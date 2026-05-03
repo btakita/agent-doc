@@ -28,8 +28,10 @@
 //!   currently focused window (which may itself be `stash`). It then repairs layout,
 //!   prunes stale sessions, auto-starts missing panes, delegates to
 //!   `tmux_router::sync`, then registers synced file→pane assignments.
-//! - `run_layout_only(col_args, window, focus)` skips auto-start; used when called
-//!   from `route` which has already handled the target file.
+//! - `run_layout_only(col_args, window, focus)` keeps the non-destructive
+//!   editor-sync contract: it still refuses to replace or override live /
+//!   ambiguous owners, but it may cold-start a pane after sync proves there is
+//!   no live owner left for the document.
 //! - `run_with_tmux(col_args, window, focus, tmux)` injects a custom `Tmux` instance
 //!   (test hook); auto-start is enabled.
 //! - `repair_layout(tmux, session_name, target_window_name)` runs three phases:
@@ -96,8 +98,9 @@
 //!   fast no-op (fast path detected before any tmux mutations).
 //! - No `tmux_session` frontmatter field is ever written by this module; all session
 //!   targeting uses the `--window` argument or live tmux pane introspection.
-//! - `run_layout_only` guarantees it will not spawn new Claude sessions (safe to call
-//!   from within an active route cycle).
+//! - `run_layout_only` is safe for passive editor sync: it will not replace a
+//!   live or ambiguous owner, but it may start a new pane after a cleanly
+//!   closed/missing prior session leaves no live owner to rescue.
 //! - `register_synced_files` holds `RegistryLock` for the duration of its write and
 //!   saves only when at least one entry changed.
 //! - `is_file_rename` is pure (no tmux dependency): it compares two paths and checks
@@ -942,7 +945,13 @@ fn skip_auto_start_for_recent_session_loss(file: &Path, session_id: &str) -> Res
 
 pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
     tracing::debug!(cols = ?col_args, window, focus, "sync::run start");
-    run_with_options(col_args, window, focus, true, &Tmux::default_server())
+    run_with_options(
+        col_args,
+        window,
+        focus,
+        AutoStartMode::Full,
+        &Tmux::default_server(),
+    )
 }
 
 /// Write a debounce marker for a file that was just renamed.
@@ -992,15 +1001,23 @@ fn has_rename_debounce(file_path: &Path) -> bool {
     true
 }
 
-/// Run sync without auto-starting sessions. Used when called from route
-/// (route already handled the target file — auto-start would create duplicates).
+/// Run sync in the passive editor mode.
+///
+/// This mode remains non-destructive around live or ambiguous owners, but it can
+/// cold-start a pane when sync proves the document no longer has a live owner.
 #[allow(dead_code)]
 pub fn run_layout_only(
     col_args: &[String],
     window: Option<&str>,
     focus: Option<&str>,
 ) -> Result<()> {
-    run_with_options(col_args, window, focus, false, &Tmux::default_server())
+    run_with_options(
+        col_args,
+        window,
+        focus,
+        AutoStartMode::SafePassive,
+        &Tmux::default_server(),
+    )
 }
 
 pub fn run_with_tmux(
@@ -1009,7 +1026,54 @@ pub fn run_with_tmux(
     focus: Option<&str>,
     tmux: &Tmux,
 ) -> Result<()> {
-    run_with_options(col_args, window, focus, true, tmux)
+    run_with_options(col_args, window, focus, AutoStartMode::Full, tmux)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoStartMode {
+    Full,
+    SafePassive,
+}
+
+impl AutoStartMode {
+    fn log_label(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::SafePassive => "safe-passive",
+        }
+    }
+}
+
+fn passive_autostart_skip_reason(
+    file: &Path,
+    session_id: &str,
+    unresolved_startup_miss: Option<&crate::startup_miss::StartupMiss>,
+) -> Result<Option<String>> {
+    if unresolved_startup_miss.is_some() {
+        return Ok(Some(
+            "startup-miss is still unresolved for this document".to_string(),
+        ));
+    }
+
+    let Some(status) = crate::startup_miss::session_log_status(file, session_id)? else {
+        return Ok(None);
+    };
+
+    if !status.latest_session_closed() {
+        return Ok(Some(format!(
+            "latest session log is still open or ambiguous (last_event={})",
+            crate::startup_miss::latest_log_last_event(&status)
+        )));
+    }
+
+    let last_event = crate::startup_miss::latest_log_last_event(&status);
+    if last_event.starts_with("session_end origin=registry_rebind ") {
+        return Ok(Some(format!(
+            "latest session ended via registry_rebind (last_event={last_event})"
+        )));
+    }
+
+    Ok(None)
 }
 
 /// Normalize the tmux layout by consolidating stash windows and ensuring
@@ -1426,12 +1490,18 @@ fn run_with_options(
     col_args: &[String],
     window: Option<&str>,
     focus: Option<&str>,
-    auto_start: bool,
+    auto_start_mode: AutoStartMode,
     tmux: &Tmux,
 ) -> Result<()> {
     let window = normalize_scope_arg(window);
     let focus = normalize_scope_arg(focus);
-    tracing::debug!(cols = ?col_args, window, focus, auto_start, "sync::run_with_options start");
+    tracing::debug!(
+        cols = ?col_args,
+        window,
+        focus,
+        auto_start_mode = auto_start_mode.log_label(),
+        "sync::run_with_options start"
+    );
 
     // Serialize sync calls via file lock. Concurrent syncs (from rapid tab switches)
     // race against each other's stash operations, causing pane bouncing. A second sync
@@ -1478,8 +1548,11 @@ fn run_with_options(
         .collect();
     let col_args = col_args.as_slice();
     sync_log(&format!(
-        "=== sync start: col_args={:?} window={:?} focus={:?} auto_start={}",
-        col_args, window, focus, auto_start
+        "=== sync start: col_args={:?} window={:?} focus={:?} auto_start_mode={}",
+        col_args,
+        window,
+        focus,
+        auto_start_mode.log_label()
     ));
     // Repair layout before anything else: consolidate stash windows and ensure
     // the agent-doc window exists.
@@ -1679,9 +1752,10 @@ fn run_with_options(
     }
 
     // Pre-sync: auto-start agent sessions for files that have session UUIDs
-    // but no alive panes. This ensures sync has panes to arrange.
-    // Skipped when auto_start=false (e.g., when called from route which already handled the file).
-    if auto_start {
+    // but no alive panes. Full mode may provision after recovery/fail-closed
+    // checks. Safe-passive mode keeps those same checks, but only provisions
+    // when the latest session log proves the prior owner already closed.
+    {
         let mut auto_started_panes: Vec<(String, String)> = Vec::new();
         let claimed_sync_panes: RefCell<std::collections::HashMap<String, PathBuf>> =
             RefCell::new(std::collections::HashMap::new());
@@ -2110,13 +2184,35 @@ fn run_with_options(
                 continue;
             }
 
+            if matches!(auto_start_mode, AutoStartMode::SafePassive)
+                && let Some(reason) = passive_autostart_skip_reason(
+                    file_path,
+                    &session_id,
+                    unresolved_startup_miss.as_ref(),
+                )?
+            {
+                eprintln!(
+                    "[sync] safe passive sync is not auto-starting {} ({})",
+                    file_path.display(),
+                    reason
+                );
+                sync_log(&format!(
+                    "safe_passive_autostart_skipped file={} reason={}",
+                    file_path.display(),
+                    reason
+                ));
+                continue;
+            }
+
             sync_log(&format!(
-                "auto-starting session for {} (no alive pane)",
-                file_path.display()
+                "auto-starting session for {} (no alive pane, mode={})",
+                file_path.display(),
+                auto_start_mode.log_label()
             ));
             eprintln!(
-                "[sync] auto-starting session for {} (no alive pane)",
-                file_path.display()
+                "[sync] auto-starting session for {} (no alive pane, mode={})",
+                file_path.display(),
+                auto_start_mode.log_label()
             );
             let file_str = file_path.to_string_lossy().to_string();
             match route::provision_pane(
@@ -2711,7 +2807,8 @@ pub(crate) fn find_associated_panes(
     let registered =
         lookup_registry_entry_for_file_session(file, session_id).map(|entry| entry.pane);
     let supervisor_match = find_alive_pane_via_supervisor_pid(tmux, file, session_id);
-    let session_log_match = find_alive_pane_via_open_session_log(tmux, file, session_id, None, false);
+    let session_log_match =
+        find_alive_pane_via_open_session_log(tmux, file, session_id, None, false);
 
     let mut associated: Vec<AssociatedPaneCandidate> = inventory
         .into_iter()
@@ -2735,7 +2832,7 @@ pub(crate) fn find_associated_panes(
                 .contains(&AssociatedPaneSource::SessionLog)
                 || candidate
                     .sources
-                .contains(&AssociatedPaneSource::ProcessTree)
+                    .contains(&AssociatedPaneSource::ProcessTree)
                 || candidate
                     .sources
                     .contains(&AssociatedPaneSource::SupervisorPid);
@@ -4028,6 +4125,98 @@ mod tests {
             true,
             None
         ));
+    }
+
+    #[test]
+    fn passive_autostart_allows_cleanly_closed_latest_session() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("closed.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: passive-closed\n---\n").unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/passive-closed.log"),
+            concat!(
+                "[1] session_start file=tasks/closed.md pane=%52 session=passive-closed\n",
+                "[2] claude_start mode=fresh restart_count=0\n",
+                "[3] supervisor_exit reason=user_quit_clean_exit pane=%52 restart_count=0\n",
+                "[4] session_end\n",
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            passive_autostart_skip_reason(&doc, "passive-closed", None).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn passive_autostart_blocks_open_latest_session() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("open.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: passive-open\n---\n").unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/passive-open.log"),
+            concat!(
+                "[1] session_start file=tasks/open.md pane=%61 session=passive-open\n",
+                "[2] codex_start mode=fresh restart_count=0\n",
+            ),
+        )
+        .unwrap();
+
+        let reason = passive_autostart_skip_reason(&doc, "passive-open", None)
+            .unwrap()
+            .expect("open session should block passive auto-start");
+        assert!(reason.contains("latest session log is still open or ambiguous"));
+    }
+
+    #[test]
+    fn passive_autostart_blocks_registry_rebind_closeout() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("rebind.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: passive-rebind\n---\n").unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/passive-rebind.log"),
+            concat!(
+                "[1] session_start file=tasks/rebind.md pane=%70 session=passive-rebind\n",
+                "[2] codex_start mode=fresh restart_count=0\n",
+                "[3] session_superseded old_pane=%70 new_pane=%71 old_window=@1 new_window=@2\n",
+                "[4] session_end origin=registry_rebind pane=%70 next_pane=%71\n",
+            ),
+        )
+        .unwrap();
+
+        let reason = passive_autostart_skip_reason(&doc, "passive-rebind", None)
+            .unwrap()
+            .expect("registry rebind should block passive auto-start");
+        assert!(reason.contains("registry_rebind"));
+    }
+
+    #[test]
+    fn passive_autostart_blocks_unresolved_startup_miss() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("tasks").join("miss.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: passive-miss\n---\n").unwrap();
+        let miss = crate::startup_miss::StartupMiss {
+            file: "tasks/miss.md".to_string(),
+            pane_id: "%81".to_string(),
+            session_id: "passive-miss".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 17,
+            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: None,
+        };
+
+        let reason = passive_autostart_skip_reason(&doc, "passive-miss", Some(&miss))
+            .unwrap()
+            .expect("startup miss should block passive auto-start");
+        assert!(reason.contains("startup-miss is still unresolved"));
     }
 
     #[test]
@@ -5498,7 +5687,8 @@ mod tests {
 
         let iso = IsolatedTmux::new("sync-windowless-project-pin");
         let _pane0 = iso.new_session("0", tmp.path()).unwrap();
-        iso.raw_cmd(&["rename-window", "-t", "0:0", "agent-doc"]).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "0:0", "agent-doc"])
+            .unwrap();
         let _pane1 = iso.new_session("1", tmp.path()).unwrap();
 
         assert_eq!(

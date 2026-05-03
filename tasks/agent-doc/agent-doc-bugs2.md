@@ -232,7 +232,25 @@ With the suite green, I committed and pushed the pending `src/agent-doc` spec/pa
 - branch: `origin/20260422/codex-agent-backend`
 
 Plan executed: `tasks/agent-doc/plan-tmux-route-resync-suite-failures.md`
-<!-- agent:boundary:c05a66d3 -->
+❯ do [#patchregr]. spec-test-build-install-commit-push
+### Re: patchregr closeout — gpt-5
+
+`#patchregr` is already satisfied by the current `src/agent-doc` HEAD. I re-traced the closeout path and verified the enforcement is present in `src/agent-doc/src/write.rs` (`complete_required_closeout(...)`), `src/agent-doc/src/git.rs` (the `commit_already_current` / snapshot-vs-`HEAD` handling), and `src/agent-doc/src/session_check.rs` (the committed-snapshot and bypassed-patchback guards).
+
+Existing regression coverage for this failure family passed:
+- `required_closeout_fails_when_only_later_prompt_drift_remains`
+- `commit_repairs_committed_head_before_user_follow_up_noop`
+- `commit_blocks_bypassed_response_patchback_on_head_current`
+
+Full verification also passed:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Plan executed: `tasks/agent-doc/plan-response-patchback-uncommitted-regression.md`
+
+No new `src/agent-doc` source diff was required in this cycle, so there was nothing new to commit or push there. The only committed mutation from this turn is the session-doc closeout itself plus marking `#patchregr` done.
+<!-- agent:boundary:7a675e7e -->
 <!-- /agent:exchange -->
 
 <!--
@@ -246,10 +264,9 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#patchregr] [recommended] Critical: a fresh visible response patchback must never degrade into `post_commit_local_drift` plus `commit_already_current`; `agent-doc` must either commit the owning repo/submodule or fail closed with a resumable diagnostic. Plan: tasks/agent-doc/plan-response-patchback-uncommitted-regression.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
-- [ ] [#jbpdrop] [recommended] Critical: a completed JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
+- [ ] [#jbpdrop] [recommended] Critical: a completeds JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
 - [ ] [#jbptrk] [recommended] Critical: Finish live validation/root-cause work for visible-pane tracking loss after editor sync/startup was reduced to report-only `resync` plus `sync --no-autostart`. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md

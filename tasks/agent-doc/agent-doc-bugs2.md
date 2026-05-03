@@ -359,7 +359,23 @@ Cross-root sync validation is complete. Existing coverage is comprehensive:
 
 **Build:** Also committed `Cargo.lock` fix from the `paths` → `[patch.crates-io]` migration (removed duplicate `agent-kit` registry entry). Committed `3d0ee13` in `src/agent-doc`, pushed. Submodule pointer updated `9da93e3` in parent.
 
-<!-- agent:boundary:f7d6efa2 -->
+❯ do [#jbmcol]. spec-test-build-install-commit-push
+### Re: do #jbmcol — opus-4-6
+
+**Spec:** Updated `specs/07-commands.md` column-memory section with explicit round-trip contract (`apply_column_memory` → tmux-router reconcile → `build_layout_state` → persist → next cycle restore) and cross-root document participation (canonical path resolves through `first_agent_doc_in_col` session-UUID check regardless of project root).
+
+**Tests added** (3 new in `src/sync.rs`):
+
+1. `column_memory_round_trip_persists_and_restores_across_cycles` — two-cycle simulation: filled layout → empty left column → restore from saved state → re-persist → verify continuity
+2. `column_memory_cross_root_doc_restores_from_submodule_path` — simulates `src/boost-client/tasks/monsterrodholders.md` alongside a root-level doc; confirms submodule paths restore from column memory identically
+3. `column_memory_preserves_right_column_when_left_is_empty` — verifies right-column doc stays in position with no prior column memory, and that `build_layout_state` correctly records empty left slots
+
+All 5 column-memory tests pass (2 existing + 3 new). Full suite: 1769 lib + 50/51 CLI tests pass (1 pre-existing CLI failure `test_cli_audit_docs_in_tempdir_no_project_marker` unrelated to this work).
+
+**Clippy fixes** (pre-existing, bundled): while-let-loop in `template.rs`/`repair.rs`, needless borrows in `resync.rs`, collapsible-if in `route.rs`/`sync.rs`, too-many-arguments in `route.rs`.
+
+**Build:** `cargo install --path .` + `cargo build --release`. Committed `8f09918` in `src/agent-doc`, pushed. Submodule pointer updated `65d3d02` in parent.
+<!-- agent:boundary:d58a1785 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -373,7 +389,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [ ] [#jbpdrop] [recommended] Critical: a completed JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md

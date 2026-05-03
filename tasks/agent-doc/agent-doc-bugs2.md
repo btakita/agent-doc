@@ -2,7 +2,7 @@
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent_doc_format: template
 agent_doc_write: crdt
-agent: claude
+agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -415,7 +415,34 @@ The registry rebind in step 7 still records proper supersession provenance via `
 - `specs/07-commands.md`: Documented the `--force` override as step 4a (skip steps 4–5)
 
 **Tests:** 1770 lib (all pass), 50/51 CLI (1 pre-existing). Committed `1d00f41` in `src/agent-doc`, pushed. Submodule pointer updated `a8d7d23` in parent.
-<!-- agent:boundary:ec5d4886 -->
+❯ The tmux session is in a bad state. The agent-doc tmux window was moved to tmux session 1. Please investigate the root cause and fix the root cause. spec-test-build-install-commit-push
+### Re: tmux session moved to session 1 root cause — gpt-5
+
+Root cause was twofold.
+
+1. Windowless mixed-root `agent-doc sync` was resolving the target tmux session from ambient context instead of the visible document set's shared `.agent-doc` root. With the workspace root pinned to session `4` and the child root pinned to session `1`, repeated syncs could drift between those sessions.
+2. `tmux-router`'s `break_pane()` did not pass an explicit target session. When a stashed pane was broken out while the current client was attached to session `1`, tmux recreated the new window in session `1` instead of the pane's source session `4`.
+
+I fixed both pieces.
+
+- `src/agent-doc/src/sync.rs`
+  - windowless sync now derives scope from the visible docs' shared root and prefers that root's live `tmux_session` pin
+  - missing-window rescue only considers same-session stash panes, and a second-pass rescue can rebuild `agent-doc` from the visible file registry instead of the caller CWD
+- `src/tmux-router/src/tmux.rs`
+  - `break_pane()` now targets `<source-session>:` explicitly, so rescued panes stay in their original tmux session
+- `src/agent-doc/src/audit_docs.rs`, `src/main.rs`, `src/route.rs`, `src/test_support.rs`
+  - restored the `audit-docs` fallback warning contract and moved env/CWD test locking to a shared mutex so the sync/route suite stays deterministic under parallel test execution
+- `src/agent-doc/specs/07-commands.md`, `src/agent-doc/VERSIONS.md`
+  - documented the new windowless-sync and stash-rescue behavior
+
+Verification:
+- `src/agent-doc`: `cargo test`, `cargo build`, `cargo install --path . --force`
+- `src/tmux-router`: `cargo test`, `cargo build`
+
+Pushed:
+- `src/agent-doc` commit `5c25a53` to `origin/20260422/codex-agent-backend`
+- `src/tmux-router` commit `3ffd937` to `origin/main`
+<!-- agent:boundary:8c175a83 -->
 <!-- /agent:exchange -->
 
 <!--

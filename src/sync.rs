@@ -716,6 +716,19 @@ fn reserve_sync_pane(
         .insert(pane_id.to_string(), file_path.to_path_buf());
 }
 
+fn registered_pane_proves_live_owner(
+    tmux: &Tmux,
+    file_path: &Path,
+    session_id: &str,
+    pane_id: &str,
+) -> bool {
+    if !tmux.pane_alive(pane_id) {
+        return false;
+    }
+    find_live_owner_pane_excluding_quiet(tmux, file_path, session_id, None).as_deref()
+        == Some(pane_id)
+}
+
 fn persist_dead_pane_capture(
     file: &Path,
     session_id: &str,
@@ -1925,6 +1938,7 @@ fn run_with_options(
     let registry_path = sessions::registry_path();
     // Track session_id → file path for post-sync claim updates
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
+    let blocked_unresolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
 
     let resolve_file = |path: &Path| -> Option<FileResolution> {
         // Step 1: Auto-scaffold empty .md files BEFORE ensure_initialized().
@@ -2167,58 +2181,76 @@ fn run_with_options(
                     file_path.display()
                 ));
             }
+            let registered_live_owner = registered_pane.as_ref().is_some_and(|pane| {
+                registered_pane_proves_live_owner(tmux, file_path, &session_id, pane)
+            });
+            if let Some(pane) = registered_pane.as_ref()
+                && tmux.pane_alive(pane)
+                && !registered_live_owner
+            {
+                eprintln!(
+                    "[sync] pane {} for {} is alive but no longer proves ownership — treating it as unresolved instead of reusing the stale binding",
+                    pane,
+                    file_path.display()
+                );
+                sync_log(&format!(
+                    "registered_pane_unowned file={} pane={} action=treat_unresolved",
+                    file_path.display(),
+                    pane
+                ));
+            }
             let has_alive_pane = claimed_owner.is_none()
                 && registered_pane
                     .as_ref()
                     .map(|pane| {
-                    if !tmux.pane_alive(pane) {
-                        return false;
-                    }
-                    // Stashed panes are alive — don't rescue here. The reconciler's
-                    // SWAP fast path handles 1-in/1-out atomically via swap-pane,
-                    // avoiding the 3-pane bounce (rescue→reconcile→stash another).
-                    if let Ok(win_id) = tmux.pane_window(pane) {
-                        let win_name = tmux
-                            .cmd()
-                            .args(["display-message", "-t", &win_id, "-p", "#{window_name}"])
-                            .output()
-                            .ok()
-                            .filter(|o| o.status.success())
-                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                            .unwrap_or_default();
-                        if win_name == "stash" || win_name.starts_with("stash-") {
-                            let pane_session = tmux
+                        if !registered_live_owner {
+                            return false;
+                        }
+                        // Stashed panes are alive — don't rescue here. The reconciler's
+                        // SWAP fast path handles 1-in/1-out atomically via swap-pane,
+                        // avoiding the 3-pane bounce (rescue→reconcile→stash another).
+                        if let Ok(win_id) = tmux.pane_window(pane) {
+                            let win_name = tmux
                                 .cmd()
-                                .args(["display-message", "-t", pane, "-p", "#{session_name}"])
+                                .args(["display-message", "-t", &win_id, "-p", "#{window_name}"])
                                 .output()
                                 .ok()
+                                .filter(|o| o.status.success())
                                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                                 .unwrap_or_default();
-                            let target_sess = context_session.as_deref().unwrap_or("");
-                            if !target_sess.is_empty() && pane_session != target_sess {
-                                eprintln!(
-                                    "[sync] pane {} for {} is in session '{}' stash; cross-session — treating as alive",
-                                    pane, file_path.display(), pane_session
-                                );
-                                sync_log(&format!(
-                                    "stash_pane_cross_session pane={} file={} actual_session={} target_session={}",
-                                    pane, file_path.display(), pane_session, target_sess
-                                ));
-                            } else {
-                                eprintln!(
-                                    "[sync] pane {} for {} is in stash — deferring rescue to reconciler",
-                                    pane, file_path.display()
-                                );
-                                sync_log(&format!(
-                                    "stash_pane_deferred pane={} file={} stash_window={}",
-                                    pane, file_path.display(), win_name
-                                ));
+                            if win_name == "stash" || win_name.starts_with("stash-") {
+                                let pane_session = tmux
+                                    .cmd()
+                                    .args(["display-message", "-t", pane, "-p", "#{session_name}"])
+                                    .output()
+                                    .ok()
+                                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                                    .unwrap_or_default();
+                                let target_sess = context_session.as_deref().unwrap_or("");
+                                if !target_sess.is_empty() && pane_session != target_sess {
+                                    eprintln!(
+                                        "[sync] pane {} for {} is in session '{}' stash; cross-session — treating as alive",
+                                        pane, file_path.display(), pane_session
+                                    );
+                                    sync_log(&format!(
+                                        "stash_pane_cross_session pane={} file={} actual_session={} target_session={}",
+                                        pane, file_path.display(), pane_session, target_sess
+                                    ));
+                                } else {
+                                    eprintln!(
+                                        "[sync] pane {} for {} is in stash — deferring rescue to reconciler",
+                                        pane, file_path.display()
+                                    );
+                                    sync_log(&format!(
+                                        "stash_pane_deferred pane={} file={} stash_window={}",
+                                        pane, file_path.display(), win_name
+                                    ));
+                                }
+                                return true;
                             }
-                            return true;
                         }
-                    }
-                    true
-                })
+                        true
+                    })
                 .unwrap_or(false);
 
             if has_alive_pane {
@@ -2273,6 +2305,9 @@ fn run_with_options(
                     miss.pane_id,
                     miss_ts
                 ));
+                blocked_unresolved_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
                 continue;
             }
 
@@ -2291,7 +2326,12 @@ fn run_with_options(
                     reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
                     continue;
                 }
-                ExistingAssociatedPaneRecovery::Ambiguous => continue,
+                ExistingAssociatedPaneRecovery::Ambiguous => {
+                    blocked_unresolved_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
+                    continue;
+                }
                 ExistingAssociatedPaneRecovery::None => {}
             }
 
@@ -2424,6 +2464,9 @@ fn run_with_options(
                                 pane,
                                 reason
                             ));
+                            blocked_unresolved_files
+                                .borrow_mut()
+                                .insert(file_path.to_path_buf());
                             continue;
                         }
                     }
@@ -2451,10 +2494,16 @@ fn run_with_options(
                     "rename-debounce: skipped auto-start for {}",
                     file_path.display()
                 ));
+                blocked_unresolved_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
                 continue;
             }
 
             if skip_auto_start_for_recent_session_loss(file_path, &session_id)? {
+                blocked_unresolved_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
                 continue;
             }
 
@@ -2475,6 +2524,9 @@ fn run_with_options(
                     file_path.display(),
                     reason
                 ));
+                blocked_unresolved_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
                 continue;
             }
 
@@ -2517,6 +2569,9 @@ fn run_with_options(
                         file_path.display(),
                         e
                     );
+                    blocked_unresolved_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
                 }
             }
         }
@@ -2569,19 +2624,26 @@ fn run_with_options(
         .as_ref()
         .map(|file| file.path())
         .unwrap_or(registry_path.as_path());
+    let allow_unresolved_pane_assignment =
+        |path: &Path| !blocked_unresolved_files.borrow().contains(path);
+    let tmux_router_options = tmux_router::SyncOptions {
+        protect_pane: None,
+        allow_unresolved_pane_assignment: Some(&allow_unresolved_pane_assignment),
+    };
 
     // NOTE: The busy pane guard (protect_pane) was removed from DETACH because it caused
     // 3-pane accumulation when the user switches documents in the same column. The guard
     // prevented stashing panes with active sessions, but when a new document replaces the
     // old one in a column, the old pane must give way. Column memory + stash rescue handle
     // session preservation for the non-agent-file case.
-    let result = tmux_router::sync(
+    let result = tmux_router::sync_with_options(
         col_args,
         window,
         focus,
         tmux,
         tmux_router_registry_path,
         &resolve_file,
+        &tmux_router_options,
     )?;
 
     if let Some(ref session_name) = target_session {
@@ -6983,5 +7045,127 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].session_id, "claudescore-3");
         assert_eq!(filtered[0].entry.pane, "%250");
+    }
+
+    #[test]
+    fn registered_pane_proves_live_owner_rejects_unowned_alive_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd = ScopedCurrentDir::set(tmp.path());
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("tasks")).unwrap();
+
+        let doc = tmp.path().join("tasks/owned.md");
+        std::fs::write(&doc, "---\nagent_doc_session: owned-session\n---\n").unwrap();
+
+        let iso = IsolatedTmux::new("sync-live-owner-proof");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+
+        assert!(
+            !registered_pane_proves_live_owner(&iso, &doc, "owned-session", &pane),
+            "a merely alive pane should not count as a live owner without ownership proof"
+        );
+    }
+
+    #[test]
+    fn safe_passive_sync_does_not_alias_spare_pane_into_blocked_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/software")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks/buildparty-investor-demo")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+        let _cwd = ScopedCurrentDir::set(root);
+
+        let tsift_doc = root.join("tasks/software/tsift.md");
+        let bugs_doc = root.join("tasks/agent-doc/agent-doc-bugs2.md");
+        let dev_doc = subroot.join("tasks/buildparty-investor-demo/dev.md");
+        std::fs::write(
+            &tsift_doc,
+            "---\nagent_doc_session: tsift-v0.1\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &bugs_doc,
+            "---\nagent_doc_session: bugs-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &dev_doc,
+            "---\nagent_doc_session: dev-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".agent-doc/logs/tsift-v0.1.log"),
+            "[1] session_start file=tasks/software/tsift.md pane=%26 session=tsift-v0.1\n[2] document_cycle phase=committed cycle=cycle-1 event=commit_success capture_id=cycle-1\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-safe-passive-no-alias");
+        let bugs_pane = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let dev_pane = iso.split_window(&bugs_pane, &subroot, "-dh").unwrap();
+        let agent_doc_window = iso.pane_window(&bugs_pane).unwrap();
+
+        sessions::register_full_with_cwd(
+            "bugs-session",
+            &bugs_pane,
+            &bugs_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &bugs_pane).unwrap(),
+            &agent_doc_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd_in(
+            &subroot,
+            "dev-session",
+            &dev_pane,
+            &dev_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &dev_pane).unwrap(),
+            &agent_doc_window,
+            &subroot.to_string_lossy(),
+        )
+        .unwrap();
+
+        run_with_options(
+            &[
+                tsift_doc.to_string_lossy().to_string(),
+                dev_doc.to_string_lossy().to_string(),
+            ],
+            None,
+            Some(tsift_doc.to_string_lossy().as_ref()),
+            AutoStartMode::SafePassive,
+            &iso,
+        )
+        .unwrap();
+
+        let root_registry = sessions::load_in(root).unwrap();
+        assert!(
+            !root_registry
+                .values()
+                .any(|entry| entry.session_id == "tsift-v0.1"),
+            "blocked passive sync must not register tsift onto a spare pane"
+        );
+
+        let ordered = iso.list_panes_ordered(&agent_doc_window).unwrap();
+        assert_eq!(
+            ordered.len(),
+            1,
+            "blocked tsift column should collapse instead of reusing an unrelated visible pane"
+        );
+        assert_ne!(
+            ordered[0], bugs_pane,
+            "blocked tsift column must not keep the old spare pane mapped in its place"
+        );
+        assert!(
+            iso.pane_alive(&bugs_pane),
+            "the displaced spare pane should be stashed rather than destroyed"
+        );
     }
 }

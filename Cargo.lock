@@ -23,7 +23,7 @@ dependencies = [
 name = "agent-doc"
 version = "0.33.16"
 dependencies = [
- "agent-kit 0.4.0",
+ "agent-kit",
  "anyhow",
  "assert_cmd",
  "clap",
@@ -71,24 +71,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-kit"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aae357d7af46da0ed1e33d685f8851807065fef3b12a0eb822364b0e78c1f551"
-dependencies = [
- "anyhow",
- "glob",
- "once_cell",
- "regex",
-]
-
-[[package]]
 name = "agent-rules"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00012a8ba81fd0d8d322710cfec3269cd24d3b9ae8bc31be168b41cfb62a6791"
 dependencies = [
- "agent-kit 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "agent-kit",
  "anyhow",
  "clap",
  "once_cell",
@@ -1003,7 +991,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ae605c3274f758e95330f71de286f5b154391321ccd4c2fd71d4a0309c67d48"
 dependencies = [
- "agent-kit 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "agent-kit",
  "agent-rules",
  "agent-runbooks",
  "anyhow",

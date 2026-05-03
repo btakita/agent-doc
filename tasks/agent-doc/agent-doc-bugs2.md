@@ -272,7 +272,26 @@ Git:
 - `agent-doc`: `2bd6a26` pushed to `origin/20260422/codex-agent-backend`
 
 Plan executed: `tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md`
-<!-- agent:boundary:f22c6230 -->
+❯ do [#jbnsrf]. spec-test-build-install-commit-push
+### Re: jbnsrf restart repro validation — gpt-5
+
+ is complete.
+
+I replayed the restart-family JetBrains paths against the live  tmux state.
+
+-  from  stayed report-only. It reported all 3 sessions live and did not create a new pane or log any new missing-pane recovery for .
+-  reused the existing  owner on pane . It moved  back from stash window  into the active  window , but it did not emit , , or a replacement .
+-  still binds  to  after the replay, which confirms the plugin-style startup/passive-sync path no longer replaces that document with a fresh pane era.
+
+Verification:
+-  ()
+- 
+
+Git:
+- no new  source diff in this cycle, so there was nothing to commit or push there
+
+Plan executed:
+<!-- agent:boundary:809cbb1d -->
 <!-- /agent:exchange -->
 
 <!--
@@ -286,11 +305,11 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [ ] [#jbpdrop] [recommended] Critical: a completeds JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
 - [ ] [#jbptrk] [recommended] Critical: Finish live validation/root-cause work for visible-pane tracking loss after editor sync/startup was reduced to report-only `resync` plus `sync --no-autostart`. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
+- [ ] [#mrreap] [recommended] Investigate why rerouting or restarting `src/boost-client/tasks/monsterrodholders.md` can close the previously running tmux pane instead of preserving or explicitly superseding it after proven owner handoff. Plan: tasks/agent-doc/plan-monsterrodholders-previous-pane-reap.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md

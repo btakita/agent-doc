@@ -268,10 +268,42 @@ Committed and pushed in `src/agent-doc`:
 - `ed2fd33` `fix: suppress split-layout bounce-back in editor tab sync`
 
 No new backlog item from this fix.
-<!-- agent:boundary:2fc9f7f7 -->
+❯ /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md is currently claimed by the claudescore-3.md tmux pane. How can we fix this misbinding? `agent-doc fix /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` should detect if monsterrodholders.md is claimed by the incorrect tmux pane and fix the state.
+❯ spec-test-build-install-commit-push
+### Re: monsterrodholders.md misbinding fix — opus-4-6
+
+Root cause: `agent-doc fix <FILE>` and `apply_targeted_fix_for_route` loaded the session registry from CWD's `.agent-doc/sessions.json` instead of resolving the `.agent-doc` root from the target file's path. For documents in submodules with their own `.agent-doc/` (like `src/boost-client/`), this meant "No registered sessions found" even when the submodule registry had valid entries.
+
+Two issues fixed:
+
+1. **Registry root resolution** — added `resolve_registry_root(target)` that walks up from the target file to find the nearest `.agent-doc/` directory (via `find_project_root`). All targeted fix paths (`run()`, `prune_targeted_in()`, `recover_target_document_pane_in()`, `apply_targeted_fix_for_route()`, `apply_fixes_with_base()`) now use the resolved base_dir with `_in` variants (`load_in`, `save_in`, `registry_path_in`, `lookup_in`).
+
+2. **Registry key matching** — `filter_registry_for_target` and `prune_dead_entries_for_target_in_registry` only matched on `entry.file` (relative path like `tasks/monsterrodholders.md`), which `same_document_path` resolved against CWD — wrong for submodule entries. Now also matches on the registry key (absolute path).
+
+Added `sessions::lookup_in(base_dir, session_id)` for submodule-aware session lookup.
+
+Verification:
+- `cargo test` — 2278 passed, 3 ignored
+- `cargo build --release` + `cargo install --path . --force`
+- Live validation: `agent-doc fix src/boost-client/tasks/monsterrodholders.md` now correctly finds and prunes the stale pane `%2` entry from the submodule registry
+- 3 new tests: `resolve_registry_root_finds_submodule_agent_doc_dir`, `resolve_registry_root_falls_back_to_superproject`, `prune_targeted_in_uses_submodule_registry`
+
+Committed and pushed in `src/agent-doc`:
+- `ece3aa0` `fix: resolve submodule registry root in targeted fix/resync`
+
+<!-- agent:boundary:02dc51a9 -->
 <!-- /agent:exchange -->
 
 <!--
+Please fix this warning.
+```
+● Bash(cargo build --release 2>&1 | tail -5)
+  ⎿  This is currently allowed but is known to produce buggy behavior with spurious
+     recompiles and changes to the crate graph. Path overrides unfortunately were
+     never intended to support this feature, so for now this message is just a
+     warning. In the future, however, this message will become a hard error.
+```
+---
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.

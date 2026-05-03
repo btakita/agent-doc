@@ -145,10 +145,17 @@ Git:
 - `agent-doc`: `4d02828` pushed to `origin/20260422/codex-agent-backend`
 
 `#mrreplay` already covers the remaining live validation pass for the actual `monsterrodholders.md` reroute/pane behavior, so I did not add a duplicate backlog item here.
-<!-- agent:boundary:e53d817a -->
+### Re: specs/07-commands.md split — gpt-5
+
+Yes. `specs/07-commands.md` has crossed the point where command closeout, session-check / repair, routing / startup-miss behavior, and orchestration are changing independently enough that one file is no longer the cleanest boundary.
+
+I would keep `specs/07-commands.md` as the top-level command index and move the long normative sections into focused sibling specs, with the first split between closeout/write/commit/session-check and route/start/sync/startup-miss behavior. I did not do that refactor in this turn.
+<!-- agent:boundary:570d19c6 -->
 <!-- /agent:exchange -->
 
 <!--
+specs/07-commands.md is getting long. Should specs/07-commands.md be split into multiple files?
+---
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.

@@ -363,7 +363,30 @@ Verification:
 Git:
 
 - no new `src/agent-doc` source diff was required in this cycle, so there was nothing new to commit or push there
-<!-- agent:boundary:c412001e -->
+❯ do [#jbctrlg]. spec-test-build-install-commit-push
+### Re: jbctrlg validation closeout — gpt-5
+
+Plan executed: `tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md`
+
+`#jbctrlg` is complete, but the validation outcome is that the original JetBrains `C-g` replay target was superseded by the later editor dispatch-only contract rather than remaining an open bug.
+
+What I verified:
+- JetBrains `Run Agent Doc` now invokes `agent-doc route --dispatch-only <relative-path>` from the plugin (`src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt`), and the editor specs describe the same contract.
+- `src/agent-doc/src/route.rs` keeps the `C-g` probe only in the managed same-document busy-pane recovery ladder; `dispatch_only_send_reopen(...)` explicitly fail-closes on visible `reverse-i-search` / history-search blockers instead of sending control keys.
+- The live root `ops.log` entries for today show the current JB-style reroute on this file as `route_dispatch_only_sent file=tasks/agent-doc/agent-doc-bugs2.md pane=%127 harness=codex`, which matches the shipped minimal editor behavior.
+
+So the original `#jbctrlg` replay target no longer exists on the JetBrains path: editor dispatch does not use the `C-g` recovery ladder anymore. There is no remaining JB-specific regression to fix under this backlog item, so the right closeout is to mark it done as superseded by the dispatch-only change.
+
+Verification / build / install:
+- `cargo test` (`1787 passed; 0 failed`)
+- `./gradlew test buildPlugin`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+- no new `src/agent-doc` source diff was required in this cycle, so there was nothing to commit or push there
+
+<!-- agent:boundary:f06ce385 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -379,7 +402,6 @@ Add a Plugin Editor command to clear the context
 
 <!-- agent:backlog -->
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
-- [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
 - [ ] [#mrreap] [recommended] Investigate why rerouting or restarting `src/boost-client/tasks/monsterrodholders.md` can close the previously running tmux pane instead of preserving or explicitly superseding it after proven owner handoff. Plan: tasks/agent-doc/plan-monsterrodholders-previous-pane-reap.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md

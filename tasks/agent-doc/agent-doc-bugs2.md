@@ -184,7 +184,20 @@ My recommendation is:
 That defer-to-custom boundary is already the right model in `skill.rs`: managed root mirrors get refreshed, but custom root `AGENTS.md` is preserved untouched. I would extend that same ownership test to any future split/install automation: only auto-split or rewrite files that carry an agent-doc managed signature or exactly match the generated baseline. Everything else should be opt-in.
 
 So the packaged contract should be: ship the runbook, ship the managed-harness layout, and let local projects override the top-level instruction structure without fighting the installer.
-<!-- agent:boundary:2891cee0 -->
+❯ The split rules should also apply to Claude Code harnesses. Probably any code harness including Gemini when we add support for Gemini.
+### Re: split policy across harnesses — gpt-5
+
+Agreed. This should be a harness-agnostic ownership rule, not a Codex-only rule.
+
+The right contract is:
+
+- the generic split runbook applies across managed code-harness instruction surfaces
+- Claude Code should follow the same managed-surface split policy as Codex
+- future harnesses like Gemini should plug into the same rule once they have an agent-doc-managed install surface
+- user-owned root instruction files should still be left alone unless they are clearly agent-doc-managed or still exactly match the generated baseline
+
+That fits the current `skill.rs` shape already: one shared source surface, harness-specific rendering, and explicit preservation of custom root `AGENTS.md`. So if we distribute this, I would describe the rule in terms of managed-vs-custom ownership across harnesses, not in terms of any one harness.
+<!-- agent:boundary:5ad30f7d -->
 <!-- /agent:exchange -->
 
 <!--

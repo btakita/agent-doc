@@ -170,7 +170,21 @@ Verification passed:
 - `cargo run --quiet -- audit-docs`
 
 I did not commit or push the `src/agent-doc` repo changes in this turn.
-<!-- agent:boundary:e66c42ce -->
+❯ Should split-spec-files and splitting AGENTS.md/CLAUDE.md be part of the agent-doc package for distribution? I think many users won't have split rules and some may have custom split rules. Can we make agent-doc's rules defer to the user's custom rules if we do decide to distribute the skill/runbook?
+### Re: split runbook distribution boundary — gpt-5
+
+Yes on bundling `split-spec-files` as a reusable runbook; no on making `split AGENTS.md/CLAUDE.md` a universal product rule.
+
+My recommendation is:
+
+- keep the generic split rule in the distributed package because it is normal authoring guidance and does not force itself on anyone
+- apply AGENTS/CLAUDE splitting only to agent-doc-managed instruction surfaces (`.codex/AGENTS.md`, installed skill mirrors, generated root mirror when it is still managed content)
+- defer completely to user-owned root `AGENTS.md` / `CLAUDE.md` once the file is custom
+
+That defer-to-custom boundary is already the right model in `skill.rs`: managed root mirrors get refreshed, but custom root `AGENTS.md` is preserved untouched. I would extend that same ownership test to any future split/install automation: only auto-split or rewrite files that carry an agent-doc managed signature or exactly match the generated baseline. Everything else should be opt-in.
+
+So the packaged contract should be: ship the runbook, ship the managed-harness layout, and let local projects override the top-level instruction structure without fighting the installer.
+<!-- agent:boundary:2891cee0 -->
 <!-- /agent:exchange -->
 
 <!--

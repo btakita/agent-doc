@@ -838,14 +838,14 @@ Done. Transferred the full Existence Lang conversation to `tasks/software/existe
 The transfer preserves the intellectual content and learnings without the back-and-forth iteration — it reads as a distilled record.
 
 This john-cassel.md document retains the full conversation history for context, and the LinkedIn message draft + formatting issue. The existence.md now has the ontological refinements as a reference for future work on the pending items (philosophy/CLAUDE.md updates, new term files, permaculture enrichment).
-<!-- agent:boundary:4e8edc13 -->
+<!-- agent:boundary:9129a954 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] Update mail/contacts/john-cassel/AGENTS.md communication timeline
-- [ ] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
-- [ ] Create philosophy/src/pneuma.md, noumena.md, phenomena.md
-- [ ] Enrich philosophy/src/permaculture.md with universal applicability analysis
+- [ ] [#j46s] Update mail/contacts/john-cassel/AGENTS.md communication timeline
+- [ ] [#w131] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
+- [ ] [#knx4] Create philosophy/src/pneuma.md, noumena.md, phenomena.md
+- [ ] [#2tqb] Enrich philosophy/src/permaculture.md with universal applicability analysis
 <!-- /agent:pending -->

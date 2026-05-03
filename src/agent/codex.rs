@@ -681,8 +681,7 @@ impl Agent for Codex {
             .as_ref()
             .map(|capability| capability.match_terms.as_slice())
             .unwrap_or(&[]);
-        let mut parsed =
-            self.send_once(prompt, session_id, model, required_ssh_match_terms)?;
+        let mut parsed = self.send_once(prompt, session_id, model, required_ssh_match_terms)?;
         if session_id.is_some()
             && (parsed.saw_resume_capability_drift || parsed.required_ssh_failure.is_some())
         {
@@ -698,8 +697,8 @@ impl Agent for Codex {
             parsed = self
                 .send_once(prompt, None, model, required_ssh_match_terms)
                 .map_err(|e| {
-                anyhow::anyhow!("fresh Codex retry after resume capability drift failed: {e}")
-            })?;
+                    anyhow::anyhow!("fresh Codex retry after resume capability drift failed: {e}")
+                })?;
         }
         if let Some(detail) = parsed.required_ssh_failure.as_deref() {
             anyhow::bail!(format_required_ssh_failure(
@@ -894,9 +893,10 @@ impl Iterator for CodexStreamIterator {
                             }
                             continue;
                         }
-                        if let Some(detail) =
-                            transcript_has_required_ssh_failure(&stderr, &self.required_ssh_match_terms)
-                        {
+                        if let Some(detail) = transcript_has_required_ssh_failure(
+                            &stderr,
+                            &self.required_ssh_match_terms,
+                        ) {
                             if self.allow_resume_capability_retry
                                 && !self.retried_fresh
                                 && !self.yielded_agent_content
@@ -1361,7 +1361,10 @@ exit 0
             .with_env(vec![("PATH".to_string(), Some(path_dir))])
             .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
 
-        let err = codex.prove_required_ssh_capability().unwrap_err().to_string();
+        let err = codex
+            .prove_required_ssh_capability()
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("monsterrodholders-server"), "got: {err}");
         assert!(err.contains("direct host probe"), "got: {err}");
     }

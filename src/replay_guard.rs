@@ -53,8 +53,8 @@ fn is_safe_leading_patch_commentary(prefix: &str) -> bool {
             continue;
         }
         let first = line.chars().next().unwrap_or_default();
-        let starts_numbered_item = first.is_ascii_digit()
-            && line[first.len_utf8()..].starts_with('.');
+        let starts_numbered_item =
+            first.is_ascii_digit() && line[first.len_utf8()..].starts_with('.');
         if line.starts_with("<!--")
             || line.starts_with("```")
             || line.starts_with("~~~")
@@ -164,8 +164,7 @@ pub(crate) fn classify_replay_payload(message: &str) -> ReplayPayloadClassificat
                             ));
                         }
                     }
-                    if let Some(prefix) = first_patch
-                        .map(|idx| &trimmed[..idx])
+                    if let Some(prefix) = first_patch.map(|idx| &trimmed[..idx])
                         && is_safe_leading_patch_commentary(prefix)
                     {
                         return ReplayPayloadClassification::Blocked(

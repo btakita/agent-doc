@@ -307,6 +307,7 @@ struct MissingRegisteredPaneRepair {
     closeout_recovery_phase: Option<String>,
     closeout_recovery_outcome: Option<crate::repair::RepairOutcome>,
     closeout_recovery_error: Option<String>,
+    block_auto_start_reason: Option<String>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -872,6 +873,21 @@ fn recover_missing_pane_closeout(
     }
 }
 
+fn missing_pane_closeout_block_reason(
+    file: &Path,
+    phase: &str,
+    error: Option<&str>,
+) -> String {
+    if let Ok(Some(message)) = crate::session_check::detect_uncommitted_closeout_drift(file) {
+        return message;
+    }
+    let detail = error.unwrap_or("unknown");
+    format!(
+        "closeout recovery for {phase} failed and needs manual repair ({detail}). Re-run `agent-doc repair {}` before syncing again",
+        file.display()
+    )
+}
+
 fn repair_missing_registered_pane(
     tmux: &Tmux,
     file: &Path,
@@ -905,6 +921,17 @@ fn repair_missing_registered_pane(
     } else {
         false
     };
+    let block_auto_start_reason = if closeout_recovery_phase.is_some()
+        && closeout_recovery_outcome.is_none()
+    {
+        Some(missing_pane_closeout_block_reason(
+            file,
+            closeout_recovery_phase.as_deref().unwrap_or("unknown"),
+            closeout_recovery_error.as_deref(),
+        ))
+    } else {
+        None
+    };
     Ok(MissingRegisteredPaneRepair {
         dead_pane,
         recorded_session_loss,
@@ -912,6 +939,7 @@ fn repair_missing_registered_pane(
         closeout_recovery_phase,
         closeout_recovery_outcome,
         closeout_recovery_error,
+        block_auto_start_reason,
     })
 }
 
@@ -2151,6 +2179,23 @@ fn run_with_options(
                                 "repaired stale preflight_started cycle before auto-start for {}",
                                 file_path.display()
                             ));
+                        }
+                        if let Some(reason) = repair.block_auto_start_reason.as_deref() {
+                            let reason = sanitize_excerpt(reason)
+                                .unwrap_or_else(|| "manual repair required".to_string());
+                            eprintln!(
+                                "[sync] manual closeout repair required for {} after pane {} disappeared — skipping auto-start: {}",
+                                file_path.display(),
+                                pane,
+                                reason
+                            );
+                            sync_log(&format!(
+                                "missing-pane closeout repair required file={} pane={} action=skip_auto_start reason={}",
+                                file_path.display(),
+                                pane,
+                                reason
+                            ));
+                            continue;
                         }
                     }
                     Err(e) => {
@@ -4409,6 +4454,7 @@ mod tests {
             Some(crate::repair::RepairOutcome::ReplayedResponse)
         );
         assert!(repair.closeout_recovery_error.is_none());
+        assert!(repair.block_auto_start_reason.is_none());
         assert!(!repair.repaired_stale_preflight);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
@@ -4502,6 +4548,7 @@ mod tests {
             Some(crate::repair::RepairOutcome::AlreadyApplied)
         );
         assert!(repair.closeout_recovery_error.is_none());
+        assert!(repair.block_auto_start_reason.is_none());
         assert!(!repair.repaired_stale_preflight);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
@@ -4572,6 +4619,86 @@ mod tests {
             !iso.pane_dead(&pane),
             "pane_killed should reflect whether the retained dead pane could be safely removed"
         );
+    }
+
+    #[test]
+    fn repair_missing_registered_pane_blocks_auto_start_when_closeout_recovery_fails() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("captured-pane-loss-invalid-backlog.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: session-captured-pane-loss-invalid-backlog\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep] existing item\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        init_git_repo(tmp.path(), &doc);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: topic — gpt-5\n",
+            "Recovered body.\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- patch:backlog -->\n",
+            "not-a-list\n",
+            "<!-- /patch:backlog -->\n"
+        );
+        crate::capture::capture_response(&doc, response).unwrap();
+        let pending_path = snapshot::pending_path_for(&doc).unwrap();
+        std::fs::create_dir_all(pending_path.parent().unwrap()).unwrap();
+        std::fs::write(&pending_path, response).unwrap();
+
+        let log_dir = tmp.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&log_dir).unwrap();
+        std::fs::write(
+            log_dir.join("session-captured-pane-loss-invalid-backlog.log"),
+            "[1] session_start file=tasks/captured-pane-loss-invalid-backlog.md pane=%424 session=session-captured-pane-loss-invalid-backlog\n[2] codex_start mode=fresh restart_count=0\n",
+        )
+        .unwrap();
+
+        let repair = repair_missing_registered_pane(
+            &Tmux::default_server(),
+            &doc,
+            "session-captured-pane-loss-invalid-backlog",
+            "%424",
+            Some("@17"),
+        )
+        .unwrap();
+        assert!(repair.recorded_session_loss);
+        assert_eq!(
+            repair.closeout_recovery_phase.as_deref(),
+            Some("response_captured")
+        );
+        assert!(repair.closeout_recovery_outcome.is_none());
+        assert!(
+            repair
+                .closeout_recovery_error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("pending/backlog patch changed non-list content")
+        );
+        let block_reason = repair
+            .block_auto_start_reason
+            .as_deref()
+            .expect("failed closeout recovery should block replacement auto-start");
+        assert!(block_reason.contains("agent-doc repair"));
+        assert!(!block_reason.contains("auto-starting session"));
+        assert!(!repair.repaired_stale_preflight);
     }
 
     #[test]

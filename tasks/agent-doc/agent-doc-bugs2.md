@@ -386,7 +386,26 @@ Verification / build / install:
 Git:
 - no new `src/agent-doc` source diff was required in this cycle, so there was nothing to commit or push there
 
-<!-- agent:boundary:f06ce385 -->
+❯ do [#mrreap]. spec-test-build-install-commit-push
+### Re: #mrreap reroute pane reap — gpt-5
+
+Plan executed: `tasks/agent-doc/plan-monsterrodholders-previous-pane-reap.md`.
+
+Root cause was live-owner precedence in `sync.rs`. During reroute/restart recovery, sync checked the generic same-file process-tree fallback before the latest open session-log owner, so an older pane that still had a matching Codex process could reclaim ownership after the fresh pane had already recorded the newest `session_start`. That is the path behind the `registered_pane_missing` and `registry_rebind` loop in the `monsterrodholders.md` logs.
+
+I changed sync to rank live-owner hints as: path provenance, supervisor pid, latest open session-log owner, then generic same-file process-tree fallback. I also added a tmux-backed regression that proves a stale same-file process-tree pane loses to the newer open session-log owner, and I aligned the docs/spec surfaces on that invariant.
+
+Verification is complete:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path . --force`
+- `cargo run --quiet -- audit-docs`
+
+Committed and pushed in `src/agent-doc`:
+- `3fa028a` `fix: prefer latest session-log owner during sync recovery`
+
+`#mrreap` is complete.
+<!-- agent:boundary:d7c36f7f -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -402,7 +421,6 @@ Add a Plugin Editor command to clear the context
 
 <!-- agent:backlog -->
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
-- [ ] [#mrreap] [recommended] Investigate why rerouting or restarting `src/boost-client/tasks/monsterrodholders.md` can close the previously running tmux pane instead of preserving or explicitly superseding it after proven owner handoff. Plan: tasks/agent-doc/plan-monsterrodholders-previous-pane-reap.md
 - [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md

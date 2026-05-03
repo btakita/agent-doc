@@ -402,7 +402,20 @@ Changes in `src/sync.rs`:
 
 **Build:** `cargo install --path .` + `cargo build --release`. Tests: 1770 lib (all pass), 50/51 CLI (1 pre-existing). Committed `c7b6204` in `src/agent-doc`, pushed. Submodule pointer updated `4bec620` in parent.
 
-<!-- agent:boundary:5a951425 -->
+❯ Add a `--force` argument to `agent-doc start` to force the agent-doc session to be bound to the tmux pane where the command was run from. spec-test-build-install-commit-push
+### Re: `--force` flag for `agent-doc start` — opus-4-6
+
+Added `--force` flag to `agent-doc start`. When set, it bypasses all existing-session-pane reuse logic (live-owner proof, supervisor health checks, startup-miss guards) and binds the session directly to the current tmux pane.
+
+The registry rebind in step 7 still records proper supersession provenance via `session_superseded` + `session_end origin=registry_rebind` in the session log for the displaced pane.
+
+**Changes:**
+- `src/main.rs`: Added `--force` arg to `Start` variant, passed to `start::run()`
+- `src/start.rs`: Wrapped the entire `existing_session_pane_action` block in `if !force`, with an info message when force is active
+- `specs/07-commands.md`: Documented the `--force` override as step 4a (skip steps 4–5)
+
+**Tests:** 1770 lib (all pass), 50/51 CLI (1 pre-existing). Committed `1d00f41` in `src/agent-doc`, pushed. Submodule pointer updated `a8d7d23` in parent.
+<!-- agent:boundary:ec5d4886 -->
 <!-- /agent:exchange -->
 
 <!--

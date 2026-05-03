@@ -375,7 +375,34 @@ All 5 column-memory tests pass (2 existing + 3 new). Full suite: 1769 lib + 50/5
 **Clippy fixes** (pre-existing, bundled): while-let-loop in `template.rs`/`repair.rs`, needless borrows in `resync.rs`, collapsible-if in `route.rs`/`sync.rs`, too-many-arguments in `route.rs`.
 
 **Build:** `cargo install --path .` + `cargo build --release`. Committed `8f09918` in `src/agent-doc`, pushed. Submodule pointer updated `65d3d02` in parent.
-<!-- agent:boundary:d58a1785 -->
+❯ I'm seeing agent-doc losing track of some tmux sessions for:
+❯ - /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
+❯ - /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md
+
+❯ Please investigate and fix root causes. spec-test-build-install-commit-push
+### Re: tmux session tracking loss — opus-4-6
+
+**Root cause identified: stash bounce loop.** When 3+ sessions share a 2-column layout, the sync was rescuing stashed panes via `join-pane` before the reconciler ran, creating a 3-pane intermediate state. The reconciler then stashed another pane to reach the desired 2-pane layout. On the next tab switch, the process reversed — continuous bounce.
+
+From the sync log:
+1. Sync for bugs2+claudescore: rescue `%130` from stash → 3 panes → reconciler stashes `%131`
+2. Sync for bugs2+monsterrodholders: rescue `%131` from stash → 3 panes → reconciler stashes `%130`
+3. Repeat indefinitely on each editor tab switch
+
+**Fix:** tmux-router's reconciler already has a SWAP fast path that handles 1-in/1-out atomically via `swap-pane`. By skipping the pre-reconciler rescue and treating stashed panes as alive, the reconciler sees the stashed pane as "desired but not in window" and the current unwanted pane as "in window but not desired" — triggering the atomic swap. No intermediate 3-pane state, no bounce.
+
+Changes in `src/sync.rs`:
+- Auto-start loop: stashed panes return `true` (alive) without rescue, deferred to reconciler
+- `rescue_stashed_associated_pane` → `log_stashed_associated_pane` (log-only, no rescue)
+- Removed now-unused `context_session`/`col_args` params from `recover_existing_associated_pane`
+- Updated module spec to document the deferred rescue behavior
+- Added `sync_defers_stash_rescue_to_reconciler_swap` test
+
+**Secondary finding:** `session-share/.agent-doc/sessions.json` has a stale cross-project entry for `monsterrodholders.md` pointing to dead pane `%117`. This is a registry hygiene issue — the prune runs per-project and the session-share prune hasn't run recently. Not harmful (dead panes are treated as unresolved) but worth a manual `agent-doc resync --fix` in session-share.
+
+**Build:** `cargo install --path .` + `cargo build --release`. Tests: 1770 lib (all pass), 50/51 CLI (1 pre-existing). Committed `c7b6204` in `src/agent-doc`, pushed. Submodule pointer updated `4bec620` in parent.
+
+<!-- agent:boundary:5a951425 -->
 <!-- /agent:exchange -->
 
 <!--

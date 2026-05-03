@@ -1181,14 +1181,9 @@ pub fn apply_patches_with_overrides(
     }
 
     // Post-patch: merge duplicate exchange openers that slipped in during patching.
-    loop {
-        match repair_duplicate_exchange_opener(&result)? {
-            Some(merged) => {
-                eprintln!("[template] post-patch: merged duplicate exchange opener");
-                result = merged;
-            }
-            None => break,
-        }
+    while let Some(merged) = repair_duplicate_exchange_opener(&result)? {
+        eprintln!("[template] post-patch: merged duplicate exchange opener");
+        result = merged;
     }
 
     // Post-patch: remove consecutive duplicate lines from exchange (prevents agent

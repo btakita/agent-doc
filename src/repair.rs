@@ -560,14 +560,9 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
 fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<String> {
     let mut dup_opener_input = doc_content.to_string();
     let mut duplicate_opener_changed = false;
-    loop {
-        match crate::template::repair_duplicate_exchange_opener(&dup_opener_input)? {
-            Some(merged) => {
-                dup_opener_input = merged;
-                duplicate_opener_changed = true;
-            }
-            None => break,
-        }
+    while let Some(merged) = crate::template::repair_duplicate_exchange_opener(&dup_opener_input)? {
+        dup_opener_input = merged;
+        duplicate_opener_changed = true;
     }
     let duplicate_close_repaired =
         crate::template::repair_duplicate_exchange_close_tail(&dup_opener_input)?

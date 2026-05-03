@@ -509,17 +509,17 @@ pub fn prune_with_tmux(tmux: &Tmux) -> Result<usize> {
     }
 
     // Fetch all metadata once (2 subprocess calls total instead of ~20-40)
-    let windows = fetch_all_window_metadata(&tmux);
-    let panes = fetch_all_pane_metadata(&tmux);
+    let windows = fetch_all_window_metadata(tmux);
+    let panes = fetch_all_pane_metadata(tmux);
 
     // Purge idle stash panes (but do NOT return active panes from stash).
     // return_stashed_panes_bulk was removed from the automatic prune path because
     // it caused a stash-bounce loop: sync stashes unwanted panes → prune returns them
     // → next sync stashes them again. Active panes should stay in stash until the
     // reconciler explicitly needs them. Use `agent-doc resync --fix` for manual recovery.
-    purge_stash_windows_bulk(&tmux, &windows, &panes);
-    purge_unregistered_stash_panes_bulk(&tmux, &windows, &panes);
-    purge_unregistered_dead_non_stash_panes_bulk(&tmux, &panes);
+    purge_stash_windows_bulk(tmux, &windows, &panes);
+    purge_unregistered_stash_panes_bulk(tmux, &windows, &panes);
+    purge_unregistered_dead_non_stash_panes_bulk(tmux, &panes);
     Ok(removed)
 }
 

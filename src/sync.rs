@@ -1595,16 +1595,15 @@ fn run_with_options(
         sync_log("repair_layout completed");
         if let Some(resolved_window_id) =
             resolve_agent_doc_window_id(tmux, session_name, "agent-doc")
+            && effective_window.as_deref() != Some(resolved_window_id.as_str())
         {
-            if effective_window.as_deref() != Some(resolved_window_id.as_str()) {
-                if let Some(previous) = effective_window.as_deref() {
-                    eprintln!(
-                        "[sync] resolved target window after repair: {} → {}",
-                        previous, resolved_window_id
-                    );
-                }
-                effective_window = Some(resolved_window_id);
+            if let Some(previous) = effective_window.as_deref() {
+                eprintln!(
+                    "[sync] resolved target window after repair: {} → {}",
+                    previous, resolved_window_id
+                );
             }
+            effective_window = Some(resolved_window_id);
         }
     }
     let window = effective_window.as_deref();
@@ -5235,6 +5234,108 @@ mod tests {
             build_layout_state(&duplicate_cols, &saved_layout),
             saved_layout,
             "duplicate current columns should not overwrite a previously distinct remembered layout"
+        );
+    }
+
+    #[test]
+    fn column_memory_round_trip_persists_and_restores_across_cycles() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let left = tmp.path().join("left.md");
+        let right = tmp.path().join("right.md");
+        std::fs::write(&left, "---\nagent_doc_session: left-sess\n---\n").unwrap();
+        std::fs::write(&right, "---\nagent_doc_session: right-sess\n---\n").unwrap();
+
+        let left_path = left.canonicalize().unwrap().to_string_lossy().to_string();
+        let right_path = right.canonicalize().unwrap().to_string_lossy().to_string();
+
+        // Cycle 1: both columns filled → build_layout_state records them
+        let cols_filled = vec![left_path.clone(), right_path.clone()];
+        let no_prior = vec![];
+        let state_1 = build_layout_state(&cols_filled, &no_prior);
+        assert_eq!(state_1, vec![left_path.clone(), right_path.clone()]);
+
+        // Cycle 2: left column goes empty (user opens non-markdown file) → apply_column_memory restores it
+        let cols_empty_left = vec![String::new(), right_path.clone()];
+        let restored = apply_column_memory(&cols_empty_left, &state_1);
+        assert_eq!(
+            restored,
+            vec![left_path.clone(), right_path.clone()],
+            "round-trip: empty left column should be restored from prior cycle's layout state"
+        );
+
+        // Cycle 2 continued: build_layout_state persists the restored state
+        let state_2 = build_layout_state(&restored, &state_1);
+        assert_eq!(
+            state_2,
+            vec![left_path.clone(), right_path.clone()],
+            "round-trip: layout state should survive through restore + re-persist"
+        );
+    }
+
+    #[test]
+    fn column_memory_cross_root_doc_restores_from_submodule_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let submodule = tmp.path().join("src/boost-client/tasks");
+        std::fs::create_dir_all(&submodule).unwrap();
+
+        let root_doc = tmp.path().join("tasks/bugs.md");
+        std::fs::create_dir_all(root_doc.parent().unwrap()).unwrap();
+        std::fs::write(&root_doc, "---\nagent_doc_session: root-sess\n---\n").unwrap();
+
+        let child_doc = submodule.join("monsterrodholders.md");
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: monster-sess\n---\n",
+        )
+        .unwrap();
+
+        let root_path = root_doc
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let child_path = child_doc
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        // Prior layout: root on left, child on right
+        let saved = vec![root_path.clone(), child_path.clone()];
+
+        // Current: left empty (non-markdown focused), child on right
+        let cols = vec![String::new(), child_path.clone()];
+        let restored = apply_column_memory(&cols, &saved);
+        assert_eq!(
+            restored,
+            vec![root_path.clone(), child_path.clone()],
+            "cross-root doc in submodule path should restore from column memory"
+        );
+    }
+
+    #[test]
+    fn column_memory_preserves_right_column_when_left_is_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let right = tmp.path().join("right.md");
+        std::fs::write(&right, "---\nagent_doc_session: right-sess\n---\n").unwrap();
+        let right_path = right.canonicalize().unwrap().to_string_lossy().to_string();
+
+        // No prior layout at all — fresh start
+        let cols = vec![String::new(), right_path.clone()];
+        let no_saved: Vec<String> = vec![];
+        let result = apply_column_memory(&cols, &no_saved);
+        assert_eq!(
+            result,
+            vec![String::new(), right_path.clone()],
+            "right-column doc must stay in position even with no column memory to restore"
+        );
+
+        // build_layout_state should record empty left, filled right
+        let state = build_layout_state(&result, &no_saved);
+        assert_eq!(
+            state,
+            vec![String::new(), right_path],
+            "layout state must preserve column positions including empty slots"
         );
     }
 

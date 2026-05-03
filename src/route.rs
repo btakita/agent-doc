@@ -2105,6 +2105,7 @@ fn retry_route_after_busy_pane_auto_fix(
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn optimistic_busy_pane_dispatch(
     tmux: &Tmux,
     file: &Path,
@@ -2885,6 +2886,7 @@ fn wait_for_start_ack(
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn retry_routed_cycle_ack_after_fresh_restart(
     tmux: &Tmux,
     file: &Path,
@@ -3209,8 +3211,8 @@ fn require_routed_cycle_ack(
         None => {
             let optimistic_allowed =
                 should_optimistically_accept_missing_cycle_ack(harness, live_child_for_file);
-            if live_child_for_file {
-                if let Some(dispatch_pane) = retry_routed_cycle_ack_after_fresh_restart(
+            if live_child_for_file
+                && let Some(dispatch_pane) = retry_routed_cycle_ack_after_fresh_restart(
                     tmux,
                     file,
                     pane,
@@ -3220,9 +3222,9 @@ fn require_routed_cycle_ack(
                     baseline,
                     marker,
                     ack_timeout,
-                )? {
-                    return Ok(Some(dispatch_pane));
-                }
+                )?
+            {
+                return Ok(Some(dispatch_pane));
             }
             crate::ops_log::log_op(
                 file,

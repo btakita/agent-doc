@@ -229,6 +229,35 @@ impl HarnessConfig {
         })
     }
 
+    /// Return a reason when the latest Codex pane output shows live user input
+    /// or another interactive composer state that must block replacement.
+    pub fn protected_prompt_input_reason(&self, output: &str) -> Option<String> {
+        if self.binary != "codex" {
+            return None;
+        }
+
+        if let Some(reason) = self.dispatch_blocker_reason(output) {
+            match reason.as_str() {
+                "queued draft in composer"
+                | "interactive shell reverse-i-search"
+                | "interactive shell history search" => return Some(reason),
+                _ => {}
+            }
+        }
+
+        let candidate = self.last_prompt_candidate(output)?;
+        let trimmed = crate::prompt::strip_ansi(&candidate);
+        let trimmed = trimmed.trim();
+        if !matches!(trimmed.chars().next(), Some('>' | '›' | '❯')) {
+            return None;
+        }
+        if self.is_dispatch_ready_prompt_line(trimmed) {
+            return None;
+        }
+
+        Some("drafted prompt input".to_string())
+    }
+
     /// Return the most recent non-empty, non-footer line from a captured transcript.
     pub fn last_prompt_candidate(&self, output: &str) -> Option<String> {
         if self.binary == "codex"
@@ -617,6 +646,43 @@ tab to queue message
 gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
 ";
         assert!(h.has_busy_cue(output));
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_detects_drafted_codex_text() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› investigate this issue
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("drafted prompt input")
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_detects_queue_state() {
+        let h = HarnessConfig::codex();
+        let output = "\
+›
+tab to queue message
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
+";
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("queued draft in composer")
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_idle_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Explain this module in @filename
+gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(h.protected_prompt_input_reason(output), None);
     }
 
     #[test]

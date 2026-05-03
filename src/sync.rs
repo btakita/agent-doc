@@ -729,6 +729,46 @@ fn registered_pane_proves_live_owner(
         == Some(pane_id)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProtectedRegisteredPaneState {
+    reason: String,
+    last_visible_excerpt: Option<String>,
+}
+
+fn resolve_harness_for_sync(file: &Path) -> crate::harness::HarnessConfig {
+    let content = std::fs::read_to_string(file).unwrap_or_default();
+    let fm = frontmatter::parse(&content)
+        .map(|(frontmatter, _)| frontmatter)
+        .unwrap_or_default();
+    let global_config = crate::config::load().unwrap_or_default();
+    crate::harness::HarnessConfig::from_context(&fm, &global_config)
+}
+
+fn protected_registered_pane_state(
+    tmux: &Tmux,
+    file: &Path,
+    pane_id: &str,
+) -> Option<ProtectedRegisteredPaneState> {
+    if !tmux.pane_alive(pane_id) {
+        return None;
+    }
+
+    let capture = sessions::capture_pane(tmux, pane_id).ok()?;
+    protected_registered_pane_state_from_capture(file, &capture)
+}
+
+fn protected_registered_pane_state_from_capture(
+    file: &Path,
+    capture: &str,
+) -> Option<ProtectedRegisteredPaneState> {
+    let harness = resolve_harness_for_sync(file);
+    let reason = harness.protected_prompt_input_reason(capture)?;
+    Some(ProtectedRegisteredPaneState {
+        reason,
+        last_visible_excerpt: last_visible_excerpt(capture),
+    })
+}
+
 fn persist_dead_pane_capture(
     file: &Path,
     session_id: &str,
@@ -2188,6 +2228,45 @@ fn run_with_options(
                 && tmux.pane_alive(pane)
                 && !registered_live_owner
             {
+                if claimed_owner.is_none()
+                    && let Some(protected) = protected_registered_pane_state(tmux, file_path, pane)
+                {
+                    let reason = sanitize_excerpt(&protected.reason)
+                        .unwrap_or_else(|| "drafted prompt input".to_string());
+                    let excerpt = protected
+                        .last_visible_excerpt
+                        .as_deref()
+                        .unwrap_or("<none>");
+                    eprintln!(
+                        "[sync] pane {} for {} is alive but shows protected Codex input ({}) — failing closed instead of recording registered_pane_missing",
+                        pane,
+                        file_path.display(),
+                        reason
+                    );
+                    sync_log(&format!(
+                        "registered_pane_protected file={} pane={} reason={} excerpt={}",
+                        file_path.display(),
+                        pane,
+                        reason,
+                        excerpt
+                    ));
+                    let mut event = format!(
+                        "registered_pane_protected pane={} reason={} action=fail_closed",
+                        pane, reason
+                    );
+                    if let Some(excerpt) = protected.last_visible_excerpt.as_deref() {
+                        event.push_str(&format!(" last_visible_excerpt={excerpt}"));
+                    }
+                    let _ = crate::startup_miss::append_session_log_event(
+                        file_path,
+                        &session_id,
+                        &event,
+                    );
+                    blocked_unresolved_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
+                    continue;
+                }
                 eprintln!(
                     "[sync] pane {} for {} is alive but no longer proves ownership — treating it as unresolved instead of reusing the stale binding",
                     pane,
@@ -3463,7 +3542,7 @@ fn pane_pid_from_tmux(tmux: &Tmux, pane_id: &str) -> Option<u32> {
         .ok()
 }
 
-fn pane_current_path(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
+fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
     let output = tmux
         .cmd()
         .args([
@@ -3482,35 +3561,13 @@ fn pane_current_path(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
     if current_path.is_empty() {
         return None;
     }
-    Some(PathBuf::from(current_path))
-}
-
-fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
-    let path = pane_current_path(tmux, pane_id)?;
+    let path = PathBuf::from(current_path);
     crate::snapshot::find_project_root(&path).or(Some(path))
 }
 
 fn pane_assignment_matches_document_root(tmux: &Tmux, pane_id: &str, project_root: &Path) -> bool {
     pane_project_root(tmux, pane_id)
         .map(|pane_root| pane_root == project_root)
-        .unwrap_or(false)
-}
-
-fn pane_within_document_scope_for_registered_session_log_owner(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    pane_id: &str,
-    project_root: &Path,
-) -> bool {
-    let Some(entry) = lookup_registry_entry_for_file_session(file, session_id) else {
-        return false;
-    };
-    if entry.pane != pane_id {
-        return false;
-    }
-    pane_current_path(tmux, pane_id)
-        .map(|path| path.starts_with(project_root))
         .unwrap_or(false)
 }
 
@@ -3737,15 +3794,7 @@ fn find_alive_pane_via_open_session_log(
     }
 
     let project_root = crate::snapshot::find_project_root(file)?;
-    if !pane_assignment_matches_document_root(tmux, pane_id, &project_root)
-        && !pane_within_document_scope_for_registered_session_log_owner(
-            tmux,
-            file,
-            session_id,
-            pane_id,
-            &project_root,
-        )
-    {
+    if !pane_assignment_matches_document_root(tmux, pane_id, &project_root) {
         return None;
     }
 
@@ -4085,24 +4134,6 @@ mod tests {
             .unwrap();
     }
 
-    fn wait_for_pane_cwd(iso: &IsolatedTmux, pane: &str, expected: &Path) {
-        let expected = expected.to_path_buf();
-        for _ in 0..20 {
-            let current = pane_current_path(iso, pane);
-            if current.as_deref() == Some(expected.as_path()) {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        let current = pane_current_path(iso, pane);
-        assert_eq!(
-            current.as_deref(),
-            Some(expected.as_path()),
-            "pane cwd did not settle to {}",
-            expected.display()
-        );
-    }
-
     #[test]
     fn resolve_associated_panes_prefers_unique_active_window() {
         let candidates = vec![
@@ -4198,128 +4229,6 @@ mod tests {
 
         let owner = find_live_owner_pane(&iso, &doc, "session-log-owner");
         assert_eq!(owner.as_deref(), Some(owner_pane.as_str()));
-    }
-
-    #[test]
-    fn find_live_owner_pane_reuses_registered_session_log_owner_inside_nested_worktree() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path();
-        let subroot = root.join("src/monsterrodholders-dev");
-        let _cwd_guard = ScopedCurrentDir::set(root);
-
-        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-        std::fs::create_dir_all(root.join("tasks")).unwrap();
-        std::fs::create_dir_all(&subroot).unwrap();
-        ProcessCommand::new("git")
-            .current_dir(&subroot)
-            .args(["init"])
-            .status()
-            .unwrap();
-
-        let doc = root.join("tasks/owned.md");
-        std::fs::write(
-            &doc,
-            "---\nagent_doc_session: nested-session-log-owner\n---\n",
-        )
-        .unwrap();
-
-        let iso = IsolatedTmux::new("sync-nested-session-log-owner");
-        let owner_pane = iso.new_session("test", root).unwrap();
-        iso.raw_cmd(&[
-            "send-keys",
-            "-t",
-            &owner_pane,
-            &format!("cd {}", subroot.display()),
-            "C-m",
-        ])
-        .unwrap();
-        wait_for_pane_cwd(&iso, &owner_pane, &subroot);
-
-        let mut registry = sessions::SessionRegistry::new();
-        let key = sessions::canonical_registry_key_in(
-            root,
-            doc.canonicalize().unwrap().to_string_lossy().as_ref(),
-        );
-        registry.insert(
-            key,
-            sessions::SessionEntry {
-                pane: owner_pane.clone(),
-                pid: pane_pid_from_tmux(&iso, &owner_pane).unwrap(),
-                cwd: root.to_string_lossy().to_string(),
-                started: "2026-05-03T00:00:00Z".to_string(),
-                session_id: "nested-session-log-owner".to_string(),
-                file: "tasks/owned.md".to_string(),
-                window: iso.pane_window(&owner_pane).unwrap(),
-                supervisor_instance_id: String::new(),
-            },
-        );
-        sessions::save_in(root, &registry).unwrap();
-        std::fs::write(
-            root.join(".agent-doc/logs/nested-session-log-owner.log"),
-            format!(
-                "[1] session_start file=tasks/owned.md pane={} session=nested-session-log-owner\n[2] codex_start mode=fresh restart_count=0\n",
-                owner_pane
-            ),
-        )
-        .unwrap();
-
-        let owner = find_live_owner_pane(&iso, &doc, "nested-session-log-owner");
-        assert_eq!(
-            owner.as_deref(),
-            Some(owner_pane.as_str()),
-            "the registered open session-log owner should survive when its cwd moves into a nested worktree"
-        );
-    }
-
-    #[test]
-    fn find_live_owner_pane_does_not_reuse_unregistered_nested_session_log_owner() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path();
-        let subroot = root.join("src/monsterrodholders-dev");
-        let _cwd_guard = ScopedCurrentDir::set(root);
-
-        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-        std::fs::create_dir_all(root.join("tasks")).unwrap();
-        std::fs::create_dir_all(&subroot).unwrap();
-        ProcessCommand::new("git")
-            .current_dir(&subroot)
-            .args(["init"])
-            .status()
-            .unwrap();
-
-        let doc = root.join("tasks/owned.md");
-        std::fs::write(
-            &doc,
-            "---\nagent_doc_session: nested-session-log-unregistered\n---\n",
-        )
-        .unwrap();
-
-        let iso = IsolatedTmux::new("sync-nested-session-log-unregistered");
-        let owner_pane = iso.new_session("test", root).unwrap();
-        iso.raw_cmd(&[
-            "send-keys",
-            "-t",
-            &owner_pane,
-            &format!("cd {}", subroot.display()),
-            "C-m",
-        ])
-        .unwrap();
-        wait_for_pane_cwd(&iso, &owner_pane, &subroot);
-
-        std::fs::write(
-            root.join(".agent-doc/logs/nested-session-log-unregistered.log"),
-            format!(
-                "[1] session_start file=tasks/owned.md pane={} session=nested-session-log-unregistered\n[2] codex_start mode=fresh restart_count=0\n",
-                owner_pane
-            ),
-        )
-        .unwrap();
-
-        let owner = find_live_owner_pane(&iso, &doc, "nested-session-log-unregistered");
-        assert_eq!(
-            owner, None,
-            "nested-worktree scope relaxation must stay limited to the current registered pane"
-        );
     }
 
     #[test]
@@ -7233,6 +7142,64 @@ mod tests {
         assert!(
             !registered_pane_proves_live_owner(&iso, &doc, "owned-session", &pane),
             "a merely alive pane should not count as a live owner without ownership proof"
+        );
+    }
+
+    #[test]
+    fn protected_registered_pane_state_detects_protected_codex_queue_state() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+
+        let doc = root.join("tasks/protected.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: protected-session\nagent: codex\n---\n",
+        )
+        .unwrap();
+
+        let capture = "\
+Starting codex...
+›
+tab to queue message
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        let protected = protected_registered_pane_state_from_capture(&doc, capture)
+            .expect("protected queue-state prompt detected");
+        assert_eq!(protected.reason, "queued draft in composer");
+        assert!(
+            protected
+                .last_visible_excerpt
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Context 31% used")
+        );
+    }
+
+    #[test]
+    fn protected_registered_pane_state_ignores_idle_codex_placeholder() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+
+        let doc = root.join("tasks/idle.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: idle-session\nagent: codex\n---\n",
+        )
+        .unwrap();
+        let capture = "\
+Starting codex...
+› Explain this module in @filename
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(
+            protected_registered_pane_state_from_capture(&doc, capture),
+            None
         );
     }
 

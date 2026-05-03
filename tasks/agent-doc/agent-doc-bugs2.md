@@ -405,7 +405,31 @@ Committed and pushed in `src/agent-doc`:
 - `3fa028a` `fix: prefer latest session-log owner during sync recovery`
 
 `#mrreap` is complete.
-<!-- agent:boundary:d7c36f7f -->
+❯ do [#mrreplay]. spec-test-build-install-commit-push
+### Re: mrreplay live replay validation — gpt-5
+
+Plan executed: `tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md`
+
+`#mrreplay` is complete.
+
+I reran the live `src/boost-client/tasks/monsterrodholders.md` route/replay path against the current `src/agent-doc` build.
+
+- `agent-doc route --dispatch-only ...` pruned the stale registry entry, targeted tmux session `4`, and cold-started `monsterrodholders.md` in pane `%162`.
+- The fresh pane timed out on the initial idle-prompt wait, but the fallback bare reopen recovered the run in the same pane: ops log recorded `route_dispatch_only_sent`, `fresh_route_trigger_recovered`, and `fresh_route_dispatch_only` for `%162`.
+- After the replay, `src/boost-client/.agent-doc/sessions.json` bound `monsterrodholders.md` to `%162` on window `@134`; it did not fall back to stale `%2`, and `tmux list-panes` still showed `%162` alive in the active `agent-doc` window.
+- No startup-miss file remained under `src/boost-client/.agent-doc/state/startup-miss`, so the earlier lingering startup-miss state cleared on this successful routed cycle.
+- The old repair failure is now only historical: the session log still shows the earlier `pending/backlog patch changed non-list content` errors on `%71` and `%73`, but the `%162` replay emitted no new backlog-normalization or duplicate-id failure.
+
+Verification:
+- `cargo test` (`1788 passed; 0 failed`)
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+- no new `src/agent-doc` source diff was required in this cycle, so there was nothing to commit or push there
+
+`#mrbusy` remains open because this replay exercised the stale-registry / fresh-start recovery path, not the busy registered-pane reroute case.
+<!-- agent:boundary:76de8776 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -421,7 +445,6 @@ Add a Plugin Editor command to clear the context
 
 <!-- agent:backlog -->
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
-- [ ] [#mrreplay] [recommended] Validate the live monsterrodholders rerun after the backlog-alias repair path landed, and determine whether the remaining pane %320 startup-miss warning clears on the next successful routed cycle. Plan: tasks/agent-doc/plan-monsterrodholders-repair-replay-validation.md
 - [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
 - [ ] [#jberr] [recommended] Keep JetBrains Run Agent Doc route failures copyable/persistent instead of transient-only. Plan: tasks/agent-doc/plan-jb-route-error-capture.md

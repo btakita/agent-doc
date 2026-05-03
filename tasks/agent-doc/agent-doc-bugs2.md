@@ -489,22 +489,42 @@ Verification before push in `src/agent-doc`:
 - `cargo install --path . --force`
 
 Note: `src/agent-doc/src/repair.rs` still has an unrelated pre-existing local formatting diff and was intentionally left uncommitted.
-<!-- agent:boundary:1f1beca2 -->
+❯ `agent-doc sync` should correct the tmux windows in addition to the tmux panes. The correct tmux windows are:
+❯ - 0:agent-doc
+❯ - 1:stash
+❯ - 2:stash2 (if needed due to 1:stash being "full")
+❯ - ...
+
+❯ `agent-doc sync` should record the current layout so future calls to `agent-doc sync` or the underlying function will by default sync to the recorded current layout.
+
+❯ Any operation that affects the tmux panes must also call the underlying function of `tmux sync` to ensure the pane layout is correct. I am noticing that mid-run, the tmux window layout becomes incorrect...switching from 2 panes toq 1 pane in the agent-doc tmux window. Whatever caused the tmux pane to leave the agent-doc window should not have been run or if it is run should sync.
+
+❯ spec-test-build-install-commit-push
+### Re: sync window/layout normalization — gpt-5
+
+Implemented the sync/window fix in `src/agent-doc` plus a stash-window fix in `src/tmux-router`.
+
+What changed:
+- `agent-doc sync` now accepts no `--col` args and replays the recorded `.agent-doc/last_layout.json` for the resolved sync scope, so future syncs can default to the last known layout.
+- The recorded layout path is now scoped to the shared `.agent-doc` root for the visible document set instead of the caller CWD, so mixed-root layouts persist and restore from the correct workspace state.
+- Sync now runs `repair_layout` again after `tmux_router::sync`, and `repair_layout` normalizes windows as well as panes: `agent-doc` goes to index `0`, stash windows are moved directly after it (`1`, `2`, ...), and occupied slots are preserved via `swap-window`.
+- `tmux-router::Tmux::find_all_stash_windows()` now returns overflow stash windows (`stash-*`), so overflow stash state is visible to callers and tests.
+
+Spec/tests/build/install:
+- Updated `specs/07-commands.md` and `VERSIONS.md`.
+- `src/agent-doc`: `cargo test`, `cargo build`, `cargo install --path . --force`
+- `src/tmux-router`: `cargo test`, `cargo build`
+
+Pushed:
+- `src/agent-doc` `e327c9f` `fix: restore sync layout from recorded state`
+- `src/tmux-router` `1aa6938` `fix: discover overflow stash windows`
+- parent pointer update `da7b44eb6` `chore: update agent-doc sync dependencies`
+
+No new backlog item from this fix.
+<!-- agent:boundary:589f4bf7 -->
 <!-- /agent:exchange -->
 
 <!--
-`agent-doc sync` should correct the tmux windows in addition to the tmux panes. The correct tmux windows are:
-- 0:agent-doc
-- 1:stash
-- 2:stash2 (if needed due to 1:stash being "full")
-- ...
-
-`agent-doc sync` should record the current layout so future calls to `agent-doc sync` or the underlying function will by default sync to the recorded current layout.
-
-Any operation that affects the tmux panes must also call the underlying function of `tmux sync` to ensure the pane layout is correct. I am noticing that mid-run, the tmux window layout becomes incorrect...switching from 2 panes toq 1 pane in the agent-doc tmux window. Whatever caused the tmux pane to leave the agent-doc window should not have been run or if it is run should sync.
-
-spec-test-build-install-commit-push
----
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.

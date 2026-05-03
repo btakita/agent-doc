@@ -49,6 +49,7 @@ Notable invariants:
 - Harness-specific launch controls are explicit: `agent_args` is generic, `claude_args` applies only to Claude, `codex_args` applies only to Codex, and `codex_network_access` controls whether agent-doc preserves, removes, or forces `CODEX_SANDBOX_NETWORK_DISABLED` for Codex child sessions. When a document lives in a submodule, harness launches must also auto-add any writable roots outside the submodule that the session lifecycle may need: the superproject working tree for parent-repo document patchbacks plus the external git metadata directories (`.git/modules/...` for the submodule and the superproject `.git` for pointer updates). If a resumed Codex `exec resume <id>` turn reports the local-browser/CDP EPERM signature (`Operation not permitted` on `127.0.0.1:9222` / `localhost:9222`), agent-doc must treat that as stale resumed-session capability drift, retry once with a fresh `codex exec`, and let the successful fresh thread replace the saved `resume` id instead of trusting the poisoned resume state again.
 - `### Re:` response headers must use the resolved model short name for attribution (for example `gpt-5`, `opus-4-6`), never the harness label (`codex`, `claude`).
 - Bundled skill/install content is part of the external contract: Claude/Codex hot-path instructions must render from one shared source surface, with differences limited to harness-specific invocation wording and frontmatter description. The shared Claude/Codex manual-repair instructions must distinguish adding a missing user prompt from repairing a missed assistant response, use `agent-doc write --commit <file>` for the missed-response path, and not stop after bare `agent-doc write`.
+- Reusable authoring runbooks shipped by `skill install` are part of that same contract. If `runbooks/split-spec-files.md` is referenced from the shared instruction surfaces, it must be bundled into installed harness runbooks and its ownership rule must stay harness-agnostic across agent-doc-managed surfaces while leaving custom root instruction files opt-in unless they still match the generated baseline.
 - Route readiness/trigger acceptance is a binary responsibility: pane prompt detection must be robust to shell startup noise and must wait for actual prompt state rather than treating echoed command text as readiness.
 - Route trigger commands must use absolute file paths (resolved against the invoker's CWD) to prevent submodule CWD-dependent misrouting. That invariant applies to every routed reopen attempt, including post-restart retries after a missed cycle ack; once route has resolved the canonical path, later retries must not fall back to `file.display()` or other caller-relative renderings. When a tmux pane's CWD is narrowed to a submodule root and the same relative path exists in both the main repo and the submodule, a relative path would resolve to the wrong file.
 
@@ -60,9 +61,15 @@ Notable invariants:
 | 4 | [Diff Computation](specs/04-diff-computation.md) | Line-level unified diff and comment stripping |
 | 5 | [Agent Backend](specs/05-agent-backend.md) | Agent trait, resolution order, Claude backend |
 | 6 | [Config](specs/06-config.md) | Global/project config, IPC, document state model |
-| 7 | [Commands](specs/07-commands.md) | All CLI commands (run, init, route, sync, write, etc.) |
+| 7 | [Commands](specs/07-commands.md) | Command-spec index with split sibling specs for core, tmux/session, closeout, and orchestration behavior |
 | 8 | [Session Routing](specs/08-session-routing.md) | Registry, claim semantics, stash routing, binding invariant |
 | 9 | [Git Integration](specs/09-git-integration.md) | Commit/branch/squash and hook system |
 | 10 | [Security](specs/10-security.md) | Threat model, known risks, recommendations |
 | 11 | [Debounce](specs/11-debounce.md) | Debounce system gaps, limitations, and improvements |
 | 12 | [Codex Support](specs/codex-support.md) | Harness-specific differences for Codex vs Claude Code |
+
+Command sub-specs:
+- [Core Commands](specs/07-core-commands.md)
+- [Session And Tmux Commands](specs/07-session-tmux-commands.md)
+- [Closeout Commands](specs/07-closeout-commands.md)
+- [Orchestration Commands](specs/07-orchestration-commands.md)

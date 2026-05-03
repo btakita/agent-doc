@@ -163,18 +163,17 @@ Document format, frontmatter fields, append vs template mode conventions, and co
 
 ## Runbooks
 
+Reusable authoring rules such as [runbooks/split-spec-files.md](runbooks/split-spec-files.md) apply across agent-doc-managed harness instruction surfaces. Leave custom root instruction files opt-in unless they still match the generated baseline.
+
+Key runbooks:
+
 - [runbooks/harness-invocation.md](runbooks/harness-invocation.md) — harness-specific invocation patterns
-- [runbooks/compact-exchange.md](runbooks/compact-exchange.md) — `compact exchange` operation
-- [runbooks/transfer-extract.md](runbooks/transfer-extract.md) — `transfer` / `extract` operations
-- [runbooks/pending-ops.md](runbooks/pending-ops.md) — pending mutation contract
-- [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md) — tier precedence + gate behavior
-- [runbooks/command-synonyms.md](runbooks/command-synonyms.md) — natural-language dispatch to `orchestrate --mode ...`
-- [runbooks/compound-task-steering.md](runbooks/compound-task-steering.md) — normalize compound directives into explicit follow-up steps
-- [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md) — post-preflight planning record and handoff contract
-- [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md) — checkpoint flush pattern
-- [runbooks/document-format.md](runbooks/document-format.md) — frontmatter + component conventions
+- [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md) — post-preflight execution contract
+- [runbooks/pending-ops.md](runbooks/pending-ops.md) — backlog mutation rules
 - [runbooks/commit.md](runbooks/commit.md) — response commit boundary and exceptions
-- [runbooks/code-enforced-directives.md](runbooks/code-enforced-directives.md) — which invariants live in the binary
+- [runbooks/split-spec-files.md](runbooks/split-spec-files.md) — stable-index spec splitting rule
+
+The full bundled catalog lives in `runbooks/`, including `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, and `code-enforced-directives`.
 
 ## Success Criteria
 

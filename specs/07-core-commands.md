@@ -1,0 +1,156 @@
+> Extracted from [07-commands.md](07-commands.md)
+
+# Core Commands
+
+This file covers the lower-churn command surface that is not primarily about tmux/session routing, response closeout, or orchestration.
+
+## run
+
+`agent-doc [run] <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`
+
+- `agent-doc <FILE>` and `agent-doc run <FILE>` are equivalent.
+- `run` computes the diff, resolves document mode from frontmatter, sends the prompt to the configured backend, durably captures the final parsed response, applies the response through the matching write path, updates the resume/session id, records `write_applied`, and then runs the same strict closeout helper used by `finalize`.
+- If the pending diff contains executable directives such as `do #id`, `run tests`, `build + install`, `commit + push`, `go`, or imperative pending-item prose, status-only or meta-only agent replies are invalid. The response must contain either concrete execution evidence or a concrete blocker.
+- If the diff contains a bare `compact exchange` request, `run` must fail closed and direct the caller to `agent-doc compact <FILE> --commit`.
+- Once a cycle records `committed`, later repair bookkeeping must not rewind the persisted cycle state to `response_captured` or `write_applied`.
+
+## init
+
+Two modes:
+
+- `agent-doc init` initializes the project-level `.agent-doc/` directories and installs bundled skill content.
+- `agent-doc init <FILE> [TITLE] [--agent NAME]` scaffolds a new session document and lazily runs project init first when needed.
+
+## install
+
+`agent-doc install [--editor jetbrains|vscode] [--skip-prereqs] [--skip-plugins]`
+
+- Verifies `tmux` and the configured agent CLI are present unless skipped.
+- Installs editor plugins either for the requested editor or for auto-detected editors.
+- Local source installs inside the `agent-loop` workspace must resolve sibling crates without ad hoc Cargo patch flags.
+
+## diff
+
+`agent-doc diff <FILE>` prints the unified diff between the saved snapshot and the current document.
+
+## reset
+
+`agent-doc reset <FILE>` clears the saved session id and deletes the snapshot for the document.
+
+## clean
+
+`agent-doc clean <FILE>` squashes all `agent-doc:` commits for the file into one via `git reset --soft`.
+
+## gc
+
+`agent-doc gc [--root DIR] [--dry-run]`
+
+- Garbage-collects orphaned snapshots, captures, locks, hooks, status files, repair diagnostics, sockets, and dead registry entries under `.agent-doc/`.
+- The orphaned-socket cleanup keeps sockets whose supervisor PID is alive or whose socket still answers.
+- `preflight` runs this automatically at most once per day via `.agent-doc/gc.stamp`.
+
+## audit-docs
+
+`agent-doc audit-docs [--root DIR]`
+
+- Audits instruction files such as `CLAUDE.md`, `AGENTS.md`, `README.md`, and `SKILL.md` for path accuracy, staleness, actionable content, and line budget.
+- Discovery prunes heavy skip directories before descent so audit time is spent on real instruction surfaces.
+
+## prompt
+
+`agent-doc prompt <FILE>`
+
+- Detects active permission prompts from a Claude Code pane by scanning the captured pane footer.
+- Supports both bracketed legacy options and numbered-list options.
+- `--answer N` selects an option and presses Enter.
+- `--all` polls every live session.
+
+## skill
+
+`agent-doc skill install` writes the bundled skill into the current project, and `agent-doc skill check` compares the installed copy to the bundled version.
+
+- The installed skill always renders `agent-doc-version` from the running binary version.
+- Harness-specific reload flows must use explicit `--harness` selection rather than environment guessing.
+
+## outline
+
+`agent-doc outline <FILE> [--json]` reports markdown heading structure, line counts, and approximate token counts.
+
+## upgrade
+
+`agent-doc upgrade` checks crates.io for a newer release and upgrades through the GitHub Release / `cargo install` / `pip` cascade.
+
+The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.json`.
+
+## plugin
+
+`agent-doc plugin install|update|list <EDITOR>`
+
+- Supports JetBrains and VS Code.
+- Pulls assets from GitHub Releases, preferring signed assets when available.
+
+## rename
+
+`agent-doc rename <OLD_PATH> <NEW_PATH>`
+
+- Migrates hash-keyed state files such as snapshots, baselines, locks, pending state, CRDT state, and pre-response artifacts to the new path hash.
+- Auto-migration through `ensure_initialized` still handles the common rename path; `rename` remains the explicit fallback.
+
+## watch
+
+`agent-doc watch [--stop] [--status] [--debounce MS] [--max-cycles N]`
+
+- Watches registered session files and re-submits them when they change.
+- CRDT/reactive documents use zero debounce.
+- Busy documents are skipped so the watch daemon cannot race the live write path.
+
+## history
+
+`agent-doc history <FILE>` lists exchange history from git.
+
+`agent-doc history <FILE> --restore <COMMIT>` prepends a historical exchange back into the current exchange component.
+
+## transfer
+
+`agent-doc transfer <SOURCE> <TARGET> <COMPONENT> [--bypass-claim] [--items ...] [--referral]`
+
+- Full transfer moves an entire component, optionally carrying backlog and icebox context too.
+- Selective `--items` transfer operates on backlog/icebox parent items keyed by `[#id]` and moves the full tracked block, including indented continuation lines.
+- `--bypass-claim` is the explicit cross-pane override.
+- `--referral` leaves the source content in place and inserts a structured pointer in the target instead of moving content.
+
+## extract
+
+`agent-doc extract <SOURCE> <TARGET> [--component NAME]`
+
+- Moves the last exchange entry from the source into the target's matching component and preserves both documents' snapshots.
+
+## backlog
+
+`agent-doc backlog <FILE> <ACTION>`
+
+- Canonical surface for tracked work. `agent-doc pending` remains a deprecated alias only.
+- Supports add/edit/done/reorder/prune/list/gate operations against the canonical `agent:backlog` component.
+- Non-item separator lines and headings inside backlog/icebox must be preserved during mutation.
+- Flush-left parent items are the tracked units; indented nested lists travel with the parent during edit/reorder/reap/transfer.
+
+## terminal
+
+`agent-doc terminal <FILE> [--session NAME]`
+
+- Opens an external terminal that attaches to the target tmux session, but only when another attached client does not already exist.
+- The terminal command comes from user config or `$TERMINAL`.
+
+## migrate
+
+`agent-doc migrate [FILES...] [--all] [--dry-run]`
+
+- Migrates deprecated `agent:pending` markers to the canonical `agent:backlog` markers and strips deprecated backlog tag attributes.
+- Skips fenced code blocks and inline code.
+
+## dedupe
+
+`agent-doc dedupe <FILE>`
+
+- Removes consecutive duplicate `### Re:` response blocks and updates the snapshot.
+- Also deletes the stale queued patch file so a plugin restart cannot replay the removed duplicate.

@@ -121,6 +121,8 @@ The binary owns all deterministic behavior: component parsing, patch application
 
 See [CLAUDE.md](CLAUDE.md) for the full module layout, stream mode details, and release process.
 
+Large specs now split behind stable entrypoint files instead of growing indefinitely. For command behavior, start at [`specs/07-commands.md`](specs/07-commands.md), which indexes the focused sibling specs for core commands, tmux/session behavior, closeout, and orchestration. For the authoring rule behind that split, see [`runbooks/split-spec-files.md`](runbooks/split-spec-files.md). That runbook applies across agent-doc-managed harness instruction surfaces, while custom root instruction files stay opt-in unless they still match the generated baseline.
+
 ## Supported Editors
 
 **JetBrains (IntelliJ, PyCharm, etc.)**

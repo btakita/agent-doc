@@ -140,6 +140,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         "harness-invocation.md",
         include_str!("../runbooks/harness-invocation.md"),
     ),
+    (
+        "split-spec-files.md",
+        include_str!("../runbooks/split-spec-files.md"),
+    ),
 ];
 
 /// Current binary version (from Cargo.toml).
@@ -1210,6 +1214,16 @@ mod tests {
                 .iter()
                 .any(|(name, _)| *name == "planning-dispatch.md"),
             "planning-dispatch.md should be in BUNDLED_RUNBOOKS"
+        );
+    }
+
+    #[test]
+    fn bundled_runbooks_include_split_spec_files_runbook() {
+        assert!(
+            BUNDLED_RUNBOOKS
+                .iter()
+                .any(|(name, _)| *name == "split-spec-files.md"),
+            "split-spec-files.md should be in BUNDLED_RUNBOOKS"
         );
     }
 

@@ -740,6 +740,7 @@ impl StreamingAgent for Codex {
             allow_resume_capability_retry: session_id.is_some(),
             retried_fresh: false,
             yielded_agent_content: false,
+            saw_final_chunk: false,
             required_ssh_match_terms: required_ssh
                 .map(|capability| capability.match_terms)
                 .unwrap_or_default(),
@@ -761,6 +762,7 @@ struct CodexStreamIterator {
     allow_resume_capability_retry: bool,
     retried_fresh: bool,
     yielded_agent_content: bool,
+    saw_final_chunk: bool,
     required_ssh_match_terms: Vec<String>,
     required_ssh_targets: Vec<String>,
 }
@@ -795,6 +797,7 @@ impl CodexStreamIterator {
         self.allow_resume_capability_retry = false;
         self.retried_fresh = true;
         self.yielded_agent_content = false;
+        self.saw_final_chunk = false;
         Ok(())
     }
 }
@@ -853,6 +856,7 @@ impl Iterator for CodexStreamIterator {
                                 self.session_id = chunk.session_id.take();
                             }
                             if chunk.is_final {
+                                self.saw_final_chunk = true;
                                 chunk.session_id = self.session_id.take();
                             }
                             if !chunk.is_final
@@ -930,6 +934,14 @@ impl Iterator for CodexStreamIterator {
                     if !stderr.trim().is_empty() {
                         eprintln!("[agent] codex subprocess stderr: {}", stderr.trim());
                     }
+                    if self.yielded_agent_content && !self.saw_final_chunk {
+                        return Some(Ok(StreamChunk {
+                            text: String::new(),
+                            thinking: None,
+                            is_final: true,
+                            session_id: self.session_id.take(),
+                        }));
+                    }
                     return None;
                 }
             }
@@ -1004,6 +1016,30 @@ mod tests {
             .iter()
             .find(|c| c.as_ref().map(|sc| sc.is_final).unwrap_or(false));
         assert!(final_chunk.is_some(), "expected final chunk");
+    }
+
+    #[test]
+    fn streaming_synthesizes_final_chunk_when_successful_eof_follows_agent_message() {
+        let codex = Codex::new(
+            Some("bash".into()),
+            Some(vec![
+                "-c".into(),
+                "cat >/dev/null; echo '{\"type\":\"thread.started\",\"thread_id\":\"t1\"}'; echo '{\"type\":\"item.completed\",\"item\":{\"id\":\"msg-1\",\"type\":\"agent_message\",\"text\":\"hello\"}}'".into(),
+            ]),
+        );
+        let iter = codex.send_streaming("ignored", None, false, None).unwrap();
+        let chunks: Vec<Result<StreamChunk>> = iter.collect();
+        assert!(
+            chunks.iter().all(|c| c.is_ok()),
+            "expected no errors, got: {chunks:?}"
+        );
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].as_ref().unwrap().text, "hello");
+        assert!(chunks[1].as_ref().unwrap().is_final);
+        assert_eq!(
+            chunks[1].as_ref().unwrap().session_id.as_deref(),
+            Some("t1")
+        );
     }
 
     #[test]

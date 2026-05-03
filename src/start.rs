@@ -2505,8 +2505,6 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
 
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
         _env_guard: std::sync::MutexGuard<'static, ()>,
@@ -2514,9 +2512,7 @@ mod tests {
 
     impl ScopedCurrentDir {
         fn set(path: &std::path::Path) -> Self {
-            let env_guard = ENV_MUTEX
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let env_guard = crate::test_support::env_lock();
             let prev_cwd = std::env::current_dir().unwrap();
             std::env::set_current_dir(path).unwrap();
             Self {

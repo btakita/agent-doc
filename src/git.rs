@@ -6050,6 +6050,7 @@ mod tests {
         std::fs::write(&doc, "# Plan\n").unwrap();
 
         // Temporarily set CWD to root
+        let _env_guard = crate::test_support::env_lock();
         let prev_cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(&root).unwrap();
 

@@ -487,12 +487,10 @@ pub(crate) fn apply_targeted_fix_for_route(
     let recovered = recover_target_document_pane_in(tmux, &target, &base_dir)?;
     outcome.reregistered_owner = recovered.reregistered_owner;
     outcome.killed_redundant_stash_panes = recovered.killed_redundant_stash_panes;
-    let scoped_registry =
-        filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
+    let scoped_registry = filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
     let issues = detect_issues_in_registry(tmux, &scoped_registry);
     if !issues.is_empty() {
-        outcome.fixed_issues =
-            apply_fixes_with_base(tmux, &issues, None, Some(&base_dir))?;
+        outcome.fixed_issues = apply_fixes_with_base(tmux, &issues, None, Some(&base_dir))?;
     }
     Ok(outcome)
 }
@@ -2162,8 +2160,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
         let removed = prune_targeted_in(&tmux, &target, &base_dir)?;
 
         if removed.is_empty() {
-            let scoped =
-                filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
+            let scoped = filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
             if scoped.is_empty() {
                 eprintln!("No registered sessions found for {}.", target.display());
             } else {
@@ -2189,8 +2186,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
             let _ = recover_target_document_pane_in(&tmux, &target, &base_dir)?;
         }
 
-        let scoped_registry =
-            filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
+        let scoped_registry = filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
         let issues = detect_issues_in_registry(&tmux, &scoped_registry);
         if !issues.is_empty() {
             if fix {
@@ -2219,8 +2215,7 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
             );
         }
 
-        let scoped_registry =
-            filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
+        let scoped_registry = filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
         if !scoped_registry.is_empty() {
             eprintln!("\nActive matching sessions:");
             for (key, entry) in &scoped_registry {
@@ -2314,7 +2309,6 @@ mod tests {
     use super::*;
     use sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
 
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
     static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct ScopedCurrentDir {
@@ -2324,9 +2318,7 @@ mod tests {
 
     impl ScopedCurrentDir {
         fn set(path: &std::path::Path) -> Self {
-            let env_guard = ENV_MUTEX
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let env_guard = crate::test_support::env_lock();
             let prev_cwd = std::env::current_dir()
                 .ok()
                 .filter(|cwd| cwd.exists())
@@ -3880,7 +3872,9 @@ mod tests {
         let root = resolve_registry_root(&doc);
         assert_eq!(
             root,
-            dir.path().canonicalize().unwrap_or(dir.path().to_path_buf()),
+            dir.path()
+                .canonicalize()
+                .unwrap_or(dir.path().to_path_buf()),
             "should resolve to the superproject .agent-doc root"
         );
     }
@@ -3921,6 +3915,9 @@ mod tests {
 
         // Verify the submodule registry is now empty
         let after = sessions::load_in(&sub).unwrap();
-        assert!(after.is_empty(), "submodule registry should be empty after prune");
+        assert!(
+            after.is_empty(),
+            "submodule registry should be empty after prune"
+        );
     }
 }

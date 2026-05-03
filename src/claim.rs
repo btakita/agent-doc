@@ -789,6 +789,7 @@ mod tests {
     #[test]
     fn registry_entry_matches_claimed_document_for_relative_entry_file() {
         let tmp = tempdir().unwrap();
+        let _env_guard = crate::test_support::env_lock();
         let old_cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 

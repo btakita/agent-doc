@@ -219,12 +219,8 @@ mod tests {
     use crate::sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
     use tempfile::TempDir;
 
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        ENV_MUTEX
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::test_support::env_lock()
     }
 
     /// Helper: set up a temp dir with a sessions.json containing a claim for the given pane.

@@ -604,10 +604,7 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
         if duplicate_opener_changed {
             crate::ops_log::log_op(
                 file,
-                &format!(
-                    "repair_duplicate_exchange_opener file={}",
-                    file.display()
-                ),
+                &format!("repair_duplicate_exchange_opener file={}", file.display()),
             );
             eprintln!(
                 "[repair] merged duplicate exchange opener(s) in {}",

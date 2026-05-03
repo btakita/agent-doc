@@ -290,8 +290,34 @@ Verification:
 
 Committed and pushed in `src/agent-doc`:
 - `ece3aa0` `fix: resolve submodule registry root in targeted fix/resync`
+❯ do [#dup-exchange]. spec-test-build-install-commit-push
+### Re: do #dup-exchange — opus-4-6
 
-<!-- agent:boundary:02dc51a9 -->
+Implemented duplicate exchange opener detection and auto-repair.
+
+#### What changed
+
+**`template.rs` — `repair_duplicate_exchange_opener()`**: New function that detects when a document has two or more complete `&lt;!-- agent:exchange --&gt;...&lt;!-- /agent:exchange --&gt;` blocks, merges the second block's content into the first, and removes the second block. Iterative — handles 3+ blocks via repeated calls.
+
+**`template.rs` — post-patch guard in `apply_patches_with_overrides()`**: After unmatched content routing and before dedup, loops `repair_duplicate_exchange_opener()` to catch any duplicate openers created during the patch pipeline.
+
+**`repair.rs` — `repair_template_doc_if_needed()`**: Runs `repair_duplicate_exchange_opener()` in a loop before the existing duplicate-close repair, so preflight catches the problem before the agent even sees the diff.
+
+**`specs/07-commands.md`**: Added the "Duplicate exchange opener guard" spec paragraph.
+
+#### Tests added
+
+- `repair_duplicate_exchange_opener_merges_two_blocks` — two complete exchange blocks with content → merged into one, both contents preserved in order, surrounding components untouched
+- `repair_duplicate_exchange_opener_returns_none_for_single` — single exchange block returns `None`
+
+#### Build
+
+- `cargo test`: 2280 passed, 3 ignored
+- `cargo install --path .` + `cargo build --release`: both binaries updated
+- Committed and pushed in `src/agent-doc`:
+  - `725af96` `fix: detect and auto-repair duplicate exchange openers`
+
+<!-- agent:boundary:2e3a7e67 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -314,8 +340,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#dyvw] 
-- [ ] [#dup-exchange] [recommended] Fail closed or auto-repair when a template/CRDT session document gains a second `<!-- agent:exchange ... -->` opener instead of appending inside the canonical exchange component. Repro: `src/session-share/tasks/buildparty-investor-demo/dev.md` ended up with two exchange blocks after a direct Codex patch/write cycle. Plan: verify whether this is a write-path structural-guard miss, a repair-path miss, or a direct-manual-edit escape hatch that should still be normalized.
 - [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
@@ -331,6 +355,7 @@ Add a Plugin Editor command to clear the context
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
+- [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement: `#jberr`.
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
 <!-- /agent:icebox -->

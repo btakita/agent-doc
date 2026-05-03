@@ -1154,6 +1154,20 @@ fn passive_autostart_skip_reason(
     Ok(None)
 }
 
+fn open_session_log_owner_fail_closed_diagnostic(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+) -> Result<Option<String>> {
+    let Some(status) = crate::startup_miss::session_log_status(file, session_id)? else {
+        return Ok(None);
+    };
+    if status.latest_start_pane.as_deref() != Some(pane_id) || !status.latest_session_open() {
+        return Ok(None);
+    }
+    crate::startup_miss::session_log_diagnostic(file, session_id)
+}
+
 fn phase2_rescue_candidates_for_files(tmux: &Tmux, col_args: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut panes = Vec::new();
@@ -2228,6 +2242,38 @@ fn run_with_options(
                 && tmux.pane_alive(pane)
                 && !registered_live_owner
             {
+                if claimed_owner.is_none()
+                    && let Some(diagnostic) =
+                        open_session_log_owner_fail_closed_diagnostic(file_path, &session_id, pane)?
+                {
+                    eprintln!(
+                        "[sync] pane {} for {} is alive but ownership proof weakened while the session log still shows that pane as the latest open owner ({}) — failing closed instead of recording registered_pane_missing",
+                        pane,
+                        file_path.display(),
+                        diagnostic
+                    );
+                    sync_log(&format!(
+                        "registered_pane_open_session_log_owner file={} pane={} action=fail_closed diagnostic={}",
+                        file_path.display(),
+                        pane,
+                        diagnostic
+                    ));
+                    let reason = sanitize_excerpt(&diagnostic).unwrap_or_else(|| {
+                        "latest open session-log owner still points to this pane".to_string()
+                    });
+                    let _ = crate::startup_miss::append_session_log_event(
+                        file_path,
+                        &session_id,
+                        &format!(
+                            "registered_pane_open_session_log_owner pane={} reason={} action=fail_closed",
+                            pane, reason
+                        ),
+                    );
+                    blocked_unresolved_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
+                    continue;
+                }
                 if claimed_owner.is_none()
                     && let Some(protected) = protected_registered_pane_state(tmux, file_path, pane)
                 {
@@ -4279,6 +4325,45 @@ mod tests {
                 .contains(&AssociatedPaneSource::SessionLog),
             "expected session-log ownership proof: {:?}",
             candidates[0].sources
+        );
+    }
+
+    #[test]
+    fn open_session_log_owner_fail_closed_diagnostic_requires_same_alive_open_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: open-log-pane\n---\n").unwrap();
+
+        let iso = IsolatedTmux::new("sync-open-log-owner-fail-closed");
+        let owner_pane = iso.new_session("test", tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/open-log-pane.log"),
+            format!(
+                "[1] session_start file=tasks/owned.md pane={} session=open-log-pane\n[2] codex_start mode=fresh restart_count=0\n",
+                owner_pane
+            ),
+        )
+        .unwrap();
+
+        let diagnostic =
+            open_session_log_owner_fail_closed_diagnostic(&doc, "open-log-pane", &owner_pane)
+                .unwrap();
+        assert!(
+            diagnostic
+                .as_deref()
+                .unwrap_or_default()
+                .contains("session log still has no later child exit or session_end")
+        );
+
+        let none =
+            open_session_log_owner_fail_closed_diagnostic(&doc, "open-log-pane", "%99999").unwrap();
+        assert!(
+            none.is_none(),
+            "other panes should not inherit the open-log guard"
         );
     }
 

@@ -10,8 +10,8 @@
 //!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
 //! - Each subcommand delegates immediately to its own module (`run::run`, `diff::run`, etc.);
 //!   `main` contains no business logic beyond argument destructuring and dispatch.
-//! - `Route` additionally calls `sync::run_layout_only` when `--col` args are present,
-//!   logging layout-sync failures to stderr without propagating the error.
+//! - `Route` no longer runs a follow-up sync; editor/plugin sync remains the
+//!   authoritative layout path.
 //! - `Write` auto-detects the write strategy from frontmatter when no `--template`/`--stream`
 //!   flag is given; CRDT-mode documents use `write::run_stream`, others use `write::run`.
 //! - `Prompt --all` runs `prompt::run_all()`; otherwise `FILE` is required.
@@ -33,7 +33,6 @@
 //! - dispatch_run: `agent-doc run <file>` → `run::run` called with correct args
 //! - dispatch_write_crdt_autodetect: CRDT frontmatter + no flags → `write::run_stream` selected
 //! - dispatch_write_inline_autodetect: inline frontmatter + no flags → `write::run` selected
-//! - dispatch_route_with_cols: `--col` args present → `sync::run_layout_only` called after route
 //! - dispatch_prompt_all: `--all` → `prompt::run_all`, no FILE required
 //! - dispatch_history_restore: `--restore <sha>` → `history::restore` called
 //! - dispatch_watch_stop: `--stop` flag → `watch::stop` called
@@ -478,7 +477,9 @@ enum Commands {
     /// Sync tmux panes to a 2D columnar layout matching the editor
     Sync {
         /// Columns of comma-separated file paths (left-to-right). Repeat for each column.
-        #[arg(long = "col", required = true)]
+        /// When omitted, sync falls back to the recorded `.agent-doc/last_layout.json`
+        /// for the current sync scope.
+        #[arg(long = "col")]
         columns: Vec<String>,
         /// Only operate on panes within this tmux window (e.g. @1)
         #[arg(long)]

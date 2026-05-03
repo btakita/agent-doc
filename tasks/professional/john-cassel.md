@@ -2,7 +2,17 @@
 agent_doc_session: 9af37216-1e49-4cd5-b32a-d9b2da189ee5
 agent_doc_format: template
 agent_doc_write: crdt
+agent: codex
+claude_model: claude-opus-4-6
+codex_args: -s danger-full-access
 claude_args: --dangerously-skip-permissions
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
+  '#commit-push': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share
+  '#follow-up-backlog': Any follow-up items to place in the backlog?
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  '#news-commit-push': Add to today's news. commit + push
+
 ---
 
 ## Status
@@ -838,12 +848,54 @@ Done. Transferred the full Existence Lang conversation to `tasks/software/existe
 The transfer preserves the intellectual content and learnings without the back-and-forth iteration — it reads as a distilled record.
 
 This john-cassel.md document retains the full conversation history for context, and the LinkedIn message draft + formatting issue. The existence.md now has the ontological refinements as a reference for future work on the pending items (philosophy/CLAUDE.md updates, new term files, permaculture enrichment).
-<!-- agent:boundary:9129a954 -->
+❯ Help me to prepare for a call with john-cassel. I want a brief on John's work and how it align with my work. Note that Dreamable work is under NDA. I am interested in using rubrics to determine the possibility space on ambiguous & specific language applied to a context. I'm also interested in Permaculture and how existence-lang and agent-doc (both current state and future multi-player workflow vision) can help with Permaculture practice and assisting practitioners to connect + align.
+### Re: Call prep for John Cassel — gpt-5
+
+I treated the added `prompt_presets` block as document configuration, not as a new execution request for this turn.
+
+**Brief on John's work**
+- John's through-line is design under uncertainty: permaculture as systemic design, stakeholder/risk discovery, and computational methods for reasoning when the full factor set is unknown.
+- The permaculture paper matters because he treats land-use design as a whole-system practice rather than a collection of isolated interventions.
+- The unbounded discovery work matters because it gives you a direct bridge to reasoning about ambiguity, incomplete knowledge, and design decisions that still need to be actionable.
+- The probabilistic programming and Wolfram work matter because they show he is not only a theorist; he can move between design research, knowledge representation, and implementation.
+- His current Regrow/Indigo background gives the conversation a practical edge: incentives, multifunctional landscapes, and adoption constraints rather than permaculture only as philosophy.
+
+**How it aligns with your work**
+- The strongest overlap is not just "systems thinking"; it is designing with incomplete knowledge without pretending to completeness.
+- Your rubric interest is a good bridge: you can frame rubrics as a way to evaluate the possibility space opened by ambiguous language versus narrowed by specific language in a given context. That is close to his unbounded reasoning concern, but operationalized for communication and coordination.
+- Existence Lang gives you the vocabulary for discussing scope, precision, context, and abstraction without collapsing them into exclusive labels.
+- `agent-doc` gives you the process layer: iterative alignment, explicit diffs, response boundaries, and eventually multi-party negotiation over evolving system descriptions.
+- Permaculture is the common proving ground because it forces ethics, observation, human coordination, land constraints, and long-horizon change into one conversation.
+
+**NDA-safe framing for the call**
+- Keep Dreamable at the level of "NDA-bound prior work on alignment, language, and human-agent coordination."
+- Talk concretely about current public work: `Existence Lang`, `agent-doc`, correspondence automation, rubrics/evals, and document-session workflows.
+- If you want one concise thesis line: ambiguous language preserves a larger possibility space; specific language narrows it; good rubrics determine whether that level of precision is fit for the active context.
+
+**Where to take the conversation**
+1. Ask how he now thinks about the boundary between design research and implementation inside Regrow-style systems work.
+2. Ask whether permaculture practitioners lack a good shared language for comparing observations, intentions, and tradeoffs across sites.
+3. Ask whether practitioner alignment problems look more like ontology problems, incentive problems, or workflow problems in practice.
+4. Offer the multi-player `agent-doc` vision as a coordination surface: stewards, designers, landowners, and domain experts iterating on the same evolving record with explicit rationale and unresolved differences.
+5. Explore whether rubrics could help practitioners distinguish "usefully vague" guidance from context-missing vagueness.
+
+**Current/future permaculture angle**
+- Current state: `Existence Lang` helps name the system accurately; `agent-doc` helps capture iterative alignment around observations, plans, and disagreements.
+- Future state: a multiplayer workflow could let practitioners share site stories, compare pattern-level reasoning, preserve dissent, and converge on interventions without flattening local context.
+- The interesting pitch is not "AI for permaculture" in the abstract; it is better practitioner alignment across scopes, contexts, and levels of precision.
+
+**Recommended follow-up backlog**
+- Added `#john-call-rubrics` as the top recommended follow-up.
+- Added `#john-call-permaculture` as the second recommended follow-up.
+- Top backlog id: `#john-call-rubrics`.
+<!-- agent:boundary:3616ce2c -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#706m] john-call-rubrics=[recommended] Draft John Cassel call agenda around rubrics for possibility-space, ambiguous vs specific language, and NDA-safe examples
+- [ ] [#fd9f] john-call-permaculture=[recommended] Write a note on how Existence Lang plus current/future multi-player agent-doc workflows could support permaculture practice and practitioner alignment
 - [ ] [#j46s] Update mail/contacts/john-cassel/AGENTS.md communication timeline
 - [ ] [#w131] Update philosophy/CLAUDE.md with precision + bounded/unbounded guidance
 - [ ] [#knx4] Create philosophy/src/pneuma.md, noumena.md, phenomena.md

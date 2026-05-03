@@ -103,7 +103,24 @@ Git:
 - parent repo: `df36c03f0` pushed to `origin/main`
 
 I did not run the live JetBrains `boost-client`/`session-share` replay in this harness, so `#jbsubroot` remains open for that final IDE/tmux validation pass.
-<!-- agent:boundary:04df2bdc -->
+❯ do [#prreap]. spec-test-build-install-commit-push
+### Re: prreap active Codex prompt pane protection — gpt-5
+I fixed the sync/rebind path that was still willing to record synthetic `registered_pane_missing` for an alive Codex pane whose ownership proof had weakened while the user still had live input drafted in the composer.
+
+Changes:
+- `src/harness.rs`: added shared Codex protected-input detection for drafted composer text plus queue/search states.
+- `src/sync.rs`: before `repair_missing_registered_pane(...)`, sync now checks for those protected Codex states and fails closed with `registered_pane_protected ... action=fail_closed` provenance instead of emitting `session_end origin=sync_missing_pane` or provisioning a replacement pane era over the live draft.
+- `specs/07-commands.md` and `VERSIONS.md`: updated the sync contract/docs to describe the new fail-closed behavior.
+
+Verification:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+- `agent-doc`: `ad20837` pushed to `origin/20260422/codex-agent-backend`
+
+<!-- agent:boundary:1704e23d -->
 <!-- /agent:exchange -->
 
 <!--

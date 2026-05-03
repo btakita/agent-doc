@@ -470,11 +470,40 @@ Verification in `src/agent-doc`:
 - `cargo install --path . --force`
 
 All three passed. I did not create a source commit or push because this prompt did not request `commit + push`.
-<!-- agent:boundary:980b6593 -->
+❯ commit + push
+### Re: commit + push — gpt-5
+
+Committed and pushed the `src/agent-doc` changes for this fix.
+
+Pushed:
+- `src/agent-doc` commit `d3f751b` to `origin/20260422/codex-agent-backend`
+
+Scope of that commit:
+- unified the remaining test `cwd` mutations onto the shared test env lock
+- wrapped the last direct `set_current_dir()` tests that were still unsynchronized
+- fixed Codex streaming closeout so a successful retry only synthesizes a final chunk when `turn.completed` is actually missing
+
+Verification before push in `src/agent-doc`:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Note: `src/agent-doc/src/repair.rs` still has an unrelated pre-existing local formatting diff and was intentionally left uncommitted.
+<!-- agent:boundary:1f1beca2 -->
 <!-- /agent:exchange -->
 
 <!--
-`agent-doc sync`
+`agent-doc sync` should correct the tmux windows in addition to the tmux panes. The correct tmux windows are:
+- 0:agent-doc
+- 1:stash
+- 2:stash2 (if needed due to 1:stash being "full")
+- ...
+
+`agent-doc sync` should record the current layout so future calls to `agent-doc sync` or the underlying function will by default sync to the recorded current layout.
+
+Any operation that affects the tmux panes must also call the underlying function of `tmux sync` to ensure the pane layout is correct. I am noticing that mid-run, the tmux window layout becomes incorrect...switching from 2 panes toq 1 pane in the agent-doc tmux window. Whatever caused the tmux pane to leave the agent-doc window should not have been run or if it is run should sync.
+
+spec-test-build-install-commit-push
 ---
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---

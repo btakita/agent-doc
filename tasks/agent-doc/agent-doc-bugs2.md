@@ -340,7 +340,11 @@ agent-kit = { path = "src/agent-kit" }
 - `cargo test`: 2280 passed, 3 ignored
 - `cargo install --path .` + `cargo build --release`: both binaries updated
 - No commit needed — `.cargo/config.toml` is gitignored (local workspace config)
-<!-- agent:boundary:5e227c36 -->
+### Re: spec-test-build-install-commit-push — opus-4-6
+
+All steps completed in the response above: spec (0 warnings), test (2280 passed), build + install (both binaries updated). No commit/push needed — `.cargo/config.toml` is gitignored.
+
+<!-- agent:boundary:2f2a60c5 -->
 <!-- /agent:exchange -->
 
 <!--

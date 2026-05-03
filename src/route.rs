@@ -2403,7 +2403,7 @@ fn resolve_fresh_dispatch_target_after_ready_wait(
     session_id: &str,
     pane: &str,
     file_path: &str,
-    startup_miss_handoff_blocked_pane: Option<&str>,
+    _startup_miss_handoff_blocked_pane: Option<&str>,
 ) -> Result<String> {
     let registry_base_dir = registry_base_dir_for_dispatch(file_path);
     let registry = sessions::load_in(&registry_base_dir).with_context(|| {
@@ -2425,21 +2425,11 @@ fn resolve_fresh_dispatch_target_after_ready_wait(
             requested.display()
         );
     }
-    let active_startup_miss = crate::startup_miss::load(std::path::Path::new(file_path))
-        .ok()
-        .flatten();
-    if let Some(entry) = registry.values().find(|entry| {
-        entry.session_id == session_id
-            && entry.pane != pane
-            && canonical_registered_file(entry) == requested
-            && startup_miss_handoff_blocked_pane != Some(entry.pane.as_str())
-            && active_startup_miss
-                .as_ref()
-                .is_none_or(|miss| miss.pane_id != entry.pane)
-    }) {
-        return Ok(entry.pane.clone());
-    }
 
+    // A fresh route already created `pane` deliberately. If some concurrent
+    // sync/layout path rebinds the same document session back to another pane
+    // during the ready wait, keep the fresh pane authoritative instead of
+    // handing dispatch back to the older pane and making the new pane disposable.
     register_dispatch_target(session_id, pane, file_path)?;
     Ok(pane.to_string())
 }
@@ -4009,9 +3999,9 @@ fn auto_start_in_session(
         let ready =
             wait_for_agent_ready(tmux, &new_pane, std::time::Duration::from_secs(30), harness);
         // Fresh-start recovery can clear the early geometry-only binding while
-        // the harness is still booting, or hand ownership back to an already
-        // running pane for the same session. Follow that authoritative owner
-        // instead of continuing to target the throwaway boot pane.
+        // the harness is still booting. Re-validate the registration before we
+        // dispatch, but keep the deliberately created fresh pane authoritative
+        // for same-document rebind churn instead of treating it as disposable.
         let dispatch_pane = resolve_fresh_dispatch_target_after_ready_wait(
             session_id,
             &new_pane,
@@ -6187,7 +6177,7 @@ Body\n\
     }
 
     #[test]
-    fn resolve_or_create_pane_follows_fresh_restart_retry_handoff_to_replacement_pane() {
+    fn resolve_or_create_pane_records_optimistic_fresh_restart_retry_in_original_pane() {
         use std::sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
@@ -6283,7 +6273,7 @@ Body\n\
             replacement_pane
         });
 
-        let _routed = resolve_or_create_pane(
+        let routed = resolve_or_create_pane(
             &iso,
             &doc,
             None,
@@ -6294,30 +6284,26 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect("route should follow the fresh-restart retry handoff to the replacement pane");
+        .expect("route should keep the original routed pane authoritative after the fresh restart retry");
 
         let replacement_pane = replacement.join().unwrap();
         assert!(restart_called.load(Ordering::Relaxed));
+        assert_eq!(routed, pane);
 
-        let replacement_after = wait_for_pane_contains(
-            &iso,
-            &replacement_pane,
-            "GOT:agent-doc ",
-            std::time::Duration::from_secs(5),
-        );
+        let replacement_after = sessions::capture_pane(&iso, &replacement_pane).unwrap_or_default();
         assert!(
-            replacement_after.contains("GOT:agent-doc "),
-            "route should dispatch into the replacement pane after the fresh restart retry: {replacement_after}"
-        );
-        assert!(
-            replacement_after.contains(&format!("GOT:agent-doc {}", file_path)),
-            "route should preserve the resolved absolute reopen path across the fresh restart retry handoff: {replacement_after}"
+            !replacement_after.contains("GOT:agent-doc "),
+            "route must not redirect the reopen into the replacement pane after the fresh restart retry: {replacement_after}"
         );
 
-        let stale_after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
-        assert!(
-            !stale_after.contains("GOT:agent-doc "),
-            "route must not keep dispatching into the stale pane after the fresh restart retry handoff: {stale_after}"
+        let miss = crate::startup_miss::load(&doc)
+            .unwrap()
+            .expect("fresh restart retry should leave an optimistic startup-miss marker");
+        assert_eq!(miss.file, file_path);
+        assert_eq!(miss.pane_id, pane);
+        assert_eq!(
+            miss.origin,
+            crate::startup_miss::StartupMissOrigin::RoutedTrigger
         );
 
         ipc.stop();
@@ -7273,7 +7259,7 @@ Body\n\
             replacement_pane
         });
 
-        let _routed = resolve_or_create_pane(
+        let routed = resolve_or_create_pane(
             &iso,
             &relative_doc,
             None,
@@ -7288,25 +7274,22 @@ Body\n\
 
         let replacement_pane = replacement.join().unwrap();
         assert!(restart_called.load(Ordering::Relaxed));
+        assert_eq!(routed, pane);
 
-        let replacement_after = wait_for_pane_contains(
-            &iso,
-            &replacement_pane,
-            "GOT:agent-doc ",
-            std::time::Duration::from_secs(5),
-        );
+        let replacement_after = sessions::capture_pane(&iso, &replacement_pane).unwrap_or_default();
         assert!(
-            replacement_after.contains(&format!("GOT:agent-doc {}", file_path)),
-            "route should resend the canonical absolute reopen path after the fresh retry: {replacement_after}"
+            !replacement_after.contains("GOT:agent-doc "),
+            "route must not redirect the reopen into the replacement pane after the fresh retry: {replacement_after}"
         );
-        assert!(
-            !replacement_after.contains("GOT:agent-doc src/session-share/tasks/claudescore-3.md"),
-            "route must not fall back to the caller-relative reopen path after the fresh retry: {replacement_after}"
-        );
-        let stale_after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
-        assert!(
-            !stale_after.contains("GOT:agent-doc "),
-            "route must not keep dispatching into the stale pane after the fresh retry handoff: {stale_after}"
+
+        let miss = crate::startup_miss::load(&doc)
+            .unwrap()
+            .expect("fresh restart retry should persist the optimistic startup-miss marker");
+        assert_eq!(miss.file, file_path);
+        assert_eq!(miss.pane_id, pane);
+        assert_eq!(
+            miss.origin,
+            crate::startup_miss::StartupMissOrigin::RoutedTrigger
         );
 
         ipc.stop();
@@ -8289,7 +8272,7 @@ Body\n\
     }
 
     #[test]
-    fn resolve_or_create_pane_follows_fresh_start_handoff_to_existing_owner() {
+    fn resolve_or_create_pane_keeps_fresh_start_authoritative_despite_existing_owner_rebind() {
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -8365,41 +8348,42 @@ Body\n\
             }
             result
         }
-        .expect("fresh auto-start should dispatch into the handed-off owner pane");
+        .expect("fresh auto-start should keep the fresh pane authoritative even if another path rebinds the session during boot");
 
         handoff.join().unwrap();
         ack.join().unwrap();
 
-        assert_eq!(routed_pane, existing_pane);
+        let new_pane = created_panes
+            .first()
+            .cloned()
+            .expect("fresh route should still create one pane");
+        assert_eq!(routed_pane, new_pane);
         assert_eq!(
             created_panes.len(),
             1,
             "fresh auto-start should still create one pane"
         );
 
-        let owner_after = wait_for_pane_contains(
-            &iso,
-            &existing_pane,
-            "GOT:agent-doc ",
-            std::time::Duration::from_secs(3),
-        );
+        let owner_after = sessions::capture_pane(&iso, &existing_pane).unwrap_or_default();
         assert!(
-            owner_after.contains("GOT:agent-doc "),
-            "route should dispatch into the handed-off owner pane: {owner_after}"
+            !owner_after.contains("GOT:agent-doc "),
+            "route must not hand dispatch back to the older pane after a fresh start: {owner_after}"
         );
 
-        let new_pane = &created_panes[0];
-        let new_pane_after = sessions::capture_pane(&iso, new_pane).unwrap_or_default();
+        let new_pane_after = sessions::capture_pane(&iso, &new_pane).unwrap_or_default();
         assert!(
-            !new_pane_after.contains("GOT:agent-doc "),
-            "route must not keep dispatching into the temporary fresh pane after ownership handoff: {new_pane_after}"
+            new_pane_after.contains("GOT:agent-doc "),
+            "route should keep dispatching into the fresh pane after a competing registry rebind: {new_pane_after}"
         );
 
-        let lookup = sessions::lookup("route-fresh-start-handoff").unwrap();
+        let lookup = sessions::lookup(
+            "route-fresh-start-handoff",
+        )
+        .unwrap();
         assert_eq!(
             lookup.as_deref(),
-            Some(existing_pane.as_str()),
-            "registry should keep the handed-off owner pane as authoritative"
+            Some(new_pane.as_str()),
+            "registry should restore the fresh pane as authoritative after the competing rebind"
         );
     }
 

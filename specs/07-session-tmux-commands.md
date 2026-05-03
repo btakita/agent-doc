@@ -27,6 +27,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - If unresolved prompt-bearing drift exists and the pane is busy, route may attempt one scoped `agent-doc fix <FILE>` pass and then one bounded fresh-restart recovery, but it must still fail closed if no clean dispatch path emerges.
 - For live same-document panes with no new prompt-bearing drift, route may focus the pane and return success without sending a duplicate reopen.
 - Fresh auto-starts and live reroutes both require a real per-document cycle acknowledgment after dispatch; accepted input alone is not sufficient.
+- Once route has created a fresh pane for a document, that pane stays authoritative for the reroute. A concurrent geometry-only registry rebind must not hand dispatch back to an older same-session pane and make the fresh pane disposable.
 
 ### Startup-miss tracking
 

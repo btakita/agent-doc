@@ -39,7 +39,38 @@ Icebox:
 - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement: `#jberr`.
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
-<!-- agent:boundary:76c93245 -->
+❯ When I select tsift.md in the left editor, the left tmux pane remains on agent-doc-bugs2.md. Even when I run `agent-doc sync ...`, the left tmux pane remains on agent-doc-bugs2.md. Please identify root cause and fix the root cause. spec-test-build-install-commit-push
+### Re: tsift sync alias root cause + fix — gpt-5
+
+Root cause was two-layered.
+
+1. `agent-doc sync` was willing to reuse a registered pane if the pane was merely alive, even when no live-owner proof still tied that pane to `tasks/software/tsift.md`.
+2. When passive sync intentionally left `tsift.md` unresolved for safety, `tmux-router::sync` could still donate a same-column or spare visible pane into that unresolved slot, which aliased the left column back to `agent-doc-bugs2.md`.
+
+I fixed both sides.
+
+- In `src/agent-doc/src/sync.rs`, registered panes now have to prove live ownership before reuse. If a pane is alive but unowned, sync logs it as unresolved and blocks that file for the cycle.
+- In `src/tmux-router/src/sync.rs`, I added an `allow_unresolved_pane_assignment` hook so blocked unresolved files cannot borrow donor or spare panes during layout repair.
+- I updated the contract/spec notes in `src/agent-doc/specs/07-commands.md`, `src/agent-doc/VERSIONS.md`, and `src/tmux-router/VERSIONS.md`.
+
+Regression coverage added:
+
+- `blocked_unresolved_file_does_not_borrow_spare_pane`
+- `registered_pane_proves_live_owner_rejects_unowned_alive_pane`
+- `safe_passive_sync_does_not_alias_spare_pane_into_blocked_file`
+
+Verification/build/install:
+
+- `cargo test` in `src/tmux-router`
+- `cargo test` in `src/agent-doc` and a clean full-suite rerun after one flaky `Broken pipe` in `agent::codex::tests::send_retries_fresh_exec_after_resume_capability_drift_signal`
+- `cargo build --release` in both `src/tmux-router` and `src/agent-doc`
+- `cargo install --path . --force` in `src/agent-doc`
+
+Git:
+
+- `tmux-router`: `acb72ba` pushed to `origin/main`
+- `agent-doc`: `ec86515` pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:51247648 -->
 <!-- /agent:exchange -->
 
 <!--

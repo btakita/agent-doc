@@ -103,7 +103,7 @@ Git:
 - parent repo: `df36c03f0` pushed to `origin/main`
 
 I did not run the live JetBrains `boost-client`/`session-share` replay in this harness, so `#jbsubroot` remains open for that final IDE/tmux validation pass.
-<!-- agent:boundary:d10d75c0 -->
+<!-- agent:boundary:04df2bdc -->
 <!-- /agent:exchange -->
 
 <!--
@@ -117,6 +117,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#patchregr] [recommended] Critical: a fresh visible response patchback must never degrade into `post_commit_local_drift` plus `commit_already_current`; `agent-doc` must either commit the owning repo/submodule or fail closed with a resumable diagnostic. Plan: tasks/agent-doc/plan-response-patchback-uncommitted-regression.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [ ] [#jbpdrop] [recommended] Critical: a completed JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md

@@ -70,7 +70,40 @@ Git:
 
 - `tmux-router`: `acb72ba` pushed to `origin/main`
 - `agent-doc`: `ec86515` pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:51247648 -->
+❯ do [#jbsubroot]. spec-test-build-install-commit-push
+### Re: jbsubroot root-aware route session selection — gpt-5
+
+I found the remaining cross-root gap in routed editor dispatch, not in passive sync.
+
+`agent-doc sync` already chose the shared `.agent-doc` root/session when a visible layout spanned the workspace root and a nested repo, but `agent-doc route --dispatch-only` still resolved its target tmux session from only the launcher cwd/current tmux session. In the JetBrains nested-root case, that let `Run Agent Doc` auto-start or reroute from `src/session-share` even when the visible split proved the shared workspace `agent-doc` window should stay authoritative.
+
+I fixed that by making route reuse the same root-aware session chooser as sync:
+- single nested-file reroutes now honor that file's nearest `.agent-doc/config.toml` pin
+- mixed-root visible layouts now prefer the shared workspace-root pin over the focused child root
+
+Updated:
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/src/sync.rs`
+- `src/agent-doc/specs/07-commands.md`
+- `src/agent-doc/editors/jetbrains/SPEC.md`
+- `src/agent-doc/VERSIONS.md`
+
+Regression coverage added for:
+- nested file root pin beating the outer cwd
+- mixed-root layout pinning route to the shared workspace root
+
+Verification:
+- `cargo test`
+- `./gradlew test buildPlugin`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+- `agent-doc`: `5c8fd99` pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `df36c03f0` pushed to `origin/main`
+
+I did not run the live JetBrains `boost-client`/`session-share` replay in this harness, so `#jbsubroot` remains open for that final IDE/tmux validation pass.
+<!-- agent:boundary:d10d75c0 -->
 <!-- /agent:exchange -->
 
 <!--

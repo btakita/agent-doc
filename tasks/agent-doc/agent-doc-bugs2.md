@@ -150,12 +150,30 @@ Git:
 Yes. `specs/07-commands.md` has crossed the point where command closeout, session-check / repair, routing / startup-miss behavior, and orchestration are changing independently enough that one file is no longer the cleanest boundary.
 
 I would keep `specs/07-commands.md` as the top-level command index and move the long normative sections into focused sibling specs, with the first split between closeout/write/commit/session-check and route/start/sync/startup-miss behavior. I did not do that refactor in this turn.
-<!-- agent:boundary:570d19c6 -->
+❯ Split `specs/07-commands.md` into separate spec files. Please create a skill/runbook to break up long spec files. I believe we have a similar skill/runbook or entry in AGENTS.md which does the same for the AGENTS.md file.
+### Re: specs/07-commands.md split — gpt-5
+
+Done.
+
+I split `src/agent-doc/specs/07-commands.md` into focused sibling specs and kept `07-commands.md` as the stable index:
+
+- `src/agent-doc/specs/07-core-commands.md`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc/specs/07-orchestration-commands.md`
+
+I also added `src/agent-doc/runbooks/split-spec-files.md` so future oversized spec splits follow one explicit pattern, and I wired that rule into the repo instruction surfaces (`CLAUDE.md`, `SPEC.md`, `README.md`, `SKILL.md`, and the crate-local installed Claude skill mirror). I refreshed the managed Claude/root instruction mirrors as part of the skill-install step.
+
+Verification passed:
+
+- `make check`
+- `cargo run --quiet -- audit-docs`
+
+I did not commit or push the `src/agent-doc` repo changes in this turn.
+<!-- agent:boundary:e66c42ce -->
 <!-- /agent:exchange -->
 
 <!--
-specs/07-commands.md is getting long. Should specs/07-commands.md be split into multiple files?
----
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.

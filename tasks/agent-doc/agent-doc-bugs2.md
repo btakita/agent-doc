@@ -119,8 +119,33 @@ Verification:
 
 Git:
 - `agent-doc`: `ad20837` pushed to `origin/20260422/codex-agent-backend`
+❯ agent-doc caused the tmux pane for src/boost-client/tasks/monsterrodholders.md to close. Please investigate and fix the root cause. spec-test-build-install-commit-push
+### Re: monsterrodholders pane-close root cause + fix — gpt-5
 
-<!-- agent:boundary:1704e23d -->
+Root cause was in `sync`, not tmux-router layout repair.
+
+When the `monsterrodholders.md` pane was still alive but its live-owner proof temporarily weakened after a routed reopen / fresh restart window, `sync` could treat that pane as unresolved and then still fall through to `repair_missing_registered_pane(...)`. If the session log still showed that exact pane as the newest open owner, `sync` was nevertheless emitting synthetic `registered_pane_missing` / `session_end origin=sync_missing_pane`, which let the registry rebind over a live pane and ultimately made the visible tmux pane disappear.
+
+I fixed that fail-open path in `src/agent-doc/src/sync.rs`.
+
+- `sync` now fails closed when an alive registered pane is still the latest open session-log owner for that document.
+- In that shape it records `registered_pane_open_session_log_owner ... action=fail_closed` and blocks replacement for the cycle instead of fabricating pane loss.
+- I added a regression test for the new guard and updated `specs/07-commands.md` plus `VERSIONS.md`.
+
+Verification / build / install:
+
+- `cargo test`
+  - the full suite hit one known flaky Codex test once: `agent::codex::tests::send_retries_fresh_exec_after_resume_capability_drift_signal` (`Broken pipe`)
+  - I reran that exact test immediately and it passed cleanly
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+
+- `agent-doc`: `4d02828` pushed to `origin/20260422/codex-agent-backend`
+
+`#mrreplay` already covers the remaining live validation pass for the actual `monsterrodholders.md` reroute/pane behavior, so I did not add a duplicate backlog item here.
+<!-- agent:boundary:e53d817a -->
 <!-- /agent:exchange -->
 
 <!--

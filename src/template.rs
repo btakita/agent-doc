@@ -62,6 +62,9 @@
 //! - `apply_patches_replace`: patch to non-exchange component replaces existing content
 //! - `apply_patches_unmatched_creates_exchange`: unmatched text auto-creates `<!-- agent:exchange -->` when absent
 //! - `apply_patches_unmatched_appends_to_existing_exchange`: unmatched text appends to existing exchange; no duplicate component
+//! - `repair_duplicate_exchange_opener_merges_two_blocks`: two complete exchange blocks → merged into one
+//! - `repair_duplicate_exchange_opener_returns_none_for_single`: single exchange block → `None` (no repair needed)
+//! - `apply_patches_post_patch_merges_duplicate_exchange_opener`: post-patch guard merges duplicate exchange openers created during patching
 //! - `apply_patches_missing_component_routes_to_exchange`: patch targeting unknown component name appears in exchange
 //! - `apply_patches_missing_component_creates_exchange`: missing component + no exchange → auto-creates exchange with overflow
 //! - `inline_attr_mode_overrides_config`: `mode=replace` on tag wins over `config.toml ([components] section)` append config
@@ -602,6 +605,54 @@ pub fn repair_duplicate_exchange_close_tail(doc: &str) -> Result<Option<String>>
     Ok(Some(repaired))
 }
 
+/// Merge duplicate `<!-- agent:exchange -->` openers into a single exchange block.
+///
+/// When a template/CRDT document gains two complete exchange components (each with
+/// its own opener and closer), this function merges the second block's content into
+/// the first and removes the second block entirely. Returns `None` if the document
+/// has zero or one exchange component.
+pub fn repair_duplicate_exchange_opener(doc: &str) -> Result<Option<String>> {
+    let components = match component::parse(doc) {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
+    let exchanges: Vec<&Component> = components.iter().filter(|c| c.name == "exchange").collect();
+    if exchanges.len() < 2 {
+        return Ok(None);
+    }
+    let first = exchanges[0];
+    let second = exchanges[1];
+
+    let first_content = first.content(doc).trim_end().to_string();
+    let second_content = second.content(doc).trim().to_string();
+
+    let merged = if first_content.trim().is_empty() && second_content.is_empty() {
+        "\n".to_string()
+    } else if first_content.trim().is_empty() {
+        format!("{}\n", second_content)
+    } else if second_content.is_empty() {
+        format!("{}\n", first_content)
+    } else {
+        format!("{}\n{}\n", first_content, second_content)
+    };
+
+    let mut result = String::new();
+    result.push_str(&doc[..first.open_end]);
+    result.push_str(&merged);
+    result.push_str(&doc[first.close_start..second.open_start]);
+    result.push_str(&doc[second.close_end..]);
+
+    if exchanges.len() > 2 {
+        eprintln!(
+            "[template] {} exchange components found — merged first two, {} remain",
+            exchanges.len(),
+            exchanges.len() - 1
+        );
+    }
+
+    Ok(Some(result))
+}
+
 /// Remove a safe escaped conversation tail below `<!-- /agent:exchange -->`.
 ///
 /// This is used when the user manually deletes a malformed trailing assistant/user
@@ -1126,6 +1177,17 @@ pub fn apply_patches_with_overrides(
             result.push_str("\n<!-- agent:exchange -->\n");
             result.push_str(&stripped);
             result.push_str("\n<!-- /agent:exchange -->\n");
+        }
+    }
+
+    // Post-patch: merge duplicate exchange openers that slipped in during patching.
+    loop {
+        match repair_duplicate_exchange_opener(&result)? {
+            Some(merged) => {
+                eprintln!("[template] post-patch: merged duplicate exchange opener");
+                result = merged;
+            }
+            None => break,
         }
     }
 
@@ -3621,6 +3683,73 @@ Existing answer.
                 .contains("duplicate close repair suffix is ambiguous"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn repair_duplicate_exchange_opener_merges_two_blocks() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ first question\n\n",
+            "### Re: first — opus-4-6\n\n",
+            "First answer.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ second question\n\n",
+            "### Re: second — opus-4-6\n\n",
+            "Second answer.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = repair_duplicate_exchange_opener(doc)
+            .unwrap()
+            .expect("duplicate opener repair should apply");
+        assert_eq!(
+            repaired.matches("<!-- agent:exchange").count(),
+            1,
+            "repair should leave exactly one exchange opener:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("<!-- /agent:exchange -->").count(),
+            1,
+            "repair should leave exactly one exchange closer:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("First answer."),
+            "first block content should be preserved:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("Second answer."),
+            "second block content should be preserved:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("<!-- agent:backlog -->"),
+            "backlog should be preserved:\n{repaired}"
+        );
+        let first_pos = repaired.find("First answer.").unwrap();
+        let second_pos = repaired.find("Second answer.").unwrap();
+        assert!(
+            first_pos < second_pos,
+            "first content should appear before second:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn repair_duplicate_exchange_opener_returns_none_for_single() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ question\n",
+            "### Re: answer — opus-4-6\n\n",
+            "Answer.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let result = repair_duplicate_exchange_opener(doc).unwrap();
+        assert!(result.is_none(), "single exchange block should return None");
     }
 
     #[test]

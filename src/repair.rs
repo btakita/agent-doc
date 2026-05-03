@@ -558,10 +558,21 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
 }
 
 fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<String> {
+    let mut dup_opener_input = doc_content.to_string();
+    let mut duplicate_opener_changed = false;
+    loop {
+        match crate::template::repair_duplicate_exchange_opener(&dup_opener_input)? {
+            Some(merged) => {
+                dup_opener_input = merged;
+                duplicate_opener_changed = true;
+            }
+            None => break,
+        }
+    }
     let duplicate_close_repaired =
-        crate::template::repair_duplicate_exchange_close_tail(doc_content)?
-            .unwrap_or_else(|| doc_content.to_string());
-    let duplicate_close_changed = duplicate_close_repaired != doc_content;
+        crate::template::repair_duplicate_exchange_close_tail(&dup_opener_input)?
+            .unwrap_or_else(|| dup_opener_input.clone());
+    let duplicate_close_changed = duplicate_close_repaired != dup_opener_input;
     let tail_repaired =
         crate::template::repair_conversation_tail_outside_exchange(&duplicate_close_repaired)?
             .unwrap_or_else(|| duplicate_close_repaired.clone());
@@ -587,9 +598,27 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
     }
     let prompt_changed = repaired != prompt_input;
 
-    if duplicate_close_changed || tail_changed || boundary_changed || prompt_changed {
+    if duplicate_opener_changed
+        || duplicate_close_changed
+        || tail_changed
+        || boundary_changed
+        || prompt_changed
+    {
         write::atomic_write_pub(file, &repaired)?;
         snapshot::save(file, &repaired)?;
+        if duplicate_opener_changed {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "repair_duplicate_exchange_opener file={}",
+                    file.display()
+                ),
+            );
+            eprintln!(
+                "[repair] merged duplicate exchange opener(s) in {}",
+                file.display()
+            );
+        }
         if duplicate_close_changed {
             crate::ops_log::log_op(
                 file,

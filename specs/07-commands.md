@@ -102,11 +102,12 @@ Recursive instruction discovery also prunes `AuditConfig.skip_dirs` before desce
 
 ## start
 
-`agent-doc start <FILE>` — start the configured harness in a new tmux pane and register the session.
+`agent-doc start <FILE> [--force]` — start the configured harness in a new tmux pane and register the session.
 
 1. Parse YAML frontmatter. If the frontmatter is malformed, fail closed with a file-targeted error that names the document and tells the user to fix the `--- ... ---` block before retrying.
 2. Ensure session UUID in frontmatter (generate if missing)
 3. Read `$TMUX_PANE` (must be inside tmux)
+4. **`--force` override:** when `--force` is set, skip steps 4–5 entirely — bypass all existing-session-pane reuse, supervisor health checks, and startup-miss guards, and proceed directly to registering the current pane as the owner. The registry rebind in step 7 still records proper supersession provenance for the displaced pane.
 4. If another tmux pane still proves live ownership of that same document session, focus and reuse that pane immediately; if it lives in another tmux session, switch the caller's current client to that session before selecting the target window/pane. Once live-owner proof exists, missing or stale supervisor IPC state does not authorize a fresh replacement pane for the same document.
 5. If `sessions.json` points at a different **alive** pane but no live owner can still be proven for the document, consult the supervisor before treating it as stale:
    - **Healthy** (supervisor IPC returns `running=true, state="healthy"`) → focus and reuse that pane

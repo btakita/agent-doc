@@ -1543,7 +1543,7 @@ fn spawn_writer_thread(
         .expect("spawn stdin->pty thread")
 }
 
-pub fn run(file: &Path) -> Result<()> {
+pub fn run(file: &Path, force: bool) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -1615,75 +1615,61 @@ pub fn run(file: &Path) -> Result<()> {
     }
     let unresolved_startup_miss = crate::startup_miss::load(file).ok().flatten();
 
-    if let Some(action) = existing_session_pane_action(&tmux, &session_id, file, &pane_id)? {
-        match action {
-            ExistingSessionPaneAction::Reuse(existing_pane) => {
-                if sessions::lookup(&session_id)?.as_deref() != Some(existing_pane.as_str()) {
-                    crate::sync::reregister_recovered_owner(
-                        &tmux,
-                        file,
-                        &session_id,
-                        &existing_pane,
-                    )?;
+    if !force {
+        if let Some(action) = existing_session_pane_action(&tmux, &session_id, file, &pane_id)? {
+            match action {
+                ExistingSessionPaneAction::Reuse(existing_pane) => {
+                    if sessions::lookup(&session_id)?.as_deref() != Some(existing_pane.as_str()) {
+                        crate::sync::reregister_recovered_owner(
+                            &tmux,
+                            file,
+                            &session_id,
+                            &existing_pane,
+                        )?;
+                        eprintln!(
+                            "[start] recovered live owner for {} in pane {}",
+                            file.display(),
+                            existing_pane
+                        );
+                    }
                     eprintln!(
-                        "[start] recovered live owner for {} in pane {}",
+                        "session {} for {} is already running in pane {} — switching focus",
+                        &session_id[..8.min(session_id.len())],
                         file.display(),
                         existing_pane
                     );
-                }
-                eprintln!(
-                    "session {} for {} is already running in pane {} — switching focus",
-                    &session_id[..8.min(session_id.len())],
-                    file.display(),
-                    existing_pane
-                );
-                if let Err(e) = focus_existing_session_pane(&tmux, &pane_id, &existing_pane) {
-                    eprintln!(
-                        "[start] warning: failed to focus pane {}: {}",
-                        existing_pane, e
-                    );
-                }
-                return Ok(());
-            }
-            ExistingSessionPaneAction::ClearStale(stale_pane) => {
-                if should_fail_closed_for_unresolved_startup_miss_rebind(
-                    &pane_id,
-                    &stale_pane,
-                    unresolved_startup_miss.as_ref(),
-                ) {
-                    let miss = unresolved_startup_miss
-                        .as_ref()
-                        .expect("guard checked presence");
-                    let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
-                    anyhow::bail!(
-                        "startup-miss from {} still belongs to alive pane {} for {} — refusing to start a replacement pane over the existing owner",
-                        miss_ts,
-                        stale_pane,
-                        file.display()
-                    );
-                }
-                match stale_registered_pane_action(query_supervisor_health(file, &session_id)) {
-                    StaleRegisteredPaneAction::ReuseRegistered => {
+                    if let Err(e) = focus_existing_session_pane(&tmux, &pane_id, &existing_pane) {
                         eprintln!(
-                            "[start] registered pane {} has a healthy supervisor for {} despite missing live-owner proof — switching focus",
-                            stale_pane,
-                            file.display()
+                            "[start] warning: failed to focus pane {}: {}",
+                            existing_pane, e
                         );
-                        if let Err(e) = focus_existing_session_pane(&tmux, &pane_id, &stale_pane) {
-                            eprintln!(
-                                "[start] warning: failed to focus pane {}: {}",
-                                stale_pane, e
-                            );
-                        }
-                        return Ok(());
                     }
-                    StaleRegisteredPaneAction::RestartRegistered => {
-                        eprintln!(
-                            "[start] registered pane {} has a restartable supervisor for {} despite missing live-owner proof — restarting in place",
+                    return Ok(());
+                }
+                ExistingSessionPaneAction::ClearStale(stale_pane) => {
+                    if should_fail_closed_for_unresolved_startup_miss_rebind(
+                        &pane_id,
+                        &stale_pane,
+                        unresolved_startup_miss.as_ref(),
+                    ) {
+                        let miss = unresolved_startup_miss
+                            .as_ref()
+                            .expect("guard checked presence");
+                        let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
+                        anyhow::bail!(
+                            "startup-miss from {} still belongs to alive pane {} for {} — refusing to start a replacement pane over the existing owner",
+                            miss_ts,
                             stale_pane,
                             file.display()
                         );
-                        if restart_via_supervisor(file, &session_id) {
+                    }
+                    match stale_registered_pane_action(query_supervisor_health(file, &session_id)) {
+                        StaleRegisteredPaneAction::ReuseRegistered => {
+                            eprintln!(
+                                "[start] registered pane {} has a healthy supervisor for {} despite missing live-owner proof — switching focus",
+                                stale_pane,
+                                file.display()
+                            );
                             if let Err(e) =
                                 focus_existing_session_pane(&tmux, &pane_id, &stale_pane)
                             {
@@ -1694,58 +1680,81 @@ pub fn run(file: &Path) -> Result<()> {
                             }
                             return Ok(());
                         }
-                        eprintln!(
-                            "[start] supervisor restart failed for pane {} — starting replacement via registry rebind so supersession provenance is preserved",
-                            stale_pane
-                        );
-                    }
-                    StaleRegisteredPaneAction::ClearStaleHalted { restart_count } => {
-                        if let Some(detail) =
-                            open_session_log_rebind_diagnostic(file, &session_id, &stale_pane)?
-                        {
-                            anyhow::bail!(
-                                "registered pane {} for {} still has open session-log provenance ({}), but the supervisor reported halted after {} restarts — refusing to replace the pane without a recorded child exit or session_end",
-                                stale_pane,
-                                file.display(),
-                                detail,
-                                restart_count
-                            );
-                        }
-                        eprintln!(
-                            "[start] registered pane {} for {} has a halted supervisor after {} restarts — starting fresh via registry rebind so supersession provenance is preserved",
-                            stale_pane,
-                            file.display(),
-                            restart_count
-                        );
-                    }
-                    StaleRegisteredPaneAction::FailClosedUnavailable => {
-                        let session_log_status =
-                            crate::startup_miss::session_log_status(file, &session_id)?;
-                        if should_clear_stale_unavailable_stash_registration(
-                            &tmux,
-                            &pane_id,
-                            &stale_pane,
-                            unresolved_startup_miss.as_ref(),
-                            session_log_status.as_ref(),
-                        ) {
+                        StaleRegisteredPaneAction::RestartRegistered => {
                             eprintln!(
-                                "[start] registered pane {} for {} is stranded in stash with unavailable supervisor and no open provenance — clearing stale registration and starting fresh in {}",
-                                stale_pane,
-                                file.display(),
-                                pane_id
-                            );
-                            let _ = sessions::deregister(&session_id)?;
-                        } else {
-                            anyhow::bail!(
-                                "registered pane {} for {} is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance",
+                                "[start] registered pane {} has a restartable supervisor for {} despite missing live-owner proof — restarting in place",
                                 stale_pane,
                                 file.display()
                             );
+                            if restart_via_supervisor(file, &session_id) {
+                                if let Err(e) =
+                                    focus_existing_session_pane(&tmux, &pane_id, &stale_pane)
+                                {
+                                    eprintln!(
+                                        "[start] warning: failed to focus pane {}: {}",
+                                        stale_pane, e
+                                    );
+                                }
+                                return Ok(());
+                            }
+                            eprintln!(
+                                "[start] supervisor restart failed for pane {} — starting replacement via registry rebind so supersession provenance is preserved",
+                                stale_pane
+                            );
+                        }
+                        StaleRegisteredPaneAction::ClearStaleHalted { restart_count } => {
+                            if let Some(detail) =
+                                open_session_log_rebind_diagnostic(file, &session_id, &stale_pane)?
+                            {
+                                anyhow::bail!(
+                                    "registered pane {} for {} still has open session-log provenance ({}), but the supervisor reported halted after {} restarts — refusing to replace the pane without a recorded child exit or session_end",
+                                    stale_pane,
+                                    file.display(),
+                                    detail,
+                                    restart_count
+                                );
+                            }
+                            eprintln!(
+                                "[start] registered pane {} for {} has a halted supervisor after {} restarts — starting fresh via registry rebind so supersession provenance is preserved",
+                                stale_pane,
+                                file.display(),
+                                restart_count
+                            );
+                        }
+                        StaleRegisteredPaneAction::FailClosedUnavailable => {
+                            let session_log_status =
+                                crate::startup_miss::session_log_status(file, &session_id)?;
+                            if should_clear_stale_unavailable_stash_registration(
+                                &tmux,
+                                &pane_id,
+                                &stale_pane,
+                                unresolved_startup_miss.as_ref(),
+                                session_log_status.as_ref(),
+                            ) {
+                                eprintln!(
+                                    "[start] registered pane {} for {} is stranded in stash with unavailable supervisor and no open provenance — clearing stale registration and starting fresh in {}",
+                                    stale_pane,
+                                    file.display(),
+                                    pane_id
+                                );
+                                let _ = sessions::deregister(&session_id)?;
+                            } else {
+                                anyhow::bail!(
+                                    "registered pane {} for {} is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance",
+                                    stale_pane,
+                                    file.display()
+                                );
+                            }
                         }
                     }
                 }
             }
         }
+    } else {
+        eprintln!(
+            "[start] --force: bypassing existing session pane reuse for {}",
+            file.display()
+        );
     }
 
     // Only relocate the current launcher pane when start is actually falling through to
@@ -3292,7 +3301,7 @@ mod tests {
         let file = tmp.path().join("bad.md");
         std::fs::write(&file, "---\nprompt_presets:\n  key: [oops\n---\n").unwrap();
 
-        let err = run(&file).unwrap_err();
+        let err = run(&file, false).unwrap_err();
         let message = err.to_string();
 
         assert!(message.contains("invalid YAML frontmatter in"));

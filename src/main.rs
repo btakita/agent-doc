@@ -382,6 +382,10 @@ enum Commands {
     Start {
         /// Path to the session document
         file: PathBuf,
+        /// Force binding the session to the current tmux pane, even if a live
+        /// owner already exists in another pane
+        #[arg(long)]
+        force: bool,
     },
     /// Route /agent-doc command to the correct tmux pane
     Route {
@@ -1250,7 +1254,7 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Start { file } => start::run(&file),
+        Commands::Start { file, force } => start::run(&file, force),
         Commands::Route {
             file,
             dispatch_only,

@@ -521,7 +521,10 @@ Pushed:
 - parent pointer update `da7b44eb6` `chore: update agent-doc sync dependencies`
 
 No new backlog item from this fix.
-<!-- agent:boundary:589f4bf7 -->
+### Re: closeout normalization — gpt-5
+
+No additional implementation in this follow-up. Reopened the active turn through the normal `finalize` boundary so the committed sync fix above is the closeout for this Codex session too.
+<!-- agent:boundary:87b6c657 -->
 <!-- /agent:exchange -->
 
 <!--

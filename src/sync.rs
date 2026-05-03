@@ -2745,6 +2745,26 @@ fn run_with_options(
             None
         }
     };
+    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        let mut blocked_files: Vec<String> = blocked_unresolved_files
+            .borrow()
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
+        blocked_files.sort();
+        if !blocked_files.is_empty() {
+            let blocked_summary = blocked_files.join(", ");
+            eprintln!(
+                "[sync] safe passive sync preserved the current tmux layout because unresolved files remain blocked: {}",
+                blocked_summary
+            );
+            sync_log(&format!(
+                "safe_passive_layout_preserved blocked_files={}",
+                blocked_summary
+            ));
+            return Ok(());
+        }
+    }
     let tmux_router_registry_path = tmux_router_registry
         .as_ref()
         .map(|file| file.path())
@@ -7289,7 +7309,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
-    fn safe_passive_sync_does_not_alias_spare_pane_into_blocked_file() {
+    fn safe_passive_sync_preserves_existing_layout_when_file_is_blocked() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let subroot = root.join("src/session-share");
@@ -7334,6 +7354,25 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
         let dev_pane = iso.split_window(&bugs_pane, &subroot, "-dh").unwrap();
         let agent_doc_window = iso.pane_window(&bugs_pane).unwrap();
+        let dev_pane_pid = pane_pid_from_tmux(&iso, &dev_pane).unwrap();
+
+        let _ipc = crate::supervisor::ipc::SupervisorIpc::start(subroot.as_path(), "dev-session", {
+            move |method| match method {
+                crate::supervisor::ipc::IpcMethod::Pid => {
+                    crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                        "pid": dev_pane_pid
+                    }))
+                }
+                crate::supervisor::ipc::IpcMethod::State => {
+                    crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                        "supervisor_pid": dev_pane_pid,
+                        "supervisor_instance_id": "dev-instance",
+                    }))
+                }
+                _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
+            }
+        })
+        .unwrap();
 
         sessions::register_full_with_cwd(
             "bugs-session",
@@ -7377,17 +7416,17 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 
         let ordered = iso.list_panes_ordered(&agent_doc_window).unwrap();
         assert_eq!(
-            ordered.len(),
-            1,
-            "blocked tsift column should collapse instead of reusing an unrelated visible pane"
-        );
-        assert_ne!(
-            ordered[0], bugs_pane,
-            "blocked tsift column must not keep the old spare pane mapped in its place"
+            ordered,
+            vec![bugs_pane.clone(), dev_pane.clone()],
+            "blocked passive sync must preserve the existing visible panes instead of letting the remaining foreign pane become authoritative"
         );
         assert!(
             iso.pane_alive(&bugs_pane),
-            "the displaced spare pane should be stashed rather than destroyed"
+            "the preserved workspace pane must remain alive"
+        );
+        assert!(
+            iso.pane_alive(&dev_pane),
+            "the resolved sibling pane must also remain visible"
         );
     }
 }

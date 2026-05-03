@@ -4382,8 +4382,6 @@ mod tests {
     use super::*;
     use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
 
-    // Serialize env var mutations across parallel test threads.
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
     // A smaller lock for startup-sensitive isolated tmux tests that inject the
     // first command immediately after pane creation.
     static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -4395,9 +4393,7 @@ mod tests {
     static ROUTE_BIN_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        ENV_MUTEX
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::test_support::env_lock()
     }
 
     fn tmux_start_lock() -> std::sync::MutexGuard<'static, ()> {

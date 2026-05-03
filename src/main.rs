@@ -112,6 +112,8 @@ mod stream;
 mod supervisor;
 mod sync;
 mod terminal;
+#[cfg(test)]
+mod test_support;
 pub(crate) use agent_doc::ipc_socket;
 mod ops_log;
 mod undo;

@@ -873,11 +873,7 @@ fn recover_missing_pane_closeout(
     }
 }
 
-fn missing_pane_closeout_block_reason(
-    file: &Path,
-    phase: &str,
-    error: Option<&str>,
-) -> String {
+fn missing_pane_closeout_block_reason(file: &Path, phase: &str, error: Option<&str>) -> String {
     if let Ok(Some(message)) = crate::session_check::detect_uncommitted_closeout_drift(file) {
         return message;
     }
@@ -921,17 +917,16 @@ fn repair_missing_registered_pane(
     } else {
         false
     };
-    let block_auto_start_reason = if closeout_recovery_phase.is_some()
-        && closeout_recovery_outcome.is_none()
-    {
-        Some(missing_pane_closeout_block_reason(
-            file,
-            closeout_recovery_phase.as_deref().unwrap_or("unknown"),
-            closeout_recovery_error.as_deref(),
-        ))
-    } else {
-        None
-    };
+    let block_auto_start_reason =
+        if closeout_recovery_phase.is_some() && closeout_recovery_outcome.is_none() {
+            Some(missing_pane_closeout_block_reason(
+                file,
+                closeout_recovery_phase.as_deref().unwrap_or("unknown"),
+                closeout_recovery_error.as_deref(),
+            ))
+        } else {
+            None
+        };
     Ok(MissingRegisteredPaneRepair {
         dead_pane,
         recorded_session_loss,
@@ -1102,6 +1097,82 @@ fn passive_autostart_skip_reason(
     }
 
     Ok(None)
+}
+
+fn phase2_rescue_candidates_for_files(tmux: &Tmux, col_args: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut panes = Vec::new();
+
+    for file_path in col_args
+        .iter()
+        .flat_map(|arg| arg.split(','))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+    {
+        if !file_path.exists() {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&file_path) else {
+            continue;
+        };
+        let Ok((fm, _)) = frontmatter::parse(&content) else {
+            continue;
+        };
+        let Some(session_id) = fm.session.as_deref() else {
+            continue;
+        };
+        let Some(entry) = lookup_registry_entry_for_file_session(&file_path, session_id) else {
+            continue;
+        };
+        if tmux.pane_alive(&entry.pane) && seen.insert(entry.pane.clone()) {
+            panes.push(entry.pane.clone());
+        }
+    }
+
+    panes
+}
+
+fn rescue_missing_agent_doc_window_from_candidates(
+    tmux: &Tmux,
+    session_name: &str,
+    target_window_name: &str,
+    rescue_candidates: &[String],
+) -> bool {
+    for pane in rescue_candidates {
+        if !tmux.pane_alive(pane) {
+            continue;
+        }
+        if tmux.pane_session(pane).ok().as_deref() != Some(session_name) {
+            continue;
+        }
+        let Ok(window_id) = tmux.pane_window(pane) else {
+            continue;
+        };
+        let Some(window_name) = window_name_for_window_id(tmux, &window_id) else {
+            continue;
+        };
+        if window_name != "stash" && !window_name.starts_with("stash-") {
+            continue;
+        }
+
+        eprintln!(
+            "[sync] rescuing pane {} from {} to recreate '{}'",
+            pane, window_name, target_window_name
+        );
+        if tmux.break_pane(pane).is_ok() {
+            if let Ok(new_win) = tmux.pane_window(pane) {
+                let _ = tmux.raw_cmd(&["rename-window", "-t", &new_win, target_window_name]);
+                eprintln!(
+                    "[sync] recreated window {} as {}",
+                    new_win, target_window_name
+                );
+            }
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Normalize the tmux layout by consolidating stash windows and ensuring
@@ -1288,32 +1359,47 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                 target_window_name
             );
 
-            // Load the registry and find any alive registered pane
+            // Load the registry and find a same-session stashed pane we can
+            // safely break back out into a visible agent-doc window.
             if let Ok(registry) = sessions::load() {
                 let mut rescued = false;
                 for entry in registry.values() {
-                    if tmux.pane_alive(&entry.pane) {
-                        eprintln!("[repair] rescuing pane {} from stash", entry.pane);
-                        match tmux.break_pane(&entry.pane) {
-                            Ok(()) => {
-                                if let Ok(new_win) = tmux.pane_window(&entry.pane) {
-                                    let _ = tmux.raw_cmd(&[
-                                        "rename-window",
-                                        "-t",
-                                        &new_win,
-                                        target_window_name,
-                                    ]);
-                                    eprintln!(
-                                        "[repair] recreated window {} as '{}'",
-                                        new_win, target_window_name
-                                    );
-                                }
-                                rescued = true;
-                                break;
+                    if !tmux.pane_alive(&entry.pane) {
+                        continue;
+                    }
+                    if tmux.pane_session(&entry.pane).ok().as_deref() != Some(session_name) {
+                        continue;
+                    }
+                    let Ok(window_id) = tmux.pane_window(&entry.pane) else {
+                        continue;
+                    };
+                    let Some(window_name) = window_name_for_window_id(tmux, &window_id) else {
+                        continue;
+                    };
+                    if window_name != "stash" && !window_name.starts_with("stash-") {
+                        continue;
+                    }
+
+                    eprintln!("[repair] rescuing pane {} from {}", entry.pane, window_name);
+                    match tmux.break_pane(&entry.pane) {
+                        Ok(()) => {
+                            if let Ok(new_win) = tmux.pane_window(&entry.pane) {
+                                let _ = tmux.raw_cmd(&[
+                                    "rename-window",
+                                    "-t",
+                                    &new_win,
+                                    target_window_name,
+                                ]);
+                                eprintln!(
+                                    "[repair] recreated window {} as '{}'",
+                                    new_win, target_window_name
+                                );
                             }
-                            Err(e) => {
-                                eprintln!("[repair] break-pane {} failed: {}", entry.pane, e);
-                            }
+                            rescued = true;
+                            break;
+                        }
+                        Err(e) => {
+                            eprintln!("[repair] break-pane {} failed: {}", entry.pane, e);
                         }
                     }
                 }
@@ -1421,7 +1507,6 @@ fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
     })
 }
 
-#[cfg(test)]
 fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
     tmux.cmd()
         .args(["display-message", "-p", "#{session_name}"])
@@ -1442,9 +1527,100 @@ fn session_name_for_target_window(tmux: &Tmux, window: &str) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-fn resolve_sync_target_session(tmux: &Tmux, window: Option<&str>) -> Option<String> {
+fn sync_candidate_files(col_args: &[String], focus: Option<&str>) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if let Some(focused) = focus.map(str::trim).filter(|path| !path.is_empty()) {
+        files.push(PathBuf::from(focused));
+    }
+    files.extend(
+        col_args
+            .iter()
+            .flat_map(|arg| arg.split(','))
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from),
+    );
+    files
+}
+
+fn canonical_sync_candidate_files(col_args: &[String], focus: Option<&str>) -> Vec<PathBuf> {
+    sync_candidate_files(col_args, focus)
+        .into_iter()
+        .filter(|path| path.exists())
+        .map(|path| path.canonicalize().unwrap_or(path))
+        .collect()
+}
+
+fn common_ancestor_dir(paths: &[PathBuf]) -> Option<PathBuf> {
+    let mut iter = paths.iter();
+    let first = iter.next()?;
+    let mut common = if first.is_dir() {
+        first.clone()
+    } else {
+        first.parent()?.to_path_buf()
+    };
+
+    for path in iter {
+        let other = if path.is_dir() {
+            path.clone()
+        } else {
+            path.parent()?.to_path_buf()
+        };
+        while !other.starts_with(&common) {
+            common = common.parent()?.to_path_buf();
+        }
+    }
+
+    Some(common)
+}
+
+fn shared_sync_scope_root(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> {
+    let files = canonical_sync_candidate_files(col_args, focus);
+    let mut current = common_ancestor_dir(&files)?;
+    loop {
+        if current.join(".agent-doc").is_dir() {
+            return Some(current);
+        }
+        current = current.parent()?.to_path_buf();
+    }
+}
+
+fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
+    let config_path = root.join(".agent-doc").join("config.toml");
+    let configured = crate::project_config::load_project_from(&config_path).tmux_session;
+    match configured {
+        Some(session) if tmux.session_alive(&session) => Some(session),
+        Some(session) => {
+            eprintln!(
+                "[sync] configured tmux_session '{}' is not alive for scope {}, ignoring stale pin",
+                session,
+                root.display()
+            );
+            None
+        }
+        None => None,
+    }
+}
+
+fn resolve_sync_target_session(
+    tmux: &Tmux,
+    window: Option<&str>,
+    col_args: &[String],
+    focus: Option<&str>,
+) -> Option<String> {
     let context_session = window.and_then(|target| session_name_for_target_window(tmux, target));
-    crate::route::resolve_preferred_session(tmux, context_session.as_deref(), "[sync]")
+    if context_session.is_some() {
+        return crate::route::resolve_preferred_session(tmux, context_session.as_deref(), "[sync]");
+    }
+
+    if let Some(scope_root) = shared_sync_scope_root(col_args, focus) {
+        if let Some(session) = configured_session_for_root(tmux, &scope_root) {
+            return Some(session);
+        }
+        return current_tmux_session_name(tmux);
+    }
+
+    crate::route::resolve_preferred_session(tmux, None, "[sync]")
 }
 
 fn resolve_agent_doc_window_id(
@@ -1470,6 +1646,16 @@ fn resolve_agent_doc_window_id(
             _ => None,
         }
     })
+}
+
+fn window_name_for_window_id(tmux: &Tmux, window_id: &str) -> Option<String> {
+    tmux.cmd()
+        .args(["display-message", "-t", window_id, "-p", "#{window_name}"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|name| !name.is_empty())
 }
 
 /// Check if this binary is a new build and clear stale caches if so.
@@ -1584,7 +1770,7 @@ fn run_with_options(
     ));
     // Repair layout before anything else: consolidate stash windows and ensure
     // the agent-doc window exists.
-    let target_session = resolve_sync_target_session(tmux, window);
+    let target_session = resolve_sync_target_session(tmux, window, col_args, focus);
     let mut effective_window = match (window, target_session.as_deref()) {
         (Some(w), _) => Some(w.to_string()),
         (None, Some(session_name)) => Some(format!("{session_name}:agent-doc")),
@@ -1592,6 +1778,17 @@ fn run_with_options(
     };
     if let Some(ref session_name) = target_session {
         let _ = repair_layout(tmux, session_name, "agent-doc");
+        if resolve_agent_doc_window_id(tmux, session_name, "agent-doc").is_none() {
+            let rescue_candidates = phase2_rescue_candidates_for_files(tmux, col_args);
+            if rescue_missing_agent_doc_window_from_candidates(
+                tmux,
+                session_name,
+                "agent-doc",
+                &rescue_candidates,
+            ) {
+                let _ = repair_layout(tmux, session_name, "agent-doc");
+            }
+        }
         sync_log("repair_layout completed");
         if let Some(resolved_window_id) =
             resolve_agent_doc_window_id(tmux, session_name, "agent-doc")
@@ -2884,17 +3081,14 @@ pub(crate) fn resolve_associated_panes(
     AssociatedPaneResolution::Ambiguous(candidates)
 }
 
-fn log_stashed_associated_pane(
-    tmux: &Tmux,
-    pane_id: &str,
-    file_path: &Path,
-) {
+fn log_stashed_associated_pane(tmux: &Tmux, pane_id: &str, file_path: &Path) {
     eprintln!(
         "[sync] associated pane {} for {} is in stash — deferring rescue to reconciler",
         pane_id,
         file_path.display()
     );
-    let win_name = tmux.pane_window(pane_id)
+    let win_name = tmux
+        .pane_window(pane_id)
         .ok()
         .and_then(|win_id| {
             tmux.cmd()
@@ -2907,7 +3101,9 @@ fn log_stashed_associated_pane(
         .unwrap_or_default();
     sync_log(&format!(
         "stash_associated_pane_deferred pane={} file={} stash_window={}",
-        pane_id, file_path.display(), win_name
+        pane_id,
+        file_path.display(),
+        win_name
     ));
 }
 
@@ -3559,8 +3755,6 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
 
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     /// Helper: list windows as vec of (index, name) pairs.
     fn list_windows(tmux: &Tmux, session: &str) -> Vec<(String, String)> {
         let output = tmux
@@ -3625,9 +3819,7 @@ mod tests {
 
     impl ScopedCurrentDir {
         fn set(path: &Path) -> Self {
-            let env_guard = ENV_MUTEX
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let env_guard = crate::test_support::env_lock();
             let prev_cwd = std::env::current_dir()
                 .ok()
                 .filter(|cwd| cwd.exists())
@@ -4483,7 +4675,10 @@ mod tests {
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
 
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let doc = tmp.path().join("tasks").join("captured-pane-loss-invalid-backlog.md");
+        let doc = tmp
+            .path()
+            .join("tasks")
+            .join("captured-pane-loss-invalid-backlog.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let content = concat!(
             "---\n",
@@ -5140,11 +5335,7 @@ mod tests {
         std::fs::write(&root_doc, "---\nagent_doc_session: root-sess\n---\n").unwrap();
 
         let child_doc = submodule.join("monsterrodholders.md");
-        std::fs::write(
-            &child_doc,
-            "---\nagent_doc_session: monster-sess\n---\n",
-        )
-        .unwrap();
+        std::fs::write(&child_doc, "---\nagent_doc_session: monster-sess\n---\n").unwrap();
 
         let root_path = root_doc
             .canonicalize()
@@ -5769,13 +5960,23 @@ mod tests {
 
         let win = iso.pane_window(&pane0).unwrap();
         sessions::register_full_with_cwd(
-            session_a, &pane0, &doc_a.to_string_lossy(),
-            std::process::id(), &win, &tmp.path().to_string_lossy(),
-        ).unwrap();
+            session_a,
+            &pane0,
+            &doc_a.to_string_lossy(),
+            std::process::id(),
+            &win,
+            &tmp.path().to_string_lossy(),
+        )
+        .unwrap();
         sessions::register_full_with_cwd(
-            session_b, &pane1, &doc_b.to_string_lossy(),
-            std::process::id(), &win, &tmp.path().to_string_lossy(),
-        ).unwrap();
+            session_b,
+            &pane1,
+            &doc_b.to_string_lossy(),
+            std::process::id(),
+            &win,
+            &tmp.path().to_string_lossy(),
+        )
+        .unwrap();
 
         // Stash pane1 — simulates what the reconciler does when switching layouts.
         iso.stash_pane(&pane1, "test").unwrap();
@@ -5783,13 +5984,23 @@ mod tests {
 
         let agent_doc_window = "test:agent-doc";
         let panes_before = iso.list_window_panes(agent_doc_window).unwrap();
-        assert_eq!(panes_before.len(), 1, "agent-doc window should have 1 pane before sync");
-        assert!(panes_before.contains(&pane0), "pane0 should be in agent-doc window");
+        assert_eq!(
+            panes_before.len(),
+            1,
+            "agent-doc window should have 1 pane before sync"
+        );
+        assert!(
+            panes_before.contains(&pane0),
+            "pane0 should be in agent-doc window"
+        );
 
         // Run sync requesting doc_a + doc_b — this should NOT rescue pane1 pre-reconciler.
         // Instead, the reconciler should handle the swap.
         let result = run_with_tmux(
-            &[doc_a.to_string_lossy().to_string(), doc_b.to_string_lossy().to_string()],
+            &[
+                doc_a.to_string_lossy().to_string(),
+                doc_b.to_string_lossy().to_string(),
+            ],
             Some(agent_doc_window),
             None,
             &iso,
@@ -5857,7 +6068,7 @@ mod tests {
             "the current client session should be the most recently created one"
         );
         assert_eq!(
-            resolve_sync_target_session(&iso, None).as_deref(),
+            resolve_sync_target_session(&iso, None, &[], None).as_deref(),
             Some("0"),
             "windowless sync should honor a live project tmux_session pin before the current session"
         );
@@ -5887,9 +6098,174 @@ mod tests {
             "the live attached session should still be discoverable"
         );
         assert_eq!(
-            resolve_sync_target_session(&iso, None).as_deref(),
+            resolve_sync_target_session(&iso, None, &[], None).as_deref(),
             Some("1"),
             "a dead project pin should fall back to the current live session"
+        );
+    }
+
+    #[test]
+    fn windowless_sync_prefers_shared_workspace_root_pin_for_mixed_roots() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+        let _cwd = ScopedCurrentDir::set(&subroot);
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"4\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            subroot.join(".agent-doc/config.toml"),
+            "tmux_session = \"1\"\n",
+        )
+        .unwrap();
+
+        let root_doc = root.join("tasks/agent-doc-bugs2.md");
+        let child_doc = subroot.join("tasks/claudescore-3.md");
+        std::fs::write(
+            &root_doc,
+            "---\nagent_doc_session: root-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: child-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-windowless-mixed-root-pin");
+        let _pane1 = iso.new_session("1", root).unwrap();
+        let _pane4 = iso.new_session("4", root).unwrap();
+
+        let columns = vec![
+            root_doc.to_string_lossy().to_string(),
+            child_doc.to_string_lossy().to_string(),
+        ];
+        assert_eq!(
+            resolve_sync_target_session(
+                &iso,
+                None,
+                &columns,
+                Some(child_doc.to_string_lossy().as_ref()),
+            )
+            .as_deref(),
+            Some("4"),
+            "mixed-root windowless sync should stay on the shared workspace root pin instead of the caller cwd or focused child root"
+        );
+    }
+
+    #[test]
+    fn rescue_missing_window_uses_visible_file_registry_not_cwd_registry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+        let _cwd = ScopedCurrentDir::set(&subroot);
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"4\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            subroot.join(".agent-doc/config.toml"),
+            "tmux_session = \"1\"\n",
+        )
+        .unwrap();
+
+        let root_doc = root.join("tasks/agent-doc-bugs2.md");
+        let child_doc = subroot.join("tasks/claudescore-3.md");
+        std::fs::write(
+            &root_doc,
+            "---\nagent_doc_session: root-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: child-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-visible-registry-rescue");
+        let root_pane = iso.new_session("4", root).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "4:0", "agent-doc"])
+            .unwrap();
+        let child_pane = iso.new_session("1", subroot.as_path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "1:0", "agent-doc"])
+            .unwrap();
+
+        let second_root_pane = iso.split_window(&root_pane, root, "-dh").unwrap();
+        iso.stash_pane(&root_pane, "4").unwrap();
+        iso.stash_pane(&second_root_pane, "4").unwrap();
+        iso.raw_cmd(&["select-window", "-t", "4:stash"]).unwrap();
+
+        let root_stash_window = iso.pane_window(&root_pane).unwrap();
+        let child_window = iso.pane_window(&child_pane).unwrap();
+
+        sessions::register_full_with_cwd_in(
+            root,
+            "root-session",
+            &root_pane,
+            &root_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &root_pane).unwrap(),
+            &root_stash_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd_in(
+            &subroot,
+            "child-session",
+            &child_pane,
+            &child_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &child_pane).unwrap(),
+            &child_window,
+            &subroot.to_string_lossy(),
+        )
+        .unwrap();
+
+        let root_entry = lookup_registry_entry_for_file_session(&root_doc, "root-session")
+            .expect("root document registry should resolve across cwd boundaries");
+        assert_eq!(root_entry.pane, root_pane);
+        assert!(
+            rescue_missing_agent_doc_window_from_candidates(
+                &iso,
+                "4",
+                "agent-doc",
+                &[root_pane.clone()],
+            ),
+            "visible-file rescue should recover the missing root agent-doc window even when cwd points at a child project"
+        );
+        let recreated_window = iso
+            .pane_window(&root_pane)
+            .expect("rescued pane should remain queryable");
+        let rescued_session = iso
+            .pane_session(&root_pane)
+            .expect("rescued root pane session should be queryable");
+        assert_eq!(
+            rescued_session, "4",
+            "rescued root pane should stay in session 4"
+        );
+        assert_eq!(
+            window_name_for_window_id(&iso, &recreated_window).as_deref(),
+            Some("agent-doc"),
+            "rescued pane should now live in an agent-doc window"
+        );
+        let recreated_panes = iso
+            .list_window_panes(&recreated_window)
+            .expect("recreated window should be queryable");
+        assert!(
+            recreated_panes.contains(&root_pane) || recreated_panes.contains(&second_root_pane),
+            "recreated agent-doc window should contain one of the root session panes, got {:?}",
+            recreated_panes
         );
     }
 

@@ -337,7 +337,33 @@ Verification completed:
 Committed and pushed in `src/agent-doc`:
 - `369a83e` `fix: keep fresh route pane authoritative`
 - branch `20260422/codex-agent-backend`
-<!-- agent:boundary:c9545c2c -->
+❯ do [#jbptrk]. spec-test-build-install-commit-push
+### Re: jbptrk live replay closeout — gpt-5
+
+Plan executed: `tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md`
+
+`#jbptrk` is complete.
+
+I reran the current JetBrains startup/layout path against the live `src/session-share` tmux state instead of relying on prior theory.
+
+- `agent-doc resync` from `src/session-share` stayed report-only and reported all 3 sessions live, including `tasks/buildparty-investor-demo/dev.md -> pane %123`.
+- `agent-doc sync --col tasks/claudescore-3.md --col tasks/buildparty-investor-demo/dev.md --focus tasks/buildparty-investor-demo/dev.md --no-autostart` resolved both files from the existing registry, rescued `%151` and `%123` out of stash, and rebuilt the active `agent-doc` window `@128` around those same panes.
+- After the replay, `src/session-share/.agent-doc/sessions.json` still bound `tasks/buildparty-investor-demo/dev.md` to `%123` and `tasks/claudescore-3.md` to `%151`, now on window `@128`.
+- No new `registered_pane_missing`, `session_end origin=sync_missing_pane`, or replacement `session_start` was emitted for the buildparty session during this replay.
+
+That closes the original visible-pane tracking failure: the non-destructive `resync` + `sync --no-autostart` path preserved the authoritative pane and recovered it into the active layout instead of replacing it.
+
+Verification:
+
+- `cargo test` (`1787 passed; 0 failed`, plus green integration/doc tests)
+- `cargo build --release`
+- `./gradlew test buildPlugin`
+- `cargo install --path . --force`
+
+Git:
+
+- no new `src/agent-doc` source diff was required in this cycle, so there was nothing new to commit or push there
+<!-- agent:boundary:c412001e -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -352,7 +378,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbptrk] [recommended] Critical: Finish live validation/root-cause work for visible-pane tracking loss after editor sync/startup was reduced to report-only `resync` plus `sync --no-autostart`. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#jbctrlg] [recommended] Replay the JetBrains Run Agent Doc reroute on tasks/agent-doc/agent-doc-bugs2.md after the ctrl-g busy-pane recovery landed. Plan: tasks/agent-doc/plan-agent-doc-bugs2-jb-ctrl-g-reroute-validation.md
 - [ ] [#mrreap] [recommended] Investigate why rerouting or restarting `src/boost-client/tasks/monsterrodholders.md` can close the previously running tmux pane instead of preserving or explicitly superseding it after proven owner handoff. Plan: tasks/agent-doc/plan-monsterrodholders-previous-pane-reap.md

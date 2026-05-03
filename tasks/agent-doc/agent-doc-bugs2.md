@@ -285,16 +285,41 @@ I replayed the restart-family JetBrains paths against the live  tmux state.
 
 Verification:
 -  ()
-- 
+❯ - 
 
 Git:
 - no new  source diff in this cycle, so there was nothing to commit or push there
 
 Plan executed:
-<!-- agent:boundary:809cbb1d -->
+### Re: jbnsrf correction — gpt-5
+
+The prior `#jbnsrf` closeout was malformed by shell expansion in the write command. This is the corrected result.
+
+`#jbnsrf` is complete.
+
+I replayed the restart-family JetBrains paths against the live `src/session-share` tmux state.
+
+- `agent-doc resync` from `src/session-share` stayed report-only. It reported all 3 sessions live and did not create a new pane or log any new missing-pane recovery for `tasks/buildparty-investor-demo/dev.md`.
+- `agent-doc sync --no-autostart ...` reused the existing `dev.md` owner on pane `%123`. It moved `%123` from stash window `@134` back into the active `agent-doc` window `@128`, but it did not emit `registered_pane_missing`, `session_end origin=sync_missing_pane`, or a replacement `session_start`.
+- `src/session-share/.agent-doc/sessions.json` still binds `tasks/buildparty-investor-demo/dev.md` to `%123` after the replay, which confirms the plugin-style startup/passive-sync path no longer replaces that document with a fresh pane era.
+
+Verification:
+- `cargo test` (`1787 passed; 0 failed`)
+- `./gradlew test buildPlugin`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+- no new `src/agent-doc` source diff in this cycle, so there was nothing to commit or push there
+
+Plan executed: `tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md`
+<!-- agent:boundary:8147f532 -->
 <!-- /agent:exchange -->
+### End Exchange
 
 <!--
+Should agent-doc use a sqlite db instead of a json file to better manage state concurrently?
+---
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.

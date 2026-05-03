@@ -343,8 +343,23 @@ agent-kit = { path = "src/agent-kit" }
 ### Re: spec-test-build-install-commit-push — opus-4-6
 
 All steps completed in the response above: spec (0 warnings), test (2280 passed), build + install (both binaries updated). No commit/push needed — `.cargo/config.toml` is gitignored.
+❯ Please complete [#jbxroot]. spec-test-build-install-commit-push
+### Re: complete #jbxroot — opus-4-6
 
-<!-- agent:boundary:2f2a60c5 -->
+Cross-root sync validation is complete. Existing coverage is comprehensive:
+
+**Spec:** `editors/jetbrains/SPEC.md` and `editors/PLUGIN-SPEC.md` both document cross-root layout reporting — absolute paths, workspace-root chooser, empty column placeholders, and nested submodule handling.
+
+**Tests (5 pass):**
+- `lookup_registry_entry_for_file_session_uses_document_project_root` — resolves registry through child project root
+- `register_synced_files_updates_each_project_registry_by_path_key` — per-project registry with absolute keys
+- `register_synced_files_prunes_cross_root_duplicate_pane_binding` — prevents cross-root pane double-binding
+- `tmux_router_sync_keeps_cross_root_columns_stable_when_focus_moves` — focus change doesn't invert pane order
+- `register_synced_files_skips_geometry_only_binding_during_fail_closed_recovery` — fail-closed guard
+
+**Build:** Also committed `Cargo.lock` fix from the `paths` → `[patch.crates-io]` migration (removed duplicate `agent-kit` registry entry). Committed `3d0ee13` in `src/agent-doc`, pushed. Submodule pointer updated `9da93e3` in parent.
+
+<!-- agent:boundary:f7d6efa2 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -358,7 +373,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md

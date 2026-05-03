@@ -313,13 +313,18 @@ Git:
 - no new `src/agent-doc` source diff in this cycle, so there was nothing to commit or push there
 
 Plan executed: `tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md`
-<!-- agent:boundary:8147f532 -->
+❯ Should agent-doc use a sqlite db instead of a json file to better manage state concurrently?
+### Re: sqlite vs json for concurrent state — gpt-5
+Not yet.
+
+The current concurrency pressure in `agent-doc` is mostly not "JSON is the wrong serialization format". The binary already splits state across per-document cycle files, snapshots, captures, and a locked `sessions.json` registry, and it takes explicit advisory locks around document writes and short git closeout sections. Most of the bugs we have been fixing here are higher-level ownership / routing / ack / recovery problems across tmux, editor IPC, and closeout sequencing, not corruption from two processes racing to parse the same JSON blob.
+
+SQLite would become worthwhile if we decide we need real cross-record transactions, queryable history, or many concurrent writers mutating shared state as a database problem. Right now it would add migration and operational complexity without removing the main failure modes we are seeing. I would keep JSON plus explicit locks for now, and only switch if we can point to concrete storage-layer races that the current per-file protocol cannot close cleanly.
+<!-- agent:boundary:390bdff2 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
-Should agent-doc use a sqlite db instead of a json file to better manage state concurrently?
----
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.

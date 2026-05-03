@@ -2,7 +2,7 @@
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
+agent: claude
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -240,7 +240,35 @@ Committed and pushed in `src/agent-doc`:
 - `db1260b` `fix: fail closed on closeout replay recovery`
 
 No new backlog item from this fix.
-<!-- agent:boundary:967cf70d -->
+❯ Navigating to /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md still does not switch the tmux pane correctly. Please do a deep dive investigation and fix. spec-test-build-install-commit-push
+### Re: monsterrodholders pane not switching on navigation — opus-4-6
+
+Root cause identified in the JetBrains IDE `selectionChanged` behavior. The `idea.log` confirms the failure pattern:
+
+```
+22:38:55.661: exec: agent-doc focus tasks/monsterrodholders.md → Focused pane %85
+22:38:56.638: exec: agent-doc focus tasks/agent-doc/agent-doc-bugs2.md → Focused pane %43
+```
+
+When the user navigates to monsterrodholders.md in the right split, JetBrains fires `selectionChanged` correctly, the plugin focuses pane `%85`, and the tmux pane switches. But ~1 second later, JetBrains fires a spurious `selectionChanged` for `agent-doc-bugs2.md` (the left split's file), which re-focuses pane `%43` and undoes the navigation. The 500ms debounce catches events within 500ms but not the ~1s-delayed spurious re-fire.
+
+Implemented bounce-back suppression in both editor plugins:
+
+- Both JB and VS Code now track `focusedFileBeforeLastCommand` and `lastCommandCompletedAt`
+- Within a 1.5-second settle window after a successful focus/sync, if a new selection event targets the pre-command focused file with the same visible set, it is classified as `BounceBack` and suppressed
+- Legitimate rapid tab switches still work: different files pass through, visible set changes pass through, and after 1.5s the settle expires
+
+Verification:
+- `cargo test` (2275 passed)
+- `cargo build --release` + `cargo install --path . --force`
+- `./gradlew test buildPlugin` in `editors/jetbrains`
+- `npm test` in `editors/vscode` (28 passed)
+
+Committed and pushed in `src/agent-doc`:
+- `ed2fd33` `fix: suppress split-layout bounce-back in editor tab sync`
+
+No new backlog item from this fix.
+<!-- agent:boundary:c28a6961 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -254,6 +282,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#dyvw]
 - [ ] [#dup-exchange] [recommended] Fail closed or auto-repair when a template/CRDT session document gains a second `<!-- agent:exchange ... -->` opener instead of appending inside the canonical exchange component. Repro: `src/session-share/tasks/buildparty-investor-demo/dev.md` ended up with two exchange blocks after a direct Codex patch/write cycle. Plan: verify whether this is a write-path structural-guard miss, a repair-path miss, or a direct-manual-edit escape hatch that should still be normalized.
 - [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md

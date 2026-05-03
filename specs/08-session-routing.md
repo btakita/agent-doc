@@ -119,6 +119,16 @@ The stash system preserves running Claude sessions when the user switches editor
 
 This is the **Binding invariant** — the foundational rule of pane management.
 
+### Bounce-Back Suppression
+
+JetBrains (and potentially VS Code) fires spurious `selectionChanged` events in split layouts: after the user selects a file in one split, the IDE re-fires selection for the other split's file ~1 second later. Without suppression, the tmux pane focus bounces back to the previous file, making it appear as if navigation doesn't work.
+
+Both editor plugins track:
+- `lastCommandCompletedAt` — timestamp of the last successful focus/sync command
+- `focusedFileBeforeLastCommand` — the file that was focused before the command ran
+
+Within a 1.5-second settle window after a command, if a new selection event arrives with the same visible file set and targets the pre-command focused file, it is classified as `BounceBack` and suppressed.
+
 ### Resolution Path
 
 When the user navigates to a document in the editor:

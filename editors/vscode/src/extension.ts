@@ -624,14 +624,20 @@ function onTabChanged(): void {
                 previous: lastTabSyncState,
             });
             if (next === null) return;
+            if (next.command.kind === 'bounce-back') return;
 
+            const previousActiveFile = lastTabSyncState?.activeFile;
             if (next.command.kind === 'focus') {
                 const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
                 await runCli(['focus', rel], cwd);
             } else {
                 await runCli(next.command.args, root);
             }
-            lastTabSyncState = next.nextState;
+            lastTabSyncState = {
+                ...next.nextState,
+                lastCommandCompletedAt: Date.now(),
+                focusedFileBeforeLastCommand: previousActiveFile,
+            };
         } catch {
             // Silently ignore tab sync errors
         } finally {

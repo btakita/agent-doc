@@ -174,7 +174,59 @@ Committed and pushed in `src/agent-doc`:
 - `91faf21` `fix: restore safe passive sync autostart`
 
 No new backlog item from this fix.
-<!-- agent:boundary:96933792 -->
+❯ I'm still not able to see the tmux pane for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md when swiching to the file. Please investigate via the ops.log and the jb logs. monsterrodholders.md is associated with the tmux pane from another document.
+
+❯ Running `Claim for Tmux Pane`.
+```
+resync: stash pane %86 is registered in its own project root — skipping kill
+merged default components into .agent-doc/config.toml
+[claim] using cwd=/home/brian/work/btakita/agent-loop/src/boost-client for registry entry
+focused pane %85
+Claimed /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md for pane %85 (session a9421282)
+Watch daemon started.
+```
+### Re: monsterrodholders pane still missing after selection and claim — gpt-5
+
+I checked the `boost-client` ops log, the live `monsterrodholders` session log, the current session registry, the live document tail, and the available JetBrains logs.
+
+The current root cause is **not** that `monsterrodholders.md` is still claimed by another document. The live registry in `src/boost-client/.agent-doc/sessions.json` is sane right now: `/home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` is bound to pane `%85`, window `@84`, session `a9421282-fd96-4943-9af5-3561ed5cb799`.
+
+The concrete failure chain is different:
+
+- your manual claim did focus/rebind the document to `%85`
+- immediately after that, `src/boost-client/.agent-doc/logs/ops.log` records `route_dispatch_only_sent file=tasks/monsterrodholders.md pane=%85 harness=codex`
+- the very next document-side event is `preflight_blocked_uncommitted_closeout_drift`
+
+That means the reopened pane is not the first thing failing. The **document closeout state** is already poisoned before passive sync / claim recovery can finish.
+
+The proof is in the live `src/boost-client/tasks/monsterrodholders.md` exchange tail. Around the failed-order review section it currently contains a malformed/bypassed response-patchback shape:
+
+- a prompt line `❯ Please review all recent failed orders...`
+- then `❯ ### Re: recent failed-order review + #next-steps — codex`
+- later a second `### Re: recent failed-order review + #next-steps — codex (HEAD)` block
+
+That matches the `session-check` / `preflight` family that treats the document as a likely direct or incomplete closeout patchback instead of a clean committed cycle. The `ops.log` entry confirms that exact class: `preflight_blocked_uncommitted_closeout_drift`.
+
+The older per-session failures line up with that diagnosis too. In `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log`, the sync recovery path repeatedly hits:
+
+- `sync_missing_pane_closeout_recovery_failed ... ERR: pending/backlog patch changed non-list content — use granular --pending-* flags instead`
+- then `supervisor_exit code=missing_pane ... reason=registered_pane_missing`
+- then `session_superseded ... origin=registry_rebind`
+
+So the current behavior is:
+
+1. the pane/session registry is still correct
+2. a routed reopen or rescue path touches the document
+3. preflight/repair sees unresolved closeout drift in `monsterrodholders.md`
+4. recovery fails
+5. later sync churn makes it look like a pane-tracking failure
+
+I also checked the standard JetBrains runtime logs under `/home/brian/.cache/JetBrains/PyCharm2026.1/log/idea*.log`. I did **not** find matching `agent-doc` plugin `selectionChanged`, `[layout-sync]`, or `[route]` entries for this repro there, so the JB logs are inconclusive on whether the tab-switch path actually issued a sync/focus command. The CLI-side logs are enough to show the stronger blocker anyway: the `monsterrodholders.md` document is already in a closeout-drift state when the later reopen/recovery happens.
+
+Plan: `tasks/agent-doc/plan-monsterrodholders-closeout-drift-sync-block.md`.
+
+I added backlog item `#mrdrift` for the follow-up fix: preserve the existing pane owner and fail once with a deterministic repair-needed result when a session doc has this malformed closeout state, instead of letting passive sync / claim / reroute churn through missing-pane and registry-rebind paths.
+<!-- agent:boundary:b5d65a2b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -188,6 +240,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#mrdrift] [recommended] Critical: fix the monsterrodholders closeout-drift state where malformed or bypassed response patchback blocks passive sync, claim, and reroute recovery with preflight_blocked_uncommitted_closeout_drift. Plan: tasks/agent-doc/plan-monsterrodholders-closeout-drift-sync-block.md
 - [ ] [#dup-exchange] [recommended] Fail closed or auto-repair when a template/CRDT session document gains a second `<!-- agent:exchange ... -->` opener instead of appending inside the canonical exchange component. Repro: `src/session-share/tasks/buildparty-investor-demo/dev.md` ended up with two exchange blocks after a direct Codex patch/write cycle. Plan: verify whether this is a write-path structural-guard miss, a repair-path miss, or a direct-manual-edit escape hatch that should still be normalized.
 - [/] [#jbxroot] [recommended] Replay the JetBrains cross-root split with tasks/agent-doc/agent-doc-bugs2.md and src/boost-client/tasks/monsterrodholders.md after the absolute cross-root layout reporting fix, and confirm passive sync no longer collapses to one pane or triggers stale-session cleanup. Plan: tasks/agent-doc/plan-jetbrains-cross-root-split-sync-validation.md
 - [ ] [#jbmcol] [recommended] Replay JetBrains mixed-split Sync Layout on src/boost-client/tasks/monsterrodholders.md and confirm empty-column column-memory restoration keeps two tmux panes with monsterrodholders.md on the right and in focus. Plan: tasks/agent-doc/plan-monsterrodholders-empty-column-sync-replay.md

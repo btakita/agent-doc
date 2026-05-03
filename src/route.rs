@@ -834,9 +834,6 @@ pub fn run_with_tmux(
     let global_config = crate::config::load().unwrap_or_default();
     let harness = HarnessConfig::from_context(&fm, &global_config);
 
-    let target_session = resolve_target_session(tmux, None, &harness);
-    eprintln!("[route] target tmux session: {}", target_session);
-
     // Use absolute path for trigger commands to avoid CWD-dependent resolution
     // when the pane's CWD differs from the invoker's (e.g., narrowed to a
     // submodule root). Relative paths would resolve to the submodule's version
@@ -844,6 +841,8 @@ pub fn run_with_tmux(
     let file_path = crate::git::resolve_absolute_file_path(file)
         .to_string_lossy()
         .into_owned();
+    let target_session = resolve_target_session(tmux, None, col_args, Some(file), &harness);
+    eprintln!("[route] target tmux session: {}", target_session);
 
     // === SINGLE EXIT POINT PATTERN ===
     // All paths resolve to a pane_id, then ONE sync call handles layout.
@@ -3427,6 +3426,27 @@ pub(crate) fn resolve_preferred_session(
     current_tmux_session(tmux)
 }
 
+fn resolve_preferred_session_for_layout(
+    tmux: &Tmux,
+    context_session: Option<&str>,
+    col_args: &[String],
+    focus: Option<&Path>,
+    log_prefix: &str,
+) -> Option<String> {
+    if let Some(ctx) = normalize_context_session(context_session) {
+        return Some(ctx.to_string());
+    }
+
+    let focus_owned = focus.map(|path| path.to_string_lossy().into_owned());
+    if let Some(scope_root) = crate::sync::shared_sync_scope_root(col_args, focus_owned.as_deref())
+        && let Some(session) = crate::sync::configured_session_for_root(tmux, &scope_root)
+    {
+        return Some(session);
+    }
+
+    resolve_preferred_session(tmux, None, log_prefix)
+}
+
 /// Single source of truth for target session resolution.
 ///
 /// Priority:
@@ -3439,9 +3459,11 @@ pub(crate) fn resolve_preferred_session(
 fn resolve_target_session(
     tmux: &Tmux,
     context_session: Option<&str>,
+    col_args: &[String],
+    focus: Option<&Path>,
     harness: &HarnessConfig,
 ) -> String {
-    resolve_preferred_session(tmux, context_session, "[route]")
+    resolve_preferred_session_for_layout(tmux, context_session, col_args, focus, "[route]")
         .unwrap_or_else(|| harness.tmux_session_fallback.clone())
 }
 
@@ -3726,7 +3748,7 @@ fn auto_start_ext(
     split_before: bool,
 ) -> Result<String> {
     let harness = resolve_harness_for_file(file);
-    let session_name = resolve_target_session(tmux, context_session, &harness);
+    let session_name = resolve_target_session(tmux, context_session, &[], Some(file), &harness);
     ensure_auto_start_target_session(tmux, context_session, &session_name, &harness)?;
     auto_start_in_session(
         tmux,
@@ -9277,7 +9299,8 @@ Body\n\
         let pane = iso.auto_start("claude", &cwd).unwrap();
         let current_session = iso.pane_session(&pane).unwrap();
 
-        let resolved = resolve_target_session(&iso, Some("   "), &HarnessConfig::claude());
+        let resolved =
+            resolve_target_session(&iso, Some("   "), &[], None, &HarnessConfig::claude());
         assert_eq!(
             resolved, current_session,
             "blank context_session should fall back to the live target session"
@@ -9304,6 +9327,101 @@ Body\n\
             resolve_preferred_session(&iso, None, "[test]").as_deref(),
             Some("0"),
             "a live project tmux_session pin should beat the caller's current session"
+        );
+    }
+
+    #[test]
+    fn resolve_target_session_prefers_nested_file_root_pin_over_outer_cwd() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+        let _cwd_guard = ScopedCurrentDir::set(root);
+
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"4\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            subroot.join(".agent-doc/config.toml"),
+            "tmux_session = \"1\"\n",
+        )
+        .unwrap();
+
+        let child_doc = subroot.join("tasks/claudescore-3.md");
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: child-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("route-test-nested-file-root-pin");
+        let _child = iso.new_session("1", root).unwrap();
+        let _workspace = iso.new_session("4", root).unwrap();
+
+        assert_eq!(
+            resolve_target_session(&iso, None, &[], Some(&child_doc), &HarnessConfig::claude()),
+            "1",
+            "route should honor the nested file's own project pin even when cwd is the outer workspace root"
+        );
+    }
+
+    #[test]
+    fn resolve_target_session_prefers_shared_workspace_root_pin_for_mixed_roots() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/session-share");
+
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(&subroot);
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"4\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            subroot.join(".agent-doc/config.toml"),
+            "tmux_session = \"1\"\n",
+        )
+        .unwrap();
+
+        let root_doc = root.join("tasks/agent-doc-bugs2.md");
+        let child_doc = subroot.join("tasks/claudescore-3.md");
+        std::fs::write(
+            &root_doc,
+            "---\nagent_doc_session: root-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: child-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("route-test-mixed-root-workspace-pin");
+        let _child = iso.new_session("1", root).unwrap();
+        let _workspace = iso.new_session("4", root).unwrap();
+
+        let col_args = vec![
+            root_doc.to_string_lossy().to_string(),
+            child_doc.to_string_lossy().to_string(),
+        ];
+        assert_eq!(
+            resolve_target_session(
+                &iso,
+                None,
+                &col_args,
+                Some(&child_doc),
+                &HarnessConfig::claude(),
+            ),
+            "4",
+            "mixed-root route should stay on the shared workspace root pin instead of the focused child root"
         );
     }
 

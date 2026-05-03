@@ -1549,7 +1549,7 @@ fn common_ancestor_dir(paths: &[PathBuf]) -> Option<PathBuf> {
     Some(common)
 }
 
-fn shared_sync_scope_root(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn shared_sync_scope_root(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> {
     let files = canonical_sync_candidate_files(col_args, focus);
     let mut current = common_ancestor_dir(&files)?;
     loop {
@@ -1603,7 +1603,7 @@ fn effective_sync_columns(
         .collect())
 }
 
-fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
+pub(crate) fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
     let config_path = root.join(".agent-doc").join("config.toml");
     let configured = crate::project_config::load_project_from(&config_path).tmux_session;
     match configured {
@@ -3463,7 +3463,7 @@ fn pane_pid_from_tmux(tmux: &Tmux, pane_id: &str) -> Option<u32> {
         .ok()
 }
 
-fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
+fn pane_current_path(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
     let output = tmux
         .cmd()
         .args([
@@ -3482,13 +3482,35 @@ fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
     if current_path.is_empty() {
         return None;
     }
-    let path = PathBuf::from(current_path);
+    Some(PathBuf::from(current_path))
+}
+
+fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
+    let path = pane_current_path(tmux, pane_id)?;
     crate::snapshot::find_project_root(&path).or(Some(path))
 }
 
 fn pane_assignment_matches_document_root(tmux: &Tmux, pane_id: &str, project_root: &Path) -> bool {
     pane_project_root(tmux, pane_id)
         .map(|pane_root| pane_root == project_root)
+        .unwrap_or(false)
+}
+
+fn pane_within_document_scope_for_registered_session_log_owner(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    project_root: &Path,
+) -> bool {
+    let Some(entry) = lookup_registry_entry_for_file_session(file, session_id) else {
+        return false;
+    };
+    if entry.pane != pane_id {
+        return false;
+    }
+    pane_current_path(tmux, pane_id)
+        .map(|path| path.starts_with(project_root))
         .unwrap_or(false)
 }
 
@@ -3715,7 +3737,15 @@ fn find_alive_pane_via_open_session_log(
     }
 
     let project_root = crate::snapshot::find_project_root(file)?;
-    if !pane_assignment_matches_document_root(tmux, pane_id, &project_root) {
+    if !pane_assignment_matches_document_root(tmux, pane_id, &project_root)
+        && !pane_within_document_scope_for_registered_session_log_owner(
+            tmux,
+            file,
+            session_id,
+            pane_id,
+            &project_root,
+        )
+    {
         return None;
     }
 
@@ -4055,6 +4085,24 @@ mod tests {
             .unwrap();
     }
 
+    fn wait_for_pane_cwd(iso: &IsolatedTmux, pane: &str, expected: &Path) {
+        let expected = expected.to_path_buf();
+        for _ in 0..20 {
+            let current = pane_current_path(iso, pane);
+            if current.as_deref() == Some(expected.as_path()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let current = pane_current_path(iso, pane);
+        assert_eq!(
+            current.as_deref(),
+            Some(expected.as_path()),
+            "pane cwd did not settle to {}",
+            expected.display()
+        );
+    }
+
     #[test]
     fn resolve_associated_panes_prefers_unique_active_window() {
         let candidates = vec![
@@ -4150,6 +4198,128 @@ mod tests {
 
         let owner = find_live_owner_pane(&iso, &doc, "session-log-owner");
         assert_eq!(owner.as_deref(), Some(owner_pane.as_str()));
+    }
+
+    #[test]
+    fn find_live_owner_pane_reuses_registered_session_log_owner_inside_nested_worktree() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/monsterrodholders-dev");
+        let _cwd_guard = ScopedCurrentDir::set(root);
+
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(&subroot).unwrap();
+        ProcessCommand::new("git")
+            .current_dir(&subroot)
+            .args(["init"])
+            .status()
+            .unwrap();
+
+        let doc = root.join("tasks/owned.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: nested-session-log-owner\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-nested-session-log-owner");
+        let owner_pane = iso.new_session("test", root).unwrap();
+        iso.raw_cmd(&[
+            "send-keys",
+            "-t",
+            &owner_pane,
+            &format!("cd {}", subroot.display()),
+            "C-m",
+        ])
+        .unwrap();
+        wait_for_pane_cwd(&iso, &owner_pane, &subroot);
+
+        let mut registry = sessions::SessionRegistry::new();
+        let key = sessions::canonical_registry_key_in(
+            root,
+            doc.canonicalize().unwrap().to_string_lossy().as_ref(),
+        );
+        registry.insert(
+            key,
+            sessions::SessionEntry {
+                pane: owner_pane.clone(),
+                pid: pane_pid_from_tmux(&iso, &owner_pane).unwrap(),
+                cwd: root.to_string_lossy().to_string(),
+                started: "2026-05-03T00:00:00Z".to_string(),
+                session_id: "nested-session-log-owner".to_string(),
+                file: "tasks/owned.md".to_string(),
+                window: iso.pane_window(&owner_pane).unwrap(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(root, &registry).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/logs/nested-session-log-owner.log"),
+            format!(
+                "[1] session_start file=tasks/owned.md pane={} session=nested-session-log-owner\n[2] codex_start mode=fresh restart_count=0\n",
+                owner_pane
+            ),
+        )
+        .unwrap();
+
+        let owner = find_live_owner_pane(&iso, &doc, "nested-session-log-owner");
+        assert_eq!(
+            owner.as_deref(),
+            Some(owner_pane.as_str()),
+            "the registered open session-log owner should survive when its cwd moves into a nested worktree"
+        );
+    }
+
+    #[test]
+    fn find_live_owner_pane_does_not_reuse_unregistered_nested_session_log_owner() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/monsterrodholders-dev");
+        let _cwd_guard = ScopedCurrentDir::set(root);
+
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(&subroot).unwrap();
+        ProcessCommand::new("git")
+            .current_dir(&subroot)
+            .args(["init"])
+            .status()
+            .unwrap();
+
+        let doc = root.join("tasks/owned.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: nested-session-log-unregistered\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-nested-session-log-unregistered");
+        let owner_pane = iso.new_session("test", root).unwrap();
+        iso.raw_cmd(&[
+            "send-keys",
+            "-t",
+            &owner_pane,
+            &format!("cd {}", subroot.display()),
+            "C-m",
+        ])
+        .unwrap();
+        wait_for_pane_cwd(&iso, &owner_pane, &subroot);
+
+        std::fs::write(
+            root.join(".agent-doc/logs/nested-session-log-unregistered.log"),
+            format!(
+                "[1] session_start file=tasks/owned.md pane={} session=nested-session-log-unregistered\n[2] codex_start mode=fresh restart_count=0\n",
+                owner_pane
+            ),
+        )
+        .unwrap();
+
+        let owner = find_live_owner_pane(&iso, &doc, "nested-session-log-unregistered");
+        assert_eq!(
+            owner, None,
+            "nested-worktree scope relaxation must stay limited to the current registered pane"
+        );
     }
 
     #[test]

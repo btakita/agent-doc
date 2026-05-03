@@ -3548,15 +3548,15 @@ fn find_live_owner_pane_excluding_with_logging(
 ) -> Option<String> {
     find_registered_pane_via_path_provenance(tmux, file, session_id, excluded_pane, log_hits)
         .or_else(|| {
-            let file_path = file.to_string_lossy();
-            find_alive_pane_for_file_inner(tmux, file_path.as_ref(), excluded_pane, log_hits)
-        })
-        .or_else(|| {
             find_alive_pane_via_supervisor_pid(tmux, file, session_id)
                 .filter(|pane| excluded_pane != Some(pane.as_str()))
         })
         .or_else(|| {
             find_alive_pane_via_open_session_log(tmux, file, session_id, excluded_pane, log_hits)
+        })
+        .or_else(|| {
+            let file_path = file.to_string_lossy();
+            find_alive_pane_for_file_inner(tmux, file_path.as_ref(), excluded_pane, log_hits)
         })
 }
 
@@ -4295,6 +4295,73 @@ mod tests {
 
         let owner = find_live_owner_pane(&iso, &doc, "session-log-owner");
         assert_eq!(owner.as_deref(), Some(owner_pane.as_str()));
+    }
+
+    #[test]
+    fn find_live_owner_pane_prefers_latest_open_session_log_owner_over_stale_process_tree_match() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: session-log-beats-process-tree\n---\n")
+            .unwrap();
+
+        let iso = IsolatedTmux::new("sync-session-log-beats-process-tree");
+        let stale_pane = iso.new_session("test", tmp.path()).unwrap();
+        let owner_pane = iso.split_window(&stale_pane, tmp.path(), "-dh").unwrap();
+
+        let fake_bin_dir = tmp.path().join("bin");
+        std::fs::create_dir_all(&fake_bin_dir).unwrap();
+        let fake_codex = fake_bin_dir.join("codex");
+        std::fs::write(
+            &fake_codex,
+            "#!/bin/sh\nsleep 60\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&fake_codex).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake_codex, perms).unwrap();
+        }
+
+        iso.raw_cmd(&[
+            "send-keys",
+            "-t",
+            &stale_pane,
+            &format!("{} {}", fake_codex.display(), doc.display()),
+            "Enter",
+        ])
+        .unwrap();
+
+        assert!(
+            wait_for(Duration::from_secs(3), || {
+                find_alive_pane_for_file_inner(&iso, doc.to_string_lossy().as_ref(), None, false)
+                    .as_deref()
+                    == Some(stale_pane.as_str())
+            }),
+            "stale pane should expose a same-file process-tree match before session-log precedence is evaluated"
+        );
+
+        std::fs::write(
+            tmp.path()
+                .join(".agent-doc/logs/session-log-beats-process-tree.log"),
+            format!(
+                "[1] session_start file=tasks/owned.md pane={} session=session-log-beats-process-tree\n[2] codex_start mode=fresh restart_count=0\n",
+                owner_pane
+            ),
+        )
+        .unwrap();
+
+        let owner = find_live_owner_pane(&iso, &doc, "session-log-beats-process-tree");
+        assert_eq!(
+            owner.as_deref(),
+            Some(owner_pane.as_str()),
+            "latest open session-log owner must win over older same-file process-tree matches"
+        );
     }
 
     #[test]

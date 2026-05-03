@@ -34,6 +34,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 - **Fresh route panes stay authoritative** — once `agent-doc route` creates a fresh pane for a document, later geometry-only registry churn must not hand dispatch back to an older same-session pane and make the fresh pane disposable.
 - **Optimistic fresh-restart retries stay explicit** — when a routed Codex fresh-restart retry never gets back to a dispatch-ready prompt, record the `startup_miss` against the original routed pane and preserve the canonical document path instead of silently treating a replacement pane as the successful retry target.
 - **Passive mixed-root sync must stay fail-safe** — when `agent-doc sync --no-autostart` leaves any visible file blocked, preserve the current visible `agent-doc` window layout and warn instead of collapsing the remaining foreign pane set into a new authoritative layout.
+- **Fresh session-log ownership beats stale process-tree fallback** — when sync evaluates competing live-owner hints, prefer path/supervisor proof and the latest open session-log owner before generic same-file process-tree matches so an older pane cannot steal a just-started reroute back from the fresh pane.
 - **Preserve user edits** — never overwrite; let `agent-doc write --stream` merge.
 - **Show progress** — stream your response in the console so the user sees real-time feedback.
 

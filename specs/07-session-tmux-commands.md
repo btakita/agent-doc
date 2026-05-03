@@ -83,6 +83,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Files with session ids are managed even when their current registry entry was pruned; `claim` is the only command that creates a new session id.
 - Sync must synthesize a per-run tmux-router registry from each visible file's own nearest `.agent-doc` root instead of forcing all files through the caller's current root.
 - An alive pane is not reusable solely because the pane id exists; it must still prove live ownership for that specific document.
+- When multiple ownership hints disagree, sync must prefer the freshest file-specific proof in this order: path/supervisor provenance, then the latest open session-log owner, and only then generic same-file process-tree matches.
 - When ownership proof weakens but the alive pane still contains protected Codex drafted input or still appears as the newest open pane in the session log, sync must fail closed for that file instead of fabricating `registered_pane_missing`.
 - If two visible files point at the same pane, sync must either find one decisive owner or drop the duplicate from the synthetic registry so tmux-router cannot alias both files onto one pane.
 - Once a live pane is reserved for one file during the pass, later files in the same pass must treat it as unavailable.

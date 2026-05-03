@@ -158,7 +158,23 @@ Committed and pushed in `src/agent-doc`:
 - `1dafdb5` `fix: reuse claimed pane for normalized registry keys`
 
 No new backlog item from this fix.
-<!-- agent:boundary:08653b22 -->
+❯ It seems that we are having issues with autostarting in general. Navigating the right editor to dev.md, claudscore-3.md does not open the tmux pane. Please take a comprehensive look to fix this issue. CRITICAL BUG. spec-test-build-install-commit-push
+### Re: passive autostart on `dev.md` / `claudescore-3.md` — gpt-5
+
+I traced this to the passive editor sync contract, not another live-pane replacement. In `src/session-share/.agent-doc/logs/586ffeea-ca3a-490b-80bd-883dd0e95673.log` and `src/session-share/.agent-doc/logs/7b453f47-23b2-4418-85e4-378270d2345d.log`, the latest `dev.md` / `claudescore-3.md` panes were ending cleanly (`user_quit_clean_exit` / `user_quit_after_ctrl_d` followed by `session_end`). After that, JetBrains / VS Code were still doing the right thing by calling `agent-doc sync --no-autostart ...`, but the CLI was interpreting that as "never start anything", so selection could rescue a stashed live pane yet could not reopen a document once no live owner remained.
+
+I changed `sync.rs` so passive `--no-autostart` stays fail-safe around live or ambiguous owners, unresolved startup-miss, `registry_rebind` closeouts, and recent missing-pane churn, but it may cold-start when the session log proves the previous pane already closed and there is no live owner left to rescue. That gives both editor plugins the same recovery behavior without reopening the "replace a running pane" bug. I added guard coverage for clean-close, open-session, unresolved-startup-miss, and `registry_rebind` shapes, and updated the sync/editor specs plus `VERSIONS.md`.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Committed and pushed in `src/agent-doc`:
+- `91faf21` `fix: restore safe passive sync autostart`
+
+No new backlog item from this fix.
+<!-- agent:boundary:96933792 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -206,7 +206,6 @@ Changed in `src/agent-doc`:
 - `src/skill.rs` now bundles `runbooks/split-spec-files.md` into installed harness runbooks and has a regression test for that bundle entry.
 - `runbooks/split-spec-files.md`, `SKILL.md`, `CLAUDE.md`, `README.md`, `SPEC.md`, and `VERSIONS.md` now describe the ownership rule as harness-agnostic across agent-doc-managed surfaces while leaving custom root instruction files opt-in unless they still match the generated baseline.
 - I refreshed the tracked Claude mirror at `src/agent-doc/.claude/skills/agent-doc/SKILL.md` so `audit-docs` no longer reports stale instruction drift.
-
 Verification / build / install:
 - `cargo run --quiet -- audit-docs` passed.
 - `cargo build --release` passed.
@@ -216,7 +215,24 @@ Verification / build / install:
 The red suite is a real blocker for `commit + push`. The failures are concentrated in tmux-heavy `route` / `resync` / `sync` coverage, including duplicate-session setup, mock prompt readiness, fresh-start/fresh-restart handoff, and busy-reroute recovery paths. I did **not** commit or push `src/agent-doc` because the full suite is not green.
 
 Plan: `tasks/agent-doc/plan-tmux-route-resync-suite-failures.md`
-<!-- agent:boundary:1248f10b -->
+❯ do [#tmuxsuite]. spec-test-build-install-commit-push
+### Re: tmuxsuite closeout — gpt-5
+
+`#tmuxsuite` is complete.
+
+I reran the full `src/agent-doc` verification path from scratch. The earlier red tmux-heavy suite did not reproduce on the current branch: `cargo test` finished green at `1787 passed; 0 failed`, including the route / resync / sync coverage that previously blocked closeout. I then reran the remaining preset steps successfully:
+
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+With the suite green, I committed and pushed the pending `src/agent-doc` spec/package update set:
+
+- commit: `2a47293` `docs: split command specs and bundle split runbook`
+- branch: `origin/20260422/codex-agent-backend`
+
+Plan executed: `tasks/agent-doc/plan-tmux-route-resync-suite-failures.md`
+<!-- agent:boundary:c05a66d3 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -230,7 +246,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxsuite] [recommended] Investigate the current route/resync/sync tmux full-suite failures blocking spec-test-build-install-commit-push. Plan: tasks/agent-doc/plan-tmux-route-resync-suite-failures.md
 - [ ] [#patchregr] [recommended] Critical: a fresh visible response patchback must never degrade into `post_commit_local_drift` plus `commit_already_current`; `agent-doc` must either commit the owning repo/submodule or fail closed with a resumable diagnostic. Plan: tasks/agent-doc/plan-response-patchback-uncommitted-regression.md
 - [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md

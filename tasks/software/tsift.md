@@ -36,7 +36,13 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:8558bd8d -->
+❯ #code-review
+### Re: code review — gpt-5
+
+1. High: timed search now misdiagnoses a concurrently removed or reset index as a "fresh" search root, which points the user away from the actual recovery step. `collect_stale_search_targets()` only records `SearchIndexState::Stale` and drops `Missing` entirely ([src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3341)), so `search_timeout_message()` falls through to the fresh-root hint whenever the index vanishes during the worker timeout window ([src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3427), [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:8023)). I reproduced it locally by indexing a temp repo, starting `tsift search --timeout 1`, deleting `.tsift/index.db` while the worker was sleeping, and observing: `The search root looks fresh, so reindexing is unlikely to help.` That is the same concurrency class this patch is trying to fix; a missing target after timeout should produce a rebuild instruction and needs a regression test next to `search_timeout_reports_reindex_when_index_turns_stale_during_worker_run()`.
+
+I ran `cargo test search_timeout`; the current tests cover the fresh-root and stale-after-mutation cases, but not the missing-index race above.
+<!-- agent:boundary:0f2dac61 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -47,6 +53,7 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#29jg] [recommended] Fix timed search timeout messaging when the target index disappears mid-run; treat missing targets as rebuild-needed and add regression coverage.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

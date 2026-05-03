@@ -250,7 +250,29 @@ Full verification also passed:
 Plan executed: `tasks/agent-doc/plan-response-patchback-uncommitted-regression.md`
 
 No new `src/agent-doc` source diff was required in this cycle, so there was nothing new to commit or push there. The only committed mutation from this turn is the session-doc closeout itself plus marking `#patchregr` done.
-<!-- agent:boundary:7a675e7e -->
+do [#jbsubroot]. spec-test-build-install-commit-push
+### Re: jbsubroot passive mixed-root replay + route validation — gpt-5
+
+I reproduced the remaining `#jbsubroot` gap in the live tmux stack. `sync --no-autostart` was correctly refusing to provision `src/boost-client/tasks/monsterrodholders.md`, but it still fell through into tmux-router reconcile and could collapse the shared `agent-doc` window down to the surviving `session-share` pane, which made a foreign pane authoritative anyway.
+
+I fixed that in `src/sync.rs`: when safe-passive sync leaves any visible file blocked, it now warns and returns before tmux-router reconciliation, preserving the current visible layout instead of stashing unrelated panes. I updated the regression to model a proven live sibling owner, and refreshed the product/spec/skill surfaces in `specs/07-session-tmux-commands.md`, `VERSIONS.md`, `README.md`, `SPEC.md`, `CLAUDE.md`, `SKILL.md`, and the tracked Claude skill mirror.
+
+Verification:
+- `cargo test`
+- `./gradlew test buildPlugin`
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Live replay:
+- `agent-doc sync --no-autostart` with `boost-client` + `session-share/tasks/claudescore-3.md` now logs `safe passive sync preserved the current tmux layout...` and leaves session `4:0` unchanged with workspace pane `%127` still visible.
+- `agent-doc route --dispatch-only` from `src/boost-client` targeted tmux session `4`, not a child-root session, and recovered a fresh `monsterrodholders.md` start in pane `%158`.
+
+Git:
+- `agent-doc`: `2bd6a26` pushed to `origin/20260422/codex-agent-backend`
+
+Plan executed: `tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md`
+<!-- agent:boundary:f22c6230 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -264,7 +286,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbsubroot] [recommended] Replay the JetBrains boost-client/session-share nested-root passive sync and Run Agent Doc path after the root-aware window-resolution fix, and confirm foreign agent-doc windows only warn instead of becoming authoritative. Plan: tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md
 - [ ] [#jbnsrf] [recommended] Validate the original restart repro after the non-destructive editor sync/startup hardening and confirm no plugin path still closes or replaces a visible pane. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md
 - [ ] [#jbpdrop] [recommended] Critical: a completeds JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
 - [ ] [#jbptrk] [recommended] Critical: Finish live validation/root-cause work for visible-pane tracking loss after editor sync/startup was reduced to report-only `resync` plus `sync --no-autostart`. Plan: tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md

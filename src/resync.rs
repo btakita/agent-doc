@@ -250,6 +250,13 @@ fn resolve_target_file(file: &Path) -> Result<PathBuf> {
     Ok(resolved.canonicalize().unwrap_or(resolved))
 }
 
+/// Resolve the `.agent-doc` project root for a target file.
+/// Falls back to the current working directory when no `.agent-doc/` ancestor is found.
+fn resolve_registry_root(target: &Path) -> PathBuf {
+    crate::snapshot::find_project_root(target)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
 fn same_document_path(target: &Path, candidate: &str) -> bool {
     if candidate.is_empty() {
         return false;
@@ -265,7 +272,9 @@ fn filter_registry_for_target(
 ) -> sessions::SessionRegistry {
     registry
         .iter()
-        .filter(|(_, entry)| same_document_path(target, &entry.file))
+        .filter(|(key, entry)| {
+            same_document_path(target, &entry.file) || same_document_path(target, key)
+        })
         .map(|(key, entry)| (key.clone(), entry.clone()))
         .collect()
 }
@@ -369,7 +378,11 @@ impl TargetDocumentFixOutcome {
     }
 }
 
-fn recover_target_document_pane(tmux: &Tmux, target: &Path) -> Result<TargetDocumentFixOutcome> {
+fn recover_target_document_pane_in(
+    tmux: &Tmux,
+    target: &Path,
+    base_dir: &Path,
+) -> Result<TargetDocumentFixOutcome> {
     let Some(session_id) = frontmatter::read_session_id(target) else {
         return Ok(TargetDocumentFixOutcome::default());
     };
@@ -382,7 +395,9 @@ fn recover_target_document_pane(tmux: &Tmux, target: &Path) -> Result<TargetDocu
         crate::sync::AssociatedPaneResolution::None => Ok(TargetDocumentFixOutcome::default()),
         crate::sync::AssociatedPaneResolution::Selected { winner, redundant } => {
             let mut outcome = TargetDocumentFixOutcome::default();
-            if sessions::lookup(&session_id)?.as_deref() != Some(winner.pane_id.as_str()) {
+            if sessions::lookup_in(base_dir, &session_id)?.as_deref()
+                != Some(winner.pane_id.as_str())
+            {
                 crate::sync::reregister_recovered_owner(
                     tmux,
                     target,
@@ -427,7 +442,10 @@ where
 {
     let removed: Vec<(String, sessions::SessionEntry)> = registry
         .iter()
-        .filter(|(_, entry)| same_document_path(target, &entry.file) && !pane_alive(&entry.pane))
+        .filter(|(key, entry)| {
+            (same_document_path(target, &entry.file) || same_document_path(target, key))
+                && !pane_alive(&entry.pane)
+        })
         .map(|(key, entry)| (key.clone(), entry.clone()))
         .collect();
 
@@ -438,15 +456,19 @@ where
     removed
 }
 
-fn prune_targeted(tmux: &Tmux, target: &Path) -> Result<Vec<(String, sessions::SessionEntry)>> {
-    let registry_path = sessions::registry_path();
+fn prune_targeted_in(
+    tmux: &Tmux,
+    target: &Path,
+    base_dir: &Path,
+) -> Result<Vec<(String, sessions::SessionEntry)>> {
+    let registry_path = sessions::registry_path_in(base_dir);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
-    let mut registry = sessions::load()?;
+    let mut registry = sessions::load_in(base_dir)?;
     let removed = prune_dead_entries_for_target_in_registry(&mut registry, target, |pane| {
         tmux.pane_alive(pane)
     });
     if !removed.is_empty() {
-        sessions::save(&registry)?;
+        sessions::save_in(base_dir, &registry)?;
     }
     Ok(removed)
 }
@@ -456,18 +478,21 @@ pub(crate) fn apply_targeted_fix_for_route(
     target_file: &Path,
 ) -> Result<TargetDocumentFixOutcome> {
     let target = resolve_target_file(target_file)?;
-    let removed = prune_targeted(tmux, &target)?;
+    let base_dir = resolve_registry_root(&target);
+    let removed = prune_targeted_in(tmux, &target, &base_dir)?;
     let mut outcome = TargetDocumentFixOutcome {
         pruned_dead_entries: removed.len(),
         ..TargetDocumentFixOutcome::default()
     };
-    let recovered = recover_target_document_pane(tmux, &target)?;
+    let recovered = recover_target_document_pane_in(tmux, &target, &base_dir)?;
     outcome.reregistered_owner = recovered.reregistered_owner;
     outcome.killed_redundant_stash_panes = recovered.killed_redundant_stash_panes;
-    let scoped_registry = filter_registry_for_target(&sessions::load()?, &target);
+    let scoped_registry =
+        filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
     let issues = detect_issues_in_registry(tmux, &scoped_registry);
     if !issues.is_empty() {
-        outcome.fixed_issues = apply_fixes(tmux, &issues, None)?;
+        outcome.fixed_issues =
+            apply_fixes_with_base(tmux, &issues, None, Some(&base_dir))?;
     }
     Ok(outcome)
 }
@@ -1872,18 +1897,35 @@ fn registered_pane_still_owns_file(tmux: &Tmux, key: &str, file: &str, pane: &st
 
 /// Apply fixes for detected issues: kill wrong-session panes, deregister wrong-process panes.
 fn apply_fixes(tmux: &Tmux, issues: &[Issue], relocate_session: Option<&str>) -> Result<usize> {
+    apply_fixes_with_base(tmux, issues, relocate_session, None)
+}
+
+fn apply_fixes_with_base(
+    tmux: &Tmux,
+    issues: &[Issue],
+    relocate_session: Option<&str>,
+    base_dir: Option<&Path>,
+) -> Result<usize> {
     if issues.is_empty() {
         return Ok(0);
     }
     tracing::debug!(issue_count = issues.len(), "resync::apply_fixes");
 
-    let registry_path = sessions::registry_path();
+    let cwd;
+    let effective_base = match base_dir {
+        Some(dir) => dir,
+        None => {
+            cwd = std::env::current_dir()?;
+            &cwd
+        }
+    };
+    let registry_path = sessions::registry_path_in(effective_base);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
-    let mut registry = sessions::load()?;
+    let mut registry = sessions::load_in(effective_base)?;
     let fixed = apply_fixes_to_registry(tmux, issues, &mut registry, relocate_session);
 
     if fixed > 0 {
-        sessions::save(&registry)?;
+        sessions::save_in(effective_base, &registry)?;
     }
     Ok(fixed)
 }
@@ -2116,10 +2158,12 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
 
     if let Some(file) = target_file {
         let target = resolve_target_file(file)?;
-        let removed = prune_targeted(&tmux, &target)?;
+        let base_dir = resolve_registry_root(&target);
+        let removed = prune_targeted_in(&tmux, &target, &base_dir)?;
 
         if removed.is_empty() {
-            let scoped = filter_registry_for_target(&sessions::load()?, &target);
+            let scoped =
+                filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
             if scoped.is_empty() {
                 eprintln!("No registered sessions found for {}.", target.display());
             } else {
@@ -2142,10 +2186,11 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
         }
 
         if fix {
-            let _ = recover_target_document_pane(&tmux, &target)?;
+            let _ = recover_target_document_pane_in(&tmux, &target, &base_dir)?;
         }
 
-        let scoped_registry = filter_registry_for_target(&sessions::load()?, &target);
+        let scoped_registry =
+            filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
         let issues = detect_issues_in_registry(&tmux, &scoped_registry);
         if !issues.is_empty() {
             if fix {
@@ -2154,7 +2199,8 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
                     issues.len(),
                     target.display()
                 );
-                let fixed = apply_fixes(&tmux, &issues, relocate_session)?;
+                let fixed =
+                    apply_fixes_with_base(&tmux, &issues, relocate_session, Some(&base_dir))?;
                 eprintln!("\nFixed {} of {} issue(s).", fixed, issues.len());
             } else {
                 eprintln!(
@@ -2173,7 +2219,8 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
             );
         }
 
-        let scoped_registry = filter_registry_for_target(&sessions::load()?, &target);
+        let scoped_registry =
+            filter_registry_for_target(&sessions::load_in(&base_dir)?, &target);
         if !scoped_registry.is_empty() {
             eprintln!("\nActive matching sessions:");
             for (key, entry) in &scoped_registry {
@@ -3798,5 +3845,82 @@ mod tests {
             new_session, "correct",
             "agent pane should be relocated to the correct session"
         );
+    }
+
+    #[test]
+    fn resolve_registry_root_finds_submodule_agent_doc_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        // Simulate superproject with .agent-doc/
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        // Simulate submodule with its own .agent-doc/
+        let sub = dir.path().join("src/sub");
+        std::fs::create_dir_all(sub.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(sub.join("tasks")).unwrap();
+        let doc = sub.join("tasks/test.md");
+        std::fs::write(&doc, "# test\n").unwrap();
+
+        let root = resolve_registry_root(&doc);
+        assert_eq!(
+            root,
+            sub.canonicalize().unwrap_or(sub.clone()),
+            "should resolve to the submodule .agent-doc root, not the superproject"
+        );
+    }
+
+    #[test]
+    fn resolve_registry_root_falls_back_to_superproject() {
+        let dir = tempfile::tempdir().unwrap();
+        // Superproject with .agent-doc/
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        // Subpath without its own .agent-doc/
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/test.md");
+        std::fs::write(&doc, "# test\n").unwrap();
+
+        let root = resolve_registry_root(&doc);
+        assert_eq!(
+            root,
+            dir.path().canonicalize().unwrap_or(dir.path().to_path_buf()),
+            "should resolve to the superproject .agent-doc root"
+        );
+    }
+
+    #[test]
+    fn prune_targeted_in_uses_submodule_registry() {
+        let iso = IsolatedTmux::new("resync-test-submod-prune");
+
+        let dir = tempfile::tempdir().unwrap();
+        // Superproject with .agent-doc/
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        // Submodule with its own .agent-doc/ and registry
+        let sub = dir.path().join("src/sub");
+        std::fs::create_dir_all(sub.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(sub.join("tasks")).unwrap();
+        let doc = sub.join("tasks/test.md");
+        std::fs::write(&doc, "# test\n").unwrap();
+
+        // Register in the submodule's sessions.json with a dead pane
+        let mut registry = SessionRegistry::new();
+        let canonical = doc.canonicalize().unwrap_or(doc.clone());
+        registry.insert(
+            canonical.to_string_lossy().to_string(),
+            test_entry("%99998", &canonical.to_string_lossy()),
+        );
+        sessions::save_in(&sub, &registry).unwrap();
+
+        // Superproject registry should be empty
+        sessions::save_in(dir.path(), &SessionRegistry::new()).unwrap();
+
+        let target = canonical;
+        let removed = prune_targeted_in(&iso, &target, &sub).unwrap();
+        assert_eq!(
+            removed.len(),
+            1,
+            "should find and prune the dead entry from the submodule registry"
+        );
+
+        // Verify the submodule registry is now empty
+        let after = sessions::load_in(&sub).unwrap();
+        assert!(after.is_empty(), "submodule registry should be empty after prune");
     }
 }

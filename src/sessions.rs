@@ -628,6 +628,13 @@ pub fn lookup(session_id: &str) -> Result<Option<String>> {
         .and_then(|key| registry.get(&key).map(|entry| entry.pane.clone())))
 }
 
+/// Look up the pane ID for a session in a specific base directory's registry.
+pub fn lookup_in(base_dir: &Path, session_id: &str) -> Result<Option<String>> {
+    let registry = load_in(base_dir)?;
+    Ok(find_registry_key_by_session_id(&registry, session_id)
+        .and_then(|key| registry.get(&key).map(|entry| entry.pane.clone())))
+}
+
 /// Look up a full registry entry by session ID.
 pub fn lookup_entry(session_id: &str) -> Result<Option<SessionEntry>> {
     let registry = load()?;

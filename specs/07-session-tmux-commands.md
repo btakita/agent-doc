@@ -166,9 +166,12 @@ single-owner actor controls:
   heuristics.
 - `agent-doc session clear <FILE>` injects the harness-native `/clear`
   equivalent into the authoritative session through the same shared
-  Enter-style supervisor submit helper used by routed reopen and queued
-  slash-command dispatch, and, for Codex, records the clear prompt state so
-  the next reroute can reapply the original launch contract.
+  supervisor-owned submit path used by routed reopen and queued
+  slash-command dispatch. The payload remains one canonical single-line
+  submit command, but the authoritative supervisor must deliver it through
+  the claimed pane's tmux input path instead of writing raw reopen bytes
+  straight into the child PTY. For Codex, it still records the clear prompt
+  state so the next reroute can reapply the original launch contract.
 - `agent-doc session doctor <FILE> [--repair]` reports actor/registry/supervisor
   drift in one read-only summary, with `--repair` explicitly escalating into the
   destructive repair path before re-checking status.

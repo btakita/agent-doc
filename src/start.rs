@@ -56,8 +56,9 @@
 //!   user quit, and session end.
 //! - On `--continue` restarts, spawns a background thread that waits for the
 //!   harness prompt to appear in the current child process's filtered pty
-//!   output before injecting the harness-specific trigger command into the
-//!   child pty to auto-trigger the skill workflow in the resumed conversation.
+//!   output before injecting the harness-specific trigger command back through
+//!   the claimed tmux pane input path to auto-trigger the skill workflow in
+//!   the resumed conversation.
 //!   This avoids the race where DSR (Device Status Report) escape sequences
 //!   interleave with the injected command, corrupting Claude Code's input
 //!   state, while also ensuring stale tmux scrollback cannot be mistaken for
@@ -700,6 +701,19 @@ fn auto_trigger_inject_command(
     if stop.load(Ordering::Relaxed) {
         return AutoTriggerOutcome::Cancelled;
     }
+    shared.transition_actor_state(
+        crate::session_actor::ActorState::Busy,
+        "dispatch",
+        "auto_trigger_inject",
+    );
+    let payload = crate::supervisor::ipc::submit_bytes(trigger_cmd);
+    if let Some(pane_id) = shared.inject_pane.as_deref() {
+        return match dispatch_submit_bytes_to_pane(pane_id, &payload) {
+            Ok(()) => AutoTriggerOutcome::Sent,
+            Err(_) => AutoTriggerOutcome::SendFailed,
+        };
+    }
+
     let Some(writer_arc) = shared.inject_writer.lock().unwrap().clone() else {
         return AutoTriggerOutcome::SendFailed;
     };
@@ -707,7 +721,7 @@ fn auto_trigger_inject_command(
         return AutoTriggerOutcome::Cancelled;
     }
 
-    let payload = crate::supervisor::ipc::submit_bytes(trigger_cmd).into_bytes();
+    let payload = payload.into_bytes();
 
     let Some(mut writer) = lock_writer_interruptibly(&writer_arc, stop) else {
         return AutoTriggerOutcome::Cancelled;
@@ -715,11 +729,6 @@ fn auto_trigger_inject_command(
     if stop.load(Ordering::Relaxed) {
         return AutoTriggerOutcome::Cancelled;
     }
-    shared.transition_actor_state(
-        crate::session_actor::ActorState::Busy,
-        "dispatch",
-        "auto_trigger_inject",
-    );
     match writer.write_all_interruptibly(&payload, stop) {
         Ok(()) => AutoTriggerOutcome::Sent,
         Err(err) if err.kind() == io::ErrorKind::Interrupted && stop.load(Ordering::Relaxed) => {
@@ -747,6 +756,20 @@ fn normalize_supervisor_inject_bytes(bytes: &str) -> Vec<u8> {
         index += 1;
     }
     normalized
+}
+
+fn dispatch_submit_bytes_to_tmux(
+    tmux: &crate::sessions::Tmux,
+    pane: &str,
+    bytes: &str,
+) -> Result<()> {
+    tmux.send_keys(pane, bytes)
+        .with_context(|| format!("failed to inject submitted input into pane {}", pane))
+}
+
+fn dispatch_submit_bytes_to_pane(pane: &str, bytes: &str) -> Result<()> {
+    let tmux = crate::sessions::Tmux::default_server();
+    dispatch_submit_bytes_to_tmux(&tmux, pane, bytes)
 }
 
 fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
@@ -1148,6 +1171,8 @@ struct SupervisorShared {
     cwd_source: &'static str,
     /// Writer handle for IPC `inject`. Replaced on each spawn, cleared between restarts.
     inject_writer: SharedWriter,
+    /// Claimed tmux pane that should receive supervisor-owned injected input.
+    inject_pane: Option<String>,
     /// Filtered output emitted by the current child process.
     recent_output: Mutex<Vec<u8>>,
     /// Child PID for IPC `pid` queries and `kill` on restart/stop.
@@ -1174,7 +1199,7 @@ struct SupervisorShared {
 impl SupervisorShared {
     #[cfg(test)]
     fn new(cwd_source: &'static str, supervisor_instance_id: String) -> Self {
-        Self::with_actor_runtime(cwd_source, supervisor_instance_id, None, None)
+        Self::with_actor_runtime(cwd_source, supervisor_instance_id, None, None, None)
     }
 
     fn with_actor_runtime(
@@ -1182,6 +1207,7 @@ impl SupervisorShared {
         supervisor_instance_id: String,
         actor_runtime: Option<SessionActorRuntime>,
         actor_state: Option<crate::session_actor::ActorState>,
+        inject_pane: Option<String>,
     ) -> Self {
         Self {
             supervisor_state: Mutex::new(SupervisorState::Healthy),
@@ -1193,6 +1219,7 @@ impl SupervisorShared {
             running: AtomicBool::new(false),
             cwd_source,
             inject_writer: Mutex::new(None),
+            inject_pane,
             recent_output: Mutex::new(Vec::new()),
             child_pid: AtomicU32::new(0),
             restart_requested: AtomicBool::new(false),
@@ -1279,25 +1306,30 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
             }
         }
         IpcMethod::Inject { bytes } => {
-            let guard = shared.inject_writer.lock().unwrap();
-            match guard.as_ref() {
-                Some(writer_arc) => {
-                    let mut w = writer_arc.lock().unwrap();
-                    let normalized = normalize_supervisor_inject_bytes(&bytes);
-                    match w.write_all_blocking(&normalized) {
-                        Ok(()) => {
-                            drop(w);
-                            shared.transition_actor_state(
-                                crate::session_actor::ActorState::Busy,
-                                "dispatch",
-                                "ipc_inject",
-                            );
-                            IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                        }
-                        Err(e) => IpcResponse::err(format!("write error: {e}")),
+            let injected = if let Some(pane_id) = shared.inject_pane.as_deref() {
+                dispatch_submit_bytes_to_pane(pane_id, &bytes).map_err(|e| e.to_string())
+            } else {
+                let guard = shared.inject_writer.lock().unwrap();
+                match guard.as_ref() {
+                    Some(writer_arc) => {
+                        let mut w = writer_arc.lock().unwrap();
+                        let normalized = normalize_supervisor_inject_bytes(&bytes);
+                        w.write_all_blocking(&normalized)
+                            .map_err(|e| format!("write error: {e}"))
                     }
+                    None => Err("no active session".to_string()),
                 }
-                None => IpcResponse::err("no active session"),
+            };
+            match injected {
+                Ok(()) => {
+                    shared.transition_actor_state(
+                        crate::session_actor::ActorState::Busy,
+                        "dispatch",
+                        "ipc_inject",
+                    );
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                Err(err) => IpcResponse::err(err),
             }
         }
         IpcMethod::Restart { mode } => {
@@ -1895,6 +1927,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         supervisor_instance_id,
         Some(actor_runtime),
         Some(crate::session_actor::ActorState::Starting),
+        Some(pane_id.clone()),
     ));
 
     // Start IPC listener
@@ -3530,6 +3563,41 @@ mod tests {
         assert_eq!(
             written.lock().unwrap().as_slice(),
             b"agent-doc tasks/software/tsift.md\r"
+        );
+    }
+
+    #[test]
+    fn dispatch_submit_bytes_to_tmux_uses_pane_submit_path() {
+        let tmp = TempDir::new().unwrap();
+        let iso = IsolatedTmux::new("start-ipc-submit-path");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let output_path = tmp.path().join("submit.txt");
+        let done_path = tmp.path().join("done.txt");
+
+        std::thread::sleep(Duration::from_millis(150));
+        iso.send_keys(
+            &pane,
+            &format!(
+                "sh -lc 'IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"'",
+                output_path.display(),
+                done_path.display()
+            ),
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+
+        dispatch_submit_bytes_to_tmux(&iso, &pane, "agent-doc tasks/software/tsift.md\n").unwrap();
+        for _ in 0..40 {
+            if done_path.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        assert!(done_path.exists(), "expected submitted command to complete");
+        assert_eq!(
+            std::fs::read_to_string(&output_path).unwrap(),
+            "agent-doc tasks/software/tsift.md"
         );
     }
 

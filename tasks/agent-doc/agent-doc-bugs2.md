@@ -95,7 +95,23 @@ Implemented phase-4 actor-owned route dispatch. Plan: tasks/agent-doc/plan-singl
 - Left pre-existing unrelated dirty files in `src/agent-doc` untouched: `README.md`, `specs/codex-support.md`, `specs/supervisor.md`, `src/plugin.rs`.
 
 `#sgown4` is complete. The umbrella tracker `#sgown` remains open for `#sgown5`-`#sgown9`.
-<!-- agent:boundary:6e304934 -->
+❯ Ctrl+D does not surface the "q" to quit menu on Codex.
+❯ do [#sgownorch]
+### Re: #sgownorch and Ctrl+D quit menu — gpt-5
+
+
+`#sgownorch` is complete. I updated `tasks/agent-doc/plan-single-owner-session-actor-transition.md` to add an explicit execution-boundary section for the remaining actor-transition work. Plan: `tasks/agent-doc/plan-single-owner-session-actor-transition.md`.
+
+The new boundary is:
+- ownership-changing sync, repair-boundary, and heuristic-deletion work stays single-owner only
+- the operator CLI / plugin-controls phase splits into a shared binary contract first, then disjoint editor-adapter work
+- bounded sidecars are appropriate primarily for the later regression and plugin-verification slice, once the authoritative path is already fixed
+
+The `Ctrl+D` report is real in the current local source state. `src/agent-doc/src/start.rs` still routes `ctrl_d_forwarded` through `RestartFresh`, and the in-flight `specs/supervisor.md` / `specs/codex-support.md` edits document that same restart-fresh behavior, so the quit-menu regression is not just stale bookkeeping. I reopened `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md` and captured it back in backlog as `#ctrldmenu`. Plan: `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`.
+
+Repo closeout: committed the two plan updates in the root repo as `07f1fe2d9` (`docs: tighten session actor execution boundaries`).
+Verification: no code changes this cycle, so I did not run the Rust suite.
+<!-- agent:boundary:deff7e4b -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -119,7 +135,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ctrldmenu] [recommended] Reopen the Codex Ctrl+D supervisor quit-menu regression: restore the q/Enter prompt instead of unconditional fresh restart. Plan: tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md
+- [ ] [#ctrldmenu] [recommended] Reopen the Codex Ctrl+C & Ctrl+D supervisor quit-menu regression: restore the q/Enter prompt instead of unconditional fresh restart. Plan: tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md
 - [ ] [#sgown5] Convert sync/focus flows to projection-only reconciliation around actor-owned panes. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown6] Add operator-facing session CLI and plugin controls: status, history, attach, restart, clear, doctor, and session diagnostics UI. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown7] Move destructive or heuristic recovery behind explicit repair-only commands and remove it from normal turn paths. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md

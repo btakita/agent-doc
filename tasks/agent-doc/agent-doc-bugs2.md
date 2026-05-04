@@ -404,24 +404,10 @@ Verification completed in `src/agent-doc`:
 
 Repo closeout in `src/agent-doc`: committed as `8be606b` (`fix: restore ready state after routed dispatch`) and pushed to `origin/20260422/codex-agent-backend`.
 
-I did not run a live JetBrains-managed replay myself, so `#jbipcr` is gated pending that manual validation step.
-Still getting route errors. spec-test-build-install-commit-push
-```
-resync: stash pane %206 is registered in its own project root — skipping kill
-[route] target tmux session: 4
-Error: authoritative actor record for tasks/buildparty-investor-demo/dev.md is bound to harness claude-code, not claude
-```
+❯ I did not run a live JetBrains-managed replay myself, so `#jbipcr` is gated pending that manual validation step.
+❯ Still getting route errors. spec-test-build-install-commit-push
 ### Re: JB Plugin `Run Agent Doc` Claude harness alias routing — gpt-5
 
-I reproduced the exact mismatch behind this failure.
-
-Root cause:
-- `src/session-share/.agent-doc/session-actors.json` already had the authoritative actor for `src/session-share/tasks/buildparty-investor-demo/dev.md` recorded with `"harness": "claude-code"`.
-- That is the canonical stored identity: `src/session_actor.rs` normalizes `claude -> claude-code` before persisting actor records.
-- `src/route.rs` was still validating that stored actor record against `harness.binary`, which is the live supervisor binary name `claude`.
-- So the authoritative reroute path failed closed on an alias mismatch before it could reuse the healthy actor pane, producing the exact `bound to harness claude-code, not claude` error you pasted.
-
-Implemented:
 - Exported the canonical harness normalizer from `src/session_actor.rs` and reused it in `src/route.rs`, so authoritative actor dispatch now compares canonical harness ids instead of raw binary labels.
 - Added a route regression proving a Claude-owned authoritative actor stored as `claude-code` remains dispatchable through the normal authoritative route path.
 - Updated `specs/08-session-routing.md`, `specs/08a-session-actor-contract.md`, and `VERSIONS.md` so the canonical-harness identity rule is explicit.
@@ -434,8 +420,40 @@ Verification completed in `src/agent-doc`:
 
 Repo closeout in `src/agent-doc`: committed as `fcfba5f` (`fix: normalize authoritative actor harness aliases`) and pushed to `origin/20260422/codex-agent-backend`.
 
-I did not run a live JetBrains-managed replay after the patch, so I added a recommended follow-up replay item for that manual validation pass.
-<!-- agent:boundary:54d24d94 -->
+- I did not run a live JetBrains-managed replay after the patch, so I added a recommended follow-up replay item for that manual validation pass.
+❯ Please have the supervisor accept and enqueue the routing. The session was not busy. It was able to accept keystrokes. Please fix the detection. It is better to be optimistic about sending the keys. spec-test-build-install-commit-push
+```
+resync: stash pane %206 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+Error: authoritative actor generation 25 for tasks/buildparty-investor-demo/dev.md owns pane %202 but route will not inject a new trigger because the authoritative actor is busy
+```
+```
+resync: stash pane %206 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+Error: authoritative actor generation 81 for tasks/agent-doc/agent-doc-bugs2.md owns pane %192 but route will not inject a new trigger because the authoritative actor is busy
+```
+### Re: authoritative actor busy/start reroute queueing — gpt-5
+
+Root cause:
+- The healthy authoritative-actor path in `src/agent-doc/src/route.rs` was stricter than the older busy-pane ladder. Once route resolved a live supervisor-backed actor record, it bailed immediately on supervisor states `busy` and `starting`, so JetBrains reroutes never reached the optimistic dispatch logic even when the pane was still accepting keystrokes.
+- That is why both `src/session-share/tasks/buildparty-investor-demo/dev.md` and this document could fail closed with `route will not inject a new trigger because the authoritative actor is busy` despite a healthy supervisor IPC socket.
+
+Implemented in `src/agent-doc`:
+- Authoritative reroutes now allow one optimistic supervisor-IPC reopen when pending prompt-bearing work exists and the actor still reports `starting` or `busy`.
+- `waiting_input`, `blocked`, and `closed` remain fail-closed, so route still refuses to inject over an active user-input or broken session state.
+- Added authoritative-route regressions for both the `busy` Claude case and the `starting` Codex case.
+- Updated `specs/08-session-routing.md`, `specs/08a-session-actor-contract.md`, and `VERSIONS.md` to document the new queue-first boundary.
+
+Verification completed in `src/agent-doc`:
+- `cargo check`
+- `cargo test` (parallel suite; passed)
+- `cargo build`
+- `cargo install --path . --force`
+
+Repo closeout in `src/agent-doc`: committed as `56c0371` (`fix: queue authoritative reroutes while busy`) and pushed to `origin/20260422/codex-agent-backend`.
+
+- I did not run a live JetBrains-managed replay myself, so I added a recommended follow-up replay item for the new busy/starting queue path.
+<!-- agent:boundary:a8609aa6 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -463,6 +481,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbqbusy] [recommended] Replay JetBrains Run Agent Doc after the authoritative busy/starting queue fix and confirm reroutes now enqueue instead of fail-closing on supervisor busy/starting state.
 - [ ] [#jbhalias] [recommended] Replay JetBrains Run Agent Doc against src/session-share/tasks/buildparty-investor-demo/dev.md after the canonical Claude harness alias fix and confirm authoritative reroutes no longer fail on claude-code/claude mismatch.
 - [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc after the canonical Claude harness alias fix and confirm Claude-owned authoritative actor sessions reroute cleanly without claude-code/claude mismatch errors.
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.

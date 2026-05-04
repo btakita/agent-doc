@@ -150,7 +150,32 @@ Verification:
 - `cargo install --path . --force`
 
 `#edispatch` is still the remaining live-editor validation step; I changed the route semantics it depends on here, but I did not rerun the JetBrains + VS Code manual replay in this cycle.
-<!-- agent:boundary:ef352e34 -->
+❯ Please fix the route error. spec-test-build-install-commit-push
+```
+resync: stash pane %157 is registered in its own project root — skipping kill
+resync: stash pane %161 is registered in its own project root — skipping kill
+resync: stash pane %151 is registered in its own project root — skipping kill
+resync: stash pane %177 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+[sync] found alive agent-doc child (pid 93552) in pane %179 for tasks/monsterrodholders.md
+Error: dispatch-only codex reopen refused to inject into pane %179 for tasks/monsterrodholders.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+```
+### Re: dispatch-only route error on the still-booting `monsterrodholders.md` pane — gpt-5
+
+Root cause was not the dispatch-only route guard itself. The local `src/boost-client/.agent-doc/logs/a9421282-fd96-4943-9af5-3561ed5cb799.log` repro for pane `%179` showed repeated `route_dispatch_only_starting_pane_not_ready ... outcome=timed_out`, then `restart_eval ... ctrl_d=true committed_cycle=false state=healthy action=prompt_user`, then `supervisor_exit reason=user_quit_after_ctrl_d`, and only after the fresh restart on `%179` did route succeed. So the pane was stuck behind the supervisor quit path during startup; route was correctly refusing to inject into a pane that never reached a dispatch-ready prompt.
+
+I fixed that in `src/agent-doc` and pushed `554cd29` to `origin/20260422/codex-agent-backend`:
+- `start.rs` now treats forwarded `Ctrl-D` / stdin EOF on a fresh or fresh-restart Codex child that never surfaced a prompt as failed startup provenance, so it restarts fresh instead of prompting the user.
+- That replacement fresh run now suppresses only the stale inherited pre-prompt `Ctrl-D` byte until a real prompt appears.
+- `README.md`, `SPEC.md`, `specs/supervisor.md`, `specs/codex-support.md`, and `VERSIONS.md` now describe that contract explicitly.
+
+Verification in `src/agent-doc` passed:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+I did not add a new backlog item. The remaining follow-up is still the existing `#edispatch` live JetBrains + VS Code replay; I changed the startup path that replay depends on, but I did not rerun the editor replay itself in this cycle.
+<!-- agent:boundary:c206d441 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

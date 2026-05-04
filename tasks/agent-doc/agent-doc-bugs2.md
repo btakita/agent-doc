@@ -35,12 +35,27 @@ Active backlog:
 - [ ] [#sgown2] Add the durable actor record store with atomic generation updates and keep sessions.json as a read projection during migration. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - 14 more active item(s)
 
-Icebox:
-- [ ] [#2dkn] Create a plan for a sqlite db store to manage sessions for better concurrency/parallelism support
-- [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
-- [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement: `#jberr`.
-- 1 more active item(s)
-<!-- agent:boundary:aff82f69 -->
+❯ Icebox:
+❯ - [ ] [#2dkn] Create a plan for a sqlite db store to manage sessions for better concurrency/parallelism support
+❯ - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
+❯ - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement: `#jberr`.
+❯ - 1 more active item(s)
+❯ do [#sgown1]
+### Re: #sgown1 — gpt-5
+
+Implemented the phase-1 single-owner session actor contract.
+
+- Added `src/agent-doc/specs/08a-session-actor-contract.md` and linked it from the routing/spec index. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- Added `src/agent-doc/src/session_actor.rs` to define monotonic ownership-generation inference plus stable `ownership_transition` log rendering.
+- `src/agent-doc/src/start.rs` now records explicit start generations and annotates `session_start` log entries with `generation=...`.
+- `src/agent-doc/src/sessions.rs` now records generation-aware ownership handoffs on registry rebinds, including transition, supersession, and `session_end origin=registry_rebind` provenance.
+- `src/agent-doc/src/resync.rs` now uses a wider mock-agent readiness window plus a real standalone `>` prompt check so the tmux-backed full suite stays stable under load.
+- Verification completed: `cargo check`, `cargo test`, `cargo build`, `cargo install --path . --force`.
+- Repo closeout: committed in `src/agent-doc` as `89963e4` (`feat: log session actor generations`) and pushed to `origin/20260422/codex-agent-backend`.
+- Left pre-existing unrelated dirty files in `src/agent-doc` untouched: `README.md`, `specs/codex-support.md`, `specs/supervisor.md`, `src/plugin.rs`.
+
+`#sgown1` was already completed and `preflight` reaped the stale checked backlog item during recovery, so there are no additional follow-up backlog mutations for this cycle. The umbrella tracker `#sgown` remains open for `#sgown2`-`#sgown9`.
+<!-- agent:boundary:3c62d3bc -->
 <!-- /agent:exchange -->
 ### End Exchange
 

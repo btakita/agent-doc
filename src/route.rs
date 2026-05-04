@@ -1824,13 +1824,12 @@ fn route_via_authoritative_actor(
         );
     }
 
-    let dispatch_start =
-        dispatch_via_supervisor_ipc(tmux, file, &dispatch_pane, session_id, file_path, harness)?;
     if dispatch_only {
+        send_command_once_unchecked(tmux, &dispatch_pane, file_path, harness)?;
         crate::ops_log::log_op(
             file,
             &format!(
-                "route_dispatch_only_via_actor file={} pane={} harness={} generation={}",
+                "route_dispatch_only_via_actor_direct_pane_submit file={} pane={} harness={} generation={}",
                 file.display(),
                 dispatch_pane,
                 harness.binary,
@@ -1839,6 +1838,9 @@ fn route_via_authoritative_actor(
         );
         return Ok(dispatch_pane);
     }
+
+    let dispatch_start =
+        dispatch_via_supervisor_ipc(tmux, file, &dispatch_pane, session_id, file_path, harness)?;
 
     let ack_pane = require_routed_cycle_ack(
         tmux,
@@ -9525,6 +9527,12 @@ Body\n\
         );
         let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
         let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &actor_pane, "> ", std::time::Duration::from_secs(3));
 
         let doc = dir.path().join("session.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
@@ -9709,14 +9717,25 @@ Body\n\
         .expect("dispatch-only reroute should dispatch through the authoritative actor pane");
         assert_eq!(resolved, actor_pane);
 
-        let trigger =
-            routed_trigger_submit_bytes(&HarnessConfig::codex().trigger_command(&file_path));
-        assert_eq!(*injects.lock().unwrap(), vec![trigger]);
+        assert!(
+            injects.lock().unwrap().is_empty(),
+            "ready authoritative dispatch-only path should submit through tmux pane input instead of supervisor inject"
+        );
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
             Some(actor_pane.as_str())
         );
 
+        let actor_after = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            &HarnessConfig::codex().trigger_command(&file_path),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
+            "dispatch-only reroute should submit the reopen in the authoritative pane: {actor_after}"
+        );
         let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(
             !stale_content.contains("STALE:agent-doc "),
@@ -9747,6 +9766,12 @@ Body\n\
         );
         let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
         let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &actor_pane, "> ", std::time::Duration::from_secs(3));
 
         let doc = dir.path().join("dispatch-only-clear-no-restart.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
@@ -9828,9 +9853,21 @@ Body\n\
             "dispatch-only reroute must not restart Codex just because the latest tracked prompt was /clear"
         );
 
-        let trigger =
-            routed_trigger_submit_bytes(&HarnessConfig::codex().trigger_command(&file_path));
-        assert_eq!(*injects.lock().unwrap(), vec![trigger]);
+        assert!(
+            injects.lock().unwrap().is_empty(),
+            "dispatch-only reroute after session clear should use pane submit instead of supervisor inject"
+        );
+
+        let actor_after = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            &HarnessConfig::codex().trigger_command(&file_path),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
+            "dispatch-only reroute after session clear should still submit the bare reopen in the authoritative pane: {actor_after}"
+        );
 
         let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(

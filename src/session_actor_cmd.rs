@@ -184,25 +184,36 @@ pub fn restart(file: &Path, mode: RestartMode) -> Result<()> {
 pub fn clear(file: &Path) -> Result<()> {
     let ctx = build_context(file)?;
     ensure_supervisor_socket(&ctx)?;
-    let response = crate::supervisor::ipc::send_command(
-        &ctx.supervisor_socket,
-        &IpcMethod::Inject {
-            bytes: crate::supervisor::ipc::submit_bytes("/clear"),
-        },
-    )
-    .with_context(|| {
-        format!(
-            "failed to contact supervisor for {}",
-            ctx.canonical_file.display()
+    let tmux = Tmux::default_server();
+    let pane_sent = ctx
+        .registry_entry
+        .as_ref()
+        .map(|entry| entry.pane.clone())
+        .filter(|pane| tmux.pane_alive(pane));
+
+    if let Some(pane) = pane_sent {
+        send_clear_to_pane(&tmux, &pane, &ctx.canonical_file)?;
+    } else {
+        let response = crate::supervisor::ipc::send_command(
+            &ctx.supervisor_socket,
+            &IpcMethod::Inject {
+                bytes: crate::supervisor::ipc::submit_bytes("/clear"),
+            },
         )
-    })?;
-    if !response.ok {
-        anyhow::bail!(
-            "{}",
-            response
-                .error
-                .unwrap_or_else(|| "supervisor inject request failed".to_string())
-        );
+        .with_context(|| {
+            format!(
+                "failed to contact supervisor for {}",
+                ctx.canonical_file.display()
+            )
+        })?;
+        if !response.ok {
+            anyhow::bail!(
+                "{}",
+                response
+                    .error
+                    .unwrap_or_else(|| "supervisor inject request failed".to_string())
+            );
+        }
     }
     if ctx.harness == "codex" {
         crate::codex_hook::record_external_prompt_for_file(
@@ -216,6 +227,16 @@ pub fn clear(file: &Path) -> Result<()> {
         ctx.canonical_file.display()
     );
     Ok(())
+}
+
+fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path) -> Result<()> {
+    tmux.send_keys(pane, "/clear").with_context(|| {
+        format!(
+            "failed to send `/clear` to authoritative pane {} for {}",
+            pane,
+            file.display()
+        )
+    })
 }
 
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
@@ -652,8 +673,41 @@ mod tests {
     }
 
     #[test]
-    fn clear_inject_records_codex_prompt_state() {
+    fn send_clear_to_pane_submits_clear_command() {
         let dir = tempfile::tempdir().unwrap();
+        let socket = format!("session-clear-direct-pane-{}", uuid::Uuid::new_v4());
+        let iso = crate::sessions::IsolatedTmux::new(&socket);
+        let pane = iso.new_session("test", dir.path()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let output_path = dir.path().join("clear.txt");
+        let done_path = dir.path().join("clear.done");
+        iso.send_keys(
+            &pane,
+            &format!(
+                "sh -lc 'IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"'",
+                output_path.display(),
+                done_path.display()
+            ),
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        send_clear_to_pane(&iso, &pane, Path::new("/tmp/doc.md")).unwrap();
+        for _ in 0..40 {
+            if done_path.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(done_path.exists(), "expected `/clear` to submit through pane input");
+        assert_eq!(std::fs::read_to_string(&output_path).unwrap(), "/clear");
+    }
+
+    #[test]
+    fn clear_falls_back_to_supervisor_inject_when_authoritative_pane_is_not_on_default_tmux() {
+        let dir = tempfile::tempdir().unwrap();
+        let iso = crate::sessions::IsolatedTmux::new("session-clear-direct-pane");
+        let pane = iso.new_session("test", dir.path()).unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(
             &doc,
@@ -679,7 +733,10 @@ mod tests {
         })
         .unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        crate::session_actor::record_session_start(&doc, "session-clear", "%41", "@7", 1).unwrap();
+        let pane_window = iso.pane_window(&pane).unwrap();
+        crate::sessions::register("session-clear", &pane, &doc.to_string_lossy()).unwrap();
+        crate::session_actor::record_session_start(&doc, "session-clear", &pane, &pane_window, 1)
+            .unwrap();
         clear(&doc).unwrap();
         let latest = crate::codex_hook::load_latest_prompt_for_file(&doc)
             .unwrap()

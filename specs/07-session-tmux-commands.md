@@ -41,7 +41,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - When route/startup acknowledgment times out, the binary records `.agent-doc/state/startup-miss/<doc-hash>.json` with pane/session provenance and shows a visible diagnostic in tmux.
 - On the next route/start/sync path, the tool must distinguish between a stale startup-miss marker and a still-stranded owner. A same-pane marker may only be cleared once newer session-log provenance proves a later open run.
 - Successful cycle acknowledgment clears the startup-miss marker.
-- `route --dispatch-only` still uses a one-shot bare reopen instead of the managed acceptance/cycle-ack path, but for an existing managed session that one-shot reopen must go through supervisor IPC instead of direct pane keystrokes. It must reuse the same bounded ready/repair/restart checks before injecting into an existing pane, and a bare reopen must not be injected into a still-booting or otherwise busy Codex pane. A tracked Codex `/clear` may still force a fresh restart on the managed non-dispatch route, but dispatch-only editor reroutes must keep sending the bare reopen into the live session after `session clear`.
+- `route --dispatch-only` still uses a one-shot bare reopen instead of the managed acceptance/cycle-ack path, but for an existing authoritative managed session that one-shot reopen must submit directly through the authoritative pane's tmux input path instead of routing back through supervisor IPC or writing raw bytes into the child PTY. It must reuse the same bounded ready/repair/restart checks before injecting into an existing pane, and a bare reopen must not be injected into a still-booting or otherwise busy Codex pane. A tracked Codex `/clear` may still force a fresh restart on the managed non-dispatch route, but dispatch-only editor reroutes must keep sending the bare reopen into the live session after `session clear`.
 - If that first dispatch-only starting-pane probe times out, route must spend one bounded recovery window looking for a newer same-file startup generation or supervisor handoff before it surfaces a `still booting` refusal. A same-file successor pane may be followed; a cross-file rebind must still fail closed.
 
 ### Live-child ack rules
@@ -165,13 +165,13 @@ single-owner actor controls:
   supervisor restart through IPC instead of relying on route-side restart
   heuristics.
 - `agent-doc session clear <FILE>` injects the harness-native `/clear`
-  equivalent into the authoritative session through the same shared
-  supervisor-owned submit path used by routed reopen and queued
-  slash-command dispatch. The payload remains one canonical single-line
-  submit command, but the authoritative supervisor must deliver it through
-  the claimed pane's tmux input path instead of writing raw reopen bytes
-  straight into the child PTY. For Codex, it still records the clear prompt
-  state so the next reroute can reapply the original launch contract.
+  equivalent into the authoritative session through the same canonical
+  single-line submit command used by routed reopen and queued slash-command
+  dispatch. When the authoritative pane is alive on the default tmux server,
+  the command must submit directly through that pane's tmux input path;
+  otherwise it may fall back to supervisor IPC inject. For Codex, it still
+  records the clear prompt state so the next reroute can reapply the original
+  launch contract.
 - `agent-doc session doctor <FILE> [--repair]` reports actor/registry/supervisor
   drift in one read-only summary, with `--repair` explicitly escalating into the
   destructive repair path before re-checking status.

@@ -55,7 +55,21 @@ Implemented the phase-1 single-owner session actor contract.
 - Left pre-existing unrelated dirty files in `src/agent-doc` untouched: `README.md`, `specs/codex-support.md`, `specs/supervisor.md`, `src/plugin.rs`.
 
 `#sgown1` was already completed and `preflight` reaped the stale checked backlog item during recovery, so there are no additional follow-up backlog mutations for this cycle. The umbrella tracker `#sgown` remains open for `#sgown2`-`#sgown9`.
-<!-- agent:boundary:88e06337 -->
+❯ do [#sgown2]
+### Re: #sgown2 — gpt-5
+
+Implemented the phase-2 durable actor store.
+
+- Added `.agent-doc/session-actors.json` support in `src/session_actor.rs`, including canonical document-keyed actor records, monotonic generation persistence, compare-and-swap guards, and legacy session-log fallback during migration.
+- `src/sessions.rs` now records non-start bindings through the actor store before emitting rebind log projections, so `sessions.json` stays a projection while route/claim/sync rebinds get durable generations.
+- `src/start.rs` now persists authoritative `session_start` actor records after generation assignment, keeping fresh starts from double-incrementing while still migrating from legacy logs.
+- Updated `specs/08a-session-actor-contract.md` to document the durable store path and the fail-closed monotonicity requirement.
+- Verification completed: `cargo check`, `cargo test`, `cargo build`, `cargo install --path . --force`.
+- Repo closeout: committed in `src/agent-doc` as `3acf5f5` (`feat: add durable session actor store`) and pushed to `origin/20260422/codex-agent-backend`.
+- Left pre-existing unrelated dirty files in `src/agent-doc` untouched: `README.md`, `specs/codex-support.md`, `specs/supervisor.md`, `src/plugin.rs`.
+
+`#sgown2` is complete. The umbrella backlog item for the remaining transition steps stays open for `#sgown3`-`#sgown9`.
+<!-- agent:boundary:32f01cd3 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

@@ -465,7 +465,40 @@ Live replay:
 Git:
 - `src/agent-doc`: `7563ecf` `fix: keep route wait logging utf8 safe`
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:eb9eb480 -->
+❯ do [#sceno]. spec-test-build-install-commit-push
+### Re: sceno closeout — gpt-5
+
+Plan executed: `tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md`
+
+`#sceno` is complete.
+
+Root cause was the optional closeout-sidecar read pattern, not the pending-done guard logic itself. Several loaders still did `exists()` followed by `read_*()`, which left a narrow race where a temp sidecar could disappear between discovery and read and surface `No such file or directory (os error 2)` during `session-check` / closeout inspection. I replaced those reads with direct optional-load helpers that treat only `NotFound` as absence while preserving all other I/O failures.
+
+Updated:
+- `src/fs_util.rs`
+- `src/cycle_state.rs`
+- `src/capture.rs`
+- `src/session_check.rs`
+- `src/snapshot.rs`
+- `src/startup_miss.rs`
+- `specs/07-closeout-commands.md`
+- `VERSIONS.md`
+- `README.md`
+- `SPEC.md`
+- `CLAUDE.md`
+- `SKILL.md`
+- `.claude/skills/agent-doc/SKILL.md`
+
+Verification:
+- `cargo test` (`1791 passed; 0 failed` on the final rerun)
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+- `agent-doc`: `7dcf001` `fix: harden optional closeout sidecar reads`
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:e4916f5d -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -481,7 +514,6 @@ Add a Plugin Editor command to clear the context
 
 <!-- agent:backlog -->
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
-- [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
 - [ ] [#jberr] [recommended] Keep JetBrains Run Agent Doc route failures copyable/persistent instead of transient-only. Plan: tasks/agent-doc/plan-jb-route-error-capture.md
 <!-- /agent:backlog -->
 

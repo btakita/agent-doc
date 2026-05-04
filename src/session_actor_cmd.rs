@@ -220,8 +220,42 @@ pub fn clear(file: &Path) -> Result<()> {
 
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
     if repair {
+        let closeout = crate::repair::repair(file)?;
+        let repair_notes = crate::sync::repair_file_state(file)?;
         crate::resync::run_fix(Some(file), None)?;
         println!("Applied repair path for {}.", file.display());
+        if closeout.repaired() {
+            println!(
+                "closeout_repair: {}",
+                match closeout {
+                    crate::repair::RepairOutcome::ReplayedResponse => {
+                        "replayed a captured response through the normal closeout path"
+                    }
+                    crate::repair::RepairOutcome::AlreadyApplied => {
+                        "completed a pending commit boundary for an already-applied response"
+                    }
+                    crate::repair::RepairOutcome::ManualTailRemovalRespected => {
+                        "respected a manual assistant-tail removal while closing the cycle"
+                    }
+                    crate::repair::RepairOutcome::StalePreflightLockRepaired => {
+                        "closed a stale preflight-started cycle"
+                    }
+                    crate::repair::RepairOutcome::CommitBoundaryRecovered => {
+                        "recovered a missing commit boundary"
+                    }
+                    crate::repair::RepairOutcome::TemplateNormalized => {
+                        "normalized template drift before closeout"
+                    }
+                    crate::repair::RepairOutcome::CompletedBacklogReaped => {
+                        "reaped a stale completed backlog item during recovery"
+                    }
+                    crate::repair::RepairOutcome::Noop => unreachable!(),
+                }
+            );
+        }
+        for note in repair_notes {
+            println!("{note}");
+        }
     }
     let ctx = build_context(file)?;
     print_status_summary(&ctx);

@@ -92,6 +92,11 @@ Later phases may refine caller values without changing the field names.
   `history`, `attach`, `restart`, `clear`, and `doctor` read or mutate the same
   authoritative record and supervisor IPC path instead of inventing separate
   tmux-only heuristics in the CLI or plugins.
+- The phase-7 repair boundary is now explicit: normal `sync` may capture
+  diagnostics and fail closed on stash/window or closeout drift, but it does
+  not run hidden layout rescue or closeout replay anymore. Those mutations live
+  behind explicit repair surfaces such as `agent-doc repair <FILE>` and
+  `agent-doc session doctor <FILE> --repair`.
 - `sessions.json` remains a projection/binding helper during migration, not the
   final actor store.
 - Session logs are the source of transition provenance and generation history.

@@ -312,6 +312,12 @@ struct MissingRegisteredPaneRepair {
     block_auto_start_reason: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MissingRegisteredPaneRepairMode {
+    InspectOnly,
+    ExplicitRepair,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 struct DeadPaneDiagnostics {
     observed_window: Option<String>,
@@ -912,6 +918,35 @@ fn recover_missing_pane_closeout(
     }
 }
 
+fn pending_missing_pane_repair_phase(file: &Path) -> Option<&'static str> {
+    let state = crate::cycle_state::load(file).ok().flatten()?;
+    match state.phase {
+        crate::cycle_state::CyclePhase::PreflightStarted => Some("preflight_started"),
+        crate::cycle_state::CyclePhase::ResponseCaptured => Some("response_captured"),
+        crate::cycle_state::CyclePhase::WriteApplied => Some("write_applied"),
+        crate::cycle_state::CyclePhase::Committed => None,
+    }
+}
+
+fn missing_pane_manual_repair_reason(file: &Path, phase: &str) -> String {
+    if let Ok(Some(message)) = crate::session_check::detect_uncommitted_closeout_drift(file) {
+        return message;
+    }
+    let detail = match phase {
+        "preflight_started" => "stale preflight state is still open",
+        "response_captured" => "a captured response still needs explicit closeout recovery",
+        "write_applied" => "the write reached disk but the commit boundary is still open",
+        _ => "manual repair is still required",
+    };
+    format!(
+        "normal sync will not auto-repair {phase} for {} ({}). Run `agent-doc repair {}` or `agent-doc session doctor {} --repair` before syncing again",
+        file.display(),
+        detail,
+        file.display(),
+        file.display()
+    )
+}
+
 fn missing_pane_closeout_block_reason(file: &Path, phase: &str, error: Option<&str>) -> String {
     if let Ok(Some(message)) = crate::session_check::detect_uncommitted_closeout_drift(file) {
         return message;
@@ -929,11 +964,21 @@ fn repair_missing_registered_pane(
     session_id: &str,
     pane_id: &str,
     last_known_window: Option<&str>,
+    mode: MissingRegisteredPaneRepairMode,
 ) -> Result<MissingRegisteredPaneRepair> {
     let dead_pane =
         capture_dead_pane_diagnostics(tmux, file, session_id, pane_id, last_known_window)?;
-    let (closeout_recovery_phase, closeout_recovery_outcome, closeout_recovery_error) =
-        recover_missing_pane_closeout(file, session_id, pane_id);
+    let (closeout_recovery_phase, closeout_recovery_outcome, closeout_recovery_error) = match mode
+    {
+        MissingRegisteredPaneRepairMode::InspectOnly => (
+            pending_missing_pane_repair_phase(file).map(str::to_string),
+            None,
+            None,
+        ),
+        MissingRegisteredPaneRepairMode::ExplicitRepair => {
+            recover_missing_pane_closeout(file, session_id, pane_id)
+        }
+    };
     let recorded_session_loss = crate::startup_miss::record_session_loss(
         file,
         session_id,
@@ -948,24 +993,31 @@ fn repair_missing_registered_pane(
             .and_then(|diag| diag.observed_window.as_deref())
             .or(last_known_window),
     )?;
-    let repaired_stale_preflight = if closeout_recovery_phase.is_none() {
-        matches!(
-            crate::repair::repair_stale_preflight_started_cycle(file)?,
-            crate::repair::RepairOutcome::StalePreflightLockRepaired
-        )
-    } else {
-        false
+    let repaired_stale_preflight = match mode {
+        MissingRegisteredPaneRepairMode::InspectOnly => false,
+        MissingRegisteredPaneRepairMode::ExplicitRepair if closeout_recovery_phase.is_none() => {
+            matches!(
+                crate::repair::repair_stale_preflight_started_cycle(file)?,
+                crate::repair::RepairOutcome::StalePreflightLockRepaired
+            )
+        }
+        MissingRegisteredPaneRepairMode::ExplicitRepair => false,
     };
-    let block_auto_start_reason =
-        if closeout_recovery_phase.is_some() && closeout_recovery_outcome.is_none() {
+    let block_auto_start_reason = match mode {
+        MissingRegisteredPaneRepairMode::InspectOnly => closeout_recovery_phase
+            .as_deref()
+            .map(|phase| missing_pane_manual_repair_reason(file, phase)),
+        MissingRegisteredPaneRepairMode::ExplicitRepair
+            if closeout_recovery_phase.is_some() && closeout_recovery_outcome.is_none() =>
+        {
             Some(missing_pane_closeout_block_reason(
                 file,
                 closeout_recovery_phase.as_deref().unwrap_or("unknown"),
                 closeout_recovery_error.as_deref(),
             ))
-        } else {
-            None
-        };
+        }
+        MissingRegisteredPaneRepairMode::ExplicitRepair => None,
+    };
     Ok(MissingRegisteredPaneRepair {
         dead_pane,
         recorded_session_loss,
@@ -975,6 +1027,74 @@ fn repair_missing_registered_pane(
         closeout_recovery_error,
         block_auto_start_reason,
     })
+}
+
+pub(crate) fn repair_file_state(file: &Path) -> Result<Vec<String>> {
+    let tmux = Tmux::default_server();
+    let canonical = file
+        .canonicalize()
+        .unwrap_or_else(|_| crate::git::resolve_absolute_file_path(file));
+    let mut actions = Vec::new();
+
+    let columns = vec![canonical.to_string_lossy().to_string()];
+    if let Some(session_name) = resolve_sync_target_session(&tmux, None, &columns, None) {
+        repair_layout(&tmux, &session_name, "agent-doc")?;
+        actions.push(format!(
+            "Repaired `agent-doc`/`stash` layout in tmux session `{session_name}`."
+        ));
+    }
+
+    let content = std::fs::read_to_string(&canonical)
+        .with_context(|| format!("failed to read {}", canonical.display()))?;
+    let (frontmatter, _) =
+        parse_frontmatter_for_sync(&content, &canonical, "session doctor --repair")?;
+    let Some(session_id) = frontmatter.session else {
+        return Ok(actions);
+    };
+    let Some(entry) = lookup_registry_entry_for_file_session(&canonical, &session_id) else {
+        return Ok(actions);
+    };
+    if tmux.pane_alive(&entry.pane) {
+        return Ok(actions);
+    }
+
+    let repair = repair_missing_registered_pane(
+        &tmux,
+        &canonical,
+        &session_id,
+        &entry.pane,
+        Some(entry.window.as_str()),
+        MissingRegisteredPaneRepairMode::ExplicitRepair,
+    )?;
+    if repair.recorded_session_loss {
+        actions.push(format!(
+            "Recorded missing-pane diagnostics for `{}` on pane `{}`.",
+            canonical.display(),
+            entry.pane
+        ));
+    }
+    if let Some(phase) = repair.closeout_recovery_phase.as_deref() {
+        if let Some(outcome) = repair.closeout_recovery_outcome {
+            actions.push(format!(
+                "Recovered `{phase}` closeout for `{}` ({}) before replacement logic resumes.",
+                canonical.display(),
+                repair_outcome_label(outcome)
+            ));
+        } else if let Some(err) = repair.closeout_recovery_error.as_deref() {
+            actions.push(format!(
+                "Explicit repair still could not finish `{phase}` closeout for `{}`: {}",
+                canonical.display(),
+                err
+            ));
+        }
+    } else if repair.repaired_stale_preflight {
+        actions.push(format!(
+            "Closed a stale `preflight_started` cycle for `{}`.",
+            canonical.display()
+        ));
+    }
+
+    Ok(actions)
 }
 
 fn skip_auto_start_for_recent_session_loss(file: &Path, session_id: &str) -> Result<bool> {
@@ -1244,47 +1364,7 @@ fn open_session_log_owner_fail_closed_diagnostic(
     crate::startup_miss::session_log_diagnostic(file, session_id)
 }
 
-fn phase2_rescue_candidates_for_files(tmux: &Tmux, col_args: &[String]) -> Vec<String> {
-    let mut seen = HashSet::new();
-    let mut panes = Vec::new();
-
-    for file_path in col_args
-        .iter()
-        .flat_map(|arg| arg.split(','))
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-    {
-        if !file_path.exists() {
-            continue;
-        }
-        let Ok(content) = std::fs::read_to_string(&file_path) else {
-            continue;
-        };
-        let Ok((fm, _)) = frontmatter::parse(&content) else {
-            continue;
-        };
-        let Some(session_id) = fm.session.as_deref() else {
-            continue;
-        };
-        if let Some(actor_pane) =
-            authoritative_actor_pane_for_document(tmux, &file_path, session_id)
-            && seen.insert(actor_pane.clone())
-        {
-            panes.push(actor_pane);
-            continue;
-        }
-        let Some(entry) = lookup_registry_entry_for_file_session(&file_path, session_id) else {
-            continue;
-        };
-        if tmux.pane_alive(&entry.pane) && seen.insert(entry.pane.clone()) {
-            panes.push(entry.pane.clone());
-        }
-    }
-
-    panes
-}
-
+#[cfg(test)]
 fn rescue_missing_agent_doc_window_from_candidates(
     tmux: &Tmux,
     session_name: &str,
@@ -2013,8 +2093,8 @@ fn run_with_options(
         focus,
         auto_start_mode.log_label()
     ));
-    // Repair layout before anything else: consolidate stash windows and ensure
-    // the agent-doc window exists.
+    // Resolve the target session/window without mutating stash/layout state.
+    // Phase-7 keeps layout rescue on explicit repair surfaces only.
     let target_session = resolve_sync_target_session(tmux, window, col_args, focus);
     let mut effective_window = match (window, target_session.as_deref()) {
         (Some(w), _) => Some(w.to_string()),
@@ -2022,19 +2102,6 @@ fn run_with_options(
         (None, None) => None,
     };
     if let Some(ref session_name) = target_session {
-        let _ = repair_layout(tmux, session_name, "agent-doc");
-        if resolve_agent_doc_window_id(tmux, session_name, "agent-doc").is_none() {
-            let rescue_candidates = phase2_rescue_candidates_for_files(tmux, col_args);
-            if rescue_missing_agent_doc_window_from_candidates(
-                tmux,
-                session_name,
-                "agent-doc",
-                &rescue_candidates,
-            ) {
-                let _ = repair_layout(tmux, session_name, "agent-doc");
-            }
-        }
-        sync_log("repair_layout completed");
         if let Some(resolved_window_id) =
             resolve_agent_doc_window_id(tmux, session_name, "agent-doc")
             && effective_window.as_deref() != Some(resolved_window_id.as_str())
@@ -2046,6 +2113,13 @@ fn run_with_options(
                 );
             }
             effective_window = Some(resolved_window_id);
+        } else {
+            let warning = format!(
+                "[sync] session {} has no visible agent-doc window; normal sync will not auto-repair stash/layout drift. Use `agent-doc fix` or `agent-doc session doctor <file> --repair` if you want layout repair.",
+                session_name
+            );
+            eprintln!("{}", warning);
+            sync_log(&warning);
         }
     }
     let window = effective_window.as_deref();
@@ -2055,7 +2129,7 @@ fn run_with_options(
         let pane_count = tmux.list_window_panes(w).map(|p| p.len()).unwrap_or(0);
         let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();
         sync_log(&format!(
-            "checkpoint:post-repair window={} panes={} list={:?}",
+            "checkpoint:post-window-resolution window={} panes={} list={:?}",
             w, pane_count, pane_list
         ));
     }
@@ -2176,56 +2250,6 @@ fn run_with_options(
             None => Some(FileResolution::Unmanaged),
         }
     };
-
-    // Self-healing: if the target window doesn't exist (was deleted when all panes
-    // were stashed), recreate it by breaking a registered pane out of the stash.
-    if let Some(w) = window {
-        let window_exists = tmux
-            .list_window_panes(w)
-            .map(|p| !p.is_empty())
-            .unwrap_or(false);
-        if !window_exists {
-            eprintln!(
-                "[sync] target window {} does not exist, attempting to recreate from stash",
-                w
-            );
-            // Find any registered pane that's alive (even in stash)
-            let all_files: Vec<PathBuf> = col_args
-                .iter()
-                .flat_map(|arg| arg.split(','))
-                .map(|s| PathBuf::from(s.trim()))
-                .collect();
-            for file_path in &all_files {
-                if let Ok(content) = std::fs::read_to_string(file_path)
-                    && let Ok((fm, _)) = frontmatter::parse(&content)
-                    && let Some(ref sid) = fm.session
-                {
-                    let rescue_pane = authoritative_actor_pane_for_document(tmux, file_path, sid)
-                        .or_else(|| {
-                            lookup_registry_entry_for_file_session(file_path, sid)
-                                .map(|entry| entry.pane)
-                        });
-                    let Some(rescue_pane) = rescue_pane.filter(|pane| tmux.pane_alive(pane)) else {
-                        continue;
-                    };
-                    eprintln!(
-                        "[sync] rescuing pane {} for {} from stash",
-                        rescue_pane,
-                        file_path.display()
-                    );
-                    // break-pane creates a new window with this pane
-                    if tmux.break_pane(&rescue_pane).is_ok() {
-                        // Rename the new window to "agent-doc"
-                        if let Ok(new_win) = tmux.pane_window(&rescue_pane) {
-                            let _ = tmux.raw_cmd(&["rename-window", "-t", &new_win, "agent-doc"]);
-                            eprintln!("[sync] recreated window {} as agent-doc", new_win);
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
 
     // Pre-sync: auto-start agent sessions for files that have session UUIDs
     // but no alive panes. Full mode may provision after recovery/fail-closed
@@ -2707,6 +2731,7 @@ fn run_with_options(
                     &session_id,
                     pane,
                     registered_entry.as_ref().map(|entry| entry.window.as_str()),
+                    MissingRegisteredPaneRepairMode::InspectOnly,
                 ) {
                     Ok(repair) => {
                         if let Some(dead) = repair.dead_pane.as_ref() {
@@ -2790,6 +2815,22 @@ fn run_with_options(
                                     err
                                 ));
                             }
+                        }
+                        if let Some(reason) = repair.block_auto_start_reason.as_deref() {
+                            eprintln!(
+                                "[sync] {}",
+                                reason
+                            );
+                            sync_log(&format!(
+                                "missing-pane auto-start blocked file={} pane={} reason={}",
+                                file_path.display(),
+                                pane,
+                                reason
+                            ));
+                            blocked_unresolved_files
+                                .borrow_mut()
+                                .insert(file_path.to_path_buf());
+                            continue;
                         } else if let Some(err) = repair.closeout_recovery_error.as_deref() {
                             eprintln!(
                                 "[sync] warning: failed to inspect closeout state for {} after pane {} disappeared: {}",
@@ -2813,26 +2854,6 @@ fn run_with_options(
                                 "repaired stale preflight_started cycle before auto-start for {}",
                                 file_path.display()
                             ));
-                        }
-                        if let Some(reason) = repair.block_auto_start_reason.as_deref() {
-                            let reason = sanitize_excerpt(reason)
-                                .unwrap_or_else(|| "manual repair required".to_string());
-                            eprintln!(
-                                "[sync] manual closeout repair required for {} after pane {} disappeared — skipping auto-start: {}",
-                                file_path.display(),
-                                pane,
-                                reason
-                            );
-                            sync_log(&format!(
-                                "missing-pane closeout repair required file={} pane={} action=skip_auto_start reason={}",
-                                file_path.display(),
-                                pane,
-                                reason
-                            ));
-                            blocked_unresolved_files
-                                .borrow_mut()
-                                .insert(file_path.to_path_buf());
-                            continue;
                         }
                     }
                     Err(e) => {
@@ -3031,10 +3052,6 @@ fn run_with_options(
         &resolve_file,
         &tmux_router_options,
     )?;
-
-    if let Some(ref session_name) = target_session {
-        let _ = repair_layout(tmux, session_name, "agent-doc");
-    }
 
     // Log pane count after tmux_router::sync
     if let Some(w) = window {
@@ -5308,6 +5325,7 @@ mod tests {
             "session-lost-pane",
             "%422",
             Some("@17"),
+            MissingRegisteredPaneRepairMode::ExplicitRepair,
         )
         .unwrap();
         assert!(repair.recorded_session_loss);
@@ -5323,6 +5341,61 @@ mod tests {
             .unwrap()
             .expect("session log should be readable");
         assert!(status.latest_session_closed());
+    }
+
+    #[test]
+    fn inspect_only_missing_registered_pane_blocks_manual_closeout_repair() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks").join("captured-pane-loss-inspect.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: session-captured-pane-loss-inspect\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        init_git_repo(tmp.path(), &doc);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let response = "<!-- patch:exchange -->\n### Re: topic — gpt-5\nRecovered body.\n<!-- /patch:exchange -->\n";
+        crate::repair::save_pending(&doc, response).unwrap();
+
+        let repair = repair_missing_registered_pane(
+            &Tmux::default_server(),
+            &doc,
+            "session-captured-pane-loss-inspect",
+            "%422",
+            Some("@17"),
+            MissingRegisteredPaneRepairMode::InspectOnly,
+        )
+        .unwrap();
+        assert_eq!(
+            repair.closeout_recovery_phase.as_deref(),
+            Some("response_captured")
+        );
+        assert!(repair.closeout_recovery_outcome.is_none());
+        assert!(repair.closeout_recovery_error.is_none());
+        let block_reason = repair
+            .block_auto_start_reason
+            .as_deref()
+            .expect("inspect-only mode should block until explicit repair runs");
+        assert!(block_reason.contains("agent-doc repair"));
+        assert!(block_reason.contains("session doctor"));
+        assert!(!repair.repaired_stale_preflight);
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::ResponseCaptured);
+        assert!(snapshot::pending_path_for(&doc).unwrap().exists());
     }
 
     #[test]
@@ -5366,6 +5439,7 @@ mod tests {
             "session-captured-pane-loss",
             "%422",
             Some("@17"),
+            MissingRegisteredPaneRepairMode::ExplicitRepair,
         )
         .unwrap();
         assert!(repair.recorded_session_loss);
@@ -5460,6 +5534,7 @@ mod tests {
             "session-write-applied-pane-loss",
             "%423",
             Some("@17"),
+            MissingRegisteredPaneRepairMode::ExplicitRepair,
         )
         .unwrap();
         assert!(repair.recorded_session_loss);
@@ -5516,8 +5591,15 @@ mod tests {
         );
 
         let repair =
-            repair_missing_registered_pane(&iso, &doc, "dead-pane-session", &pane, Some("@17"))
-                .unwrap();
+            repair_missing_registered_pane(
+                &iso,
+                &doc,
+                "dead-pane-session",
+                &pane,
+                Some("@17"),
+                MissingRegisteredPaneRepairMode::ExplicitRepair,
+            )
+            .unwrap();
         let dead = repair
             .dead_pane
             .as_ref()
@@ -5607,6 +5689,7 @@ mod tests {
             "session-captured-pane-loss-invalid-backlog",
             "%424",
             Some("@17"),
+            MissingRegisteredPaneRepairMode::ExplicitRepair,
         )
         .unwrap();
         assert!(repair.recorded_session_loss);

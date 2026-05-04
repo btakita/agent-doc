@@ -107,7 +107,11 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Post-sync registry updates must fail closed if tmux-router reports a
   geometry-only pane assignment that disagrees with a still-live authoritative
   actor pane for that document.
-- Before replacing a missing pane, sync must first attempt closeout recovery for `response_captured` or `write_applied` cycles. If that recovery fails, sync must fail closed and preserve the durable capture instead of provisioning another pane.
+- When a missing pane coincides with an open `preflight_started`,
+  `response_captured`, or `write_applied` cycle, normal sync must fail closed
+  and preserve the current tmux layout until an explicit repair surface closes
+  that state. `agent-doc repair <FILE>` and `agent-doc session doctor <FILE>
+  --repair` own that recovery boundary.
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.
 - If any visible file stays blocked under passive `--no-autostart`, sync must preserve the current visible tmux layout and warn instead of reconciling the remaining foreign pane set into a new authoritative layout.
@@ -121,9 +125,15 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 ## repair_layout
 
-`repair_layout` runs before sync and again after tmux-router reconciliation.
+`repair_layout` is an explicit repair primitive, not a normal sync side effect.
 
-- It consolidates duplicate stash windows, recreates the `agent-doc` window from stash when needed, and normalizes window indices so `agent-doc` remains window `0` with stash windows immediately after it.
+- `agent-doc session doctor <FILE> --repair` and other repair-oriented commands
+  may call it to consolidate duplicate stash windows, recreate the `agent-doc`
+  window from stash when needed, and normalize window indices so `agent-doc`
+  remains window `0` with stash windows immediately after it.
+- Ordinary `agent-doc sync` resolves the target session/window without invoking
+  `repair_layout`; if stash/window drift is detected, sync warns and leaves the
+  destructive or heuristic layout repair for an explicit repair command.
 
 ## session
 

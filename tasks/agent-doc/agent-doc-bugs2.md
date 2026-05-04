@@ -369,7 +369,44 @@ Verification completed in `src/agent-doc`:
 Repo closeout in `src/agent-doc`: committed as `1e807fd` (`fix: normalize supervisor ipc submit bytes`) and pushed to `origin/20260422/codex-agent-backend`.
 
 I did not run a live JetBrains-managed tmux repro after the patch, so I added a recommended backlog follow-up for that manual replay.
-<!-- agent:boundary:027d6cf2 -->
+do [#jbipcr]. I am still getting routing errors from `Run Agent Doc`
+```
+resync: stash pane %202 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+Error: authoritative actor generation 183 for tasks/monsterrodholders.md owns pane %206 but route will not inject a new trigger because the authoritative actor is still starting
+```
+```
+[route] target tmux session: 4
+Error: authoritative actor generation 81 for tasks/agent-doc/agent-doc-bugs2.md owns pane %192 but route will not inject a new trigger because the authoritative actor is busy
+```
+
+❯ spec-test-build-install-commit-push
+### Re: JB Plugin `Run Agent Doc` routing errors — gpt-5
+
+I reproduced the code path behind the repeated routed-session refusals.
+
+Root cause:
+- The supervisor-side actor lifecycle in `src/agent-doc/src/start.rs` only converted `busy -> ready` on the first prompt ever seen from the child because that transition was gated by `prompt_visible_once`.
+- After any routed IPC reopen marked the actor `busy`, later idle prompts from the same child no longer restored the supervisor actor state to `ready`.
+- That left healthy panes wedged in supervisor state `busy`, so later JetBrains `Run Agent Doc` reroutes failed closed with `authoritative actor ... is busy` even though the pane had already returned to an idle prompt.
+- The `still starting` refusal remains legitimate while a child is actually booting, but this patch prevents the post-start prompt from staying stuck in the non-ready state once the child is idle.
+
+Implemented:
+- Added `prompt_visible_requires_ready_transition()` in `src/agent-doc/src/start.rs` so `prompt_visible_once` stays a child-lifecycle fact for restart heuristics, while repeated idle prompts can still drive the supervisor actor state back to `ready` after routed or auto-trigger dispatches.
+- Added regression tests covering the first-prompt case and the later `busy -> ready` recovery case.
+- Updated `specs/08-session-routing.md` and `specs/08a-session-actor-contract.md` to make the repeated prompt-driven ready transition explicit.
+
+Verification completed in `src/agent-doc`:
+- `cargo check`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Repo closeout in `src/agent-doc`: committed as `8be606b` (`fix: restore ready state after routed dispatch`) and pushed to `origin/20260422/codex-agent-backend`.
+
+I did not run a live JetBrains-managed replay myself, so `#jbipcr` is gated pending that manual validation step.
+
+<!-- agent:boundary:6d29b471 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -397,7 +434,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc against a healthy authoritative actor session and confirm rerouted submits no longer draft a literal newline before the reopen.
+- [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc against a healthy authoritative actor session and confirm rerouted submits no longer draft a literal newline before the reopen.
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.
 - [ ] [#devmdcmt] [recommended] `agent-doc` left `src/session-share/tasks/buildparty-investor-demo/dev.md` in a synthetic `write_stream` cycle with `phase=write_applied` after the response had already landed, so `session-check` still failed until an explicit later `agent-doc commit` closed it. Create a fix plan only: reproduce the exact template/CRDT closeout path that writes the response, verify why no terminal commit/finalize step followed, compare the failure with `#rspcmt`, trace any boundary/backlog/session-check interaction that allows `write_applied` to survive as a nonterminal state, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports a completed turn until the document closeout is verifiably committed.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.

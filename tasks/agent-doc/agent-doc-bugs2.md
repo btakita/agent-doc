@@ -474,12 +474,35 @@ Repo closeout:
 - `src/tmux-router`: committed as `e2681a1` (`fix: batch routed tmux submit keys`) and pushed to `origin/main`
 - `src/agent-doc`: committed as `2ac667a` (`fix: stabilize busy reroute handoff`) and pushed to `origin/20260422/codex-agent-backend`
 
+❯ I did not run a live JetBrains-managed replay in this cycle. The existing replay items `#jbqbusy`, `#jbipcr`, and `#edispatch` remain the manual validation path; I did not add a new backlog item.
+### Re: JB Plugin `Run Agent Doc` Enter submit path — gpt-5
+
+Implemented the fix in both repos.
+
+- `src/tmux-router/src/tmux.rs` now batches literal text plus `Enter` into one tmux invocation, so the non-supervisor fallback cannot leave a drafted `agent-doc ...` command sitting in the pane while a later submit races or gets lost.
+- `src/agent-doc/src/route.rs` now binds reroute ownership to the file-derived registry root during busy-session recovery and restart handoff, and the busy-restart path can adopt the replacement pane through the same validated dispatch registration path instead of CWD-dependent lookups. That was the remaining reason the full parallel suite could still fail while I was fixing the submit path.
+- Updated `src/tmux-router/README.md`, `src/tmux-router/docs/api-reference.md`, `src/tmux-router/VERSIONS.md`, `src/agent-doc/specs/08-session-routing.md`, and `src/agent-doc/VERSIONS.md` to document the single-invocation submit contract and the reroute handoff behavior.
+
+Verification completed:
+- `cargo fmt --check` in `src/agent-doc` and `src/tmux-router`
+- `cargo test` in `src/tmux-router`
+- `cargo test` in `src/agent-doc` (parallel suite: `1828` unit tests plus integration and CLI suites)
+- `cargo install --path . --force` in `src/agent-doc`
+
+Repo closeout:
+- `src/tmux-router`: committed as `e2681a1` (`fix: batch routed tmux submit keys`) and pushed to `origin/main`
+- `src/agent-doc`: committed as `2ac667a` (`fix: stabilize busy reroute handoff`) and pushed to `origin/20260422/codex-agent-backend`
+
 I did not run a live JetBrains-managed replay in this cycle. The existing replay items `#jbqbusy`, `#jbipcr`, and `#edispatch` remain the manual validation path; I did not add a new backlog item.
-<!-- agent:boundary:1d8e63eb -->
+<!-- agent:boundary:75432a3a -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
+Why is there a non-supervisor path? We should unify all communication through the supervisor actor and remove the non-supervisor path. The supervisor actor path should be 100% reliable and fast. Note that if the supervisor process is manually stopped and restarted, the routing to the supervisor process must work flawlessly. spec-test-build-install-commit-push
+---
+A visible unselected editor's (/home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md) tmux pane is removed from the agent-doc tmux window during an active turn. Syncing brings back the tmux pane. The pane should always remain visible if the document is visible in the editor or was the last visible agent doc. This regression has been around for a few days at least. Please identify root cause(s) and fix. spec-test-build-install-commit-push 
+---
 do [#jbqbusy]. spec-test-build-install-commit-push
 ---
 "Press Enter to restart, or 'q' to exit."

@@ -638,11 +638,34 @@ Git:
 - pushed to `origin/20260422/codex-agent-backend`
 
 ❯ No follow-up backlog item remains from this fix.
-<!-- agent:boundary:5b16860e -->
+### Re: passive editor sync fast handoff — gpt-5
+
+I tightened the passive `agent-doc sync --no-autostart` path so split-layout editor selection no longer pays the full ownership-recovery cost on the happy path.
+
+What changed:
+- `src/sync.rs` now takes the fast handoff order for safe-passive sync: latest matching session-log pane first, then an alive registered pane rooted to the same document, and only then a cold-start when neither exists.
+- The expensive supervisor/process-tree recovery stays in place for the non-passive and non-happy-path cases instead of blocking every editor tab switch.
+- Added regression coverage for the alive-registered-pane passive-path reuse case.
+- Updated the spec/instruction surfaces (`README.md`, `SPEC.md`, `CLAUDE.md`, `.claude/skills/agent-doc/SKILL.md`, `editors/SPEC.md`, `editors/jetbrains/SPEC.md`, `VERSIONS.md`) so `audit-docs` stays aligned with the new contract.
+
+Verification / build / install:
+- `cargo test` (`1801 passed; 0 failed` plus integration/doc tests)
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+- `src/agent-doc`: `ffbb5f8` `fix: speed up passive sync handoff`
+- pushed to `origin/20260422/codex-agent-backend`
+
+❯ No follow-up backlog item remains from this fix.
+<!-- agent:boundary:1f31bdfb -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
+agent-doc incorrectly stashed /home/brian/work/btakita/agent-loop/src/session-share/tasks/claudescore-3.md while the turn was running and no user action was taken. I called `agent-doc sync` and the running tmux pane was unstashed back in the agent-doc window. Please identify the root cause and fix. spec-test-build-install-commit-push
+---
 agent-doc running /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md with Codex is failing due to the sandbox. Please help me to DISABLE THE CODEX SANDBOX. I don't want agent-doc to bypass the sandbox by default but for my environment I want to bypass the sandbox. spec-test-build-install-commit-push
 ---
 I saw this error. Id the root cause and fix. spec-test-build-install-commit-push

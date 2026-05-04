@@ -117,8 +117,25 @@ That replay stayed on the passive fast path: sync reused the existing registered
 
 I also re-ran the current `src/agent-doc` verification/build/install path on the existing source state at `7be3375`: full `cargo test` passed (`1808` unit/integration tests plus the integration suites), `cargo build` passed, and `cargo install --path . --force` replaced the local binary.
 
-I did not make a new source commit or push because the replay and current regression/build suite both passed without requiring an additional code change. I marked `#mrhreplay` done and added one new follow-up item for a different shape that still appeared afterward: a later routed `monsterrodholders.md` dispatch logged `route_dispatch_only_sent` on `%175`, then `registered_pane_missing` / `session_end origin=sync_missing_pane`, and rebound the live owner to `%176`. That churn happened after the passive replay, so it needs separate route-path investigation rather than keeping `#mrhreplay` open.
-<!-- agent:boundary:b57f16c8 -->
+❯ I did not make a new source commit or push because the replay and current regression/build suite both passed without requiring an additional code change. I marked `#mrhreplay` done and added one new follow-up item for a different shape that still appeared afterward: a later routed `monsterrodholders.md` dispatch logged `route_dispatch_only_sent` on `%175`, then `registered_pane_missing` / `session_end origin=sync_missing_pane`, and rebound the live owner to `%176`. That churn happened after the passive replay, so it needs separate route-path investigation rather than keeping `#mrhreplay` open.
+❯ do [#mrhroute] [#kpane]. spec-test-build-install-commit-push
+### Re: #mrhroute + #kpane — gpt-5
+
+I fixed both paths in `src/agent-doc` and pushed `fc34a2e` to `origin/20260422/codex-agent-backend`.
+
+For `#kpane`, the remaining pane-loss repro was the fresh keepalive successor inheriting the completed run's raw pre-prompt `Ctrl-D` byte. That let a successful committed run log `ctrl_d_committed_cycle_restart_fresh`, then immediately fall back into `ctrl_d_prompt_user` / `user_quit_after_ctrl_d` on the successor. `start.rs` now suppresses only stale inherited `Ctrl-D` bytes before that keepalive successor surfaces a real prompt; fresh `Ctrl-D` still works normally once the prompt is back.
+
+For `#mrhroute`, the risky dispatch-only route shape was sending a bare reopen into an alive pane whose latest open session-log run was still only `codex_start`/`codex_restart` with no dispatch-ready prompt yet. `route.rs` now does one short ready probe for that narrow boot-window case and fails closed instead of injecting into the still-starting pane. Normal live panes still get the low-latency bare `agent-doc <FILE>` reopen.
+
+Spec/docs updated: `README.md`, `SPEC.md`, `specs/supervisor.md`, `specs/07-session-tmux-commands.md`, `VERSIONS.md`.
+
+Verification in `src/agent-doc`:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+I fixed the code for `#edispatch`'s prerequisite route path in this cycle, but I did not run the live JetBrains + VS Code replay itself, so `#edispatch` stays open for that validation step.
+<!-- agent:boundary:213aa580 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -142,8 +159,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#mrhroute] [recommended] Investigate why tasks/monsterrodholders.md still rebounded from %175 to %176 via registered_pane_missing immediately after a later route_dispatch_only_sent, even though the mixed-root passive sync replay itself stayed stable.
-- [ ] [#kpane] [recommended] Simplify Codex post-turn pane retention so a committed turn can never fall through a later supervisor quit branch. Replace the current `Ctrl-D` -> fresh restart -> possible `user_quit_after_ctrl_d` chain with one keepalive invariant and regress it on `src/boost-client/tasks/monsterrodholders.md`. Plan: `tasks/agent-doc/plan-committed-codex-turn-pane-retention-simplify.md`
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where `finalize`/`write --commit` can report success without a persisted commit, identify any stash/sync/session-check interaction that can leave the response uncommitted, then add regression coverage and a fail-closed acceptance criterion so agent-doc never reports a completed closeout until the response commit is verifiably present.

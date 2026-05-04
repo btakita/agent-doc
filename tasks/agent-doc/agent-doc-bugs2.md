@@ -40,7 +40,34 @@ Icebox:
 - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement:
 - 1 more active item(s)
-<!-- agent:boundary:e558bed6 -->
+❯ `Run Agent Doc` now restarts Codex.
+
+❯ Now the `Clear Session Context` inserts a `\n` into the prompt instead of an Enter. Please create a comprehensive fix for Enter. Ensure that the same Enter method is used instead of bespoke individual solutions. spec-test-build-install-commit-push
+### Re: Clear Session Context Enter submit path — gpt-5
+
+`Run Agent Doc` restarting Codex is noted.
+
+I fixed the `Clear Session Context` submit path by routing supervisor-owned single-line injections through one shared helper, `supervisor::ipc::submit_bytes()`, so the authoritative `/clear`, routed reopen, queue-dispatch command injects, and auto-trigger all emit the same Enter-style carriage-return submit instead of mixing `\n`, `\r`, and receiver-side normalization. That keeps the tmux fallback contract aligned with the supervisor contract rather than relying on bespoke path-by-path formatting.
+
+Updated:
+- `src/supervisor/ipc.rs`
+- `src/session_actor_cmd.rs`
+- `src/queue_dispatch.rs`
+- `src/route.rs`
+- `src/start.rs`
+- `specs/07-session-tmux-commands.md`
+- `VERSIONS.md`
+
+Verification:
+- New targeted regressions passed for the shared submit helper, `session clear`, queue-dispatch supervisor inject, and routed submit bytes.
+- Full `cargo test` passed in `src/agent-doc`.
+- `cargo build` passed.
+- `cargo install --path . --force` replaced the local `agent-doc` binary.
+
+Git:
+- Committed in `src/agent-doc` as `c15cb50` (`fix: unify supervisor submit enter handling`)
+- Pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:01ef932a -->
 <!-- /agent:exchange -->
 ### End Exchange
 

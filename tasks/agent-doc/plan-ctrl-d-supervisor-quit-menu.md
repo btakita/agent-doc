@@ -1,18 +1,19 @@
 # Plan — restore Codex `Ctrl+D` supervisor quit menu
 
 **Pending:** `#ctrldmenu` in `tasks/agent-doc/agent-doc-bugs2.md`
-**Status:** Implemented
+**Status:** Reopened on 2026-05-04
 
 ## Problem
 
 Pressing `Ctrl+D` in a tmux-backed Codex `agent-doc` session currently exits the child and immediately restarts the supervisor path instead of presenting the cooked-mode quit menu with `q`.
 
-Current evidence from local source state on 2026-04-28:
+Current evidence from local source state on 2026-05-04:
 
 - `src/agent-doc/src/start.rs` now routes `restart_continue_exit_strategy(false, true, 0)` to `RestartFresh`
 - the clean-exit branch logs `ctrl_d_restart_fresh` and prints `Restarting fresh to keep the pane attached...`
 - the older prompt path (`Press Enter to restart, or 'q' to exit.`) is no longer used for the Codex `Ctrl+D` case
-- `src/agent-doc/specs/supervisor.md` was edited to describe this same restart-fresh behavior, so code and spec currently agree on the wrong contract
+- local edits in `src/agent-doc/specs/supervisor.md` and `src/agent-doc/specs/codex-support.md` currently document the same restart-fresh behavior, so the observed regression is reflected in the in-flight docs as well
+- `src/agent-doc/VERSIONS.md` still claims this was fixed in v0.33.12, so plan/status bookkeeping no longer matches the local source state
 
 This regresses the expected user-facing behavior: `Ctrl+D` should let the user choose whether to quit the supervisor entirely or restart, rather than forcing an automatic restart.
 

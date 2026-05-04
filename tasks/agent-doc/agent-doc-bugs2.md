@@ -291,7 +291,38 @@ Implemented the phase-9 verification closeout. Plan: `tasks/agent-doc/plan-singl
 - Repo closeout in `src/agent-doc`: committed as `f341583` (`test: verify actor and plugin session surfaces`) and pushed to `origin/20260422/codex-agent-backend`.
 
 `#sgown9` is complete, and the umbrella tracker `#sgown` is complete as well.
-<!-- agent:boundary:87eb9f31 -->
+❯ Please identify why agent-doc incorrectly closes /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
+❯ With our new actor based model up to [#sgown8], the monsterrodholders.md tmux pane was still being incorrectly closed. Does [#sgown9] fix the issue? If not, please identify root cause(s) and fix.
+❯ spec-test-build-install-commit-push
+### Re: monsterrodholders mixed-root pane replacement — gpt-5
+
+`#sgown9` did not fix this bug. That phase added actor/plugin verification coverage, but the actual pane-loss path was still in normal full sync.
+
+Root cause:
+- When the editor/JetBrains path supplied an explicit tmux `--window` target such as `@0` that was not actually an `agent-doc` window, and the target tmux session no longer had any visible `agent-doc` window discoverable by name, `sync` still continued full reconciliation onto that arbitrary window.
+- In the mixed-root remembered-layout case, that made sync classify the real `/home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` pane as missing and cold-start a replacement, which is why the existing pane was effectively replaced/closed.
+
+Implemented fix in `src/agent-doc`:
+- `src/sync.rs` now fails closed when sync is given an explicit non-`agent-doc` tmux window and the target session has no visible `agent-doc` window to reconcile against. In that state it preserves layout instead of trying to reconcile onto the wrong window.
+- Added a tmux-backed regression for this exact mixed-root/non-agent-window case.
+- Updated `README.md` and `specs/07-session-tmux-commands.md` to record the new fail-closed invariant.
+- While validating the fix, I also isolated the `route::provision_pane_*` pane-placement tests onto temp registry roots so the newer cross-file dispatch guard remains deterministic under parallel `cargo test`.
+
+Verification completed in `src/agent-doc`:
+- `cargo fmt`
+- `cargo test` (parallel pass)
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+- `npm test`
+- `npm run package`
+- `./gradlew test buildPlugin`
+
+Repo closeout in `src/agent-doc`: committed as `ac44467` (`fix: fail closed sync on non-agent window targets`) and pushed to `origin/20260422/codex-agent-backend`.
+
+``
+No follow-up backlog item was added in this cycle because the root cause is fixed and the verification/build/install/package suite is green.
+<!-- agent:boundary:40a2fbb6 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

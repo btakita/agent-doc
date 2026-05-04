@@ -498,7 +498,32 @@ Verification:
 Git:
 - `agent-doc`: `7dcf001` `fix: harden optional closeout sidecar reads`
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:e4916f5d -->
+❯ do [#jberr]. spec-test-build-install-commit-push
+### Re: jb route error persistence — gpt-5
+
+Plan executed: `tasks/agent-doc/plan-jb-route-error-capture.md`
+
+`#jberr` is complete.
+
+JetBrains `Run Agent Doc` was still surfacing routed failures as a plain IDE error notification, so startup-miss and pending-drift output could disappear before it was copyable. I changed `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt` so a failed `agent-doc route --dispatch-only` now:
+
+- saves the exact route output unchanged under `.agent-doc/state/editor-route-errors/<sanitized-doc>.txt`
+- marks the IDE notification as important
+- adds `Copy route error`, `Open saved error`, and `Copy error path` actions
+
+I added Kotlin coverage for the saved diagnostics path and exact-output persistence, updated `editors/jetbrains/SPEC.md`, `editors/PLUGIN-SPEC.md`, and `VERSIONS.md`, and bumped the JetBrains plugin version to `0.2.90`.
+
+Verification:
+- `./gradlew test buildPlugin`
+- `cargo test` (`1791 passed; 0 failed`)
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+- `agent-doc`: `2153b02` `fix: persist jetbrains route errors`
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:6e9c0c6a -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -514,7 +539,6 @@ Add a Plugin Editor command to clear the context
 
 <!-- agent:backlog -->
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
-- [ ] [#jberr] [recommended] Keep JetBrains Run Agent Doc route failures copyable/persistent instead of transient-only. Plan: tasks/agent-doc/plan-jb-route-error-capture.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

@@ -223,7 +223,43 @@ It also narrows the implementation contract:
 I committed and pushed the plan as `65bcea0ff` on `origin/main`.
 
 No tests/build/install ran in this cycle because `#rnpane` was a planning-only backlog item and the repo change was limited to the plan document.
-<!-- agent:boundary:037d41c6 -->
+❯ There are some errors with the JB Plugin `Run Agent Doc`. The processes were booted and ready. spec-test-build-install-commit-push
+```
+resync: stash pane %173 is registered in its own project root — skipping kill
+resync: stash pane %161 is registered in its own project root — skipping kill
+resync: stash pane %177 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+[sync] found alive agent-doc child (pid 1978757) in pane %151 for tasks/claudescore-3.md
+Error: dispatch-only codex reopen refused to inject into pane %151 for tasks/claudescore-3.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+```
+```
+resync: stash pane %177 is registered in its own project root — skipping kill
+resync: stash pane %157 is registered in its own project root — skipping kill
+resync: stash pane %161 is registered in its own project root — skipping kill
+resync: stash pane %183 is registered in its own project root — skipping kill
+resync: stash pane %180 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+[sync] found alive agent-doc child (pid 2003142) in pane %184 for tasks/monsterrodholders.md
+Error: dispatch-only codex reopen refused to inject into pane %184 for tasks/monsterrodholders.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+```
+### Re: JB Plugin `Run Agent Doc` false `still booting` reroutes — gpt-5
+
+Root cause was the final dispatch-only reopen probe, not the JB plugin. After the busy-pane recovery path restarted Codex, `route.rs` still pinned the original pane and failed closed after the first 2s ready wait. In the `%151` / `%184` repros the supervisor had already started a newer same-file generation, and sometimes handed the session to a successor pane, but route kept treating the stale pane as authoritative and surfaced `dispatch-only codex reopen refused ... still booting`.
+
+I fixed that in `src/agent-doc` and pushed `9c87fa8` to `origin/20260422/codex-agent-backend`:
+- dispatch-only reroute now gets one bounded recovery window after the first starting-pane timeout
+- if the same pane starts a newer generation, route retries that pane instead of failing immediately
+- if the supervisor hands the same file to a new alive pane, route follows that same-file successor instead of pinning the stale pane
+- cross-file handoffs still fail closed
+- spec/docs updated in `README.md`, `specs/07-session-tmux-commands.md`, and `VERSIONS.md`
+
+Verification in `src/agent-doc` passed:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+I did not add a new backlog item because the existing `#edispatch` replay already covers the remaining live JetBrains + VS Code validation for this editor-trigger path.
+<!-- agent:boundary:f71cbd0d -->
 <!-- /agent:exchange -->
 ### End Exchange
 

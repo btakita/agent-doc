@@ -94,7 +94,17 @@ Root cause was stale `session_end origin=registry_rebind` provenance, not generi
 I changed `src/agent-doc` so live rebind successors count as ownership proof during sync recovery, and passive cold-start now blocks only while that recorded successor is still alive and rooted to the same document. I also updated the sync spec, `README.md`, and `VERSIONS.md`, installed the rebuilt local `agent-doc`, and pushed `6a10069` to `origin/20260422/codex-agent-backend`. I added backlog item `#mrhreplay` for a live replay of the exact mixed-root passive-sync path.
 
 Verification: full `cargo test` in `src/agent-doc` passed, and `cargo build` plus `cargo install --path . --force` both passed. The document response was committed, but the explicit `agent-doc session-check` backstop still reports an active-session interruption for the current Codex turn; `agent-doc preflight` now reports `no_changes: true`, so the remaining issue is closeout-guard bookkeeping rather than an uncommitted document diff.
-<!-- agent:boundary:87ae95e3 -->
+❯ Stale `session_end origin=registry_rebind` provenance seems to be too fragile. The provenance model does not work reliably. Can you make an optimistic model that checks for **only** the tmux pane? The process id should not cause the provenance check to fail. spec-test-build-install-commit-push
+### Re: optimistic registry-rebind ownership — gpt-5
+
+I changed `src/agent-doc/src/sync.rs` so live-owner recovery now treats an alive `session_end origin=registry_rebind ... next_pane=...` successor as authoritative ownership proof before falling back to generic same-file process-tree matching. That makes the handoff optimistic on the tmux pane itself: if the successor pane is still alive and rooted to the same document, sync keeps it authoritative even when supervisor PID or foreground process-tree provenance drifts after the rebind.
+
+I added two regressions for that exact shape: one proves `find_live_owner_pane(...)` reuses the live rebind successor directly, and the other proves `registered_pane_proves_live_owner(...)` accepts that successor without PID/process-tree fallback. I also updated `README.md`, `SPEC.md`, `specs/07-session-tmux-commands.md`, and `VERSIONS.md` so the ownership order explicitly includes the live `registry_rebind` successor.
+
+Verification completed in `src/agent-doc`: full `cargo test` passed, `cargo build` passed, and `cargo install --path . --force` replaced the local binary. I committed and pushed `7be3375` on `origin/20260422/codex-agent-backend`.
+
+I did not add a new backlog item because the existing `#mrhreplay` follow-up already covers the live mixed-root replay for this code path.
+<!-- agent:boundary:c6c2518a -->
 <!-- /agent:exchange -->
 ### End Exchange
 

@@ -165,8 +165,8 @@ on claude exit with code c:
                          that as failed startup provenance and restart fresh
                          instead of chaining `--continue`
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user
-                         (Enter to restart fresh / q to exit) so the user can
-                         choose to quit the supervisor cleanly
+                         (Enter to restart fresh / q to exit) so the operator
+                         can intentionally quit the supervisor cleanly
                          EXCEPT when that same fresh/fresh-restart Codex child
                          exits before it ever surfaces an idle prompt: treat
                          the forwarded `Ctrl-D`/stdin EOF as failed startup
@@ -181,13 +181,13 @@ on claude exit with code c:
                          (`user_quit*`, `user_restart_fresh`, invalid input) so
                          later `session_start` / `session_end` transitions keep
                          user-input provenance in the session log
-                         AND stdin EOF at that prompt counts as quit, not as an
-                         implicit restart, EXCEPT for a first-run `Ctrl-D` prompt
-                         that fires inside the early-start grace window after a
-                         fresh pane start: that specific EOF must restart fresh
-                         instead of closing the pane so transient tmux
-                         stash/rescue input races do not look like an
-                         intentional quit
+                         AND stdin EOF at the restored Ctrl+D prompt counts as
+                         quit, because that prompt now only appears after a
+                         real visible child prompt and reflects an intentional
+                         operator quit/restart choice again
+                         AND stdin EOF at the remaining resume-failure prompt
+                         counts as `restart fresh`, not as quit, so detached
+                         stdin cannot close the pane during keepalive recovery
                          AND non-empty non-`q` input is rejected with a
                          re-prompt instead of silently restarting fresh
                          AND resume auto-trigger only accepts a prompt line that

@@ -33,15 +33,17 @@
 //!   Exception: if a fresh/fresh-restart Codex child exits cleanly before it ever
 //!   surfaces an idle prompt, treat that as failed startup provenance and restart
 //!   fresh instead of chaining `--continue`.
-//!   If stdin EOF/Ctrl-D was forwarded, Codex restarts fresh instead of
-//!   surfacing a quit prompt, so ordinary routed/editor-owned turns cannot
-//!   tear down the claimed tmux pane from inherited or detached stdin state.
-//!   Prompt decisions are still logged explicitly for the remaining
-//!   resume-failure prompt path. Prompt-time stdin EOF on that path restarts
-//!   fresh instead of silently quitting, so routed or detached Codex sessions
-//!   do not lose the claimed tmux pane just because the supervisor prompt had
-//!   no readable stdin. Non-empty non-`q` input is rejected and re-prompted
-//!   instead of silently restarting fresh.
+//!   If stdin EOF/Ctrl-D was forwarded after a normal prompted run, Codex
+//!   returns to the restart-or-quit prompt so the operator can intentionally
+//!   restart fresh or exit the supervisor cleanly. Child runs that already
+//!   committed a document cycle still restart fresh instead, and promptless
+//!   fresh/fresh-restart exits still count as failed startup provenance.
+//!   Prompt decisions are still logged explicitly. Prompt-time stdin EOF on
+//!   the remaining resume-failure prompt path restarts fresh instead of
+//!   silently quitting, so routed or detached Codex sessions do not lose the
+//!   claimed tmux pane just because the supervisor prompt had no readable
+//!   stdin. Non-empty non-`q` input is rejected and re-prompted instead of
+//!   silently restarting fresh.
 //!   If the resume handoff just failed, the first failure restarts fresh and
 //!   repeated failures escalate to that same prompt instead of looping blindly.
 //! - Prints the truncated session UUID and pane ID to stderr on registration.
@@ -282,6 +284,7 @@ enum CleanExitResolution {
 enum RestartContinueExitStrategy {
     Resume,
     RestartFresh,
+    CtrlDPromptUser,
     PromptUser,
 }
 
@@ -422,13 +425,16 @@ fn restart_continue_exit_strategy(
     ctrl_d_forwarded: bool,
     recent_failed_resumes: usize,
     clean_exit_before_prompt: bool,
-    _committed_cycle_after_latest_run: bool,
+    committed_cycle_after_latest_run: bool,
 ) -> RestartContinueExitStrategy {
     if clean_exit_before_prompt {
         return RestartContinueExitStrategy::RestartFresh;
     }
     if ctrl_d_forwarded {
-        return RestartContinueExitStrategy::RestartFresh;
+        if committed_cycle_after_latest_run {
+            return RestartContinueExitStrategy::RestartFresh;
+        }
+        return RestartContinueExitStrategy::CtrlDPromptUser;
     }
     if failed_resume && recent_failed_resumes >= FAILED_RESUME_THRESHOLD {
         return RestartContinueExitStrategy::PromptUser;
@@ -2214,6 +2220,36 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                             clean_exit_before_prompt,
                             committed_cycle_after_latest_run,
                         ) {
+                            RestartContinueExitStrategy::CtrlDPromptUser => {
+                                shared.transition_actor_state(
+                                    crate::session_actor::ActorState::WaitingInput,
+                                    "supervisor",
+                                    "ctrl_d_prompt",
+                                );
+                                raw_mode.suspend();
+                                eprintln!("\n{} exited after stdin EOF/Ctrl-D.", harness.binary);
+                                log_event(
+                                    &mut session_log,
+                                    &format!("ctrl_d_prompt_user restart_count={}", restart_count),
+                                );
+                                match prompt_for_restart_or_quit(
+                                    &mut session_log,
+                                    "ctrl_d",
+                                    "Press Enter to restart fresh, or 'q' to exit.",
+                                    "user_quit_after_ctrl_d",
+                                    PromptEofPolicy::Quit,
+                                ) {
+                                    PromptOutcome::Quit => {
+                                        break "user_quit_after_ctrl_d";
+                                    }
+                                    PromptOutcome::RestartFresh => {
+                                        raw_mode.resume();
+                                        first_run = true;
+                                        restart_count += 1;
+                                        suppress_stale_ctrl_d_until_prompt = false;
+                                    }
+                                }
+                            }
                             RestartContinueExitStrategy::PromptUser => {
                                 shared.transition_actor_state(
                                     crate::session_actor::ActorState::WaitingInput,
@@ -3173,10 +3209,10 @@ mod tests {
     }
 
     #[test]
-    fn restart_continue_strategy_restarts_fresh_after_ctrl_d() {
+    fn restart_continue_strategy_prompts_after_ctrl_d() {
         assert_eq!(
             restart_continue_exit_strategy(false, true, 0, false, false),
-            RestartContinueExitStrategy::RestartFresh
+            RestartContinueExitStrategy::CtrlDPromptUser
         );
     }
 
@@ -3329,14 +3365,22 @@ mod tests {
         );
         assert_eq!(
             restart_continue_exit_strategy(false, true, 0, false, false),
-            RestartContinueExitStrategy::RestartFresh
+            RestartContinueExitStrategy::CtrlDPromptUser
         );
     }
 
     #[test]
-    fn ctrl_d_with_failed_resume_still_restarts_fresh() {
+    fn ctrl_d_with_failed_resume_still_prompts_when_run_did_not_commit() {
         assert_eq!(
             restart_continue_exit_strategy(true, true, 1, false, false),
+            RestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+
+    #[test]
+    fn ctrl_d_with_failed_resume_still_restarts_fresh_after_committed_cycle() {
+        assert_eq!(
+            restart_continue_exit_strategy(true, true, 1, false, true),
             RestartContinueExitStrategy::RestartFresh
         );
     }

@@ -152,8 +152,44 @@ Git:
 - Committed in `src/agent-doc` as `72bb116` (`fix: submit dispatch-only reroutes via live pane`).
 - Pushed to `origin/20260422/codex-agent-backend`.
 
-I also repaired one malformed scratch HTML comment in this session document (`-->` inside a comment body) so `agent-doc preflight` could parse backlog and icebox normally again.
-<!-- agent:boundary:3c3b7350 -->
+❯ I also repaired one malformed scratch HTML comment in this session document (`-->` inside a comment body) so `agent-doc preflight` could parse backlog and icebox normally again.
+❯ The `\n` has not been fixed for `Run Agent Doc` and `Clear Session Context`. Please layout the command flow from sending the keys to emiting the keys so we can dissect where this issue may be happening?
+### Re: Run Agent Doc and Clear Session Context command flow — gpt-5
+
+I traced the live command path. The important point is that `Run Agent Doc` and `Clear Session Context` now mostly converge on the same backend submit path, so if both still show the same `\n` behavior the bug is probably below the editor plugin layer.
+
+`Run Agent Doc` flow:
+1. JetBrains `TerminalUtil.sendToTerminal()` spawns `agent-doc route --dispatch-only <relative-path>`.
+2. `src/agent-doc/src/route.rs` routes through `resolve_or_create_pane_dispatch_only()` -> `dispatch_only_reopen_existing_pane()` -> `dispatch_only_send_reopen()`.
+3. That path builds the bare Codex reopen string `agent-doc <file>`, then wraps it with `routed_trigger_submit_bytes()` -> `supervisor::ipc::submit_bytes()`.
+4. `submit_bytes()` canonicalizes the payload to `agent-doc <file>\r` in `src/agent-doc/src/supervisor/ipc.rs`.
+5. `dispatch_only_send_reopen()` then sends `IpcMethod::Inject { bytes }` to the session supervisor.
+6. In `src/agent-doc/src/start.rs`, `handle_ipc(IpcMethod::Inject)` takes the claimed `inject_pane` and calls `dispatch_submit_bytes_to_pane()`.
+7. That lands in `dispatch_submit_bytes_to_tmux()` -> `tmux.send_keys(pane, bytes)`.
+8. `src/tmux-router/src/tmux.rs` trims trailing CR/LF, then for ASCII payloads builds one `tmux send-keys -H ... 0d` command in `send_keys_hex_command()`.
+
+`Clear Session Context` flow:
+1. VS Code and JetBrains both call `agent-doc session clear <relative-path>` through the CLI, not by typing `/clear` themselves.
+2. `src/agent-doc/src/session_actor_cmd.rs` runs `clear()`.
+3. If the authoritative pane is alive, it sends directly via `send_clear_to_pane()` -> `tmux.send_keys(pane, "/clear")`.
+4. If no live pane is available, it falls back to the same supervisor IPC inject path as `Run Agent Doc`: `submit_bytes("/clear")` -> `IpcMethod::Inject` -> `start.rs handle_ipc()` -> `dispatch_submit_bytes_to_pane()` -> `tmux.send_keys()`.
+5. For the normal alive-pane case and the fallback case, ASCII commands still converge on the same `tmux send-keys -H ... 0d` emitter.
+
+Where the bug is most likely hiding:
+- The shared ASCII fast path emits a carriage-return byte `0d`, not tmux's symbolic `Enter` key name. That means the system is assuming `CR byte == real Enter` for Codex.
+- These two flows do not run the later acceptance-poll retry that sends `send_keys_raw("Enter")`. `route`'s older unchecked path and `queue_dispatch` still have that retry, but `dispatch-only` reopen and `session clear` do not.
+- So if Codex distinguishes a pasted carriage-return byte from an actual Enter key event inside the composer, both features would fail together exactly the way you are seeing.
+- This makes a stale plugin install unlikely. The plugin is only spawning `agent-doc route --dispatch-only ...` or `agent-doc session clear ...`; it is not generating the `\n` itself.
+
+Secondary suspect, but less likely for normal started sessions:
+- `start.rs` still has a raw child-PTY writer fallback when `inject_pane` is absent. In a normal `agent-doc start` session `inject_pane` is set, so this is probably not the active path for your repro, but it is the one remaining branch that bypasses tmux pane input entirely.
+
+If we want to prove the root cause next, the first place to instrument is `src/tmux-router/src/tmux.rs`:
+- Compare the current ASCII `send-keys -H ... 0d` path against a forced symbolic `Enter` path in a live Codex pane.
+- Specifically test whether `agent-doc <file>` + symbolic `Enter` succeeds while the current byte-stream `0d` path still drafts a visible `\n`.
+
+No code changes in this cycle. This was a control-flow trace so we can target the next fix at the real convergence point instead of changing another route-specific caller.
+<!-- agent:boundary:45ce416e -->
 <!-- /agent:exchange -->
 ###
 

@@ -431,19 +431,15 @@ fn restart_continue_exit_strategy(
     ctrl_d_forwarded: bool,
     recent_failed_resumes: usize,
     clean_exit_before_prompt: bool,
-    committed_cycle_after_latest_run: bool,
 ) -> RestartContinueExitStrategy {
     if ctrl_c_forwarded_interrupt {
         return RestartContinueExitStrategy::CtrlCPromptUser;
     }
+    if ctrl_d_forwarded {
+        return RestartContinueExitStrategy::CtrlDPromptUser;
+    }
     if clean_exit_before_prompt {
         return RestartContinueExitStrategy::RestartFresh;
-    }
-    if ctrl_d_forwarded {
-        if committed_cycle_after_latest_run {
-            return RestartContinueExitStrategy::RestartFresh;
-        }
-        return RestartContinueExitStrategy::CtrlDPromptUser;
     }
     if failed_resume && recent_failed_resumes >= FAILED_RESUME_THRESHOLD {
         return RestartContinueExitStrategy::PromptUser;
@@ -502,6 +498,14 @@ fn is_forwarded_ctrl_c_interrupt_exit(
             signal.eq_ignore_ascii_case("Interrupt") || signal.eq_ignore_ascii_case("SIGINT")
         })
         || status.exit_code() == 130
+}
+
+fn policy_exit_code_for_supervisor(exit_code: i32, ctrl_c_forwarded_interrupt: bool) -> i32 {
+    if ctrl_c_forwarded_interrupt {
+        0
+    } else {
+        exit_code
+    }
 }
 
 fn committed_cycle_after_latest_run_from_status(
@@ -2207,7 +2211,11 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             failed_resume_tracker.reset();
         }
 
-        let action = policy.on_exit(code);
+        // Forwarded operator Ctrl+C is an intentional shutdown request, not a
+        // supervisor crash signal, so keep the policy state on the clean-exit
+        // path and surface the same restart/quit prompt as Ctrl+D.
+        let policy_exit_code = policy_exit_code_for_supervisor(code, ctrl_c_forwarded_interrupt);
+        let action = policy.on_exit(policy_exit_code);
         *shared.supervisor_state.lock().unwrap() = policy.state;
         let action_name = match &action {
             RestartAction::PromptUser => "prompt_user",
@@ -2288,7 +2296,6 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                             ctrl_d_forwarded,
                             recent_failures,
                             clean_exit_before_prompt,
-                            committed_cycle_after_latest_run,
                         ) {
                             RestartContinueExitStrategy::CtrlCPromptUser => {
                                 shared.transition_actor_state(
@@ -3303,15 +3310,22 @@ mod tests {
     #[test]
     fn restart_continue_strategy_prefers_resume_by_default() {
         assert_eq!(
-            restart_continue_exit_strategy(false, false, false, 0, false, false),
+            restart_continue_exit_strategy(false, false, false, 0, false),
             RestartContinueExitStrategy::Resume
         );
     }
 
     #[test]
+    fn forwarded_ctrl_c_uses_clean_exit_code_for_policy() {
+        assert_eq!(policy_exit_code_for_supervisor(1, true), 0);
+        assert_eq!(policy_exit_code_for_supervisor(130, true), 0);
+        assert_eq!(policy_exit_code_for_supervisor(1, false), 1);
+    }
+
+    #[test]
     fn restart_continue_strategy_prompts_after_forwarded_ctrl_c_interrupt() {
         assert_eq!(
-            restart_continue_exit_strategy(true, false, false, 0, false, false),
+            restart_continue_exit_strategy(true, false, false, 0, false),
             RestartContinueExitStrategy::CtrlCPromptUser
         );
     }
@@ -3319,23 +3333,23 @@ mod tests {
     #[test]
     fn restart_continue_strategy_prompts_after_ctrl_d() {
         assert_eq!(
-            restart_continue_exit_strategy(false, false, true, 0, false, false),
+            restart_continue_exit_strategy(false, false, true, 0, false),
             RestartContinueExitStrategy::CtrlDPromptUser
         );
     }
 
     #[test]
-    fn restart_continue_strategy_restarts_fresh_before_prompt_even_after_ctrl_d() {
+    fn restart_continue_strategy_still_prompts_after_ctrl_d_before_prompt() {
         assert_eq!(
-            restart_continue_exit_strategy(false, false, true, 0, true, false),
-            RestartContinueExitStrategy::RestartFresh
+            restart_continue_exit_strategy(false, false, true, 0, true),
+            RestartContinueExitStrategy::CtrlDPromptUser
         );
     }
 
     #[test]
-    fn restart_continue_strategy_restarts_fresh_after_ctrl_d_when_run_committed() {
+    fn restart_continue_strategy_restarts_fresh_before_prompt_without_ctrl_d() {
         assert_eq!(
-            restart_continue_exit_strategy(false, false, true, 0, false, true),
+            restart_continue_exit_strategy(false, false, false, 0, true),
             RestartContinueExitStrategy::RestartFresh
         );
     }
@@ -3416,7 +3430,7 @@ mod tests {
     #[test]
     fn restart_continue_strategy_restarts_fresh_after_single_failed_resume() {
         assert_eq!(
-            restart_continue_exit_strategy(false, true, false, 1, false, false),
+            restart_continue_exit_strategy(false, true, false, 1, false),
             RestartContinueExitStrategy::RestartFresh
         );
     }
@@ -3424,14 +3438,7 @@ mod tests {
     #[test]
     fn restart_continue_strategy_prompts_after_repeated_failed_resumes() {
         assert_eq!(
-            restart_continue_exit_strategy(
-                false,
-                true,
-                false,
-                FAILED_RESUME_THRESHOLD,
-                false,
-                false,
-            ),
+            restart_continue_exit_strategy(false, true, false, FAILED_RESUME_THRESHOLD, false,),
             RestartContinueExitStrategy::PromptUser
         );
     }
@@ -3439,7 +3446,7 @@ mod tests {
     #[test]
     fn restart_continue_strategy_restarts_fresh_when_clean_exit_happens_before_prompt() {
         assert_eq!(
-            restart_continue_exit_strategy(false, false, false, 0, true, false),
+            restart_continue_exit_strategy(false, false, false, 0, true),
             RestartContinueExitStrategy::RestartFresh
         );
     }
@@ -3485,7 +3492,7 @@ mod tests {
             CleanExitResolution::RestartContinue
         );
         assert_eq!(
-            restart_continue_exit_strategy(false, false, true, 0, false, false),
+            restart_continue_exit_strategy(false, false, true, 0, false),
             RestartContinueExitStrategy::CtrlDPromptUser
         );
     }
@@ -3498,7 +3505,7 @@ mod tests {
             CleanExitResolution::RestartContinue
         );
         assert_eq!(
-            restart_continue_exit_strategy(true, false, false, 0, false, false),
+            restart_continue_exit_strategy(true, false, false, 0, false),
             RestartContinueExitStrategy::CtrlCPromptUser
         );
     }
@@ -3506,16 +3513,16 @@ mod tests {
     #[test]
     fn ctrl_d_with_failed_resume_still_prompts_when_run_did_not_commit() {
         assert_eq!(
-            restart_continue_exit_strategy(false, true, true, 1, false, false),
+            restart_continue_exit_strategy(false, true, true, 1, false),
             RestartContinueExitStrategy::CtrlDPromptUser
         );
     }
 
     #[test]
-    fn ctrl_d_with_failed_resume_still_restarts_fresh_after_committed_cycle() {
+    fn ctrl_d_with_failed_resume_still_prompts_even_when_clean_exit_was_early() {
         assert_eq!(
-            restart_continue_exit_strategy(false, true, true, 1, false, true),
-            RestartContinueExitStrategy::RestartFresh
+            restart_continue_exit_strategy(false, true, true, 1, true),
+            RestartContinueExitStrategy::CtrlDPromptUser
         );
     }
 

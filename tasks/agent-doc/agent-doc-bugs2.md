@@ -453,29 +453,36 @@ Verification completed in `src/agent-doc`:
 Repo closeout in `src/agent-doc`: committed as `56c0371` (`fix: queue authoritative reroutes while busy`) and pushed to `origin/20260422/codex-agent-backend`.
 
 - I did not run a live JetBrains-managed replay myself, so I added a recommended follow-up replay item for the new busy/starting queue path.
-<!-- agent:boundary:a8609aa6 -->
+❯ When I ran `Run Agent Doc` from the JB Plugin, a `\n` was inserted into the prompt instead of Enter. spec-test-build-install-commit-push
+
+❯ ![img_3.png](img_3.png)
+### Re: JB Plugin `Run Agent Doc` Enter submit path — gpt-5
+
+Implemented the fix in both repos.
+
+- `src/tmux-router/src/tmux.rs` now batches literal text plus `Enter` into one tmux invocation, so the non-supervisor fallback cannot leave a drafted `agent-doc ...` command sitting in the pane while a later submit races or gets lost.
+- `src/agent-doc/src/route.rs` now binds reroute ownership to the file-derived registry root during busy-session recovery and restart handoff, and the busy-restart path can adopt the replacement pane through the same validated dispatch registration path instead of CWD-dependent lookups. That was the remaining reason the full parallel suite could still fail while I was fixing the submit path.
+- Updated `src/tmux-router/README.md`, `src/tmux-router/docs/api-reference.md`, `src/tmux-router/VERSIONS.md`, `src/agent-doc/specs/08-session-routing.md`, and `src/agent-doc/VERSIONS.md` to document the single-invocation submit contract and the reroute handoff behavior.
+
+Verification completed:
+- `cargo fmt --check` in `src/agent-doc` and `src/tmux-router`
+- `cargo test` in `src/tmux-router`
+- `cargo test` in `src/agent-doc` (parallel suite: `1828` unit tests plus integration and CLI suites)
+- `cargo install --path . --force` in `src/agent-doc`
+
+Repo closeout:
+- `src/tmux-router`: committed as `e2681a1` (`fix: batch routed tmux submit keys`) and pushed to `origin/main`
+- `src/agent-doc`: committed as `2ac667a` (`fix: stabilize busy reroute handoff`) and pushed to `origin/20260422/codex-agent-backend`
+
+I did not run a live JetBrains-managed replay in this cycle. The existing replay items `#jbqbusy`, `#jbipcr`, and `#edispatch` remain the manual validation path; I did not add a new backlog item.
+<!-- agent:boundary:1d8e63eb -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
-The JB plugin calling agent-doc sync did not autostart /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md. I had to manually call `agent-doc start /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md`. Please identify root cause(s) and fix. spec-test-build-install-commit-push 
+do [#jbqbusy]. spec-test-build-install-commit-push
 ---
 "Press Enter to restart, or 'q' to exit."
----
-agent-doc running /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md with Codex is failing due to the sandbox. Please help me to DISABLE THE CODEX SANDBOX. I don't want agent-doc to bypass the sandbox by default but for my environment I want to bypass the sandbox. spec-test-build-install-commit-push
----
-I saw this error. Id the root cause and fix. spec-test-build-install-commit-push
-```
-• The binary rejected --pending-done '#ssheperm' because backlog IDs on the write path are resolved without the leading
-  #. I’m retrying the same finalize closeout with --pending-done ssheperm so the response and backlog completion still
-  land in one binary-owned commit.
-```
----
-When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
----
-Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.
----
-Add a Plugin Editor command to clear the context
 -->
 
 ## Pending / Not Built

@@ -88,8 +88,31 @@ Git:
 - Committed in `src/agent-doc` as `dc4c011` (`fix: keep dispatch-only reroutes on live session after clear`)
 - Pushed to `origin/20260422/codex-agent-backend`
 
-I did not run a live JetBrains/VS Code replay in this cycle, so the existing replay validation backlog item remains open.
-<!-- agent:boundary:624fd81d -->
+❯ I did not run a live JetBrains/VS Code replay in this cycle, so the existing replay validation backlog item remains open.
+❯ `Clear Session Context` still has the same regression. `Run Agent Doc` sends `agent-doc ...` but has the `\n` issue. spec-test-build-install-commit-push
+### Re: Clear Session Context fallback submit path — gpt-5
+
+I fixed the remaining Enter regression on the tmux fallback path instead of layering another route-specific workaround. `tmux-router::Tmux::send_keys()` now trims trailing line endings and, for ASCII command payloads such as `agent-doc <file>` and `/clear`, emits one `tmux send-keys -H ... 0d` byte stream so the pane receives the full command plus carriage return as one submit. Non-ASCII payloads keep the existing literal-text fallback.
+
+I also tightened the documented contract in `src/agent-doc`: fallback reroutes now explicitly require the same carriage-return submit boundary as supervisor IPC, so `Run Agent Doc`, `Clear Session Context`, and any non-authoritative fallback submit path all share one Enter model instead of drifting between newline, split Enter, or path-specific behavior.
+
+Verification:
+- `cargo test send_keys_hex_command_uses_single_ascii_stream_with_carriage_return_submit -- --nocapture` in `src/tmux-router`
+- `cargo test send_keys_paths_trim_trailing_line_endings_before_submit -- --nocapture` in `src/tmux-router`
+- `cargo test resolve_or_create_pane_dispatch_only_does_not_restart_after_tracked_codex_clear -- --nocapture` in `src/agent-doc`
+- full `cargo test` passed in `src/tmux-router`
+- full `cargo test` passed in `src/agent-doc`
+- `cargo build` passed in `src/agent-doc`
+- `cargo install --path . --force` replaced the local `agent-doc` binary
+
+Git:
+- Committed in `src/tmux-router` as `66e853f` (`fix: send submitted tmux commands as one byte stream`)
+- Pushed to `origin/main`
+- Committed in `src/agent-doc` as `24c8e28` (`docs: tighten fallback reroute submit contract`)
+- Pushed to `origin/20260422/codex-agent-backend`
+
+I did not run a live JetBrains/VS Code replay in this cycle, so the existing editor replay validation backlog remains the right place to confirm the end-to-end repro is gone.
+<!-- agent:boundary:347bdcf1 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

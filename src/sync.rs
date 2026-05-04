@@ -1131,6 +1131,7 @@ fn registered_pane_matches_document_root(tmux: &Tmux, file: &Path, pane_id: &str
 }
 
 fn passive_autostart_skip_reason(
+    tmux: &Tmux,
     file: &Path,
     session_id: &str,
     unresolved_startup_miss: Option<&crate::startup_miss::StartupMiss>,
@@ -1153,9 +1154,12 @@ fn passive_autostart_skip_reason(
     }
 
     let last_event = crate::startup_miss::latest_log_last_event(&status);
-    if last_event.starts_with("session_end origin=registry_rebind ") {
+    if last_event.starts_with("session_end origin=registry_rebind ")
+        && let Some(successor) =
+            find_alive_pane_via_registry_rebind_successor(tmux, file, session_id, None, false)
+    {
         return Ok(Some(format!(
-            "latest session ended via registry_rebind (last_event={last_event})"
+            "latest session ended via registry_rebind and successor pane {successor} is still alive (last_event={last_event})"
         )));
     }
 
@@ -2525,6 +2529,7 @@ fn run_with_options(
                 }
 
                 if let Some(reason) = passive_autostart_skip_reason(
+                    tmux,
                     file_path,
                     &session_id,
                     unresolved_startup_miss.as_ref(),
@@ -2789,6 +2794,7 @@ fn run_with_options(
 
             if matches!(auto_start_mode, AutoStartMode::SafePassive)
                 && let Some(reason) = passive_autostart_skip_reason(
+                    tmux,
                     file_path,
                     &session_id,
                     unresolved_startup_miss.as_ref(),
@@ -3314,6 +3320,7 @@ pub(crate) fn find_alive_pane_for_file(tmux: &Tmux, file_path: &str) -> Option<S
 pub(crate) enum AssociatedPaneSource {
     Registered,
     SessionLog,
+    RegistryRebind,
     ProcessTree,
     SupervisorPid,
 }
@@ -3323,6 +3330,7 @@ impl AssociatedPaneSource {
         match self {
             Self::Registered => "registered",
             Self::SessionLog => "session-log",
+            Self::RegistryRebind => "registry-rebind",
             Self::ProcessTree => "process-tree",
             Self::SupervisorPid => "supervisor-pid",
         }
@@ -3452,6 +3460,8 @@ pub(crate) fn find_associated_panes(
     let supervisor_match = find_alive_pane_via_supervisor_pid(tmux, file, session_id);
     let session_log_match =
         find_alive_pane_via_open_session_log(tmux, file, session_id, None, false);
+    let registry_rebind_match =
+        find_alive_pane_via_registry_rebind_successor(tmux, file, session_id, None, false);
 
     let mut associated: Vec<AssociatedPaneCandidate> = inventory
         .into_iter()
@@ -3461,6 +3471,11 @@ pub(crate) fn find_associated_panes(
             }
             if session_log_match.as_deref() == Some(candidate.pane_id.as_str()) {
                 candidate.sources.insert(AssociatedPaneSource::SessionLog);
+            }
+            if registry_rebind_match.as_deref() == Some(candidate.pane_id.as_str()) {
+                candidate
+                    .sources
+                    .insert(AssociatedPaneSource::RegistryRebind);
             }
             if process_tree_matches.contains(&candidate.pane_id) {
                 candidate.sources.insert(AssociatedPaneSource::ProcessTree);
@@ -3473,6 +3488,9 @@ pub(crate) fn find_associated_panes(
             let proves_live_ownership = candidate
                 .sources
                 .contains(&AssociatedPaneSource::SessionLog)
+                || candidate
+                    .sources
+                    .contains(&AssociatedPaneSource::RegistryRebind)
                 || candidate
                     .sources
                     .contains(&AssociatedPaneSource::ProcessTree)
@@ -4030,6 +4048,40 @@ fn find_alive_pane_via_open_session_log(
     Some(pane_id.to_string())
 }
 
+fn find_alive_pane_via_registry_rebind_successor(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+    log_hits: bool,
+) -> Option<String> {
+    let status = crate::startup_miss::session_log_status(file, session_id)
+        .ok()
+        .flatten()?;
+    if !status.latest_session_closed() {
+        return None;
+    }
+    let pane_id = crate::startup_miss::latest_registry_rebind_successor(&status)?;
+    if excluded_pane == Some(pane_id) || !tmux.pane_alive(pane_id) {
+        return None;
+    }
+
+    let project_root = crate::snapshot::find_project_root(file)?;
+    if !pane_assignment_matches_document_root(tmux, pane_id, &project_root) {
+        return None;
+    }
+
+    if log_hits {
+        eprintln!(
+            "[sync] recovered live pane {} for session {} via registry-rebind successor",
+            pane_id,
+            &session_id[..std::cmp::min(8, session_id.len())],
+        );
+    }
+
+    Some(pane_id.to_string())
+}
+
 /// Check if a process (by PID) is running agent-doc for a specific file.
 ///
 /// Uses `ps -p <pid> -o command=` which works on both Linux and macOS.
@@ -4570,6 +4622,51 @@ mod tests {
     }
 
     #[test]
+    fn recover_existing_associated_pane_reuses_live_registry_rebind_successor() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: associated-rebind\n---\n").unwrap();
+
+        let iso = IsolatedTmux::new("sync-associated-registry-rebind");
+        let successor_pane = iso.new_session("test", tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/associated-rebind.log"),
+            format!(
+                "[1] session_start file=tasks/owned.md pane=%70 session=associated-rebind\n[2] codex_start mode=fresh restart_count=0\n[3] session_superseded old_pane=%70 new_pane={} old_window=@1 new_window=@2\n[4] session_end origin=registry_rebind pane=%70 next_pane={}\n",
+                successor_pane,
+                successor_pane
+            ),
+        )
+        .unwrap();
+
+        let recovery = recover_existing_associated_pane(
+            &iso,
+            &doc,
+            "associated-rebind",
+            None,
+            &RefCell::new(std::collections::HashMap::new()),
+        );
+
+        assert!(matches!(
+            recovery,
+            ExistingAssociatedPaneRecovery::Recovered(ref pane) if pane == &successor_pane
+        ));
+        let candidates = find_associated_panes(&iso, &doc, "associated-rebind");
+        assert_eq!(candidates.len(), 1);
+        assert!(
+            candidates[0]
+                .sources
+                .contains(&AssociatedPaneSource::RegistryRebind),
+            "expected registry-rebind ownership proof: {:?}",
+            candidates[0].sources
+        );
+    }
+
+    #[test]
     fn open_session_log_owner_fail_closed_diagnostic_requires_same_alive_open_pane() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -4792,6 +4889,7 @@ mod tests {
     #[test]
     fn passive_autostart_allows_cleanly_closed_latest_session() {
         let tmp = tempfile::TempDir::new().unwrap();
+        let iso = IsolatedTmux::new("sync-passive-closed");
         std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         let doc = tmp.path().join("tasks").join("closed.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
@@ -4808,7 +4906,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            passive_autostart_skip_reason(&doc, "passive-closed", None).unwrap(),
+            passive_autostart_skip_reason(&iso, &doc, "passive-closed", None).unwrap(),
             None
         );
     }
@@ -4816,6 +4914,7 @@ mod tests {
     #[test]
     fn passive_autostart_blocks_open_latest_session() {
         let tmp = tempfile::TempDir::new().unwrap();
+        let iso = IsolatedTmux::new("sync-passive-open");
         std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         let doc = tmp.path().join("tasks").join("open.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
@@ -4829,23 +4928,53 @@ mod tests {
         )
         .unwrap();
 
-        let reason = passive_autostart_skip_reason(&doc, "passive-open", None)
+        let reason = passive_autostart_skip_reason(&iso, &doc, "passive-open", None)
             .unwrap()
             .expect("open session should block passive auto-start");
         assert!(reason.contains("latest session log is still open or ambiguous"));
     }
 
     #[test]
-    fn passive_autostart_blocks_registry_rebind_closeout() {
+    fn passive_autostart_blocks_live_registry_rebind_successor() {
         let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
         std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         let doc = tmp.path().join("tasks").join("rebind.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: passive-rebind\n---\n").unwrap();
+        let iso = IsolatedTmux::new("sync-passive-rebind-live");
+        let successor = iso.new_session("test", tmp.path()).unwrap();
         std::fs::write(
             tmp.path().join(".agent-doc/logs/passive-rebind.log"),
+            format!(
+                "[1] session_start file=tasks/rebind.md pane=%70 session=passive-rebind\n\
+[2] codex_start mode=fresh restart_count=0\n\
+[3] session_superseded old_pane=%70 new_pane={} old_window=@1 new_window=@2\n\
+[4] session_end origin=registry_rebind pane=%70 next_pane={}\n",
+                successor, successor
+            ),
+        )
+        .unwrap();
+
+        let reason = passive_autostart_skip_reason(&iso, &doc, "passive-rebind", None)
+            .unwrap()
+            .expect("live registry-rebind successor should block passive auto-start");
+        assert!(reason.contains("registry_rebind"));
+        assert!(reason.contains(successor.as_str()));
+    }
+
+    #[test]
+    fn passive_autostart_allows_stale_registry_rebind_successor() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let iso = IsolatedTmux::new("sync-passive-rebind-stale");
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("rebind.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: passive-rebind-stale\n---\n").unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/passive-rebind-stale.log"),
             concat!(
-                "[1] session_start file=tasks/rebind.md pane=%70 session=passive-rebind\n",
+                "[1] session_start file=tasks/rebind.md pane=%70 session=passive-rebind-stale\n",
                 "[2] codex_start mode=fresh restart_count=0\n",
                 "[3] session_superseded old_pane=%70 new_pane=%71 old_window=@1 new_window=@2\n",
                 "[4] session_end origin=registry_rebind pane=%70 next_pane=%71\n",
@@ -4853,15 +4982,16 @@ mod tests {
         )
         .unwrap();
 
-        let reason = passive_autostart_skip_reason(&doc, "passive-rebind", None)
-            .unwrap()
-            .expect("registry rebind should block passive auto-start");
-        assert!(reason.contains("registry_rebind"));
+        assert_eq!(
+            passive_autostart_skip_reason(&iso, &doc, "passive-rebind-stale", None).unwrap(),
+            None
+        );
     }
 
     #[test]
     fn passive_autostart_blocks_unresolved_startup_miss() {
         let tmp = tempfile::TempDir::new().unwrap();
+        let iso = IsolatedTmux::new("sync-passive-miss");
         let doc = tmp.path().join("tasks").join("miss.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "---\nagent_doc_session: passive-miss\n---\n").unwrap();
@@ -4875,7 +5005,7 @@ mod tests {
             cycle_baseline_id: None,
         };
 
-        let reason = passive_autostart_skip_reason(&doc, "passive-miss", Some(&miss))
+        let reason = passive_autostart_skip_reason(&iso, &doc, "passive-miss", Some(&miss))
             .unwrap()
             .expect("startup miss should block passive auto-start");
         assert!(reason.contains("startup-miss is still unresolved"));

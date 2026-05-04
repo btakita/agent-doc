@@ -90,7 +90,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Once a live pane is reserved for one file during the pass, later files in the same pass must treat it as unavailable.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
 - Before replacing a missing pane, sync must first attempt closeout recovery for `response_captured` or `write_applied` cycles. If that recovery fails, sync must fail closed and preserve the durable capture instead of provisioning another pane.
-- Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a merely `registry_rebind`-closed latest session log all block passive `--no-autostart` cold-start.
+- Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.
 - If any visible file stays blocked under passive `--no-autostart`, sync must preserve the current visible tmux layout and warn instead of reconciling the remaining foreign pane set into a new authoritative layout.
 
 ### Sync-specific invariants

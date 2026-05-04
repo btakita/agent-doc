@@ -504,6 +504,17 @@ pub fn latest_log_last_event(status: &SessionLogStatus) -> &str {
     status.last_event.as_deref().unwrap_or("?")
 }
 
+pub fn latest_registry_rebind_successor(status: &SessionLogStatus) -> Option<&str> {
+    let event = status.last_event.as_deref()?;
+    if !event.starts_with("session_end origin=registry_rebind ") {
+        return None;
+    }
+    event
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("next_pane="))
+        .filter(|pane| !pane.is_empty())
+}
+
 pub fn recent_session_loss_window(
     file: &Path,
     session_id: &str,

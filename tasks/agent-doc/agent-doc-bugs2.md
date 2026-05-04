@@ -1047,8 +1047,18 @@ Verification:
 ❯ Commit: `df5c7c6` (`fix: route managed reroutes through supervisor ipc`)
 ❯ Push: `origin/20260422/codex-agent-backend`
 ### Re: closeout repair — gpt-5
-Follow-up closeout only: reopening the binary-owned response path so the supervisor-routing response above remains the active committed tail for this turn. No additional repo changes were made beyond the already-pushed `src/agent-doc` commit `df5c7c6`.
-<!-- agent:boundary:68f8994e -->
+❯ Follow-up closeout only: reopening the binary-owned response path so the supervisor-routing response above remains the active committed tail for this turn. No additional repo changes were made beyond the already-pushed `src/agent-doc` commit `df5c7c6`.
+❯ The JB Plugin `Run Agent Doc` still sends a `\n` into the prompt instead of an Enter to submit the prompt.
+❯ ![img_4.png](img_4.png)
+### Re: JB Plugin `Run Agent Doc` newline submit path — gpt-5
+Implemented the routed-submit fix in `src/agent-doc`.
+
+- `src/agent-doc/src/route.rs` now sends the supervisor IPC reopen with an explicit carriage-return submit byte instead of relying on a later newline normalization step. That makes the route boundary itself match the managed-harness Enter contract.
+- Added a focused helper/regression for the submit bytes and updated the supervisor-route assertions that were still pinned to the old `"\n"` transport payload.
+- Verification completed in `src/agent-doc`: `cargo test`, `cargo build`, `cargo install --path . --force`.
+
+I did not run a live JetBrains replay in this cycle, so the remaining validation is manual confirmation that `Run Agent Doc` now submits the bare reopen instead of drafting a literal `\n` in the Codex composer.
+<!-- agent:boundary:10fe47db -->
 <!-- /agent:exchange -->
 ### End Exchange
 

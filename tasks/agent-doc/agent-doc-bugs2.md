@@ -55,7 +55,7 @@ Verification:
 - `cargo test sync::` in `src/agent-doc`: surfaced one existing red `resync` regression (`purge_unregistered_stash_panes_kills_retained_dead_stash_pane`) on the broad run; the same test passed immediately when rerun alone, so I did not use that suite as proof of this fix.
 
 I added two follow-ups to the backlog: `#resyncflake` for the red retained-dead-pane test, and `#vssplitreplay` for a live mixed-root replay against the exact `agent-doc-bugs2.md` + `claudescore-3.md` split.
-<!-- agent:boundary:31ed651a -->
+<!-- agent:boundary:4d936ab6 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -80,7 +80,7 @@ Add a Plugin Editor command to clear the context
 
 <!-- agent:backlog -->
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
-- [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split ( + ) to confirm passive sync no longer stashes a healthy running pane.
+- [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where `finalize`/`write --commit` can report success without a persisted commit, identify any stash/sync/session-check interaction that can leave the response uncommitted, then add regression coverage and a fail-closed acceptance criterion so agent-doc never reports a completed closeout until the response commit is verifiably present.
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 <!-- /agent:backlog -->

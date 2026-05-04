@@ -35,8 +35,10 @@
 //!   fresh instead of chaining `--continue`.
 //!   If stdin EOF/Ctrl-D was forwarded after a normal prompted run, Codex
 //!   returns to the restart-or-quit prompt so the operator can intentionally
-//!   restart fresh or exit the supervisor cleanly. Child runs that already
-//!   committed a document cycle still restart fresh instead, and promptless
+//!   restart fresh or exit the supervisor cleanly. A stdin-forwarded Ctrl+C
+//!   that terminates the child now uses that same quit prompt instead of being
+//!   misclassified as a transient crash. Child runs that already committed a
+//!   document cycle still restart fresh after Ctrl+D instead, and promptless
 //!   fresh/fresh-restart exits still count as failed startup provenance.
 //!   Prompt decisions are still logged explicitly. Prompt-time stdin EOF on
 //!   the remaining resume-failure prompt path restarts fresh instead of
@@ -284,6 +286,7 @@ enum CleanExitResolution {
 enum RestartContinueExitStrategy {
     Resume,
     RestartFresh,
+    CtrlCPromptUser,
     CtrlDPromptUser,
     PromptUser,
 }
@@ -421,12 +424,16 @@ fn clean_exit_resolution(harness: &crate::harness::HarnessConfig) -> CleanExitRe
 }
 
 fn restart_continue_exit_strategy(
+    ctrl_c_forwarded_interrupt: bool,
     failed_resume: bool,
     ctrl_d_forwarded: bool,
     recent_failed_resumes: usize,
     clean_exit_before_prompt: bool,
     committed_cycle_after_latest_run: bool,
 ) -> RestartContinueExitStrategy {
+    if ctrl_c_forwarded_interrupt {
+        return RestartContinueExitStrategy::CtrlCPromptUser;
+    }
     if clean_exit_before_prompt {
         return RestartContinueExitStrategy::RestartFresh;
     }
@@ -476,6 +483,23 @@ fn strip_stale_ctrl_d_before_prompt(
     }
 
     Some(data.iter().copied().filter(|byte| *byte != 0x04).collect())
+}
+
+fn is_forwarded_ctrl_c_interrupt_exit(
+    status: &portable_pty::ExitStatus,
+    ctrl_c_forwarded: bool,
+) -> bool {
+    if !ctrl_c_forwarded {
+        return false;
+    }
+
+    let rendered = status.to_string();
+    rendered
+        .strip_prefix("Terminated by ")
+        .is_some_and(|signal| {
+            signal.eq_ignore_ascii_case("Interrupt") || signal.eq_ignore_ascii_case("SIGINT")
+        })
+        || status.exit_code() == 130
 }
 
 fn committed_cycle_after_latest_run_from_status(
@@ -1155,6 +1179,8 @@ struct SupervisorShared {
     restart_mode: Mutex<String>,
     /// Flag: stdin→pty writer forwarded \x04 (Ctrl+D) to the pty.
     ctrl_d_forwarded: AtomicBool,
+    /// Flag: stdin→pty writer forwarded \x03 (Ctrl+C) to the pty.
+    ctrl_c_forwarded: AtomicBool,
     /// Outcome of the most recent auto-trigger attempt after a restart.
     auto_trigger_outcome: AtomicU8,
     /// Whether the current child ever surfaced an idle harness prompt.
@@ -1192,6 +1218,7 @@ impl SupervisorShared {
             stop_requested: AtomicBool::new(false),
             restart_mode: Mutex::new("continue".to_string()),
             ctrl_d_forwarded: AtomicBool::new(false),
+            ctrl_c_forwarded: AtomicBool::new(false),
             auto_trigger_outcome: AtomicU8::new(AutoTriggerOutcome::NotNeeded as u8),
             prompt_visible_once: AtomicBool::new(false),
             suppress_stale_ctrl_d_until_prompt: AtomicBool::new(false),
@@ -1400,6 +1427,7 @@ fn spawn_writer_thread(
     writer: Arc<Mutex<SharedPtyWriter>>,
     stop_fd: std::os::unix::io::RawFd,
     stop: Arc<AtomicBool>,
+    ctrl_c_flag: Option<Arc<AtomicBool>>,
     ctrl_d_flag: Option<Arc<AtomicBool>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
@@ -1480,6 +1508,14 @@ fn spawn_writer_thread(
                         }
                         flag.store(true, Ordering::Relaxed);
                     }
+                    if let Some(ref flag) = ctrl_c_flag
+                        && data.contains(&0x03)
+                    {
+                        if debug {
+                            eprintln!("[stdin->pty] Ctrl+C (\\x03) detected in forwarded data");
+                        }
+                        flag.store(true, Ordering::Relaxed);
+                    }
                     let Some(mut w) = lock_writer_interruptibly(&writer, stop.as_ref()) else {
                         if debug {
                             eprintln!("[stdin->pty] stop requested while waiting for writer");
@@ -1518,6 +1554,7 @@ fn spawn_writer_thread(
     writer: Arc<Mutex<SharedPtyWriter>>,
     _stop_fd: (),
     stop: Arc<AtomicBool>,
+    ctrl_c_flag: Option<Arc<AtomicBool>>,
     ctrl_d_flag: Option<Arc<AtomicBool>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
@@ -1533,6 +1570,11 @@ fn spawn_writer_thread(
                         drop(lock);
                         if let Some(ref flag) = ctrl_d_flag {
                             if buf[..n].contains(&0x04) {
+                                flag.store(true, Ordering::Relaxed);
+                            }
+                        }
+                        if let Some(ref flag) = ctrl_c_flag {
+                            if buf[..n].contains(&0x03) {
                                 flag.store(true, Ordering::Relaxed);
                             }
                         }
@@ -1982,6 +2024,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         shared.restart_requested.store(false, Ordering::Relaxed);
         shared.stop_requested.store(false, Ordering::Relaxed);
         shared.ctrl_d_forwarded.store(false, Ordering::Relaxed);
+        shared.ctrl_c_forwarded.store(false, Ordering::Relaxed);
         shared
             .auto_trigger_outcome
             .store(AutoTriggerOutcome::NotNeeded as u8, Ordering::Relaxed);
@@ -1995,6 +2038,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         let reader_thread = spawn_reader_thread(shared.clone(), harness.clone(), pty_reader);
         let writer_stop = StopSignal::new().context("failed to create writer stop signal")?;
         let writer_stop_flag = Arc::new(AtomicBool::new(false));
+        let ctrl_c_flag = Arc::new(AtomicBool::new(false));
         let ctrl_d_flag = Arc::new(AtomicBool::new(false));
         #[cfg(unix)]
         let writer_thread = spawn_writer_thread(
@@ -2002,6 +2046,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             writer_arc.clone(),
             writer_stop.read_fd(),
             writer_stop_flag.clone(),
+            Some(ctrl_c_flag.clone()),
             Some(ctrl_d_flag.clone()),
         );
         #[cfg(not(unix))]
@@ -2010,6 +2055,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             writer_arc.clone(),
             (),
             writer_stop_flag.clone(),
+            Some(ctrl_c_flag.clone()),
             Some(ctrl_d_flag.clone()),
         );
 
@@ -2064,6 +2110,9 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         if ctrl_d_flag.load(Ordering::Relaxed) {
             shared.ctrl_d_forwarded.store(true, Ordering::Relaxed);
         }
+        if ctrl_c_flag.load(Ordering::Relaxed) {
+            shared.ctrl_c_forwarded.store(true, Ordering::Relaxed);
+        }
 
         // Clean up shared state (must happen before dropping session so the
         // inject_writer Arc is released before the pty master closes).
@@ -2117,6 +2166,10 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             AutoTriggerOutcome::from_u8(shared.auto_trigger_outcome.load(Ordering::Relaxed));
         let prompt_visible_once = shared.prompt_visible_once.load(Ordering::Relaxed);
 
+        let ctrl_c_forwarded_interrupt = is_forwarded_ctrl_c_interrupt_exit(
+            &status,
+            shared.ctrl_c_forwarded.load(Ordering::Relaxed),
+        );
         let ctrl_d_forwarded = shared.ctrl_d_forwarded.load(Ordering::Relaxed);
         let failed_resume =
             resume_handoff_failed(auto_trigger, ctrl_d_forwarded, auto_trigger_outcome);
@@ -2214,12 +2267,43 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                         };
 
                         match restart_continue_exit_strategy(
+                            ctrl_c_forwarded_interrupt,
                             failed_resume,
                             ctrl_d_forwarded,
                             recent_failures,
                             clean_exit_before_prompt,
                             committed_cycle_after_latest_run,
                         ) {
+                            RestartContinueExitStrategy::CtrlCPromptUser => {
+                                shared.transition_actor_state(
+                                    crate::session_actor::ActorState::WaitingInput,
+                                    "supervisor",
+                                    "ctrl_c_prompt",
+                                );
+                                raw_mode.suspend();
+                                eprintln!("\n{} exited after stdin Ctrl+C.", harness.binary);
+                                log_event(
+                                    &mut session_log,
+                                    &format!("ctrl_c_prompt_user restart_count={}", restart_count),
+                                );
+                                match prompt_for_restart_or_quit(
+                                    &mut session_log,
+                                    "ctrl_c",
+                                    "Press Enter to restart fresh, or 'q' to exit.",
+                                    "user_quit_after_ctrl_c",
+                                    PromptEofPolicy::Quit,
+                                ) {
+                                    PromptOutcome::Quit => {
+                                        break "user_quit_after_ctrl_c";
+                                    }
+                                    PromptOutcome::RestartFresh => {
+                                        raw_mode.resume();
+                                        first_run = true;
+                                        restart_count += 1;
+                                        suppress_stale_ctrl_d_until_prompt = false;
+                                    }
+                                }
+                            }
                             RestartContinueExitStrategy::CtrlDPromptUser => {
                                 shared.transition_actor_state(
                                     crate::session_actor::ActorState::WaitingInput,
@@ -3203,15 +3287,23 @@ mod tests {
     #[test]
     fn restart_continue_strategy_prefers_resume_by_default() {
         assert_eq!(
-            restart_continue_exit_strategy(false, false, 0, false, false),
+            restart_continue_exit_strategy(false, false, false, 0, false, false),
             RestartContinueExitStrategy::Resume
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_prompts_after_forwarded_ctrl_c_interrupt() {
+        assert_eq!(
+            restart_continue_exit_strategy(true, false, false, 0, false, false),
+            RestartContinueExitStrategy::CtrlCPromptUser
         );
     }
 
     #[test]
     fn restart_continue_strategy_prompts_after_ctrl_d() {
         assert_eq!(
-            restart_continue_exit_strategy(false, true, 0, false, false),
+            restart_continue_exit_strategy(false, false, true, 0, false, false),
             RestartContinueExitStrategy::CtrlDPromptUser
         );
     }
@@ -3219,7 +3311,7 @@ mod tests {
     #[test]
     fn restart_continue_strategy_restarts_fresh_before_prompt_even_after_ctrl_d() {
         assert_eq!(
-            restart_continue_exit_strategy(false, true, 0, true, false),
+            restart_continue_exit_strategy(false, false, true, 0, true, false),
             RestartContinueExitStrategy::RestartFresh
         );
     }
@@ -3227,7 +3319,7 @@ mod tests {
     #[test]
     fn restart_continue_strategy_restarts_fresh_after_ctrl_d_when_run_committed() {
         assert_eq!(
-            restart_continue_exit_strategy(false, true, 0, false, true),
+            restart_continue_exit_strategy(false, false, true, 0, false, true),
             RestartContinueExitStrategy::RestartFresh
         );
     }
@@ -3308,7 +3400,7 @@ mod tests {
     #[test]
     fn restart_continue_strategy_restarts_fresh_after_single_failed_resume() {
         assert_eq!(
-            restart_continue_exit_strategy(true, false, 1, false, false),
+            restart_continue_exit_strategy(false, true, false, 1, false, false),
             RestartContinueExitStrategy::RestartFresh
         );
     }
@@ -3316,7 +3408,14 @@ mod tests {
     #[test]
     fn restart_continue_strategy_prompts_after_repeated_failed_resumes() {
         assert_eq!(
-            restart_continue_exit_strategy(true, false, FAILED_RESUME_THRESHOLD, false, false),
+            restart_continue_exit_strategy(
+                false,
+                true,
+                false,
+                FAILED_RESUME_THRESHOLD,
+                false,
+                false,
+            ),
             RestartContinueExitStrategy::PromptUser
         );
     }
@@ -3324,7 +3423,7 @@ mod tests {
     #[test]
     fn restart_continue_strategy_restarts_fresh_when_clean_exit_happens_before_prompt() {
         assert_eq!(
-            restart_continue_exit_strategy(false, false, 0, true, false),
+            restart_continue_exit_strategy(false, false, false, 0, true, false),
             RestartContinueExitStrategy::RestartFresh
         );
     }
@@ -3333,6 +3432,12 @@ mod tests {
     fn ctrl_d_flag_initialized_false() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         assert!(!shared.ctrl_d_forwarded.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn ctrl_c_flag_initialized_false() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        assert!(!shared.ctrl_c_forwarded.load(Ordering::Relaxed));
     }
 
     #[test]
@@ -3364,15 +3469,28 @@ mod tests {
             CleanExitResolution::RestartContinue
         );
         assert_eq!(
-            restart_continue_exit_strategy(false, true, 0, false, false),
+            restart_continue_exit_strategy(false, false, true, 0, false, false),
             RestartContinueExitStrategy::CtrlDPromptUser
+        );
+    }
+
+    #[test]
+    fn ctrl_c_interrupt_overrides_codex_auto_restart() {
+        let harness = crate::harness::HarnessConfig::codex();
+        assert_eq!(
+            clean_exit_resolution(&harness),
+            CleanExitResolution::RestartContinue
+        );
+        assert_eq!(
+            restart_continue_exit_strategy(true, false, false, 0, false, false),
+            RestartContinueExitStrategy::CtrlCPromptUser
         );
     }
 
     #[test]
     fn ctrl_d_with_failed_resume_still_prompts_when_run_did_not_commit() {
         assert_eq!(
-            restart_continue_exit_strategy(true, true, 1, false, false),
+            restart_continue_exit_strategy(false, true, true, 1, false, false),
             RestartContinueExitStrategy::CtrlDPromptUser
         );
     }
@@ -3380,7 +3498,7 @@ mod tests {
     #[test]
     fn ctrl_d_with_failed_resume_still_restarts_fresh_after_committed_cycle() {
         assert_eq!(
-            restart_continue_exit_strategy(true, true, 1, false, true),
+            restart_continue_exit_strategy(false, true, true, 1, false, true),
             RestartContinueExitStrategy::RestartFresh
         );
     }
@@ -3726,8 +3844,14 @@ mod tests {
         let stop = StopSignal::new().unwrap();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let shared = Arc::new(SupervisorShared::new("test", "writer-stop".to_string()));
-        let handle =
-            spawn_writer_thread(shared, writer_arc, stop.read_fd(), stop_flag.clone(), None);
+        let handle = spawn_writer_thread(
+            shared,
+            writer_arc,
+            stop.read_fd(),
+            stop_flag.clone(),
+            None,
+            None,
+        );
 
         // Writer thread should be alive, blocked in poll()
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -3781,7 +3905,8 @@ mod tests {
         let stop_fd = stop.read_fd();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let shared = Arc::new(SupervisorShared::new("test", "writer-epipe".to_string()));
-        let handle = spawn_writer_thread(shared, writer_arc, stop_fd, stop_flag.clone(), None);
+        let handle =
+            spawn_writer_thread(shared, writer_arc, stop_fd, stop_flag.clone(), None, None);
 
         // Inject a byte into stdin to trigger a write attempt.
         // The write will fail (EPIPE) and the thread should exit.
@@ -3874,5 +3999,21 @@ mod tests {
             rendered.contains("exit_status=\"Exited with code 7\""),
             "got: {rendered}"
         );
+    }
+
+    #[test]
+    fn forwarded_ctrl_c_interrupt_exit_requires_forwarded_ctrl_c_signal_exit() {
+        let interrupt = portable_pty::ExitStatus::with_signal("Interrupt");
+        assert!(is_forwarded_ctrl_c_interrupt_exit(&interrupt, true));
+        assert!(!is_forwarded_ctrl_c_interrupt_exit(&interrupt, false));
+
+        let clean = portable_pty::ExitStatus::with_exit_code(0);
+        assert!(!is_forwarded_ctrl_c_interrupt_exit(&clean, true));
+    }
+
+    #[test]
+    fn forwarded_ctrl_c_interrupt_exit_accepts_exit_code_130() {
+        let status = portable_pty::ExitStatus::with_exit_code(130);
+        assert!(is_forwarded_ctrl_c_interrupt_exit(&status, true));
     }
 }

@@ -167,6 +167,12 @@ on claude exit with code c:
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user
                          (Enter to restart fresh / q to exit) so the operator
                          can intentionally quit the supervisor cleanly
+                         EXCEPT when stdin-forwarded Ctrl+C terminates the
+                         child → prompt user with that same menu instead of
+                         treating the exit like a transient crash
+                         AND only stdin-forwarded Ctrl+C counts for that path;
+                         route/plugin-injected interrupts that bypass the
+                         stdin writer stay on the automatic recovery path
                          EXCEPT when that same fresh/fresh-restart Codex child
                          exits before it ever surfaces an idle prompt: treat
                          the forwarded `Ctrl-D`/stdin EOF as failed startup

@@ -217,11 +217,20 @@ Verification completed in `src/agent-doc`:
 Repo closeout in `src/agent-doc`: committed as `211cea0` (`fix: always prompt on forwarded codex quit keys`) and pushed to `origin/20260422/codex-agent-backend`.
 
 I left the pre-existing unrelated dirty changes in `src/agent-doc/src/plugin.rs` and `src/agent-doc/src/route.rs` untouched. I did not run a manual tmux-backed interactive repro in this cycle; the validation here is the green Rust suite plus the build/install path.
-<!-- agent:boundary:9dcb3f12 -->
+### Re: `ctrl_d_committed_cycle_restart_fresh` policy — gpt-5
+
+That policy came from an earlier keepalive hardening pass. The original goal was to keep a claimed Codex pane attached after a successful routed `agent-doc` turn so a forwarded EOF/Ctrl+D from the just-finished run could not immediately tear the supervisor down. In practice that conflated "preserve the pane after a completed run" with "operator explicitly asked to see the quit menu," and the session log evidence here shows it was too aggressive.
+
+The fix in `211cea0` removes that direct-restart behavior for forwarded operator quit keys. Forwarded `Ctrl+D` now goes to the `Enter` / `q` menu instead of `ctrl_d_committed_cycle_restart_fresh`, and terminating forwarded `Ctrl+C` goes there too. The only remaining automatic fresh-restart case is a genuinely promptless clean exit with no forwarded operator key, which is a startup-recovery path rather than a user quit path.
+
+No repo changes were made in this follow-up closeout beyond recording this response.
+<!-- agent:boundary:653e7d9f -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
+Why was ctrl_d_committed_cycle_restart_fresh in the policy? Ctrl+D should never directly restart Codex or Claude. Ctrl+D 1x for Codex and 2x for Claude should surface the "Press Enter to restart, or 'q' to exit." menu. Enter would then restart Codex or Claude. 'q' + Enter would stop the supervisor process. spec-test-build-install-commit-push
+---
 "Press Enter to restart, or 'q' to exit."
 ---
 agent-doc running /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md with Codex is failing due to the sandbox. Please help me to DISABLE THE CODEX SANDBOX. I don't want agent-doc to bypass the sandbox by default but for my environment I want to bypass the sandbox. spec-test-build-install-commit-push

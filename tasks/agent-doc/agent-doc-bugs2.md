@@ -70,7 +70,25 @@ Verification:
 - `cargo run -- plugin install --local vscode`: installed `0.2.11`.
 - `cargo run -- plugin install --local jetbrains`: installed the local plugin into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
 - Code commit pushed in `src/agent-doc`: `4d36c77` on `origin/20260422/codex-agent-backend`.
-<!-- agent:boundary:e444a7c0 -->
+❯ The tmux pane for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md is repeatedly erronously closed. We have attempted many "fixes" but none of the fixes have worked. This seems like a fundamental architectural issue. Perhaps there is a problem with the submodule support. Why is monsterrodholders.md tmux pane succeptable to being closed in error? This does not happen as often with the agent-doc managed tmux panes in session-share. This is a CRITICAL ERROR.
+❯ spec-test-build-install-commit-push
+### Re: monsterrodholders passive pane loss — gpt-5
+
+Root cause was not generic submodule support. The failing path was a stale `session_end origin=registry_rebind ...` closeout in the `monsterrodholders.md` session log. Passive `agent-doc sync --no-autostart` was treating any latest `registry_rebind` closeout as a hard blocker, even when the recorded successor pane was already gone or no longer owned the document. That stranded `src/boost-client/tasks/monsterrodholders.md` until a full autostart recreated it; later reconcile passes then had to stash or swap panes, which is why the pane looked like it was being closed arbitrarily.
+
+I fixed that in `src/agent-doc`:
+- passive sync now blocks only when the recorded rebind successor is still alive and rooted to the same document
+- live rebind successors now count as an ownership-proof source during sync recovery
+- stale rebind provenance no longer prevents passive cold-start for mixed-root docs like `src/boost-client/tasks/monsterrodholders.md`
+
+Verification:
+- `cargo test` in `src/agent-doc`: passed
+- `cargo build` in `src/agent-doc`: passed
+- `cargo install --path . --force` in `src/agent-doc`: replaced the local `agent-doc` binary
+- pushed `6a10069` to `origin/20260422/codex-agent-backend`
+
+I added `#mrhreplay` to the backlog to replay the exact mixed-root passive-sync path against `agent-doc-bugs2.md` + `monsterrodholders.md` in live editor use.
+<!-- agent:boundary:11391ae0 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -94,6 +112,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#mrhreplay] [recommended] Replay mixed-root passive sync for tasks/agent-doc/agent-doc-bugs2.md + src/boost-client/tasks/monsterrodholders.md and verify stale registry_rebind closeouts no longer block passive cold-start.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where `finalize`/`write --commit` can report success without a persisted commit, identify any stash/sync/session-check interaction that can leave the response uncommitted, then add regression coverage and a fail-closed acceptance criterion so agent-doc never reports a completed closeout until the response commit is verifiably present.

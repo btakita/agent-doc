@@ -152,12 +152,33 @@ Verification completed in `src/agent-doc`: `cargo check`, `cargo test`, `cargo b
 Repo closeout in `src/agent-doc`: committed as `294896f` (`fix: restore codex ctrl-c quit menu`) and pushed to `origin/20260422/codex-agent-backend`.
 Left the pre-existing unrelated dirty change in `src/agent-doc/src/plugin.rs` untouched.
 
-`Ctrl+D`'s existing quit-menu path remains in place; this cycle fixed the missing equivalent path for actual stdin-forwarded `Ctrl+C`.
-<!-- agent:boundary:097c423d -->
+❯ `Ctrl+D`'s existing quit-menu path remains in place; this cycle fixed the missing equivalent path for actual stdin-forwarded `Ctrl+C`.
+❯ do [#sgown6]. spec-test-build-install-commit-push
+### Re: #sgown6 — gpt-5
+
+Implemented the phase-6 operator-facing session controls. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+
+- Added actor-backed agent-doc session subcommands for status, history, attach, restart, file-scoped clear, and doctor, while preserving the existing tmux-session pinning compatibility surface.
+- Wired JetBrains and VS Code session controls onto that shared binary contract: Show Session Status, Restart Session, Clear Session Context, and Copy Session Diagnostics.
+- Updated the actor/session/operator specs, plugin specs, and release notes to document the phase-6 surface.
+- Verification completed in src/agent-doc: cargo check, cargo test, cargo build, cargo install --path . --force, npm test, npm run package, and JetBrains ./gradlew test buildPlugin.
+- Local install completed for the VS Code extension and for the JetBrains plugin in the active IntelliJ IDEA 2026.1 profile.
+- Repo closeout in src/agent-doc: committed as 7b4fbbd (feat: add actor-backed session operator controls) and pushed to origin/20260422/codex-agent-backend.
+- Left the pre-existing unrelated dirty change in src/plugin.rs untouched.
+
+#sgown6 is complete. The remaining transition steps stay open for #sgown7-#sgown9.
+<!-- agent:boundary:71c3b5c7 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
+The "Press Enter to restart, or 'q' to exit." menu for both Claude and Codex managed sessions have issues with the Enter key. spec-test-build-install-commit-push 
+```
+claude exited cleanly.
+                      Press Enter to restart, or 'q' to exit.
+                                                             q^M^M^M^M
+```
+---
 agent-doc running /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md with Codex is failing due to the sandbox. Please help me to DISABLE THE CODEX SANDBOX. I don't want agent-doc to bypass the sandbox by default but for my environment I want to bypass the sandbox. spec-test-build-install-commit-push
 ---
 I saw this error. Id the root cause and fix. spec-test-build-install-commit-push

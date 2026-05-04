@@ -97,6 +97,11 @@ Later phases may refine caller values without changing the field names.
   not run hidden layout rescue or closeout replay anymore. Those mutations live
   behind explicit repair surfaces such as `agent-doc repair <FILE>` and
   `agent-doc session doctor <FILE> --repair`.
+- The phase-8 normal-path cleanup is now in place: route/start/sync no longer
+  re-elect ownership from latest-open session logs, `registry_rebind`
+  successors, or generic same-file process-tree scans. Those sources still
+  matter for diagnostics and explicit repair, but they cannot silently reclaim
+  authority away from the actor-backed path.
 - `sessions.json` remains a projection/binding helper during migration, not the
   final actor store.
 - Session logs are the source of transition provenance and generation history.

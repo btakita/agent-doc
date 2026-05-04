@@ -968,8 +968,7 @@ fn repair_missing_registered_pane(
 ) -> Result<MissingRegisteredPaneRepair> {
     let dead_pane =
         capture_dead_pane_diagnostics(tmux, file, session_id, pane_id, last_known_window)?;
-    let (closeout_recovery_phase, closeout_recovery_outcome, closeout_recovery_error) = match mode
-    {
+    let (closeout_recovery_phase, closeout_recovery_outcome, closeout_recovery_error) = match mode {
         MissingRegisteredPaneRepairMode::InspectOnly => (
             pending_missing_pane_repair_phase(file).map(str::to_string),
             None,
@@ -1310,7 +1309,7 @@ fn sync_actor_or_live_owner_matches(
     pane_id: &str,
 ) -> bool {
     authoritative_actor_pane_for_document(tmux, file, session_id).as_deref() == Some(pane_id)
-        || find_live_owner_pane_excluding_quiet(tmux, file, session_id, None).as_deref()
+        || find_normal_path_owner_pane_excluding_quiet(tmux, file, session_id, None).as_deref()
             == Some(pane_id)
 }
 
@@ -2352,55 +2351,17 @@ fn run_with_options(
                 ));
             }
             if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-                if let Some(pane_id) =
-                    find_alive_pane_via_open_session_log(tmux, file_path, &session_id, None, false)
-                {
-                    if let Some(owner) =
-                        claimed_sync_pane_owner(&claimed_sync_panes, &pane_id, file_path)
-                    {
-                        eprintln!(
-                            "[sync] safe passive sync found latest session-log owner {} for {} but it is already reserved for {} in this sync run",
-                            pane_id,
-                            file_path.display(),
-                            owner.display()
-                        );
-                        sync_log(&format!(
-                            "safe_passive_session_log_owner_reserved file={} pane={} owner={}",
-                            file_path.display(),
-                            pane_id,
-                            owner.display()
-                        ));
-                    } else {
-                        eprintln!(
-                            "[sync] safe passive sync reusing latest session-log owner {} for {}",
-                            pane_id,
-                            file_path.display()
-                        );
-                        sync_log(&format!(
-                            "safe_passive_reuse_session_log_owner file={} pane={}",
-                            file_path.display(),
-                            pane_id
-                        ));
-                        reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
-                        if registered_pane.as_deref() != Some(pane_id.as_str()) {
-                            let _ =
-                                reregister_recovered_owner(tmux, file_path, &session_id, &pane_id);
-                        }
-                        continue;
-                    }
-                }
                 if let Some(pane_id) = registered_pane.as_ref()
                     && claimed_owner.is_none()
-                    && tmux.pane_alive(pane_id)
-                    && registered_pane_matches_document_root(tmux, file_path, pane_id)
+                    && registered_pane_proves_live_owner(tmux, file_path, &session_id, pane_id)
                 {
                     eprintln!(
-                        "[sync] safe passive sync reusing alive registered pane {} for {} without waiting on full live-owner proof",
+                        "[sync] safe passive sync reusing authoritative actor or supervisor-backed registered pane {} for {}",
                         pane_id,
                         file_path.display()
                     );
                     sync_log(&format!(
-                        "safe_passive_reuse_registered_pane file={} pane={}",
+                        "safe_passive_reuse_registered_projection file={} pane={}",
                         file_path.display(),
                         pane_id
                     ));
@@ -2704,24 +2665,69 @@ fn run_with_options(
             // alive pane in the target session is already running agent-doc
             // for this file (registry may have been pruned or stale).
             // This prevents creating duplicate panes.
-            match recover_existing_associated_pane(
-                tmux,
-                file_path,
-                &session_id,
-                window,
-                &claimed_sync_panes,
-            ) {
-                ExistingAssociatedPaneRecovery::Recovered(pane_id) => {
-                    reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
-                    continue;
-                }
-                ExistingAssociatedPaneRecovery::Ambiguous => {
+            let associated_candidates = find_associated_panes(tmux, file_path, &session_id);
+            match resolve_associated_panes(associated_candidates.clone(), window) {
+                AssociatedPaneResolution::Selected { winner, redundant } => {
+                    let detail = std::iter::once(&winner)
+                        .chain(redundant.iter())
+                        .map(|candidate| {
+                            format!(
+                                "{}:{}:{}:{}",
+                                candidate.pane_id,
+                                candidate.window_name,
+                                candidate.window_id,
+                                candidate.source_summary()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!(
+                        "[sync] found legacy associated pane evidence for {} but normal sync will not reclaim ownership from {} automatically; run an explicit claim/repair instead",
+                        file_path.display(),
+                        winner.pane_id
+                    );
+                    sync_log(&format!(
+                        "associated_pane_requires_explicit_repair file={} pane={} sources={} redundant={} candidates={}",
+                        file_path.display(),
+                        winner.pane_id,
+                        winner.source_summary(),
+                        redundant.len(),
+                        detail
+                    ));
                     blocked_unresolved_files
                         .borrow_mut()
                         .insert(file_path.to_path_buf());
                     continue;
                 }
-                ExistingAssociatedPaneRecovery::None => {}
+                AssociatedPaneResolution::Ambiguous(candidates) => {
+                    let detail = candidates
+                        .iter()
+                        .map(|candidate| {
+                            format!(
+                                "{}:{}:{}:{}",
+                                candidate.pane_id,
+                                candidate.window_name,
+                                candidate.window_id,
+                                candidate.source_summary()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!(
+                        "[sync] found multiple legacy associated panes for {}; normal sync will not re-elect ownership. Resolve with explicit claim/repair.",
+                        file_path.display()
+                    );
+                    sync_log(&format!(
+                        "associated_pane_ambiguous_requires_explicit_repair file={} candidates={}",
+                        file_path.display(),
+                        detail
+                    ));
+                    blocked_unresolved_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
+                    continue;
+                }
+                AssociatedPaneResolution::None => {}
             }
 
             if let Some(ref pane) = registered_pane {
@@ -2817,10 +2823,7 @@ fn run_with_options(
                             }
                         }
                         if let Some(reason) = repair.block_auto_start_reason.as_deref() {
-                            eprintln!(
-                                "[sync] {}",
-                                reason
-                            );
+                            eprintln!("[sync] {}", reason);
                             sync_log(&format!(
                                 "missing-pane auto-start blocked file={} pane={} reason={}",
                                 file_path.display(),
@@ -3806,6 +3809,52 @@ pub(crate) fn find_live_owner_pane(tmux: &Tmux, file: &Path, session_id: &str) -
     find_live_owner_pane_excluding(tmux, file, session_id, None)
 }
 
+pub(crate) fn find_normal_path_owner_pane(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+) -> Option<String> {
+    find_normal_path_owner_pane_excluding(tmux, file, session_id, None)
+}
+
+pub(crate) fn find_normal_path_owner_pane_excluding(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+) -> Option<String> {
+    find_normal_path_owner_pane_excluding_with_logging(tmux, file, session_id, excluded_pane, true)
+}
+
+pub(crate) fn find_normal_path_owner_pane_excluding_quiet(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+) -> Option<String> {
+    find_normal_path_owner_pane_excluding_with_logging(tmux, file, session_id, excluded_pane, false)
+}
+
+fn find_normal_path_owner_pane_excluding_with_logging(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+    log_hits: bool,
+) -> Option<String> {
+    authoritative_actor_pane_for_document(tmux, file, session_id)
+        .filter(|pane| excluded_pane != Some(pane.as_str()))
+        .or_else(|| {
+            find_registered_pane_via_path_provenance(
+                tmux,
+                file,
+                session_id,
+                excluded_pane,
+                log_hits,
+            )
+        })
+}
+
 pub(crate) fn find_live_owner_pane_excluding(
     tmux: &Tmux,
     file: &Path,
@@ -3831,6 +3880,9 @@ fn find_live_owner_pane_excluding_with_logging(
     excluded_pane: Option<&str>,
     log_hits: bool,
 ) -> Option<String> {
+    // Full heuristic recovery remains available for explicit repair/resync paths.
+    // Normal route/start/sync ownership decisions must use
+    // `find_normal_path_owner_pane*` instead.
     find_registered_pane_via_path_provenance(tmux, file, session_id, excluded_pane, log_hits)
         .or_else(|| {
             find_alive_pane_via_supervisor_pid(tmux, file, session_id)
@@ -5349,7 +5401,10 @@ mod tests {
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
 
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let doc = tmp.path().join("tasks").join("captured-pane-loss-inspect.md");
+        let doc = tmp
+            .path()
+            .join("tasks")
+            .join("captured-pane-loss-inspect.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let content = concat!(
             "---\n",
@@ -5394,7 +5449,10 @@ mod tests {
         assert!(!repair.repaired_stale_preflight);
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, crate::cycle_state::CyclePhase::ResponseCaptured);
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::ResponseCaptured
+        );
         assert!(snapshot::pending_path_for(&doc).unwrap().exists());
     }
 
@@ -5590,16 +5648,15 @@ mod tests {
             "pane should be retained as dead for diagnostics"
         );
 
-        let repair =
-            repair_missing_registered_pane(
-                &iso,
-                &doc,
-                "dead-pane-session",
-                &pane,
-                Some("@17"),
-                MissingRegisteredPaneRepairMode::ExplicitRepair,
-            )
-            .unwrap();
+        let repair = repair_missing_registered_pane(
+            &iso,
+            &doc,
+            "dead-pane-session",
+            &pane,
+            Some("@17"),
+            MissingRegisteredPaneRepairMode::ExplicitRepair,
+        )
+        .unwrap();
         let dead = repair
             .dead_pane
             .as_ref()
@@ -7919,7 +7976,7 @@ mod tests {
     }
 
     #[test]
-    fn registered_pane_proves_live_owner_accepts_live_registry_rebind_successor() {
+    fn registered_pane_proves_live_owner_rejects_live_registry_rebind_successor() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd = ScopedCurrentDir::set(tmp.path());
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
@@ -7941,8 +7998,8 @@ mod tests {
         .unwrap();
 
         assert!(
-            registered_pane_proves_live_owner(&iso, &doc, "owned-rebind-session", &pane),
-            "a live registry-rebind successor should count as ownership proof without PID/process-tree fallback"
+            !registered_pane_proves_live_owner(&iso, &doc, "owned-rebind-session", &pane),
+            "a live registry-rebind successor should not count as normal-path ownership proof without an authoritative actor record or supervisor-backed registry binding"
         );
     }
 

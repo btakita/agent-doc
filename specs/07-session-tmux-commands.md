@@ -21,8 +21,9 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 - Routes a harness-native reopen command into the authoritative pane for the document.
 - When `.agent-doc/session-actors.json` has a healthy authoritative record for the document, route must treat that actor generation as the owner-of-record and dispatch through supervisor IPC instead of re-electing a pane from tmux/process heuristics.
-- Ownership proof preference is: canonical path provenance from `sessions.json`, then tmux process-tree file-path proof, then supervisor-PID recovery.
+- Normal-path ownership proof is the authoritative actor record first, then the supervisor-backed registered binding from `sessions.json`.
 - Actor-backed reroutes may refresh `sessions.json` as a projection of the actor pane, but they must not opportunistically steal another same-file pane or re-register to a heuristic winner while the authoritative actor is healthy.
+- Session-log owners, `registry_rebind` successors, and generic same-file process-tree matches are repair/diagnostic signals only; route must fail closed with explicit inspect/claim/kill guidance instead of promoting them back to authority on the normal path.
 - Route must fail closed on ambiguity and list concrete follow-up commands instead of guessing.
 - Routed dispatch must target an actually idle composer. Drafted user input, queue-only Codex composer states, reverse-i-search, permission prompts, or similar blockers are not safe.
 - Codex reroutes always send the bare `agent-doc <FILE>` reopen. Multiline payloads or content-edited payloads are invalid.
@@ -98,8 +99,8 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - When `.agent-doc/session-actors.json` has a live authoritative record for a
   visible document, sync must treat that actor-owned pane as the owner-of-record
   and refresh `sessions.json` only as a projection of that binding.
-- An alive pane is not reusable solely because the pane id exists; it must still prove live ownership for that specific document.
-- When multiple ownership hints disagree, sync must prefer the freshest file-specific proof in this order: path/supervisor provenance, then the latest open session-log owner, then the latest alive `registry_rebind` successor pane, and only then generic same-file process-tree matches.
+- An alive pane is not reusable solely because the pane id exists; normal sync may reuse only the authoritative actor pane or the supervisor-backed registered binding for that specific document.
+- When ownership falls back to legacy associated-pane evidence (`session-log`, `registry_rebind`, generic same-file process tree), sync must fail closed and require explicit claim/repair instead of choosing a winner automatically.
 - When ownership proof weakens but the alive pane still contains protected Codex drafted input or still appears as the newest open pane in the session log, sync must fail closed for that file instead of fabricating `registered_pane_missing`.
 - If two visible files point at the same pane, sync must either find one decisive owner or drop the duplicate from the synthetic registry so tmux-router cannot alias both files onto one pane.
 - Once a live pane is reserved for one file during the pass, later files in the same pass must treat it as unavailable.

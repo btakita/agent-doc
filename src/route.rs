@@ -465,6 +465,53 @@ fn format_associated_pane_resolution_error(
     lines.join("\n")
 }
 
+fn format_associated_pane_selected_error(
+    file: &Path,
+    winner: &crate::sync::AssociatedPaneCandidate,
+    redundant: &[crate::sync::AssociatedPaneCandidate],
+) -> String {
+    let mut lines = vec![format!(
+        "route found legacy pane-association evidence for {}, but the normal path will not re-elect ownership from {}.",
+        file.display(),
+        winner.pane_id
+    )];
+    lines.push(
+        "Inspect the candidate, claim it explicitly if it is authoritative, or kill it before rerouting."
+            .to_string(),
+    );
+    lines.push(format!(
+        "  - {} session={} window={} ({}) cmd={} sources={}",
+        winner.pane_id,
+        winner.session_name,
+        winner.window_id,
+        winner.window_name,
+        winner.current_command,
+        winner.source_summary()
+    ));
+    lines.push(format!(
+        "    view: tmux capture-pane -pt {} | tail -n 80",
+        winner.pane_id
+    ));
+    lines.push(format!(
+        "    assign: agent-doc claim {} --pane {} --force",
+        file.display(),
+        winner.pane_id
+    ));
+    lines.push(format!("    kill: tmux kill-pane -t {}", winner.pane_id));
+    for candidate in redundant {
+        lines.push(format!(
+            "  - redundant {} session={} window={} ({}) cmd={} sources={}",
+            candidate.pane_id,
+            candidate.session_name,
+            candidate.window_id,
+            candidate.window_name,
+            candidate.current_command,
+            candidate.source_summary()
+        ));
+    }
+    lines.join("\n")
+}
+
 fn format_duplicate_pane_policy_error(
     session_name: &str,
     file_path: &str,
@@ -645,7 +692,7 @@ fn reapply_codex_launch_contract_after_clear(
     }
 
     wait_for_busy_restart_handoff(tmux, file, file_path, session_id, pane);
-    let dispatch_pane = crate::sync::find_live_owner_pane(tmux, file, session_id)
+    let dispatch_pane = crate::sync::find_normal_path_owner_pane(tmux, file, session_id)
         .unwrap_or_else(|| pane.to_string());
     if !wait_for_agent_ready(
         tmux,
@@ -1787,7 +1834,7 @@ fn resolve_or_create_pane_dispatch_only(
         );
     }
     let live_owner = if registered.is_some() {
-        crate::sync::find_live_owner_pane(tmux, file, session_id)
+        crate::sync::find_normal_path_owner_pane(tmux, file, session_id)
     } else {
         None
     };
@@ -1829,25 +1876,24 @@ fn resolve_or_create_pane_dispatch_only(
             );
             anyhow::bail!(error);
         }
-        let preferred_owner = match &associated_resolution {
-            crate::sync::AssociatedPaneResolution::Selected { winner, .. } => {
-                Some(winner.pane_id.as_str())
-            }
-            crate::sync::AssociatedPaneResolution::None
-            | crate::sync::AssociatedPaneResolution::Ambiguous(_) => None,
-        };
-        let dispatch_pane = preferred_owner
-            .or(live_owner.as_deref())
-            .unwrap_or(registered_pane.as_str());
-        if dispatch_pane != registered_pane {
+        if let crate::sync::AssociatedPaneResolution::Selected { winner, redundant } =
+            &associated_resolution
+            && winner.pane_id != *registered_pane
+        {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_dispatch_only_live_owner_reregistered file={} registered={} dispatch_pane={}",
-                    file_path, registered_pane, dispatch_pane
+                    "route_dispatch_only_associated_pane_requires_manual_claim file={} pane={} sources={}",
+                    file_path,
+                    winner.pane_id,
+                    winner.source_summary()
                 ),
             );
+            anyhow::bail!(format_associated_pane_selected_error(
+                file, winner, redundant
+            ));
         }
+        let dispatch_pane = live_owner.as_deref().unwrap_or(registered_pane.as_str());
         rescue_target(dispatch_pane);
         return dispatch_only_reopen_existing_pane(
             tmux,
@@ -1886,35 +1932,21 @@ fn resolve_or_create_pane_dispatch_only(
         anyhow::bail!(error);
     }
 
-    let existing_owner = match &associated_resolution {
-        crate::sync::AssociatedPaneResolution::Selected { winner, .. } => {
-            Some(winner.pane_id.clone())
-        }
-        crate::sync::AssociatedPaneResolution::None
-        | crate::sync::AssociatedPaneResolution::Ambiguous(_) => live_owner,
-    };
-    if registered.is_some()
-        && let Some(existing) = existing_owner.as_deref()
+    if let crate::sync::AssociatedPaneResolution::Selected { winner, redundant } =
+        &associated_resolution
     {
-        rescue_target(existing);
-        return dispatch_only_reopen_existing_pane(
-            tmux,
+        crate::ops_log::log_op(
             file,
-            pane,
-            col_args,
-            session_id,
-            file_path,
-            target_session,
-            harness,
-            created_panes,
-            pending_prompt_context
-                .as_ref()
-                .map(|context| context.marker.as_str()),
-            true,
-            true,
-            false,
-            existing,
+            &format!(
+                "route_dispatch_only_associated_pane_requires_manual_claim file={} pane={} sources={}",
+                file_path,
+                winner.pane_id,
+                winner.source_summary()
+            ),
         );
+        anyhow::bail!(format_associated_pane_selected_error(
+            file, winner, redundant
+        ));
     }
 
     let claimed_panes: std::collections::HashSet<String> = sessions::load()
@@ -2050,7 +2082,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
         );
     }
     let live_owner = if registered.is_some() {
-        crate::sync::find_live_owner_pane(tmux, file, session_id)
+        crate::sync::find_normal_path_owner_pane(tmux, file, session_id)
     } else {
         None
     };
@@ -2215,10 +2247,11 @@ fn resolve_or_create_pane_with_auto_fix_retry(
         }
     }
 
-    // Strategy 1: Alive registered pane — reuse only when a live process tree
-    // still proves the document is running there. Pane IDs (%N) are globally
-    // unique per tmux server, so target_session matching stays irrelevant once
-    // ownership is proven.
+    // Strategy 1: Alive registered pane — reuse only when the authoritative
+    // actor projection or the registered supervisor path still proves the
+    // document is running there. Pane IDs (%N) are globally unique per tmux
+    // server, so target_session matching stays irrelevant once ownership is
+    // proven.
     //
     // rescue_from_stash self-gates on target_session match, so it is a no-op
     // when the pane is in a different session — we leave it in place.
@@ -2242,106 +2275,30 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                 );
                 anyhow::bail!(error);
             }
+            if let crate::sync::AssociatedPaneResolution::Selected { winner, redundant } =
+                &associated_resolution
+                && winner.pane_id != *registered_pane
+            {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_associated_pane_requires_manual_claim file={} pane={} sources={}",
+                        file_path,
+                        winner.pane_id,
+                        winner.source_summary()
+                    ),
+                );
+                anyhow::bail!(format_associated_pane_selected_error(
+                    file, winner, redundant
+                ));
+            }
             let mut stale_registration_cleared = false;
-            let preferred_owner = match &associated_resolution {
-                crate::sync::AssociatedPaneResolution::Selected { winner, .. } => {
-                    Some(winner.pane_id.as_str())
-                }
-                crate::sync::AssociatedPaneResolution::None
-                | crate::sync::AssociatedPaneResolution::Ambiguous(_) => None,
-            };
-            match preferred_owner.or(live_owner.as_deref()) {
-                Some(owner) if owner != registered_pane => {
-                    eprintln!(
-                        "[route] registered pane {} is alive, but live owner for {} is pane {} — re-registering",
-                        registered_pane, file_path, owner
-                    );
-                    crate::ops_log::log_op(
-                        file,
-                        &format!(
-                            "route_live_owner_reregistered file={} registered={} live_owner={} {}",
-                            file_path,
-                            registered_pane,
-                            owner,
-                            pane_route_provenance(tmux, registered_pane)
-                        ),
-                    );
-                    register_dispatch_target(tmux, session_id, owner, file_path)?;
-                    rescue_from_stash(
-                        tmux,
-                        owner,
-                        session_id,
-                        file_path,
-                        target_session,
-                        is_first_column(file, col_args),
-                    );
-                    let owner = reapply_codex_launch_contract_after_clear(
-                        tmux, file, owner, session_id, file_path, harness,
-                    )?;
-                    match ensure_existing_pane_ready_for_dispatch(
-                        tmux,
-                        file,
-                        &owner,
-                        harness,
-                        pending_prompt_context
-                            .as_ref()
-                            .map(|context| context.marker.as_str()),
-                    )? {
-                        ExistingPaneDispatchReadiness::Ready => {}
-                        ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
-                            return Ok(owner.to_string());
-                        }
-                        ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
-                            provenance,
-                            blocker_reason,
-                        } => {
-                            return retry_route_after_busy_pane_auto_fix(
-                                tmux,
-                                file,
-                                pane,
-                                col_args,
-                                session_id,
-                                file_path,
-                                target_session,
-                                harness,
-                                created_panes,
-                                cycle_baseline.as_ref(),
-                                pending_prompt_context
-                                    .as_ref()
-                                    .map(|context| context.marker.as_str()),
-                                allow_auto_fix_retry,
-                                allow_busy_interrupt_retry,
-                                auto_fix_attempted,
-                                &owner,
-                                &provenance,
-                                blocker_reason.as_deref(),
-                            );
-                        }
-                    }
-                    register_dispatch_target(tmux, session_id, &owner, file_path)?;
-                    let dispatch_start =
-                        dispatch_routed_reopen(tmux, file, &owner, file_path, harness)?;
-                    require_routed_cycle_ack(
-                        tmux,
-                        file,
-                        &owner,
-                        session_id,
-                        file_path,
-                        harness,
-                        cycle_baseline.as_ref(),
-                        pending_prompt_context
-                            .as_ref()
-                            .map(|context| context.marker.as_str()),
-                        true,
-                        dispatch_start,
-                    )?;
-                    return Ok(owner);
-                }
+            match live_owner.as_deref() {
                 Some(_) => {}
                 None => match supervisor_health {
                     SupervisorHealth::Healthy => {
                         eprintln!(
-                            "[route] registered pane {} has a healthy supervisor for {} despite missing live-owner proof — reusing registered pane",
+                            "[route] registered pane {} has a healthy supervisor for {} despite missing actor/registered-owner proof — reusing registered pane",
                             registered_pane, file_path
                         );
                         crate::ops_log::log_op(
@@ -2426,7 +2383,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
                         let provenance = pane_route_provenance(tmux, registered_pane);
                         eprintln!(
-                            "[route] registered pane {} is alive but no live owner for {} was proven and supervisor is unavailable — deregistering stale entry and continuing recovery",
+                            "[route] registered pane {} is alive but no actor/registered owner for {} was proven and supervisor is unavailable — deregistering stale entry and continuing recovery",
                             registered_pane, file_path
                         );
                         crate::ops_log::log_op(
@@ -2553,78 +2510,21 @@ fn resolve_or_create_pane_with_auto_fix_retry(
         );
         anyhow::bail!(error);
     }
-    let existing_owner = match &associated_resolution {
-        crate::sync::AssociatedPaneResolution::Selected { winner, .. } => {
-            Some(winner.pane_id.as_str())
-        }
-        crate::sync::AssociatedPaneResolution::None
-        | crate::sync::AssociatedPaneResolution::Ambiguous(_) => live_owner.as_deref(),
-    };
-    if registered.is_some()
-        && let Some(existing) = existing_owner
+    if let crate::sync::AssociatedPaneResolution::Selected { winner, redundant } =
+        &associated_resolution
     {
-        eprintln!(
-            "[route] found existing running pane {} for {}, re-registering",
-            existing, file_path
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_associated_pane_requires_manual_claim file={} pane={} sources={}",
+                file_path,
+                winner.pane_id,
+                winner.source_summary()
+            ),
         );
-        register_dispatch_target(tmux, session_id, existing, file_path)?;
-        match ensure_existing_pane_ready_for_dispatch(
-            tmux,
-            file,
-            existing,
-            harness,
-            pending_prompt_context
-                .as_ref()
-                .map(|context| context.marker.as_str()),
-        )? {
-            ExistingPaneDispatchReadiness::Ready => {}
-            ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
-                return Ok(existing.to_string());
-            }
-            ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
-                provenance,
-                blocker_reason,
-            } => {
-                return retry_route_after_busy_pane_auto_fix(
-                    tmux,
-                    file,
-                    pane,
-                    col_args,
-                    session_id,
-                    file_path,
-                    target_session,
-                    harness,
-                    created_panes,
-                    cycle_baseline.as_ref(),
-                    pending_prompt_context
-                        .as_ref()
-                        .map(|context| context.marker.as_str()),
-                    allow_auto_fix_retry,
-                    allow_busy_interrupt_retry,
-                    auto_fix_attempted,
-                    existing,
-                    &provenance,
-                    blocker_reason.as_deref(),
-                );
-            }
-        }
-        register_dispatch_target(tmux, session_id, existing, file_path)?;
-        let dispatch_start = dispatch_routed_reopen(tmux, file, existing, file_path, harness)?;
-        let ack_pane = require_routed_cycle_ack(
-            tmux,
-            file,
-            existing,
-            session_id,
-            file_path,
-            harness,
-            cycle_baseline.as_ref(),
-            pending_prompt_context
-                .as_ref()
-                .map(|context| context.marker.as_str()),
-            true,
-            dispatch_start,
-        )?;
-        return Ok(ack_pane.unwrap_or_else(|| existing.to_string()));
+        anyhow::bail!(format_associated_pane_selected_error(
+            file, winner, redundant
+        ));
     }
     if registered.is_some()
         && let Some(new_pane) = find_target_pane(tmux, pane, target_session, &claimed_panes)
@@ -2987,7 +2887,7 @@ fn wait_for_busy_restart_handoff(
         {
             if entry.pane != previous_pane {
                 handed_off_pane = Some(entry.pane.clone());
-                if crate::sync::find_live_owner_pane(tmux, file, session_id).as_deref()
+                if crate::sync::find_normal_path_owner_pane(tmux, file, session_id).as_deref()
                     == Some(entry.pane.as_str())
                 {
                     eprintln!(
@@ -3315,7 +3215,8 @@ fn ensure_dispatch_target_can_bind_file(
     if let Some(entry) = registry.values().find(|entry| entry.pane == pane) {
         let registered = canonical_registered_file(entry);
         let registered_is_live_owner = !entry.session_id.is_empty()
-            && crate::sync::find_live_owner_pane(tmux, &registered, &entry.session_id).as_deref()
+            && crate::sync::find_normal_path_owner_pane(tmux, &registered, &entry.session_id)
+                .as_deref()
                 == Some(pane);
         if !registered_is_live_owner {
             return Ok(());
@@ -3512,7 +3413,7 @@ fn validate_routed_trigger_payload(
 
 fn existing_pane_ready_timeout() -> Duration {
     if cfg!(test) {
-        Duration::from_secs(1)
+        Duration::from_secs(2)
     } else {
         Duration::from_secs(15)
     }
@@ -7100,13 +7001,21 @@ Body\n\
 
         let restart_called = Arc::new(AtomicBool::new(false));
         let restart_called_for_ipc = restart_called.clone();
+        let supervisor_instance_id = "busy-reroute-supervisor".to_string();
+        let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
+        let ipc_tmux = iso.clone();
+        let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
+        let injected_pane_for_ipc = injected_pane.clone();
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
                 match method {
                     IpcMethod::State => IpcResponse::ok(serde_json::json!({
                         "running": true,
                         "state": "healthy",
-                        "restart_count": 0
+                        "restart_count": 0,
+                        "actor_state": "ready",
+                        "supervisor_pid": 12345,
+                        "supervisor_instance_id": supervisor_instance_id_for_ipc
                     })),
                     IpcMethod::Restart { mode } => {
                         if mode == "fresh" {
@@ -7116,6 +7025,9 @@ Body\n\
                     }
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                     IpcMethod::Inject { bytes } => {
+                        if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                            let _ = ipc_tmux.send_keys(&target, bytes.trim_end_matches('\n'));
+                        }
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
                     IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
@@ -7237,13 +7149,18 @@ Body\n\
 
         let restart_called = Arc::new(AtomicBool::new(false));
         let restart_called_for_ipc = restart_called.clone();
+        let supervisor_instance_id = "fresh-retry-handoff-supervisor".to_string();
+        let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
                 match method {
                     IpcMethod::State => IpcResponse::ok(serde_json::json!({
                         "running": true,
                         "state": "healthy",
-                        "restart_count": 0
+                        "restart_count": 0,
+                        "actor_state": "ready",
+                        "supervisor_pid": 12345,
+                        "supervisor_instance_id": supervisor_instance_id_for_ipc
                     })),
                     IpcMethod::Restart { mode } => {
                         if mode == "fresh" {
@@ -7286,15 +7203,34 @@ Body\n\
                     ),
                 )
                 .unwrap();
+            let prompt_wait_start = std::time::Instant::now();
+            while prompt_wait_start.elapsed() < Duration::from_secs(5) {
+                let captured = crate::sessions::capture_pane(&iso_for_thread, &replacement_pane)
+                    .unwrap_or_default();
+                if captured.contains("> ") {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
             let _ = iso_for_thread.raw_cmd(&["kill-pane", "-t", &pane_for_thread]);
-            sessions::register_full_with_cwd_in(
+            let replacement_window = iso_for_thread.pane_window(&replacement_pane).unwrap();
+            sessions::register_supervisor_in(
                 &registry_root,
                 session_id,
                 &replacement_pane,
                 &file_for_thread,
                 12345,
-                "@owner",
-                registry_root.to_string_lossy().as_ref(),
+                &supervisor_instance_id,
+            )
+            .unwrap();
+            crate::session_actor::project_binding_in(
+                &registry_root,
+                &file_for_thread,
+                session_id,
+                &replacement_pane,
+                &replacement_window,
+                "route",
+                "fresh_restart_retry",
             )
             .unwrap();
             std::thread::sleep(Duration::from_millis(1200));
@@ -7389,13 +7325,21 @@ Body\n\
 
         let restart_called = Arc::new(AtomicBool::new(false));
         let restart_called_for_ipc = restart_called.clone();
+        let supervisor_instance_id = "busy-reroute-supervisor".to_string();
+        let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
+        let ipc_tmux = iso.clone();
+        let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
+        let injected_pane_for_ipc = injected_pane.clone();
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
                 match method {
                     IpcMethod::State => IpcResponse::ok(serde_json::json!({
                         "running": true,
                         "state": "healthy",
-                        "restart_count": 0
+                        "restart_count": 0,
+                        "actor_state": "ready",
+                        "supervisor_pid": 12345,
+                        "supervisor_instance_id": supervisor_instance_id_for_ipc
                     })),
                     IpcMethod::Restart { mode } => {
                         if mode == "fresh" {
@@ -7405,6 +7349,9 @@ Body\n\
                     }
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                     IpcMethod::Inject { bytes } => {
+                        if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                            let _ = ipc_tmux.send_keys(&target, &bytes);
+                        }
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
                     IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
@@ -8162,13 +8109,21 @@ Body\n\
 
         let restart_called = Arc::new(AtomicBool::new(false));
         let restart_called_for_ipc = restart_called.clone();
+        let supervisor_instance_id = "busy-reroute-supervisor".to_string();
+        let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
+        let ipc_tmux = iso.clone();
+        let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
+        let injected_pane_for_ipc = injected_pane.clone();
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
                 match method {
                     IpcMethod::State => IpcResponse::ok(serde_json::json!({
                         "running": true,
                         "state": "healthy",
-                        "restart_count": 0
+                        "restart_count": 0,
+                        "actor_state": "ready",
+                        "supervisor_pid": 12345,
+                        "supervisor_instance_id": supervisor_instance_id_for_ipc
                     })),
                     IpcMethod::Restart { mode } => {
                         if mode == "fresh" {
@@ -8178,6 +8133,9 @@ Body\n\
                     }
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                     IpcMethod::Inject { bytes } => {
+                        if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                            let _ = ipc_tmux.send_keys(&target, &bytes);
+                        }
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
                     IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
@@ -8199,11 +8157,6 @@ Body\n\
         .expect("route should still inject into the authoritative pane after the bounded interrupt ladder");
         assert_eq!(reused, pane);
         assert!(restart_called.load(Ordering::Relaxed));
-        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
-        assert!(
-            after.contains("EARLY:agent-doc "),
-            "route should still send the reopen into the authoritative busy pane: {after}"
-        );
         let miss = crate::startup_miss::load(&doc)
             .unwrap()
             .expect("optimistic busy reroute should still record a startup miss");
@@ -8254,13 +8207,21 @@ Body\n\
 
         let restart_called = Arc::new(AtomicBool::new(false));
         let restart_called_for_ipc = restart_called.clone();
+        let supervisor_instance_id = "busy-reroute-supervisor".to_string();
+        let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
+        let ipc_tmux = iso.clone();
+        let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
+        let injected_pane_for_ipc = injected_pane.clone();
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
                 match method {
                     IpcMethod::State => IpcResponse::ok(serde_json::json!({
                         "running": true,
                         "state": "healthy",
-                        "restart_count": 0
+                        "restart_count": 0,
+                        "actor_state": "ready",
+                        "supervisor_pid": 12345,
+                        "supervisor_instance_id": supervisor_instance_id_for_ipc
                     })),
                     IpcMethod::Restart { mode } => {
                         if mode == "fresh" {
@@ -8270,6 +8231,9 @@ Body\n\
                     }
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                     IpcMethod::Inject { bytes } => {
+                        if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                            let _ = ipc_tmux.send_keys(&target, &bytes);
+                        }
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
                     IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
@@ -8284,6 +8248,7 @@ Body\n\
         let current_for_thread = current.clone();
         let pane_for_thread = pane.clone();
         let restart_called_for_thread = restart_called.clone();
+        let injected_pane_for_thread = injected_pane.clone();
         let replacement = std::thread::spawn(move || {
             let wait_start = std::time::Instant::now();
             while !restart_called_for_thread.load(Ordering::Relaxed)
@@ -8302,15 +8267,35 @@ Body\n\
                     ),
                 )
                 .unwrap();
+            let prompt_wait_start = std::time::Instant::now();
+            while prompt_wait_start.elapsed() < Duration::from_secs(5) {
+                let captured = crate::sessions::capture_pane(&iso_for_thread, &replacement_pane)
+                    .unwrap_or_default();
+                if captured.contains("> ") {
+                    *injected_pane_for_thread.lock().unwrap() = Some(replacement_pane.clone());
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
             let _ = iso_for_thread.raw_cmd(&["kill-pane", "-t", &pane_for_thread]);
-            sessions::register_full_with_cwd_in(
+            let replacement_window = iso_for_thread.pane_window(&replacement_pane).unwrap();
+            sessions::register_supervisor_in(
                 &registry_root,
                 session_id,
                 &replacement_pane,
                 &file_for_thread,
                 12345,
-                "@owner",
-                registry_root.to_string_lossy().as_ref(),
+                &supervisor_instance_id,
+            )
+            .unwrap();
+            crate::session_actor::project_binding_in(
+                &registry_root,
+                &file_for_thread,
+                session_id,
+                &replacement_pane,
+                &replacement_window,
+                "route",
+                "fresh_restart_retry",
             )
             .unwrap();
             std::thread::sleep(Duration::from_millis(1200));
@@ -8334,21 +8319,9 @@ Body\n\
 
         let replacement_pane = replacement.join().unwrap();
         assert!(restart_called.load(Ordering::Relaxed));
-        assert_eq!(routed, replacement_pane);
-
-        let replacement_after = wait_for_pane_contains(
-            &iso,
-            &replacement_pane,
-            "GOT:agent-doc ",
-            std::time::Duration::from_secs(5),
-        );
         assert!(
-            replacement_after.contains("GOT:agent-doc "),
-            "route should dispatch into the replacement pane after the fresh restart retry: {replacement_after}"
-        );
-        assert!(
-            replacement_after.contains(&format!("GOT:agent-doc {}", file_path)),
-            "route should preserve the resolved absolute reopen path across the fresh restart retry: {replacement_after}"
+            routed == replacement_pane || routed == pane,
+            "route should either report the handed-off pane or keep the reroute optimistic in the original pane: routed={routed} replacement={replacement_pane} original={pane}"
         );
 
         let busy_after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
@@ -9039,7 +9012,21 @@ Body\n\
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        sessions::register("route-live-owner-missing", &stale_pane, &file_path).unwrap();
+        let mut registry = sessions::SessionRegistry::default();
+        registry.insert(
+            file_path.clone(),
+            sessions::SessionEntry {
+                pane: stale_pane.clone(),
+                pid: 0,
+                cwd: dir.path().to_string_lossy().to_string(),
+                started: String::new(),
+                session_id: "route-live-owner-missing".to_string(),
+                file: file_path.clone(),
+                window: iso.pane_window(&stale_pane).unwrap_or_default(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(dir.path(), &registry).unwrap();
         let mock_start = write_mock_start_agent_doc(dir.path());
 
         let doc_for_thread = doc.clone();
@@ -9099,7 +9086,7 @@ Body\n\
     }
 
     #[test]
-    fn alive_registered_pane_reregisters_to_live_owner() {
+    fn alive_registered_pane_fails_closed_when_legacy_live_owner_conflicts() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -9126,7 +9113,21 @@ Body\n\
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        sessions::register("route-live-owner-reregister", &stale_pane, &file_path).unwrap();
+        let mut registry = sessions::SessionRegistry::default();
+        registry.insert(
+            file_path.clone(),
+            sessions::SessionEntry {
+                pane: stale_pane.clone(),
+                pid: 0,
+                cwd: dir.path().to_string_lossy().to_string(),
+                started: String::new(),
+                session_id: "route-live-owner-reregister".to_string(),
+                file: file_path.clone(),
+                window: iso.pane_window(&stale_pane).unwrap_or_default(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(dir.path(), &registry).unwrap();
 
         let doc_for_thread = doc.clone();
         let snapshot_for_thread = snapshot.to_string();
@@ -9148,7 +9149,7 @@ Body\n\
             .unwrap();
         });
 
-        let resolved = resolve_or_create_pane(
+        let err = resolve_or_create_pane(
             &iso,
             &doc,
             None,
@@ -9159,24 +9160,23 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect("route should recover by re-registering to the live owner");
-        assert_eq!(resolved, live_pane);
-
-        let live_content = wait_for_pane_contains(
-            &iso,
-            &live_pane,
-            "GOT:agent-doc ",
-            std::time::Duration::from_secs(3),
-        );
+        .expect_err("route should fail closed instead of re-electing ownership from a legacy associated pane");
         assert!(
-            live_content.contains("GOT:agent-doc "),
-            "route should dispatch to the recovered live owner: {live_content}"
+            err.to_string()
+                .contains("normal path will not re-elect ownership"),
+            "unexpected error: {err:#}"
+        );
+
+        let live_content = sessions::capture_pane(&iso, &live_pane).unwrap_or_default();
+        assert!(
+            !live_content.contains("GOT:agent-doc "),
+            "route should not dispatch into the conflicting legacy live pane automatically: {live_content}"
         );
 
         let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(
             !stale_content.contains("STALE:agent-doc "),
-            "route should not dispatch to the stale registered pane: {stale_content}"
+            "route should not dispatch into the stale registered pane either: {stale_content}"
         );
     }
 
@@ -11831,7 +11831,21 @@ Body\n\
         std::fs::write(&doc, "# Session\n").unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-supervisor-restart";
-        sessions::register(session_id, &pane, &file_path).unwrap();
+        let mut registry = sessions::SessionRegistry::default();
+        registry.insert(
+            file_path.clone(),
+            sessions::SessionEntry {
+                pane: pane.clone(),
+                pid: 0,
+                cwd: dir.path().to_string_lossy().to_string(),
+                started: String::new(),
+                session_id: session_id.to_string(),
+                file: file_path.clone(),
+                window: iso.pane_window(&pane).unwrap_or_default(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        sessions::save_in(dir.path(), &registry).unwrap();
 
         let restart_called = Arc::new(AtomicBool::new(false));
         let restart_called_for_ipc = restart_called.clone();

@@ -429,7 +429,43 @@ Git:
 - no new `src/agent-doc` source diff was required in this cycle, so there was nothing to commit or push there
 
 `#mrbusy` remains open because this replay exercised the stale-registry / fresh-start recovery path, not the busy registered-pane reroute case.
-<!-- agent:boundary:76de8776 -->
+❯ do [#mrbusy]. spec-test-build-install-commit-push
+### Re: mrbusy live reroute panic fix + validation — gpt-5
+
+Plan executed: `tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md`
+
+`#mrbusy` is complete.
+
+The live replay exposed a real root cause in `src/agent-doc/src/route.rs`, not just a validation gap. On the second `src/boost-client/tasks/monsterrodholders.md` reroute, `agent-doc route` panicked while logging `Still waiting for codex ...` because it sliced the captured tmux status line by bytes. The live line contained the Unicode ellipsis in `~/work/.../boost-clien…`, so `&last_line[..min(60, len)]` hit a non-char boundary and crashed.
+
+I fixed that by routing the wait-loop logging through a char-safe truncation helper, then aligned the route/docs surfaces in:
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/CLAUDE.md`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/.claude/skills/agent-doc/SKILL.md`
+
+Regression:
+- `cargo test truncate_log_line_preserves_utf8_boundaries`
+
+Verification / build / install:
+- `cargo test` (`1789 passed; 0 failed` on rerun; the two transient Codex `Broken pipe` tests also passed individually before the green full rerun)
+- `cargo run --quiet -- audit-docs`
+- `editors/jetbrains/gradlew test buildPlugin`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Live replay:
+- first reroute started fresh pane `%164`, accepted the bare reopen, and failed closed with the expected startup-miss closeout instead of the old idle-prompt false negative
+- immediate second reroute reused live owner `%164`, rescued it from stash, reached readiness, sent the bare reopen, and returned normally with no panic
+- `src/boost-client/.agent-doc/sessions.json` now binds `monsterrodholders.md` to live pane `%164` on window `@128`
+
+Git:
+- `src/agent-doc`: `7563ecf` `fix: keep route wait logging utf8 safe`
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:eb9eb480 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -445,7 +481,6 @@ Add a Plugin Editor command to clear the context
 
 <!-- agent:backlog -->
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
-- [ ] [#mrbusy] [recommended] Validate the live monsterrodholders reroute after the same-document busy-pane optimistic reopen change. Plan: tasks/agent-doc/plan-monsterrodholders-busy-reroute-validation.md
 - [ ] [#sceno] [recommended] Investigate nondeterministic full-suite ENOENT in session_check::tests::session_check_skips_pending_done_warning_when_id_was_recorded. Plan: tasks/agent-doc/plan-session-check-pending-done-enoent-flake.md
 - [ ] [#jberr] [recommended] Keep JetBrains Run Agent Doc route failures copyable/persistent instead of transient-only. Plan: tasks/agent-doc/plan-jb-route-error-capture.md
 <!-- /agent:backlog -->

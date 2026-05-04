@@ -143,8 +143,8 @@ If you see a JSON response with `Browser`, `webSocketDebuggerUrl`, etc., it's wo
 
 **Security note:** Port 9222 is only bound to localhost (`127.0.0.1`) by default, so only local processes can connect. No external exposure. But any local process (including malware) could control your browser through this port. If concerned, you could use a non-standard port (e.g., `--remote-debugging-port=9333`).
 
-Want me to set this up now?
-I restarted Brave. Please test and make necessary configuration changes.
+❯ Want me to set this up now?
+❯ I restarted Brave. Please test and make necessary configuration changes.
 ### Re: Test remote debugging & configure
 
 **Test result:** Port 9222 is **not responding**. The `brave-flags.conf` file didn't exist — Brave was running without the flag.
@@ -158,7 +158,7 @@ I restarted Brave. Please test and make necessary configuration changes.
 
 **Next step:** Restart Brave again for the flag to take effect. Then I'll verify the port and install the chrome-devtools-mcp server.
 
-Restarted brave
+❯ Restarted brave
 ### Re: Restarted brave
 
 Remote debugging is **live**:
@@ -179,8 +179,8 @@ This connects to your running Brave session automatically. The MCP server will b
 
 All setup is complete.
 
-What SKILL.md do you recommend we should use to drive brave? agent-doc?
-just a personal agent-loop skill? If that is the case, how can libraries such as agent-doc identify there is a skill for driving the browser?
+❯ What SKILL.md do you recommend we should use to drive brave? agent-doc?
+❯ just a personal agent-loop skill? If that is the case, how can libraries such as agent-doc identify there is a skill for driving the browser?
 ### Re: Skill architecture for browser driving
 
 **Not agent-doc** — agent-doc is a document session tool. Wrong scope.
@@ -213,7 +213,7 @@ So if agent-doc needs to drive the browser during a session, it doesn't call a b
 
 Want me to scaffold `.claude/skills/browser/SKILL.md`?
 
-Should we have a rust library to distribute this skill? Are there deterministic cli functions that can be called, such as setup and other useful deterministic operations?
+❯ Should we have a rust library to distribute this skill? Are there deterministic cli functions that can be called, such as setup and other useful deterministic operations?
 ### Re: Rust CLI for browser skill?
 
 **Probably not yet.** Here's the reasoning:
@@ -251,7 +251,7 @@ Want me to scaffold the SKILL.md now?
 I want a place to add operations. I can see sift & ragie integration as being useful.
 Also, converting web pages and/or summaries to markdown for adding context.
 
-Note I just added `claude_args: --dangerously-skip-permissions`
+❯ Note I just added `claude_args: --dangerously-skip-permissions`
 ### Re: Operations registry + sift/ragie integration
 
 Scaffolded `.claude/skills/browser/SKILL.md`. It's a living operations registry you can grow:
@@ -270,7 +270,7 @@ The skill is intentionally thin right now — just the operations catalog and in
 
 File: `.claude/skills/browser/SKILL.md`
 
-Should we create a chrome-devtools-harness rust package? Would the same configs drive Chrome, Chromium, and Brave via the Devtools MCP Server?
+❯ Should we create a chrome-devtools-harness rust package? Would the same configs drive Chrome, Chromium, and Brave via the Devtools MCP Server?
 ### Re: Web-to-markdown + permissions flag
 
 **Added "Web page to markdown" operation** to the browser skill — covers the context injection use case (scrape page → clean markdown → paste into task files / agent-doc sessions).
@@ -286,11 +286,11 @@ The browser skill now has 5 operations:
 
 Plus sift and ragie integration stubs.
 
-What is a good name for the rust cli + skill tool?
-chrome-devtools-harness?
-chrome-devtools-agents?
-Any other names to use?
-Please restart this claude session with `--dangerously-skip-permissions`
+❯ What is a good name for the rust cli + skill tool?
+❯ chrome-devtools-harness?
+❯ chrome-devtools-agents?
+❯ Any other names to use?
+❯ Please restart this claude session with `--dangerously-skip-permissions`
 ### Re: Naming the Rust CLI + cross-browser compatibility
 
 **Yes, same configs drive Chrome, Chromium, and Brave.** They all speak CDP (Chrome DevTools Protocol). The only difference is the executable path:
@@ -324,11 +324,11 @@ Reasoning:
 
 `chrome-devtools-harness` and `chrome-devtools-agents` both have "chrome" in the name, which is misleading since it works with Brave too. And "agents" is overloaded in your ecosystem.
 
-What do you think?
-`browser-bridge` would be great, but it implies firefox, safari, and other browsers.
+❯ What do you think?
+❯ `browser-bridge` would be great, but it implies firefox, safari, and other browsers.
 ### Re: Restart with --dangerously-skip-permissions
 
-I can't restart myself mid-session. The `claude_args: --dangerously-skip-permissions` is already in the frontmatter — tmux-router will use it on the **next session spawn**. To apply it now, close this session and re-open the document. The next `/agent-doc tasks/software/brave.md` cycle will launch with skip-permissions active.
+❯ I can't restart myself mid-session. The `claude_args: --dangerously-skip-permissions` is already in the frontmatter — tmux-router will use it on the **next session spawn**. To apply it now, close this session and re-open the document. The next `/agent-doc tasks/software/brave.md` cycle will launch with skip-permissions active.
 ### Re: browser-bridge implies too broad
 
 Good catch. `browser-bridge` suggests Firefox/Safari support which CDP doesn't provide. Narrower names that scope to Chromium-based browsers:
@@ -345,9 +345,9 @@ Good catch. `browser-bridge` suggests Firefox/Safari support which CDP doesn't p
 
 It's accurate (Brave, Chrome, Chromium are all Chromium-based), doesn't overreach (no Firefox/Safari implication), and still pairs well with `.claude/skills/browser/` (the skill stays browser-generic for potential future WebDriver/Playwright additions, while the CLI is specifically CDP/Chromium).
 
-Create btakita/chromium-bridge gh project.
-Add src/chromium-bridge as a git submodule to agent-loop.
-Add README.md, SPEC.md, and implement.
+❯ Create btakita/chromium-bridge gh project.
+❯ Add src/chromium-bridge as a git submodule to agent-loop.
+❯ Add README.md, SPEC.md, and implement.
 ### Re: Create chromium-bridge
 
 Done. Here's what was created:
@@ -380,8 +380,8 @@ Done. Here's what was created:
 
 All pushed to `btakita/chromium-bridge` main branch. Submodule pointer ready to commit in agent-loop.
 
-Look at https://crates.io/crates/cdpkit
-Does this do what we need?
+❯ Look at https://crates.io/crates/cdpkit
+❯ Does this do what we need?
 ### Re: cdpkit evaluation
 
 **cdpkit** (`0.2.2`) is a type-safe CDP client library for Rust. Here's the comparison:
@@ -417,10 +417,10 @@ page::methods::Navigate::new(url).send(&cdp, Some(&session)).await?;
 
 Want me to refactor chromium-bridge to use cdpkit?
 
-How about a shorter name such as cdp-cli?
-Does `cdpkit` seem to be something that will be stable going forward?
-Is there a SPEC.md?
-Should we have our own library based off of this library?
+❯ How about a shorter name such as cdp-cli?
+❯ Does `cdpkit` seem to be something that will be stable going forward?
+❯ Is there a SPEC.md?
+❯ Should we have our own library based off of this library?
 ### Re: Naming, cdpkit stability, and library strategy
 
 **Shorter name — `cdp-cli`:** Already taken on crates.io (it's a directory navigation tool, completely unrelated). Other short options:
@@ -466,8 +466,8 @@ Our current raw WebSocket code is ~50 lines. Swapping to cdpkit gives us typed c
 
 The risk is low because our CLI surface is small — we only use `Page.navigate`, `Runtime.evaluate`, and `Page.captureScreenshot`. Even if cdpkit's API changes, adapting 5 call sites is trivial.
 
-Don't over-invest in abstractions before we have real usage patterns.
-Option 1. Let's keep the `chromium-bridge` name.
+❯ Don't over-invest in abstractions before we have real usage patterns.
+❯ Option 1. Let's keep the `chromium-bridge` name.
 ### Re: Option 1 — cdpkit refactor done
 
 Refactored `chromium-bridge` to use cdpkit. Keeping the name.
@@ -488,7 +488,7 @@ Refactored `chromium-bridge` to use cdpkit. Keeping the name.
 
 Pushed to `btakita/chromium-bridge` main.
 
-Let's build and install chromium-bridge.
+❯ Let's build and install chromium-bridge.
 ### Re: Build and install
 
 Done.
@@ -514,10 +514,10 @@ $ chromium-bridge list
 
 Both the symlink and cargo-installed binary are working.
 
-release chromium-bridge
-Create an install script:
-- [ ] Install script (`curl | sh`) for binary download ([#30](https://github.com/btakita/agent-doc/issues/30))
-- Create a brew install task
+❯ release chromium-bridge
+❯ Create an install script:
+❯ - [ ] Install script (`curl | sh`) for binary download ([#30](https://github.com/btakita/agent-doc/issues/30))
+❯ - Create a brew install task
 ### Re: Release chromium-bridge
 
 Published to crates.io: `chromium-bridge v0.1.0`
@@ -528,7 +528,7 @@ $ cargo install chromium-bridge
 
 Now installable by anyone. Also pushed .gitignore update (`*.iml` for JetBrains).
 
-**Re: "Create a bash .."** — this looks like an incomplete edit (cut off mid-word). What were you going to say? A bash script, bash alias, bash completion?
+❯ **Re: "Create a bash .."** — this looks like an incomplete edit (cut off mid-word). What were you going to say? A bash script, bash alias, bash completion?
 ### Re: Install script and brew
 
 **Install script (`curl | sh`):** This requires GitHub Releases with prebuilt binaries first. The flow:
@@ -550,8 +550,8 @@ Now installable by anyone. Also pushed .gitignore update (`*.iml` for JetBrains)
 2. Write install.sh
 3. Create brew tap (lower priority — `cargo install` already works)
 
-Want me to create the GitHub Release now? I can build a linux-x86_64 binary and attach it.
-yes
+❯ Want me to create the GitHub Release now? I can build a linux-x86_64 binary and attach it.
+❯ yes
 ### Re: GitHub Release + install script
 
 Done. Both created:
@@ -582,9 +582,9 @@ The install script auto-detects OS/arch and falls back to suggesting `cargo inst
 
 **Brew tap** deferred — `cargo install` and the install script cover the immediate need. Can create `btakita/homebrew-tap` later when there's demand.
 
-Add gh actions to build and deploy cross platform releases.
-- Add macOS builds to GitHub Release (cross-compile or CI)
-- Create btakita/homebrew-tap (deferred — low priority)
+❯ Add gh actions to build and deploy cross platform releases.
+❯ - Add macOS builds to GitHub Release (cross-compile or CI)
+❯ - Create btakita/homebrew-tap (deferred — low priority)
 ### Re: GitHub Actions cross-platform releases
 
 Created `.github/workflows/release.yml` — triggers on version tags (`v*`). Builds 4 targets:
@@ -613,9 +613,9 @@ git push origin main
 git tag v0.1.1 && git push origin v0.1.1
 ```
 
-Want me to commit and push this now?
-audit docs
-release
+❯ Want me to commit and push this now?
+❯ audit docs
+❯ release
 ### Re: Audit docs + release
 
 **Doc audit — fixed:**
@@ -634,8 +634,8 @@ Add dev dependencies:
 - module-harness
 - existence
 
-Add module-harness to all modules.
-Add ontology.
+❯ Add module-harness to all modules.
+❯ Add ontology.
 ### Re: Dev dependencies + module-harness + ontology
 
 **Done:**
@@ -688,8 +688,8 @@ $ chromium-bridge evaluate "document.title" --tab "cdp-cli"
 Search Results for 'cdp-cli' - crates.io: Rust Package Registry
 ```
 
-Go:
-- Monitor CI v0.1.1 re-run #3 (existence dep fix + rustls)
+❯ Go:
+❯ - Monitor CI v0.1.1 re-run #3 (existence dep fix + rustls)
 ### Re: Monitor CI
 
 **CI v0.1.1 passed — all 4 targets built successfully.**
@@ -707,8 +707,8 @@ The install script now works cross-platform:
 curl -sSf https://raw.githubusercontent.com/btakita/chromium-bridge/main/install.sh | sh
 ```
 
-Please investigate agent-loop packages.
-Such as corky and any other libraries that may use sift and/or ragie.
+❯ Please investigate agent-loop packages.
+❯ Such as corky and any other libraries that may use sift and/or ragie.
 ### Re: Investigate agent-loop packages for sift/ragie
 
 **Corky** (`src/corky/`) is the only package with sift and ragie integrations. Here's what exists:
@@ -759,8 +759,8 @@ This pipeline works today with no code changes — just filesystem coordination.
 
 How can we integrate sift for multiple libraries?
 
-This was in tasks/professional/bob-remekia. Implementation should move here:
-- chromium-bridge: Add `type` command using CDP Input.dispatchKeyEvent
+❯ This was in tasks/professional/bob-remekia. Implementation should move here:
+❯ - chromium-bridge: Add `type` command using CDP Input.dispatchKeyEvent
 ### Re: Sift integration for multiple libraries
 
 **Sift is already integrated into corky** (`src/corky/src/search/sift.rs`) as a `SearchBackend`. Use via `corky search --backend sift "<query>"`.
@@ -787,6 +787,7 @@ This bob-remeika task item is complete — no further implementation needed.
 
 Implement:
 - [ ] Browser skill (`/browser`) documentation and workflow refinement
+
 
 ### Browser skill refinement — completed
 
@@ -815,12 +816,133 @@ chromium-bridge type '#message-entry' 'Hello!' --tab pulsesms
 
 **Fix:** Check the `type` command's text preprocessing for unnecessary escape handling.
 
-<!-- agent:boundary:fe8beb6f -->
+     dist/app.js
+       #12561  10:56 AM  🟣  Ragie sources panel deployed to production Cloudflare Pages
+
+     src/agent-doc-js/index.html
+       #12562  10:59 AM  ✅  Committed Ragie sources panel feature to version control
+
+     src/agent-doc-js
+       #12563            ✅  Pushed sources panel to GitHub and updated parent repository submodule reference
+
+     #S3637 Prepare pre-call materials and outreach strategy for Bob Remeika (Ragie) partnership discussion (Apr 2, 11:11 AM)
+
+     src/agent-doc-js/src/app.js
+       #12564  11:11 AM  🔵  Diff gutter implementation uses CodeMirror StateField and GutterMarker
+       #12565            🟣  Added processing marker type and markProcessing function for diff gutter
+       #12566            🟣  Integrated processing markers into handleSubmit workflow
+
+     src/agent-doc-js/style.css
+       #12567  11:12 AM  🟣  Added pulsing animation CSS for processing diff markers
+
+     General
+       #12568            ✅  Deployed processing spinner feature to Cloudflare Pages
+
+     src/agent-doc-js/index.html
+       #12569            ✅  Committed pulsing gutter spinner feature to git repository
+
+     tasks/professional/bob-remeika.md
+       #12570            ⚖️  Pre-call outreach strategy for Ragie partnership discussion
+       #12571            ⚖️  Client use case disclosure strategy deferred to call
+
+     #S3638 Generate call structure document for Bob Remeika meeting from task file (Apr 2, 11:12 AM)
+
+     tmp/bob-remeika-call-structure.md
+       #12572  11:13 AM  ✅  Call structure document created for Ragie CEO meeting
+
+     tmp/bob-remeika-call-structure.html
+       #12573            ✅  PDF call structure generated for Bob Remeika meeting
+
+     tasks/professional/bob-remeika.md
+       #12574  11:24 AM  ✅  Added one-page summary constraint to Bob Remeika call structure document
+
+     tmp/bob-remeika-call-structure.md
+       #12575            🔄  Condensed Bob Remeika call structure into one-page table format
+
+     tasks/professional/bob-remeika.md
+       #12576  11:26 AM  🟣  Generated call structure PDF for Bob Remeika meeting
+
+     #S3639 Generate call preparation PDF for Bob Remeika meeting with structured agenda blocks (Apr 2, 11:26 AM)
+
+     tmp/bob-remeika-call-structure.md
+       #12577  11:26 AM  🔄  Restructured call document from table to hierarchical format with compact CSS
+
+
+     Access 237k tokens of past research & decisions for just 17,953t. Use the claude-mem skill to access memories by ID.
+
+     View Observations Live @ http://localhost:37777
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+
+     dist/app.js
+       #12561  10:56 AM  🟣  Ragie sources panel deployed to production Cloudflare Pages
+
+     src/agent-doc-js/index.html
+       #12562  10:59 AM  ✅  Committed Ragie sources panel feature to version control
+
+     src/agent-doc-js
+       #12563            ✅  Pushed sources panel to GitHub and updated parent repository submodule reference
+
+     #S3637 Prepare pre-call materials and outreach strategy for Bob Remeika (Ragie) partnership discussion (Apr 2, 11:11 AM)
+
+     src/agent-doc-js/src/app.js
+       #12564  11:11 AM  🔵  Diff gutter implementation uses CodeMirror StateField and GutterMarker
+       #12565            🟣  Added processing marker type and markProcessing function for diff gutter
+       #12566            🟣  Integrated processing markers into handleSubmit workflow
+
+     src/agent-doc-js/style.css
+       #12567  11:12 AM  🟣  Added pulsing animation CSS for processing diff markers
+
+     General
+       #12568            ✅  Deployed processing spinner feature to Cloudflare Pages
+
+     src/agent-doc-js/index.html
+       #12569            ✅  Committed pulsing gutter spinner feature to git repository
+
+     tasks/professional/bob-remeika.md
+       #12570            ⚖️  Pre-call outreach strategy for Ragie partnership discussion
+       #12571            ⚖️  Client use case disclosure strategy deferred to call
+
+     #S3638 Generate call structure document for Bob Remeika meeting from task file (Apr 2, 11:12 AM)
+
+     tmp/bob-remeika-call-structure.md
+       #12572  11:13 AM  ✅  Call structure document created for Ragie CEO meeting
+
+     tmp/bob-remeika-call-structure.html
+       #12573            ✅  PDF call structure generated for Bob Remeika meeting
+
+     tasks/professional/bob-remeika.md
+       #12574  11:24 AM  ✅  Added one-page summary constraint to Bob Remeika call structure document
+
+     tmp/bob-remeika-call-structure.md
+       #12575            🔄  Condensed Bob Remeika call structure into one-page table format
+
+     tasks/professional/bob-remeika.md
+       #12576  11:26 AM  🟣  Generated call structure PDF for Bob Remeika meeting
+
+     #S3639 Generate call preparation PDF for Bob Remeika meeting with structured agenda blocks (Apr 2, 11:26 AM)
+
+     tmp/bob-remeika-call-structure.md
+       #12577  11:26 AM  🔄  Restructured call document from table to hierarchical format with compact CSS
+
+
+     Access 237k tokens of past research & decisions for just 17,953t. Use the claude-mem skill to access memories by ID.
+
+     View Observations Live @ http://localhost:37777
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+<!-- agent:boundary:bbfc8df2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)
-- [ ] Explore sift corpus configuration for multi-project search
+- [ ] [#3jmq] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)
+- [ ] [#fp48] Explore sift corpus configuration for multi-project search
 <!-- /agent:pending -->

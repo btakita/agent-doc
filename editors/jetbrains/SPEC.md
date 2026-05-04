@@ -44,6 +44,7 @@ Two strategies for detecting the file's position in the editor split:
 - `Run Agent Doc` saves and dispatches immediately with `agent-doc route --dispatch-only`, without editor-side typing debounce or local "already running" inference.
 - Repeating `Run Agent Doc` while an older plugin-spawned route process is still alive cancels the stale process and immediately starts a fresh dispatch for the same document.
 - The action is silent on route progress/success. Failures are logged to the IDE Event Log / notification tool window instead of showing bottom-right balloon popups.
+- A failed route persists the exact `agent-doc route` output under `.agent-doc/state/editor-route-errors/` and the notification exposes copy/open actions so startup-miss and pending-drift diagnostics remain inspectable after the toast moment.
 - Route session targeting follows the same root-aware chooser as sync: a nested document reroute uses that file's nearest `.agent-doc` root, while a mixed-root visible layout stays pinned to the shared workspace root instead of the focused child repo.
 
 ### Safe Sync Surface

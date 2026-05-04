@@ -1,6 +1,7 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.codeInsight.hint.HintManager
+import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
@@ -15,6 +16,8 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 object TerminalUtil {
+    private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
+
     internal interface InFlightRouteHandle {
         fun isAlive(): Boolean
         fun cancelForReplacement()
@@ -169,9 +172,13 @@ object TerminalUtil {
                         LOG.warn("[route] superseded route exited after replacement for $relativePath")
                     } else if (exitCode != 0) {
                         LOG.warn("[route] FAILED (exit $exitCode): $output")
-                        notifyError(
-                            project,
-                            "agent-doc route failed for $relativePath after $elapsed (exit $exitCode):\n$output"
+                        notifyPersistentRouteFailure(
+                            project = project,
+                            cwd = cwd,
+                            relativePath = relativePath,
+                            exitCode = exitCode,
+                            elapsed = elapsed,
+                            routeOutput = output,
                         )
                     } else {
                         LOG.warn("[route] SUCCESS: $output")
@@ -324,6 +331,76 @@ object TerminalUtil {
         }
     }
 
+    internal fun routeFailureDiagnosticsFile(cwd: String, relativePath: String): File {
+        val diagnosticsDir = File(cwd, ROUTE_ERROR_DIAGNOSTICS_DIR)
+        val sanitized = relativePath
+            .replace('\\', '/')
+            .replace(Regex("[^A-Za-z0-9._/-]+"), "_")
+            .replace("/", "__")
+            .ifBlank { "route-error" }
+        return File(diagnosticsDir, "$sanitized.txt")
+    }
+
+    internal fun persistRouteFailureOutput(cwd: String, relativePath: String, routeOutput: String): File? {
+        return try {
+            val diagnostics = routeFailureDiagnosticsFile(cwd, relativePath)
+            diagnostics.parentFile?.mkdirs()
+            diagnostics.writeText(routeOutput)
+            diagnostics
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    internal fun notifyPersistentRouteFailure(
+        project: Project,
+        cwd: String,
+        relativePath: String,
+        exitCode: Int,
+        elapsed: String,
+        routeOutput: String,
+    ) {
+        val savedFile = persistRouteFailureOutput(cwd, relativePath, routeOutput)
+        val summary = buildString {
+            append("agent-doc route failed for ")
+            append(relativePath)
+            append(" after ")
+            append(elapsed)
+            append(" (exit ")
+            append(exitCode)
+            append(").")
+            if (savedFile != null) {
+                append("\nSaved exact route output to ")
+                append(savedFile.relativeToOrSelf(File(cwd)).path)
+            } else {
+                append("\n")
+                append(routeOutput)
+            }
+        }
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, NotificationType.ERROR)
+            notification.isImportant = true
+            notification.addAction(NotificationAction.createSimple("Copy route error") {
+                CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
+                showHint(project, "Copied route error for $relativePath")
+            })
+            if (savedFile != null) {
+                notification.addAction(NotificationAction.createSimple("Open saved error") {
+                    openFile(project, savedFile)
+                })
+                notification.addAction(NotificationAction.createSimple("Copy error path") {
+                    CopyPasteManager.getInstance().setContents(StringSelection(savedFile.path))
+                    showHint(project, "Copied saved error path for $relativePath")
+                })
+            }
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
     /**
      * Extracts a brief layout description from a command list.
      * Returns a string like "--col a.md,b.md --col c.md" or "focus a.md",
@@ -391,24 +468,27 @@ object TerminalUtil {
         val requestFile = File(requestPath)
         if (!requestFile.exists()) return
 
-        ApplicationManager.getApplication().invokeLater {
-            val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(requestFile)
-            if (virtualFile != null) {
-                // Open and focus the file
-                FileEditorManager.getInstance(project).openTextEditor(
-                    OpenFileDescriptor(project, virtualFile),
-                    true
-                )
-                
-                // Copy the diff content to clipboard to make it even easier to send to Junie
-                try {
-                    val content = requestFile.readText()
-                    CopyPasteManager.getInstance().setContents(StringSelection(content))
-                    showHint(project, "Opened Junie request (diff copied to clipboard)")
-                } catch (e: Exception) {
-                    showHint(project, "Opened Junie request")
-                }
+        openFile(project, requestFile) {
+            // Copy the diff content to clipboard to make it even easier to send to Junie
+            try {
+                val content = requestFile.readText()
+                CopyPasteManager.getInstance().setContents(StringSelection(content))
+                showHint(project, "Opened Junie request (diff copied to clipboard)")
+            } catch (e: Exception) {
+                showHint(project, "Opened Junie request")
             }
+        }
+    }
+
+    private fun openFile(project: Project, file: File, afterOpen: (() -> Unit)? = null) {
+        if (!file.exists()) return
+        ApplicationManager.getApplication().invokeLater {
+            val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file) ?: return@invokeLater
+            FileEditorManager.getInstance(project).openTextEditor(
+                OpenFileDescriptor(project, virtualFile),
+                true
+            )
+            afterOpen?.invoke()
         }
     }
 }

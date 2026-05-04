@@ -1,7 +1,9 @@
 package com.github.btakita.agentdoc
 
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -86,6 +88,35 @@ class TerminalUtilTest {
             ),
             args,
         )
+    }
+
+    @Test
+    fun `route failure diagnostics path stays under project state directory`() {
+        val file = TerminalUtil.routeFailureDiagnosticsFile(
+            cwd = "/repo",
+            relativePath = "tasks/agent-doc/agent-doc-bugs2.md",
+        )
+
+        assertEquals(
+            "/repo/.agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt",
+            file.path,
+        )
+    }
+
+    @Test
+    fun `persisted route failure keeps exact binary output`() {
+        val cwd = Files.createTempDirectory("agent-doc-jb-route-error").toFile()
+        val output = "[agent-doc] startup-miss: routed trigger accepted but no document cycle started\n"
+
+        val saved = TerminalUtil.persistRouteFailureOutput(
+            cwd = cwd.path,
+            relativePath = "tasks/agent-doc/agent-doc-bugs2.md",
+            routeOutput = output,
+        )
+
+        assertNotNull(saved)
+        assertTrue(saved!!.isFile)
+        assertEquals(output, saved.readText())
     }
 
     private class FakeRouteHandle(private var alive: Boolean) : TerminalUtil.InFlightRouteHandle {

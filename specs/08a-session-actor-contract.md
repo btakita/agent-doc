@@ -84,6 +84,10 @@ Later phases may refine caller values without changing the field names.
   supervisor IPC to the actor-owned pane, waits for the normal routed
   acknowledgment window, and only refreshes `sessions.json` as a projection of
   the actor binding.
+- The phase-5 sync/focus path also consumes that authoritative actor record
+  directly when the actor pane is still alive: sync rescues/reconciles layout
+  around the actor-owned pane and focus selects it without re-electing
+  ownership from a stale `sessions.json` projection.
 - `sessions.json` remains a projection/binding helper during migration, not the
   final actor store.
 - Session logs are the source of transition provenance and generation history.

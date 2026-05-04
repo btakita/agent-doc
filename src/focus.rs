@@ -12,8 +12,11 @@
 //!   errors if the override pane is not alive.
 //! - When `pane_override` is `None`, reads the file from disk, parses YAML frontmatter,
 //!   and extracts the `agent_doc_session` UUID; errors if the field is absent.
-//! - Looks up the UUID in `sessions.json` via `sessions::lookup`; errors if no entry
-//!   is found or if the registered pane is dead.
+//! - When `.agent-doc/session-actors.json` has a live authoritative record for the
+//!   document session, focus prefers that actor-owned pane over a stale
+//!   `sessions.json` projection.
+//! - Otherwise, looks up the UUID in `sessions.json` via `sessions::lookup`; errors
+//!   if no entry is found or if the registered pane is dead.
 //! - On success, calls `tmux select-pane` and logs the focused pane + file path to stderr.
 //!
 //! ## Agentic Contracts
@@ -28,6 +31,8 @@
 //! ## Evals
 //! - `focus_live_pane` (aspirational): file has a valid session UUID and a live pane →
 //!   `select-pane` is called and `Ok(())` is returned.
+//! - `focus_prefers_authoritative_actor_pane` (aspirational): stale registry pane +
+//!   live actor pane → focus selects the actor-owned pane.
 //! - `focus_dead_pane` (aspirational): session UUID exists in registry but pane is dead →
 //!   error containing "pane … is dead" is returned.
 //! - `focus_no_session` (aspirational): file frontmatter has no `agent_doc_session` →
@@ -76,6 +81,14 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
         ),
     };
 
+    if let Some(actor_pane) =
+        crate::sync::authoritative_actor_pane_for_document(tmux, file, &session_id)
+    {
+        tmux.select_pane(&actor_pane)?;
+        eprintln!("Focused pane {} ({})", actor_pane, file.display());
+        return Ok(());
+    }
+
     let pane = sessions::lookup(&session_id)?;
     match pane {
         Some(pane_id) if tmux.pane_alive(&pane_id) => {
@@ -93,5 +106,91 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
                 &session_id[..std::cmp::min(8, session_id.len())]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sessions::{self, IsolatedTmux};
+    use std::path::{Path, PathBuf};
+
+    struct ScopedCurrentDir {
+        prev_cwd: PathBuf,
+        _env_guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl ScopedCurrentDir {
+        fn set(path: &Path) -> Self {
+            let env_guard = crate::test_support::env_lock();
+            let prev_cwd = std::env::current_dir()
+                .ok()
+                .filter(|cwd| cwd.exists())
+                .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+            std::env::set_current_dir(path).unwrap();
+            Self {
+                prev_cwd,
+                _env_guard: env_guard,
+            }
+        }
+    }
+
+    impl Drop for ScopedCurrentDir {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prev_cwd);
+        }
+    }
+
+    #[test]
+    fn focus_prefers_authoritative_actor_pane_over_stale_registry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+
+        let doc = root.join("tasks/focus-actor.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: focus-actor\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("focus-authoritative-actor");
+        let stale_pane = iso.new_session("test", root).unwrap();
+        let actor_pane = iso.split_window(&stale_pane, root, "-dh").unwrap();
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+
+        sessions::register_full_with_cwd(
+            "focus-actor",
+            &stale_pane,
+            &doc.to_string_lossy(),
+            1,
+            &iso.pane_window(&stale_pane).unwrap(),
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        crate::session_actor::project_binding_in(
+            root,
+            &doc.to_string_lossy(),
+            "focus-actor",
+            &actor_pane,
+            &actor_window,
+            "sync",
+            "focus_test_projection",
+        )
+        .unwrap();
+
+        run_with_tmux(&doc, None, &iso).unwrap();
+
+        let selected = iso
+            .raw_cmd(&["display-message", "-p", "#{pane_id}"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(
+            selected, actor_pane,
+            "focus should select the authoritative actor pane instead of the stale registry pane"
+        );
     }
 }

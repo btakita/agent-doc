@@ -61,6 +61,12 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 `agent-doc focus <FILE> [--pane P]` focuses the pane that currently owns the document session.
 
+- When `.agent-doc/session-actors.json` has a live authoritative record for the
+  document session, focus must select that actor-owned pane even if
+  `sessions.json` still points at an older projection.
+- Focus may use `sessions.json` only as a fallback binding helper when no live
+  authoritative actor pane exists.
+
 ## layout
 
 `agent-doc layout <FILE>... [--split h|v] [--window W]`
@@ -89,12 +95,18 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Declaratively mirrors editor layout into tmux columns.
 - Files with session ids are managed even when their current registry entry was pruned; `claim` is the only command that creates a new session id.
 - Sync must synthesize a per-run tmux-router registry from each visible file's own nearest `.agent-doc` root instead of forcing all files through the caller's current root.
+- When `.agent-doc/session-actors.json` has a live authoritative record for a
+  visible document, sync must treat that actor-owned pane as the owner-of-record
+  and refresh `sessions.json` only as a projection of that binding.
 - An alive pane is not reusable solely because the pane id exists; it must still prove live ownership for that specific document.
 - When multiple ownership hints disagree, sync must prefer the freshest file-specific proof in this order: path/supervisor provenance, then the latest open session-log owner, then the latest alive `registry_rebind` successor pane, and only then generic same-file process-tree matches.
 - When ownership proof weakens but the alive pane still contains protected Codex drafted input or still appears as the newest open pane in the session log, sync must fail closed for that file instead of fabricating `registered_pane_missing`.
 - If two visible files point at the same pane, sync must either find one decisive owner or drop the duplicate from the synthetic registry so tmux-router cannot alias both files onto one pane.
 - Once a live pane is reserved for one file during the pass, later files in the same pass must treat it as unavailable.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
+- Post-sync registry updates must fail closed if tmux-router reports a
+  geometry-only pane assignment that disagrees with a still-live authoritative
+  actor pane for that document.
 - Before replacing a missing pane, sync must first attempt closeout recovery for `response_captured` or `write_applied` cycles. If that recovery fails, sync must fail closed and preserve the durable capture instead of provisioning another pane.
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.

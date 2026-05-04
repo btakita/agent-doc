@@ -646,9 +646,8 @@ fn build_tmux_router_sync_registry(
         let Some((_, project_root, _)) = registry_location_for_file(path) else {
             continue;
         };
-        let live_owner_match = find_live_owner_pane_excluding_quiet(tmux, path, &session_id, None)
-            .as_deref()
-            == Some(entry.pane.as_str());
+        let live_owner_match =
+            sync_actor_or_live_owner_matches(tmux, path, &session_id, &entry.pane);
         let pane_root_match =
             pane_assignment_matches_document_root(tmux, &entry.pane, &project_root);
         candidates.push(SyntheticRegistryCandidate {
@@ -725,8 +724,7 @@ fn registered_pane_proves_live_owner(
     if !tmux.pane_alive(pane_id) {
         return false;
     }
-    find_live_owner_pane_excluding_quiet(tmux, file_path, session_id, None).as_deref()
-        == Some(pane_id)
+    sync_actor_or_live_owner_matches(tmux, file_path, session_id, pane_id)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1116,6 +1114,86 @@ fn registered_pane_matches_document_root(tmux: &Tmux, file: &Path, pane_id: &str
         .unwrap_or(false)
 }
 
+fn load_live_authoritative_actor_record(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+) -> Option<crate::session_actor::ActorRecord> {
+    let canonical = file
+        .canonicalize()
+        .ok()
+        .unwrap_or_else(|| file.to_path_buf());
+    let base_dir = crate::snapshot::find_project_root(&canonical)?;
+    let record = crate::session_actor::load_record_in(&base_dir, &canonical.to_string_lossy())
+        .ok()
+        .flatten()?;
+    if record.session_id != session_id || !tmux.pane_alive(&record.pane_id) {
+        return None;
+    }
+    Some(record)
+}
+
+pub(crate) fn authoritative_actor_pane_for_document(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+) -> Option<String> {
+    load_live_authoritative_actor_record(tmux, file, session_id).map(|record| record.pane_id)
+}
+
+fn project_authoritative_actor_binding(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+) -> Option<String> {
+    let record = load_live_authoritative_actor_record(tmux, file, session_id)?;
+    let actor_pane = record.pane_id.clone();
+    if lookup_registry_entry_for_file_session(file, session_id)
+        .as_ref()
+        .map(|entry| entry.pane.as_str())
+        != Some(actor_pane.as_str())
+    {
+        eprintln!(
+            "[sync] authoritative actor generation {} keeps {} on pane {} — refreshing sessions.json as a projection",
+            record.generation,
+            file.display(),
+            actor_pane
+        );
+        sync_log(&format!(
+            "actor_projection_refresh file={} pane={} generation={}",
+            file.display(),
+            actor_pane,
+            record.generation
+        ));
+        if let Err(err) = reregister_recovered_owner(tmux, file, session_id, &actor_pane) {
+            eprintln!(
+                "[sync] warning: failed to project authoritative actor pane {} for {} into sessions.json: {}",
+                actor_pane,
+                file.display(),
+                err
+            );
+            sync_log(&format!(
+                "warning: actor_projection_refresh_failed file={} pane={} err={}",
+                file.display(),
+                actor_pane,
+                err
+            ));
+        }
+    }
+    Some(actor_pane)
+}
+
+fn sync_actor_or_live_owner_matches(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+) -> bool {
+    authoritative_actor_pane_for_document(tmux, file, session_id).as_deref() == Some(pane_id)
+        || find_live_owner_pane_excluding_quiet(tmux, file, session_id, None).as_deref()
+            == Some(pane_id)
+}
+
 fn passive_autostart_skip_reason(
     tmux: &Tmux,
     file: &Path,
@@ -1189,6 +1267,13 @@ fn phase2_rescue_candidates_for_files(tmux: &Tmux, col_args: &[String]) -> Vec<S
         let Some(session_id) = fm.session.as_deref() else {
             continue;
         };
+        if let Some(actor_pane) =
+            authoritative_actor_pane_for_document(tmux, &file_path, session_id)
+            && seen.insert(actor_pane.clone())
+        {
+            panes.push(actor_pane);
+            continue;
+        }
         let Some(entry) = lookup_registry_entry_for_file_session(&file_path, session_id) else {
             continue;
         };
@@ -2114,18 +2199,24 @@ fn run_with_options(
                 if let Ok(content) = std::fs::read_to_string(file_path)
                     && let Ok((fm, _)) = frontmatter::parse(&content)
                     && let Some(ref sid) = fm.session
-                    && let Some(entry) = lookup_registry_entry_for_file_session(file_path, sid)
-                    && tmux.pane_alive(&entry.pane)
                 {
+                    let rescue_pane = authoritative_actor_pane_for_document(tmux, file_path, sid)
+                        .or_else(|| {
+                            lookup_registry_entry_for_file_session(file_path, sid)
+                                .map(|entry| entry.pane)
+                        });
+                    let Some(rescue_pane) = rescue_pane.filter(|pane| tmux.pane_alive(pane)) else {
+                        continue;
+                    };
                     eprintln!(
                         "[sync] rescuing pane {} for {} from stash",
-                        entry.pane,
+                        rescue_pane,
                         file_path.display()
                     );
                     // break-pane creates a new window with this pane
-                    if tmux.break_pane(&entry.pane).is_ok() {
+                    if tmux.break_pane(&rescue_pane).is_ok() {
                         // Rename the new window to "agent-doc"
-                        if let Ok(new_win) = tmux.pane_window(&entry.pane) {
+                        if let Ok(new_win) = tmux.pane_window(&rescue_pane) {
                             let _ = tmux.raw_cmd(&["rename-window", "-t", &new_win, "agent-doc"]);
                             eprintln!("[sync] recreated window {} as agent-doc", new_win);
                         }
@@ -2183,8 +2274,11 @@ fn run_with_options(
                 None => continue,
             };
 
+            let authoritative_actor_pane =
+                project_authoritative_actor_binding(tmux, file_path, &session_id);
             let registered_entry = lookup_registry_entry_for_file_session(file_path, &session_id);
-            let registered_pane = registered_entry.as_ref().map(|entry| entry.pane.clone());
+            let registered_pane = authoritative_actor_pane
+                .or_else(|| registered_entry.as_ref().map(|entry| entry.pane.clone()));
             if let Some((miss, supersession)) =
                 crate::startup_miss::take_superseded_startup_miss(file_path)?
             {
@@ -3056,8 +3150,7 @@ fn register_synced_files(
             continue;
         };
         let live_owner_matches =
-            find_live_owner_pane_excluding_quiet(tmux, file_path, session_id, None).as_deref()
-                == Some(pane_id);
+            sync_actor_or_live_owner_matches(tmux, file_path, session_id, pane_id);
         if pane_assignment_matches_document_root(tmux, pane_id, &project_root) || live_owner_matches
         {
             *acceptable_duplicate_claims
@@ -3070,9 +3163,25 @@ fn register_synced_files(
         let Some(&pane_id) = pane_lookup.get(file_path.as_path()) else {
             continue;
         };
+        if let Some(actor_pane) = authoritative_actor_pane_for_document(tmux, file_path, session_id)
+            && pane_id != actor_pane
+        {
+            eprintln!(
+                "[sync] refusing geometry-only pane assignment {} for {} because authoritative actor pane {} still owns the document",
+                pane_id,
+                file_path.display(),
+                actor_pane
+            );
+            sync_log(&format!(
+                "register_synced_files_skip_actor_projection file={} pane={} authoritative_pane={}",
+                file_path.display(),
+                pane_id,
+                actor_pane
+            ));
+            continue;
+        }
         let live_owner_matches =
-            find_live_owner_pane_excluding_quiet(tmux, file_path, session_id, None).as_deref()
-                == Some(pane_id);
+            sync_actor_or_live_owner_matches(tmux, file_path, session_id, pane_id);
         let fail_closed_binding_guard = crate::startup_miss::load(file_path)
             .ok()
             .flatten()
@@ -4589,6 +4698,53 @@ mod tests {
 
         let owner = find_live_owner_pane(&iso, &doc, "live-rebind-owner");
         assert_eq!(owner.as_deref(), Some(successor_pane.as_str()));
+    }
+
+    #[test]
+    fn sync_actor_or_live_owner_matches_prefers_authoritative_actor_record() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd_guard = ScopedCurrentDir::set(root);
+
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: actor-owner\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-authoritative-actor-owner");
+        let stale_pane = iso.new_session("test", root).unwrap();
+        let actor_pane = iso.split_window(&stale_pane, root, "-dh").unwrap();
+        let stale_window = iso.pane_window(&stale_pane).unwrap();
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+
+        sessions::register_full_with_cwd(
+            "actor-owner",
+            &stale_pane,
+            &doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &stale_pane).unwrap(),
+            &stale_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        crate::session_actor::project_binding_in(
+            root,
+            &doc.to_string_lossy(),
+            "actor-owner",
+            &actor_pane,
+            &actor_window,
+            "sync",
+            "test_actor_projection",
+        )
+        .unwrap();
+
+        assert!(
+            sync_actor_or_live_owner_matches(&iso, &doc, "actor-owner", &actor_pane),
+            "sync should treat the authoritative actor pane as a live owner even when generic route heuristics still point elsewhere"
+        );
     }
 
     #[test]
@@ -7386,6 +7542,60 @@ mod tests {
         assert!(
             child_registry.is_empty(),
             "fail-closed recovery should not let sync rebind a geometry-only pane assignment"
+        );
+    }
+
+    #[test]
+    fn register_synced_files_keeps_authoritative_actor_projection() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let _cwd = ScopedCurrentDir::set(root);
+
+        let doc = root.join("tasks/actor-owned.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: actor-owned\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-register-authoritative-actor");
+        let actor_pane = iso.new_session("test", root).unwrap();
+        let other_pane = iso.split_window(&actor_pane, root, "-dh").unwrap();
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+
+        sessions::register_full_with_cwd(
+            "actor-owned",
+            &actor_pane,
+            &doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &actor_pane).unwrap(),
+            &actor_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        crate::session_actor::project_binding_in(
+            root,
+            &doc.to_string_lossy(),
+            "actor-owned",
+            &actor_pane,
+            &actor_window,
+            "sync",
+            "test_actor_projection",
+        )
+        .unwrap();
+
+        register_synced_files(
+            &iso,
+            &[("actor-owned".to_string(), doc.clone())],
+            &[(doc.clone(), other_pane.clone())],
+        );
+
+        let entry = lookup_registry_entry_for_file_session(&doc, "actor-owned")
+            .expect("registry entry should remain present");
+        assert_eq!(
+            entry.pane, actor_pane,
+            "sync must keep sessions.json projected onto the authoritative actor pane"
         );
     }
 

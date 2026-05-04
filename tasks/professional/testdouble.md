@@ -941,8 +941,35 @@ Yes. I would send this:
 > Thanks,
 > Brian
 
-If you want, I can also compress this one more step into a more casual two-paragraph version.
-<!-- agent:boundary:2f4717d2 -->
+❯ If you want, I can also compress this one more step into a more casual two-paragraph version.
+❯ Re: 4.2 and 10.1, what are some of the dangers to me if not changed?
+### Re: 4.2 and 10.1 risk — gpt-5
+
+The practical danger in **Section 4.2** is payment leverage.
+
+If it keeps saying you only get paid on post-60-day termination if you have **not materially breached**, they have an argument to delay or withhold money by asserting some claimed breach, even if the real dispute is small, debatable, or unrelated to the amount owed. In practice, that means:
+
+- you could end up fighting about payment after you leave,
+- already-completed work becomes bargaining leverage,
+- they may try to offset more than the actual damage,
+- and you bear the collection risk and legal cost to prove you were still entitled to be paid.
+
+The practical danger in **Section 10.1** is liability leakage.
+
+Even though they added a narrower indemnity clause elsewhere, Section 10.1 still gives them a separate path to argue that any third-party IP complaint triggers very broad reimbursement obligations for `all damages, losses, expenses, costs, and attorneys' fees whatsoever`. If that language stays untouched, the risks are:
+
+- the new liability cap may be argued not to control that section cleanly,
+- the narrower indemnity language may be undermined by overlap,
+- you may get pulled into paying defense costs on a broader theory than you intended,
+- and a client or company complaint about reused code, libraries, or deliverables could turn into a much more expensive dispute than the contract otherwise suggests.
+
+So the short version is:
+
+- **4.2 risk:** they may use alleged breach as a reason not to pay you.
+- **10.1 risk:** they may use overlapping IP/indemnity language to expand your financial exposure.
+
+Those are not just drafting niceties. They are the remaining clauses most likely to matter if the relationship ends badly.
+<!-- agent:boundary:812cce5b -->
 <!-- /agent:exchange -->
 
 ## Queue

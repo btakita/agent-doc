@@ -123,8 +123,22 @@ Implemented the Codex `Ctrl+D` quit-menu fix. Plan: `tasks/agent-doc/plan-ctrl-d
 - Repo closeout in `src/agent-doc`: committed as `8d6292a` (`fix: restore codex ctrl-d quit menu`) and pushed to `origin/20260422/codex-agent-backend`.
 - Left pre-existing unrelated dirty changes in `src/agent-doc/src/plugin.rs` untouched.
 
-I did not run a manual tmux-backed interactive Ctrl+D repro in this cycle; the verification here is automated coverage plus the repo build/install path.
-<!-- agent:boundary:4211240e -->
+❯ I did not run a manual tmux-backed interactive Ctrl+D repro in this cycle; the verification here is automated coverage plus the repo build/install path.
+❯ do [#sgown5]
+### Re: #sgown5 — gpt-5
+
+Implemented phase-5 sync/focus projection reconciliation around the authoritative session actor. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+
+- `src/agent-doc/src/sync.rs` now treats a live `.agent-doc/session-actors.json` record as the sync owner-of-record, refreshes `sessions.json` only as a projection, rescues actor-owned panes when rebuilding the visible tmux window, and refuses geometry-only post-sync rebinds away from the actor pane.
+- `src/agent-doc/src/focus.rs` now prefers the live authoritative actor pane over a stale registry binding.
+- Updated `src/agent-doc/specs/07-session-tmux-commands.md` and `src/agent-doc/specs/08a-session-actor-contract.md` to document the phase-5 actor-first sync/focus contract.
+- Added regression coverage for actor-owned sync/live-owner projection, focus behavior, and the post-sync registry guard that keeps `sessions.json` aligned with the actor pane.
+- Verification completed in `src/agent-doc`: `cargo check`, `cargo test`, `cargo build`, `cargo install --path . --force`.
+- Repo closeout in `src/agent-doc`: committed as `37266e9` (`feat: project sync and focus onto actor panes`) and pushed to `origin/20260422/codex-agent-backend`.
+- Left pre-existing unrelated dirty changes in `src/agent-doc/src/plugin.rs` untouched.
+
+`#sgown5` is complete. The umbrella tracker `#sgown` remains open for `#sgown6`-`#sgown9`.
+<!-- agent:boundary:f1cae1fb -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -148,14 +162,13 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgown5] Convert sync/focus flows to projection-only reconciliation around actor-owned panes. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown6] Add operator-facing session CLI and plugin controls: status, history, attach, restart, clear, doctor, and session diagnostics UI. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown7] Move destructive or heuristic recovery behind explicit repair-only commands and remove it from normal turn paths. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown8] Delete the remaining normal-path ownership inference from process-tree, session-log, and registry-rebind logic. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown9] Add regression and plugin verification for generation monotonicity, stale-generation rejection, sync/layout preservation, and stage-specific dispatch failures. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown] Umbrella tracker for the single-owner session actor transition. Bookkeeping: keep spec/test/build/install/commit/push coverage aligned across #sgown1-#sgown9. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.
-- [ ] [#devmdcmt] [recommended] Response was written into `src/session-share/tasks/buildparty-investor-demo/dev.md` but the closeout was not committed. Create a fix plan only: reproduce the exact `agent-doc` write/finalize path for this template/CRDT doc, compare it with `#rspcmt`, trace where append/write can persist content without the expected commit/finalize step, identify any session-doc-specific boundary or backlog rewrite interaction that leaves the file dirty, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports completion until the target document's closeout is verifiably committed.
+- [ ] [#devmdcmt] [recommended] `agent-doc` left `src/session-share/tasks/buildparty-investor-demo/dev.md` in a synthetic `write_stream` cycle with `phase=write_applied` after the response had already landed, so `session-check` still failed until an explicit later `agent-doc commit` closed it. Create a fix plan only: reproduce the exact template/CRDT closeout path that writes the response, verify why no terminal commit/finalize step followed, compare the failure with `#rspcmt`, trace any boundary/backlog/session-check interaction that allows `write_applied` to survive as a nonterminal state, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports a completed turn until the document closeout is verifiably committed.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where `finalize`/`write --commit` can report success without a persisted commit, identify any stash/sync/session-check interaction that can leave the response uncommitted, then add regression coverage and a fail-closed acceptance criterion so agent-doc never reports a completed closeout until the response commit is verifiably present.

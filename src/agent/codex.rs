@@ -147,6 +147,60 @@ fn looks_like_ssh_alias_config_failure(text: &str) -> bool {
         || lower.contains("no such file or directory")
 }
 
+fn has_required_ssh_match_term(text: &str, lowered_terms: &[String]) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lowered_terms.iter().any(|term| lower.contains(term))
+}
+
+fn looks_like_ssh_command(text: &str) -> bool {
+    text.split_whitespace().any(|token| {
+        let trimmed = token.trim_matches(|c: char| matches!(c, '"' | '\'' | '`'));
+        let basename = trimmed.rsplit('/').next().unwrap_or(trimmed);
+        basename.eq_ignore_ascii_case("ssh") || basename.eq_ignore_ascii_case("ssh.exe")
+    })
+}
+
+fn first_required_ssh_failure_line<'a>(
+    text: &'a str,
+    lowered_terms: &[String],
+    require_match_term: bool,
+) -> Option<&'a str> {
+    for line in lower_trimmed_lines(text) {
+        let lower = line.to_ascii_lowercase();
+        if require_match_term && !lowered_terms.iter().any(|term| lower.contains(term)) {
+            continue;
+        }
+        if looks_like_ssh_dns_failure(&lower)
+            || looks_like_ssh_network_failure(&lower)
+            || looks_like_ssh_auth_failure(&lower)
+            || looks_like_ssh_alias_config_failure(&lower)
+        {
+            return Some(line);
+        }
+    }
+    None
+}
+
+fn command_execution_required_ssh_failure(
+    command: &str,
+    aggregated_output: &str,
+    lowered_terms: &[String],
+) -> Option<String> {
+    if let Some(line) = first_required_ssh_failure_line(aggregated_output, lowered_terms, true) {
+        return Some(line.to_string());
+    }
+
+    if !looks_like_ssh_command(command)
+        || !has_required_ssh_match_term(command, lowered_terms)
+        || looks_like_local_browser_cdp_permission_denied(aggregated_output)
+    {
+        return None;
+    }
+
+    first_required_ssh_failure_line(aggregated_output, lowered_terms, false)
+        .map(str::to_string)
+}
+
 fn transcript_has_required_ssh_failure(text: &str, match_terms: &[String]) -> Option<String> {
     if match_terms.is_empty() {
         return None;
@@ -156,20 +210,23 @@ fn transcript_has_required_ssh_failure(text: &str, match_terms: &[String]) -> Op
         .map(|term| term.trim().to_ascii_lowercase())
         .filter(|term| !term.is_empty())
         .collect();
-    for line in lower_trimmed_lines(text) {
-        let lower = line.to_ascii_lowercase();
-        if !lowered_terms.iter().any(|term| lower.contains(term)) {
-            continue;
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
+        let item = json.get("item")?;
+        let item_type = item.get("type").and_then(|v| v.as_str())?;
+        if item_type != "command_execution" {
+            return None;
         }
-        if looks_like_ssh_dns_failure(&lower)
-            || looks_like_ssh_network_failure(&lower)
-            || looks_like_ssh_auth_failure(&lower)
-            || looks_like_ssh_alias_config_failure(&lower)
-        {
-            return Some(line.to_string());
-        }
+
+        let command = item.get("command").and_then(|v| v.as_str()).unwrap_or("");
+        let aggregated_output = item
+            .get("aggregated_output")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        return command_execution_required_ssh_failure(command, aggregated_output, &lowered_terms);
     }
-    None
+
+    first_required_ssh_failure_line(text, &lowered_terms, true).map(str::to_string)
 }
 
 fn format_required_ssh_failure(targets: &[String], detail: &str) -> String {
@@ -1420,6 +1477,26 @@ exit 0
     }
 
     #[test]
+    fn required_ssh_failure_detects_bare_socket_eperm_when_command_proves_ssh_context() {
+        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}"#;
+
+        assert_eq!(
+            transcript_has_required_ssh_failure(line, &["monsterrodholders-server".to_string()]),
+            Some("socket: Operation not permitted".to_string())
+        );
+    }
+
+    #[test]
+    fn required_ssh_failure_ignores_bare_socket_eperm_without_ssh_command_context() {
+        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"chromium-bridge list","aggregated_output":"socket: Operation not permitted","exit_code":1,"status":"completed"}}"#;
+
+        assert_eq!(
+            transcript_has_required_ssh_failure(line, &["monsterrodholders-server".to_string()]),
+            None
+        );
+    }
+
+    #[test]
     fn send_retries_fresh_exec_after_resume_capability_drift_signal() {
         let (_dir, script) = write_fake_codex_script(
             r#"#!/bin/sh
@@ -1436,6 +1513,45 @@ fi
 "#,
         );
         let codex = Codex::new(Some(script), None);
+
+        let response = codex
+            .send("prompt", Some("resume-123"), false, None)
+            .unwrap();
+
+        assert_eq!(response.text, "fresh response");
+        assert_eq!(response.session_id.as_deref(), Some("fresh-thread"));
+    }
+
+    #[test]
+    fn send_retries_fresh_exec_after_bare_socket_required_ssh_resume_drift_signal() {
+        let (_ssh_dir, path_dir) = write_fake_ssh_script(
+            r#"#!/bin/sh
+if [ "$1" = "-G" ]; then
+  echo "user root"
+  echo "hostname 50.28.2.199"
+  echo "port 22"
+  echo "identityfile /tmp/id_ed25519"
+  exit 0
+fi
+exit 0
+"#,
+        );
+        let (_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+if [ "$2" = "resume" ]; then
+  printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+else
+  printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"fresh response"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+fi
+"#,
+        );
+        let codex = Codex::new(Some(script), None)
+            .with_env(vec![("PATH".to_string(), Some(path_dir))])
+            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
 
         let response = codex
             .send("prompt", Some("resume-123"), false, None)
@@ -1535,6 +1651,51 @@ exit 0
 if [ "$2" = "resume" ]; then
   printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
   printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","aggregated_output":"ssh: connect to host 50.28.2.199 port 22: Operation not permitted","exit_code":255,"status":"completed"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+else
+  printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"fresh response"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+fi
+"#,
+        );
+        let codex = Codex::new(Some(script), None)
+            .with_env(vec![("PATH".to_string(), Some(path_dir))])
+            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+
+        let chunks: Vec<_> = codex
+            .send_streaming("prompt", Some("resume-123"), false, None)
+            .unwrap()
+            .collect();
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].as_ref().unwrap().text, "fresh response");
+        assert!(chunks[1].as_ref().unwrap().is_final);
+        assert_eq!(
+            chunks[1].as_ref().unwrap().session_id.as_deref(),
+            Some("fresh-thread")
+        );
+    }
+
+    #[test]
+    fn streaming_retries_fresh_exec_after_bare_socket_required_ssh_resume_drift_signal() {
+        let (_ssh_dir, path_dir) = write_fake_ssh_script(
+            r#"#!/bin/sh
+if [ "$1" = "-G" ]; then
+  echo "user root"
+  echo "hostname 50.28.2.199"
+  echo "port 22"
+  echo "identityfile /tmp/id_ed25519"
+  exit 0
+fi
+exit 0
+"#,
+        );
+        let (_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+if [ "$2" = "resume" ]; then
+  printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}'
   printf '%s\n' '{"type":"turn.completed","usage":{}}'
 else
   printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'

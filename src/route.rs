@@ -1759,6 +1759,48 @@ fn route_via_authoritative_actor(
             );
             return Ok(dispatch_pane);
         }
+        if authoritative_actor_dispatch_can_queue_optimistically(actor_state) {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_actor_dispatch_optimistic_queue file={} pane={} harness={} generation={} actor_state={}",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    actor.record.generation,
+                    actor_state.as_str()
+                ),
+            );
+            eprintln!(
+                "[route] authoritative actor generation {} for {} still reports {} on pane {} — sending the bare {} reopen anyway so the supervisor can queue it",
+                actor.record.generation,
+                file.display(),
+                actor_state.as_str(),
+                dispatch_pane,
+                harness.binary
+            );
+            let dispatch_start = dispatch_via_supervisor_ipc(
+                tmux,
+                file,
+                &dispatch_pane,
+                session_id,
+                file_path,
+                harness,
+            )?;
+            let ack_pane = require_routed_cycle_ack(
+                tmux,
+                file,
+                &dispatch_pane,
+                session_id,
+                file_path,
+                harness,
+                baseline,
+                prompt_bearing_marker,
+                true,
+                dispatch_start,
+            )?;
+            return Ok(ack_pane.unwrap_or(dispatch_pane));
+        }
         anyhow::bail!(
             "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {}",
             actor.record.generation,
@@ -3147,6 +3189,15 @@ fn authoritative_actor_dispatch_blocker_reason(
         crate::session_actor::ActorState::Closed => Some("the authoritative actor is closed"),
         crate::session_actor::ActorState::Blocked => Some("the authoritative actor is blocked"),
     }
+}
+
+fn authoritative_actor_dispatch_can_queue_optimistically(
+    state: crate::session_actor::ActorState,
+) -> bool {
+    matches!(
+        state,
+        crate::session_actor::ActorState::Starting | crate::session_actor::ActorState::Busy
+    )
 }
 
 fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {
@@ -9453,6 +9504,208 @@ Body\n\
         .expect("healthy actor record should remain dispatchable");
         assert_eq!(actor.record.harness, "claude-code");
         assert_eq!(actor.record.pane_id, actor_pane);
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn resolve_or_create_pane_dispatches_busy_authoritative_actor_when_prompt_target_pending() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-authoritative-actor-busy");
+        let session = "claude";
+        let cwd = test_cwd();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("session.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-authoritative-actor-busy";
+        sessions::register(session_id, &stale_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "busy",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::claude(),
+            &mut Vec::new(),
+        )
+        .expect("route should optimistically queue a busy authoritative actor");
+        assert_eq!(resolved, actor_pane);
+
+        let trigger = format!("{}\n", HarnessConfig::claude().trigger_command(&file_path));
+        assert_eq!(*injects.lock().unwrap(), vec![trigger]);
+        assert_eq!(
+            sessions::lookup(session_id).unwrap().as_deref(),
+            Some(actor_pane.as_str())
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn resolve_or_create_pane_dispatches_starting_authoritative_actor_when_prompt_target_pending() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-authoritative-actor-starting");
+        let session = "codex";
+        let cwd = test_cwd();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("session.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-authoritative-actor-starting";
+        sessions::register(session_id, &stale_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "starting",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should optimistically queue a starting authoritative actor");
+        assert_eq!(resolved, actor_pane);
+
+        let trigger = format!("{}\n", HarnessConfig::codex().trigger_command(&file_path));
+        assert_eq!(*injects.lock().unwrap(), vec![trigger]);
+        assert_eq!(
+            sessions::lookup(session_id).unwrap().as_deref(),
+            Some(actor_pane.as_str())
+        );
 
         ipc.stop();
     }

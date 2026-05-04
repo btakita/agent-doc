@@ -92,7 +92,10 @@ Later phases may refine caller values without changing the field names.
   when the supervisor is healthy: it dispatches the bare reopen through
   supervisor IPC to the actor-owned pane, waits for the normal routed
   acknowledgment window, and only refreshes `sessions.json` as a projection of
-  the actor binding.
+  the actor binding. Prompt-bearing reroutes must still allow one optimistic
+  supervisor-side queue attempt while the authoritative actor reports
+  `starting` or `busy`; only `waiting_input`, `blocked`, and `closed` remain
+  hard fail-closed states for duplicate reopen injection.
 - The phase-5 sync/focus path also consumes that authoritative actor record
   directly when the actor pane is still alive: sync rescues/reconciles layout
   around the actor-owned pane and focus selects it without re-electing

@@ -187,7 +187,7 @@ pub fn clear(file: &Path) -> Result<()> {
     let response = crate::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
         &IpcMethod::Inject {
-            bytes: "/clear\n".to_string(),
+            bytes: crate::supervisor::ipc::submit_bytes("/clear"),
         },
     )
     .with_context(|| {
@@ -660,12 +660,12 @@ mod tests {
             "---\nagent_doc_session: session-clear\nagent: codex\n---\n",
         )
         .unwrap();
+        let captured = Arc::new(Mutex::new(Vec::<String>::new()));
+        let captured_for_ipc = captured.clone();
         let sock = crate::supervisor::ipc::SupervisorIpc::start(dir.path(), "session-clear", {
-            let captured = Arc::new(Mutex::new(Vec::<String>::new()));
-            let shared = captured.clone();
             move |method| match method {
                 IpcMethod::Inject { bytes } => {
-                    shared.lock().unwrap().push(bytes);
+                    captured_for_ipc.lock().unwrap().push(bytes);
                     crate::supervisor::ipc::IpcResponse::ok_empty()
                 }
                 IpcMethod::State => crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
@@ -685,6 +685,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(latest, "/clear");
+        assert_eq!(
+            captured.lock().unwrap().as_slice(),
+            &[crate::supervisor::ipc::submit_bytes("/clear")]
+        );
         drop(sock);
     }
 }

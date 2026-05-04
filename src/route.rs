@@ -2509,15 +2509,14 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                 }
                 register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
-                let dispatch_start =
-                    dispatch_existing_managed_reopen(
-                        tmux,
-                        file,
-                        session_id,
-                        &registered_pane,
-                        file_path,
-                        harness,
-                    )?;
+                let dispatch_start = dispatch_existing_managed_reopen(
+                    tmux,
+                    file,
+                    session_id,
+                    &registered_pane,
+                    file_path,
+                    harness,
+                )?;
                 require_routed_cycle_ack(
                     tmux,
                     file,
@@ -2630,12 +2629,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
         }
         register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
         let dispatch_start = dispatch_existing_managed_reopen(
-            tmux,
-            file,
-            session_id,
-            &new_pane,
-            file_path,
-            harness,
+            tmux, file, session_id, &new_pane, file_path, harness,
         )?;
         let ack_pane = require_routed_cycle_ack(
             tmux,
@@ -3155,7 +3149,7 @@ fn dispatch_via_supervisor_ipc_with_mode(
 
     let tracker = build_routed_dispatch_start_tracker(file, file_path, harness)?;
     let method = IpcMethod::Inject {
-        bytes: format!("{payload}\n"),
+        bytes: routed_trigger_submit_bytes(&payload),
     };
     let response = crate::supervisor::ipc::send_command(&sock, &method).with_context(|| {
         format!(
@@ -3235,15 +3229,7 @@ fn dispatch_via_supervisor_ipc(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<RoutedDispatchStartProof> {
-    dispatch_via_supervisor_ipc_with_mode(
-        tmux,
-        file,
-        pane,
-        session_id,
-        file_path,
-        harness,
-        true,
-    )
+    dispatch_via_supervisor_ipc_with_mode(tmux, file, pane, session_id, file_path, harness, true)
 }
 
 fn dispatch_via_supervisor_ipc_once(
@@ -3254,15 +3240,7 @@ fn dispatch_via_supervisor_ipc_once(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<RoutedDispatchStartProof> {
-    dispatch_via_supervisor_ipc_with_mode(
-        tmux,
-        file,
-        pane,
-        session_id,
-        file_path,
-        harness,
-        false,
-    )
+    dispatch_via_supervisor_ipc_with_mode(tmux, file, pane, session_id, file_path, harness, false)
 }
 
 fn authoritative_actor_dispatch_blocker_reason(
@@ -3573,6 +3551,10 @@ fn dispatch_routed_reopen(
 
 fn routed_trigger_payload(trigger: &str) -> String {
     trigger.to_string()
+}
+
+fn routed_trigger_submit_bytes(payload: &str) -> String {
+    crate::supervisor::ipc::submit_bytes(payload)
 }
 
 fn validate_routed_trigger_payload(
@@ -5100,13 +5082,7 @@ fn auto_start_in_session(
                 )?;
                 RoutedDispatchStartProof::CommandAcceptedOnly
             } else {
-                dispatch_routed_reopen(
-                    tmux,
-                    file,
-                    &dispatch_pane,
-                    file_path,
-                    harness,
-                )?
+                dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness)?
             }
         } else {
             eprintln!(
@@ -5124,13 +5100,7 @@ fn auto_start_in_session(
                 )
                 .map(|_| RoutedDispatchStartProof::CommandAcceptedOnly)
             } else {
-                dispatch_routed_reopen(
-                    tmux,
-                    file,
-                    &dispatch_pane,
-                    file_path,
-                    harness,
-                )
+                dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness)
             };
             match dispatch_result {
                 Ok(proof) => {
@@ -6610,6 +6580,14 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
 
     #[test]
+    fn routed_trigger_submit_bytes_use_carriage_return_submit() {
+        assert_eq!(
+            routed_trigger_submit_bytes("agent-doc test.md"),
+            "agent-doc test.md\r"
+        );
+    }
+
+    #[test]
     fn validate_routed_trigger_payload_accepts_bare_codex_reopen() {
         let harness = HarnessConfig::codex();
         let trigger = harness.trigger_command("test.md");
@@ -7003,7 +6981,9 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         assert_eq!(routed, pane);
         assert_eq!(
             *injects.lock().unwrap(),
-            vec![format!("{}\n", HarnessConfig::codex().trigger_command(&file_path))],
+            vec![routed_trigger_submit_bytes(
+                &HarnessConfig::codex().trigger_command(&file_path)
+            )],
             "route should dispatch the bare Codex reopen through supervisor IPC before waiting for the delayed live-child ack"
         );
 
@@ -7173,20 +7153,21 @@ Body\n\
         sessions::register("route-live-child-skip", &pane, &file_path).unwrap();
         let injects = Arc::new(Mutex::new(Vec::<String>::new()));
         let injects_for_ipc = injects.clone();
-        let mut ipc = SupervisorIpc::start(
-            dir.path(),
-            "route-live-child-skip",
-            move |method| match method {
-                IpcMethod::Inject { bytes } => {
-                    injects_for_ipc.lock().unwrap().push(bytes.clone());
-                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
-                }
-                IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
-            },
-        )
-        .unwrap();
+        let mut ipc =
+            SupervisorIpc::start(
+                dir.path(),
+                "route-live-child-skip",
+                move |method| match method {
+                    IpcMethod::Inject { bytes } => {
+                        injects_for_ipc.lock().unwrap().push(bytes.clone());
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                },
+            )
+            .unwrap();
 
         let resolved = resolve_or_create_pane(
             &iso,
@@ -7204,9 +7185,12 @@ Body\n\
         let injects = injects.lock().unwrap().clone();
         assert!(
             !injects.is_empty()
-                && injects
-                    .iter()
-                    .all(|inject| inject == &format!("{}\n", HarnessConfig::codex().trigger_command(&file_path))),
+                && injects.iter().all(|inject| {
+                    inject
+                        == &routed_trigger_submit_bytes(
+                            &HarnessConfig::codex().trigger_command(&file_path),
+                        )
+                }),
             "route should still dispatch the trigger through supervisor IPC before accepting the optimistic startup-miss path: {injects:?}"
         );
         let miss = crate::startup_miss::load(&doc)
@@ -7525,8 +7509,7 @@ Body\n\
     #[test]
     fn resolve_or_create_pane_restarts_fresh_before_dispatch_after_tracked_codex_clear() {
         use std::sync::{
-            Mutex,
-            Arc,
+            Arc, Mutex,
             atomic::{AtomicBool, Ordering},
         };
 
@@ -7656,7 +7639,7 @@ Body\n\
         let trigger = HarnessConfig::codex().trigger_command(&file_path);
         let injects = injects.lock().unwrap().clone();
         assert!(
-            injects == vec![format!("{trigger}\n")],
+            injects == vec![routed_trigger_submit_bytes(&trigger)],
             "route should inject exactly one bare reopen through supervisor IPC after the fresh restart: {injects:?}"
         );
 
@@ -7934,7 +7917,7 @@ Body\n\
         )
         .expect("dispatch-only reopen should still send once when no explicit blocker is visible");
         assert!(
-            *injects.lock().unwrap() == vec![format!("{trigger}\n")],
+            *injects.lock().unwrap() == vec![routed_trigger_submit_bytes(&trigger)],
             "dispatch-only reopen must use exactly one supervisor inject without extra Enter retries"
         );
         ipc.stop();
@@ -8846,8 +8829,7 @@ Body\n\
     #[test]
     fn resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route() {
         use std::sync::{
-            Arc,
-            Mutex,
+            Arc, Mutex,
             atomic::{AtomicBool, Ordering},
         };
 
@@ -8975,7 +8957,10 @@ Body\n\
         assert!(restart_called.load(Ordering::Relaxed));
         assert_eq!(routed, replacement_pane);
         assert!(
-            *injects.lock().unwrap() == vec![format!("{}\n", HarnessConfig::codex().trigger_command(&file_path))],
+            *injects.lock().unwrap()
+                == vec![routed_trigger_submit_bytes(
+                    &HarnessConfig::codex().trigger_command(&file_path)
+                )],
             "route should dispatch exactly one bare Codex reopen through supervisor IPC after the restart handoff"
         );
 
@@ -9611,7 +9596,8 @@ Body\n\
         .expect("route should dispatch through the authoritative actor pane");
         assert_eq!(resolved, actor_pane);
 
-        let trigger = format!("{}\n", HarnessConfig::codex().trigger_command(&file_path));
+        let trigger =
+            routed_trigger_submit_bytes(&HarnessConfig::codex().trigger_command(&file_path));
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
@@ -9716,7 +9702,8 @@ Body\n\
         .expect("dispatch-only reroute should dispatch through the authoritative actor pane");
         assert_eq!(resolved, actor_pane);
 
-        let trigger = format!("{}\n", HarnessConfig::codex().trigger_command(&file_path));
+        let trigger =
+            routed_trigger_submit_bytes(&HarnessConfig::codex().trigger_command(&file_path));
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
@@ -9882,7 +9869,8 @@ Body\n\
         .expect("route should optimistically queue a busy authoritative actor");
         assert_eq!(resolved, actor_pane);
 
-        let trigger = format!("{}\n", HarnessConfig::claude().trigger_command(&file_path));
+        let trigger =
+            routed_trigger_submit_bytes(&HarnessConfig::claude().trigger_command(&file_path));
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
@@ -9983,7 +9971,8 @@ Body\n\
         .expect("route should optimistically queue a starting authoritative actor");
         assert_eq!(resolved, actor_pane);
 
-        let trigger = format!("{}\n", HarnessConfig::codex().trigger_command(&file_path));
+        let trigger =
+            routed_trigger_submit_bytes(&HarnessConfig::codex().trigger_command(&file_path));
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
@@ -10618,7 +10607,9 @@ Body\n\
         assert_eq!(resolved, pane);
         assert!(
             *injects.lock().unwrap()
-                == vec![format!("{}\n", HarnessConfig::codex().trigger_command(&file_path))],
+                == vec![routed_trigger_submit_bytes(
+                    &HarnessConfig::codex().trigger_command(&file_path)
+                )],
             "route should dispatch to the registered pane via supervisor IPC after recovering the live owner via supervisor pid"
         );
 

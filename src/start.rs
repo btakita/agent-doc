@@ -707,7 +707,7 @@ fn auto_trigger_inject_command(
         return AutoTriggerOutcome::Cancelled;
     }
 
-    let payload = normalize_supervisor_inject_bytes(&format!("{trigger_cmd}\n"));
+    let payload = crate::supervisor::ipc::submit_bytes(trigger_cmd).into_bytes();
 
     let Some(mut writer) = lock_writer_interruptibly(&writer_arc, stop) else {
         return AutoTriggerOutcome::Cancelled;

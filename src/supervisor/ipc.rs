@@ -150,6 +150,16 @@ fn default_restart_mode() -> String {
     "continue".to_string()
 }
 
+/// Build the canonical Enter-style submit bytes for a single-line harness input.
+///
+/// All supervisor-owned command injection paths should use this helper so the
+/// sender contract stays explicit and consistent instead of relying on
+/// receiver-side newline normalization.
+pub fn submit_bytes(text: &str) -> String {
+    let payload = text.trim_end_matches(['\r', '\n']);
+    format!("{payload}\r")
+}
+
 /// Response from the supervisor to a client command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IpcResponse {
@@ -498,6 +508,13 @@ mod tests {
         assert_eq!(resp.data.unwrap()["n"], 19);
 
         ipc.stop();
+    }
+
+    #[test]
+    fn submit_bytes_uses_single_carriage_return_submit() {
+        assert_eq!(submit_bytes("/clear"), "/clear\r");
+        assert_eq!(submit_bytes("/clear\n"), "/clear\r");
+        assert_eq!(submit_bytes("/clear\r\n"), "/clear\r");
     }
 
     #[test]

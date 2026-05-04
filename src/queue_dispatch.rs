@@ -226,7 +226,7 @@ fn try_supervisor_dispatch(
 
     // Use `inject` method to send the command text to the harness stdin.
     // The harness interprets `/command` lines natively.
-    let bytes = format!("{}\n", item.raw);
+    let bytes = supervisor_ipc::submit_bytes(&item.raw);
     let method = supervisor_ipc::IpcMethod::Inject { bytes };
     let resp =
         supervisor_ipc::send_command(&sock, &method).context("supervisor IPC dispatch failed")?;
@@ -403,5 +403,44 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("no supervisor socket or tmux pane available"));
+    }
+
+    #[test]
+    fn dispatch_supervisor_injects_command_with_shared_submit_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "---\nagent_doc_session: queue-session\n---\n").unwrap();
+
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let captured_for_ipc = captured.clone();
+        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(
+            dir.path(),
+            "queue-session",
+            move |method| match method {
+                crate::supervisor::ipc::IpcMethod::Inject { bytes } => {
+                    captured_for_ipc.lock().unwrap().push(bytes);
+                    crate::supervisor::ipc::IpcResponse::ok_empty()
+                }
+                crate::supervisor::ipc::IpcMethod::State
+                | crate::supervisor::ipc::IpcMethod::Pid
+                | crate::supervisor::ipc::IpcMethod::Restart { .. }
+                | crate::supervisor::ipc::IpcMethod::Stop { .. } => {
+                    crate::supervisor::ipc::IpcResponse::ok_empty()
+                }
+            },
+        )
+        .unwrap();
+
+        let item = classify("/clear");
+        let ctx = DispatchContext::from_file(&doc).unwrap();
+        let result = dispatch_command(&item, &ctx).unwrap();
+        assert!(matches!(result, DispatchResult::Ok));
+        assert_eq!(
+            captured.lock().unwrap().as_slice(),
+            &[crate::supervisor::ipc::submit_bytes("/clear")]
+        );
+
+        ipc.stop();
     }
 }

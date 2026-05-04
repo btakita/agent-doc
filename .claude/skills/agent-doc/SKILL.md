@@ -28,8 +28,10 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 ## Core Principles
 
 - **Document is the UI** — the user's edits ARE the prompt; respond in the document AND the console.
+- **Harness-native `agent-doc` entrypoints start the binary-owned response cycle** — when the user invokes `/agent-doc <FILE>`, `agent-doc <FILE>`, or the equivalent entrypoint for the active harness, treat that as an executable workflow entry rather than a generic document-editing request. Do not manually patch the final assistant response into the document, and do not report success before `agent-doc finalize <FILE>` or `agent-doc write --commit <FILE>` completes. For Codex/direct-exec paths, run the explicit `agent-doc session-check <FILE>` backstop before ending the turn.
 - **Imperative edits are executable directives** — when the user writes `do #id`, `go`, `fix this`, `run tests`, `build + install`, `commit + push`, or similar inside the session document, treat that as authorization to perform the requested repo work from the document context. Do not require the same instruction to be repeated in chat.
 - **Local tmux stack work spans sibling repos** — in the `agent-loop` workspace, `src/tmux-router` is a first-class development target for `src/agent-doc`. When a task moves generic tmux pane/session behavior out of `agent-doc`, update the sibling crate too and rely on the workspace cargo patch at `.cargo/config.toml` so local builds exercise the moved code.
+- **Passive mixed-root sync must stay fail-safe** — when `agent-doc sync --no-autostart` leaves any visible file blocked, preserve the current visible `agent-doc` window layout and warn instead of collapsing the remaining foreign pane set into a new authoritative layout.
 - **Preserve user edits** — never overwrite; let `agent-doc write --stream` merge.
 - **Show progress** — stream your response in the console so the user sees real-time feedback.
 
@@ -129,6 +131,8 @@ Complete the requested implementation, verification, build/install, and local in
 
 **Agent harnesses own full-suite verification:** if you changed code, tests, build logic, or instruction surfaces, run the full project verification suite explicitly after the edits and before `finalize` / `write --commit`. Do not rely on a pre-commit hook to do this for you.
 
+**Do not waive red suites as "unrelated" or "flaky":** when the full verification suite is failing, treat that as a real blocker even if the failing tests do not appear to touch the code you just changed. Fix the failure in the same turn or report the concrete blocker and capture the follow-up in backlog; do not declare success while the suite is red.
+
 For the normal response cycle, pipe the response through `agent-doc finalize --stream` so the write crosses the commit boundary in one binary-owned path. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
 
 ```bash
@@ -159,18 +163,17 @@ Document format, frontmatter fields, append vs template mode conventions, and co
 
 ## Runbooks
 
+Reusable authoring rules such as [runbooks/split-spec-files.md](runbooks/split-spec-files.md) apply across agent-doc-managed harness instruction surfaces. Leave custom root instruction files opt-in unless they still match the generated baseline.
+
+Key runbooks:
+
 - [runbooks/harness-invocation.md](runbooks/harness-invocation.md) — harness-specific invocation patterns
-- [runbooks/compact-exchange.md](runbooks/compact-exchange.md) — `compact exchange` operation
-- [runbooks/transfer-extract.md](runbooks/transfer-extract.md) — `transfer` / `extract` operations
-- [runbooks/pending-ops.md](runbooks/pending-ops.md) — pending mutation contract
-- [runbooks/model-tier-gate.md](runbooks/model-tier-gate.md) — tier precedence + gate behavior
-- [runbooks/command-synonyms.md](runbooks/command-synonyms.md) — natural-language dispatch to `orchestrate --mode ...`
-- [runbooks/compound-task-steering.md](runbooks/compound-task-steering.md) — normalize compound directives into explicit follow-up steps
-- [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md) — post-preflight planning record and handoff contract
-- [runbooks/streaming-checkpoints.md](runbooks/streaming-checkpoints.md) — checkpoint flush pattern
-- [runbooks/document-format.md](runbooks/document-format.md) — frontmatter + component conventions
+- [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md) — post-preflight execution contract
+- [runbooks/pending-ops.md](runbooks/pending-ops.md) — backlog mutation rules
 - [runbooks/commit.md](runbooks/commit.md) — response commit boundary and exceptions
-- [runbooks/code-enforced-directives.md](runbooks/code-enforced-directives.md) — which invariants live in the binary
+- [runbooks/split-spec-files.md](runbooks/split-spec-files.md) — stable-index spec splitting rule
+
+The full bundled catalog lives in `runbooks/`, including `compact-exchange`, `transfer-extract`, `model-tier-gate`, `command-synonyms`, `compound-task-steering`, `streaming-checkpoints`, `document-format`, and `code-enforced-directives`.
 
 ## Success Criteria
 

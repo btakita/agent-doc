@@ -1,2 +1,3 @@
 [features]
 codex_hooks = true
+sandbox_mode = false

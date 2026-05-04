@@ -134,12 +134,40 @@ Git:
 - Committed in `src/agent-doc` as `39d5a7e` (`fix: route supervisor injects through pane input`)
 - Pushed to `origin/20260422/codex-agent-backend`
 
-I did not run a live VS Code/JB replay from this CLI session, so the existing replay validation backlog remains the right place to confirm the end-to-end repro is gone.
-<!-- agent:boundary:861b8a14 -->
+❯ I did not run a live VS Code/JB replay from this CLI session, so the existing replay validation backlog remains the right place to confirm the end-to-end repro is gone.
+❯ The `\n` has not been fixed for `Run Agent Doc` and `Clear Session Context`. Please fix. Please verify the issue has been fixed because you have been mistaken ~5 times already. spec-test-build-install-commit-push
+### Re: Run Agent Doc and Clear Session Context submit path — gpt-5
+
+I fixed the remaining stale-supervisor submit path in `src/agent-doc` instead of adding another newline/Enter workaround.
+
+`agent-doc route --dispatch-only` now sends the bare reopen directly into the authoritative pane's tmux input path once that actor-owned pane is ready, so `Run Agent Doc` no longer depends on an already-running supervisor process to relay the reopen. File-scoped `agent-doc session clear <FILE>` now sends `/clear` directly to the authoritative pane when that pane is alive on the default tmux server, and only falls back to supervisor IPC inject when no directly addressable authoritative pane is available. I also updated the session/tmux spec and `VERSIONS.md` to match that contract.
+
+Verification:
+- New tmux-backed regressions passed for the direct-pane `route --dispatch-only` path, the direct-pane `session clear` path, and the fallback-to-supervisor `session clear` path.
+- Full `cargo test` passed in `src/agent-doc`.
+- `cargo build --release` passed in `src/agent-doc`.
+- `cargo install --path . --force` replaced the local `agent-doc` binary.
+
+Git:
+- Committed in `src/agent-doc` as `72bb116` (`fix: submit dispatch-only reroutes via live pane`).
+- Pushed to `origin/20260422/codex-agent-backend`.
+
+I also repaired one malformed scratch HTML comment in this session document (`-->` inside a comment body) so `agent-doc preflight` could parse backlog and icebox normally again.
+<!-- agent:boundary:3c3b7350 -->
 <!-- /agent:exchange -->
-### End Exchange
+###
 
 <!--
+Fix all clippy warnings
+```
+• Ran cargo build --manifest-path src/agent-doc/Cargo.toml --release && cargo install --path src/agent-doc --force
+  └ warning: function `send_command_once_checked` is never used
+        --\> src/route.rs:3477:4
+    … +106 lines (ctrl + t to view transcript)
+        Replaced package `agent-doc v0.33.16 (/home/brian/work/btakita/agent-loop/src/agent-doc)` with `agent-doc
+    v0.33.16 (/home/brian/work/btakita/agent-loop/src/agent-doc)` (executable `agent-doc`)
+```
+---
 In the JB Plugin context menu and in the equivalent VSCode plugin menu:
 - Remove `Run With Junie` from the numbered hotkeys.
 - Remove `Force Claim for Tmux Pane` from the numbered hotkeys.

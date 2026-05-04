@@ -376,8 +376,28 @@ What does make sense is a narrower split:
 
 So my recommendation is: keep `#sgown` as a sequential migration plan, and only use orchestration for bounded sub-steps with disjoint write scopes after the actor store and route contract are in place.
 
+❯ No tests/build/install ran in this cycle because the requested work here was answer-only, not implementation.
+❯ Should we run each step as a sequence of subagents?
+### Re: sequence of subagents for each `#sgown` step — gpt-5
+
+Not as the default execution model.
+
+A better rule is: keep one primary owner per `#sgown` step, and only use subagents as bounded sidecars inside a step when the write scope is clearly disjoint. That keeps the actor-model migration serialized where it needs to be serialized, while still letting you parallelize narrow work like:
+- implementation owner on `#sgown4`, plus a read-only verifier for route regressions
+- implementation owner on `#sgown6`, plus a sidecar for JB/VS Code UI wording or menu wiring review
+- implementation owner on `#sgown9`, plus parallel replay/verification workers once the code under test already exists
+
+What I would avoid is chaining the core steps as handoff-style subagents, where one subagent owns `#sgown2`, another then takes `#sgown3`, and so on. That would reintroduce coordination drift into the migration that is supposed to remove drift.
+
+So the operating model I recommend is:
+- `#sgown1` through `#sgown5`, `#sgown7`, and `#sgown8`: single primary owner, optional verifier sidecars only
+- `#sgown6`: eligible for bounded sidecars after the actor/session contract is stable
+- `#sgown9`: the best candidate for real parallel subagent verification work
+
+I added one backlog follow-up to define that subagent boundary explicitly once `#sgown4` lands, so the execution model is written down before the later UI and verification phases.
+
 No tests/build/install ran in this cycle because the requested work here was answer-only, not implementation.
-<!-- agent:boundary:8f6d7867 -->
+<!-- agent:boundary:c6237d32 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -401,6 +421,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sgownorch] [recommended] Define which single-owner transition steps may use bounded sidecar subagents versus single-owner execution only, after #sgown4 lands. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown1] Freeze the actor-owned session contract, generation semantics, and ownership-transition instrumentation. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown2] Add the durable actor record store with atomic generation updates and keep sessions.json as a read projection during migration. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown3] Move supervisor ownership, prompt-readiness, and closeout state transitions onto actor commands. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md

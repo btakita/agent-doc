@@ -250,7 +250,27 @@ Verification completed in `src/agent-doc`:
 Repo closeout in `src/agent-doc`: committed as `d92aad5` (`fix: always prompt on forwarded ctrl-d`) and pushed to `origin/20260422/codex-agent-backend`.
 
 I left the pre-existing unrelated dirty changes in `src/agent-doc/src/plugin.rs` and `src/agent-doc/src/route.rs` untouched. No follow-up backlog mutations were needed for this fix.
-<!-- agent:boundary:d059e795 -->
+❯ do [#sgown7]
+### Re: #sgown7 — gpt-5
+
+Implemented phase-7 repair-only isolation. Plan: `tasks/agent-doc/plan-single-owner-session-actor-transition.md`.
+
+- `src/agent-doc/src/sync.rs` now splits missing-pane handling into inspect-only vs explicit-repair modes. Ordinary `sync` no longer auto-runs `repair_layout(...)`, stash/window rescue, or closeout replay when it encounters drift; it captures diagnostics, records the missing-pane/session-loss evidence, and fails closed with an explicit repair instruction instead.
+- Added `sync::repair_file_state(...)` and wired `agent-doc session doctor <FILE> --repair` through the full explicit repair surface: document closeout repair, file-scoped layout repair, missing-pane recovery, then `resync --fix` before re-reporting status.
+- Updated `specs/07-session-tmux-commands.md`, `specs/08a-session-actor-contract.md`, and `VERSIONS.md` so the phase-7 contract now states that normal sync is diagnostic/fail-closed while `agent-doc repair <FILE>` and `agent-doc session doctor <FILE> --repair` own the repair boundary.
+- Added/updated sync regressions for the new inspect-only boundary plus the existing explicit-repair paths.
+
+Verification completed in `src/agent-doc`:
+- `cargo check`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Repo closeout in `src/agent-doc`: committed as `38dbc8a` (`feat: isolate sync repair behind explicit commands`) and pushed to `origin/20260422/codex-agent-backend`.
+
+`#sgown7` is complete. The umbrella tracker `#sgown` remains open for `#sgown8`-`#sgown9`.
+
+<!-- agent:boundary:df0c6541 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

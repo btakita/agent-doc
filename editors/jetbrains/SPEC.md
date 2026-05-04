@@ -54,6 +54,7 @@ Two strategies for detecting the file's position in the editor split:
 - `Restart Session` runs `agent-doc session restart <relative-path>` and keeps restart ownership in the binary/supervisor path.
 - `Clear Session Context` runs `agent-doc session clear <relative-path>` so Codex/Claude clear semantics stay aligned with the binary-owned launch contract tracking.
 - `Copy Session Diagnostics` runs `agent-doc session doctor <relative-path>`, copies the exact output, and keeps the binary-owned diagnostics text available for bug reports.
+- Plugin verification must cover exact session-status display, `session clear` command wiring, and persistent route-failure retention for stage-specific dispatch diagnostics.
 
 ### Safe Sync Surface
 

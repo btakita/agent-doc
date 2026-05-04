@@ -135,6 +135,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Restart Session:** Run `agent-doc session restart <relative-path>`. Plugins must not send raw tmux control keys as a substitute for the actor-owned restart path.
 - **Clear Session Context:** Run `agent-doc session clear <relative-path>` so Codex/Claude clear behavior stays aligned with the binary-owned launch-contract tracking.
 - **Copy Session Diagnostics:** Run `agent-doc session doctor <relative-path>`, preserve the exact text in an IDE diagnostics surface, and provide a one-click copy path.
+- **Verification floor:** Plugin tests must cover exact session-status display, `session clear` command wiring, and a persistent stage-specific route-dispatch failure surface.
 
 ### 2.8 Slash Command Autocomplete
 

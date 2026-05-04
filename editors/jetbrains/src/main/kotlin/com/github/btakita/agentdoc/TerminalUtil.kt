@@ -304,7 +304,7 @@ object TerminalUtil {
             args = listOf("status"),
             startedMessage = "Loading session status for ${file.name}",
             onSuccess = { relativePath, output ->
-                notifyInfo(project, output.ifBlank { "Loaded session status for $relativePath" })
+                notifyInfo(project, sessionStatusSuccessMessage(relativePath, output))
             },
             onComplete = onComplete,
         )
@@ -360,9 +360,7 @@ object TerminalUtil {
     ) {
         val (cwd, relativePath) = resolveProject(project, file)
         val agentDoc = resolveAgentDoc(cwd)
-        val cmd = mutableListOf(agentDoc, "session")
-        cmd.addAll(args)
-        cmd.add(relativePath)
+        val cmd = buildSessionCommand(agentDoc, args, relativePath)
         try {
             val process = ProcessBuilder(cmd)
                 .directory(java.io.File(cwd))
@@ -408,6 +406,20 @@ object TerminalUtil {
         }
         return "agent-doc"
     }
+
+    internal fun buildSessionCommand(
+        agentDoc: String,
+        args: List<String>,
+        relativePath: String,
+    ): List<String> = buildList {
+        add(agentDoc)
+        add("session")
+        addAll(args)
+        add(relativePath)
+    }
+
+    internal fun sessionStatusSuccessMessage(relativePath: String, output: String): String =
+        output.ifBlank { "Loaded session status for $relativePath" }
 
     fun showHint(project: Project, message: String) {
         ApplicationManager.getApplication().invokeLater {

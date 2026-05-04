@@ -7,6 +7,13 @@ import * as native from './native';
 import { consumeClaimedPatch, isPatchAlreadyApplied } from './patchGuard';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
+    buildRouteFailurePresentation,
+    buildSessionCommandArgs,
+    buildSessionStatusPresentation,
+    buildSessionSuccessHint,
+    type SessionCommandName,
+} from './sessionUi';
+import {
     buildSyncCommandArgs,
     buildTabChangeCommand,
     flattenVisibleColumns,
@@ -166,6 +173,7 @@ class SlashCommandCompletionProvider implements vscode.CompletionItemProvider {
 const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
 let statusBarTimeout: ReturnType<typeof setTimeout> | undefined;
 const sessionOutputChannel = vscode.window.createOutputChannel('Agent Doc Session');
+const routeFailureOutputChannel = vscode.window.createOutputChannel('Agent Doc Route Failures');
 
 function showHint(message: string): void {
     statusBarItem.text = `$(check) ${message}`;
@@ -514,12 +522,15 @@ async function submitAction(): Promise<void> {
         trackedFiles.add(editor.document.uri.fsPath);
         ensurePromptPolling(cwd);
     } catch (err: any) {
-        showError(`route failed: ${err.message}`);
+        const { relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+        const failure = buildRouteFailurePresentation(rel, err.message);
+        showRouteFailureOutput(failure.title, failure.body);
+        showError(failure.toast);
     }
 }
 
 async function runSessionCommandForActiveFile(
-    args: string[],
+    command: SessionCommandName,
     onSuccess: (output: string, relativePath: string) => void,
     onErrorLabel: string,
 ): Promise<void> {
@@ -535,7 +546,7 @@ async function runSessionCommandForActiveFile(
     try {
         await editor.document.save();
         const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
-        const output = await runCli(['session', ...args, rel], cwd);
+        const output = await runCli(buildSessionCommandArgs(command, rel), cwd);
         onSuccess(output, rel);
     } catch (err: any) {
         showError(`${onErrorLabel}: ${err.message}`);
@@ -553,12 +564,24 @@ function showSessionOutput(title: string, output: string): void {
     sessionOutputChannel.show(true);
 }
 
+function showRouteFailureOutput(title: string, output: string): void {
+    routeFailureOutputChannel.clear();
+    routeFailureOutputChannel.appendLine(title);
+    if (output.trim()) {
+        routeFailureOutputChannel.appendLine(output.trim());
+    } else {
+        routeFailureOutputChannel.appendLine('(no output)');
+    }
+    routeFailureOutputChannel.show(true);
+}
+
 async function showSessionStatusAction(): Promise<void> {
     await runSessionCommandForActiveFile(
-        ['status'],
+        'status',
         (output, rel) => {
-            showSessionOutput(`Session status: ${rel}`, output);
-            showHint(`Session status: ${rel}`);
+            const presentation = buildSessionStatusPresentation(rel, output);
+            showSessionOutput(presentation.title, presentation.body);
+            showHint(presentation.hint);
         },
         'session status failed',
     );
@@ -566,9 +589,9 @@ async function showSessionStatusAction(): Promise<void> {
 
 async function restartSessionAction(): Promise<void> {
     await runSessionCommandForActiveFile(
-        ['restart'],
+        'restart',
         (output, rel) => {
-            showHint(output || `Restart requested for ${rel}`);
+            showHint(buildSessionSuccessHint('restart', rel, output));
         },
         'session restart failed',
     );
@@ -576,9 +599,9 @@ async function restartSessionAction(): Promise<void> {
 
 async function clearSessionContextAction(): Promise<void> {
     await runSessionCommandForActiveFile(
-        ['clear'],
+        'clear',
         (output, rel) => {
-            showHint(output || `Cleared session context for ${rel}`);
+            showHint(buildSessionSuccessHint('clear', rel, output));
         },
         'session clear failed',
     );
@@ -586,11 +609,11 @@ async function clearSessionContextAction(): Promise<void> {
 
 async function copySessionDiagnosticsAction(): Promise<void> {
     await runSessionCommandForActiveFile(
-        ['doctor'],
+        'doctor',
         async (output, rel) => {
             await vscode.env.clipboard.writeText(output);
             showSessionOutput(`Session diagnostics: ${rel}`, output);
-            showHint(`Copied session diagnostics for ${rel}`);
+            showHint(buildSessionSuccessHint('doctor', rel, output));
         },
         'session diagnostics failed',
     );
@@ -1581,6 +1604,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // Status bar item cleanup
     context.subscriptions.push(statusBarItem);
     context.subscriptions.push(sessionOutputChannel);
+    context.subscriptions.push(routeFailureOutputChannel);
 }
 
 export function deactivate(): void {

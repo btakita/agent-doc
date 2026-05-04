@@ -733,4 +733,59 @@ mod tests {
             "unexpected error: {err}"
         );
     }
+
+    #[test]
+    fn record_session_start_rejects_stale_generation_after_new_owner_rebind() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-6\nagent: codex\n---\nBody\n",
+        );
+
+        record_session_start(&file, "session-6", "%91", "@10", 1).unwrap();
+        project_binding_in(
+            tmp.path(),
+            &file.to_string_lossy(),
+            "session-6",
+            "%92",
+            "@11",
+            "sync",
+            "recover_owner",
+        )
+        .unwrap();
+
+        let err = record_session_start(&file, "session-6", "%91", "@10", 1)
+            .expect_err("stale generation must not overwrite the newer authoritative owner");
+        assert!(
+            format!("{err}").contains("compare-and-swap failed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn transition_state_rejects_stale_session_updates() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-7\nagent: codex\n---\nBody\n",
+        );
+
+        record_session_start(&file, "session-7", "%101", "@12", 1).unwrap();
+        let err = transition_state(
+            &file,
+            "session-7-stale",
+            "%101",
+            ActorState::Closed,
+            "supervisor",
+            "session_end",
+        )
+        .expect_err("stale session updates must not mutate the authoritative record");
+
+        assert!(
+            format!("{err}").contains("current session"),
+            "unexpected error: {err}"
+        );
+    }
 }

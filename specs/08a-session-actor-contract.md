@@ -102,6 +102,11 @@ Later phases may refine caller values without changing the field names.
   successors, or generic same-file process-tree scans. Those sources still
   matter for diagnostics and explicit repair, but they cannot silently reclaim
   authority away from the actor-backed path.
+- Phase-9 verification must keep explicit regression coverage for generation
+  monotonicity, stale session/pane rejection, blocked mixed-root layout
+  preservation, and plugin operator surfaces that display exact session status,
+  route `session clear` through the actor-backed command path, and preserve
+  stage-specific dispatch failures in a durable diagnostics surface.
 - `sessions.json` remains a projection/binding helper during migration, not the
   final actor store.
 - Session logs are the source of transition provenance and generation history.

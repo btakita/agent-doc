@@ -72,6 +72,11 @@ Later phases may refine caller values without changing the field names.
 - `.agent-doc/session-actors.json` is the durable per-document actor record
   store. It is keyed by canonical document path and carries the authoritative
   generation, pane/window binding, harness, state, and last transition.
+- Actor-record `harness` values use canonical ids rather than raw binary names:
+  `claude` normalizes to `claude-code`, `codex` stays `codex`, and empty values
+  collapse to `default`. Normal-path route/start/sync checks must compare
+  against that canonical identity so harness aliases do not strand a healthy
+  authoritative actor.
 - Store updates must be monotonic and fail closed on generation regressions; a
   stale writer must not overwrite a newer generation.
 - Same-generation state transitions must also fail closed when the caller's

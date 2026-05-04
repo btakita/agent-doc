@@ -158,7 +158,7 @@ fn render_field<'a>(value: Option<&'a str>, fallback: &'a str) -> &'a str {
     value.filter(|value| !value.is_empty()).unwrap_or(fallback)
 }
 
-fn normalize_harness_name(raw: &str) -> String {
+pub(crate) fn normalize_harness_name(raw: &str) -> String {
     match raw.trim() {
         "" => "default".to_string(),
         "claude" => "claude-code".to_string(),

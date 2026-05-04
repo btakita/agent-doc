@@ -1677,15 +1677,16 @@ fn load_authoritative_actor_dispatch_target(
             session_id
         );
     }
+    let expected_harness = crate::session_actor::normalize_harness_name(&harness.binary);
     if !record.harness.trim().is_empty()
         && record.harness != "default"
-        && record.harness != harness.binary
+        && record.harness != expected_harness
     {
         anyhow::bail!(
             "authoritative actor record for {} is bound to harness {}, not {}",
             file.display(),
             record.harness,
-            harness.binary
+            expected_harness
         );
     }
     if !tmux.pane_alive(&record.pane_id) {
@@ -9393,6 +9394,65 @@ Body\n\
             !stale_content.contains("STALE:agent-doc "),
             "dispatch-only reroute should not inject into the stale registered pane when actor authority points elsewhere: {stale_content}"
         );
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-authoritative-actor-claude-harness");
+        let session = "claude";
+        let cwd = test_cwd();
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("session.md");
+        std::fs::write(
+            &doc,
+            "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-authoritative-actor-claude";
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "ready",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let actor = load_authoritative_actor_dispatch_target(
+            &iso,
+            &doc,
+            session_id,
+            &file_path,
+            &HarnessConfig::claude(),
+        )
+        .expect("normalized Claude harness name should not fail the authoritative actor lookup")
+        .expect("healthy actor record should remain dispatchable");
+        assert_eq!(actor.record.harness, "claude-code");
+        assert_eq!(actor.record.pane_id, actor_pane);
 
         ipc.stop();
     }

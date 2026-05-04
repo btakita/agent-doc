@@ -204,8 +204,26 @@ Verification:
 
 Pushed to `origin/20260422/codex-agent-backend`.
 
-I did not add a new backlog item because this cycle implemented the requested policy directly and the verification/build/install path is green.
-<!-- agent:boundary:098503ea -->
+❯ I did not add a new backlog item because this cycle implemented the requested policy directly and the verification/build/install path is green.
+❯ do [#rnpane]. spec-test-build-install-commit-push
+### Re: #rnpane — gpt-5
+
+I handled `#rnpane` as the plan-only task it already was. Plan: `tasks/agent-doc/plan-running-tmux-pane-closure.md`.
+
+The plan now freezes two concrete repro families instead of one generic pane-loss suspicion:
+- supervisor / keepalive closeout paths in `.agent-doc/logs/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.log`, where clean `codex_exit code=0` still reaches `user_quit_after_eof` or `user_quit_after_ctrl_d`
+- a later `%169` repro in `.agent-doc/logs/ops.log`, where `commit_success` and `route_dispatch_only_sent` continue without a matching `session_end`, pointing at post-commit route/sync/layout mutation instead of a true supervisor closeout
+
+It also narrows the implementation contract:
+- define one explicit allowlist for destructive pane actions
+- fail closed outside that allowlist
+- instrument every pane-loss mutation primitive (`kill-pane`, `kill-window`, `stash_pane`, `join-pane`, `split-window`)
+- add tmux-backed regressions across supervisor, route, sync, resync, and tmux-router DETACH
+
+I committed and pushed the plan as `65bcea0ff` on `origin/main`.
+
+No tests/build/install ran in this cycle because `#rnpane` was a planning-only backlog item and the repo change was limited to the plan document.
+<!-- agent:boundary:037d41c6 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -229,7 +247,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rnpane] [recommended] agent-doc closed the running tmux pane. Create a fix plan only: freeze a concrete repro, identify whether the pane is being lost in supervisor exit handling, route/rebind, sync/reconcile, or tmux-router DETACH, define an explicit allowlist for destructive pane actions, and add tmux-backed regression targets so running or just-completed panes cannot disappear implicitly. Plan: `tasks/agent-doc/plan-running-tmux-pane-closure.md`
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.
 - [ ] [#devmdcmt] [recommended] Response was written into `src/session-share/tasks/buildparty-investor-demo/dev.md` but the closeout was not committed. Create a fix plan only: reproduce the exact `agent-doc` write/finalize path for this template/CRDT doc, compare it with `#rspcmt`, trace where append/write can persist content without the expected commit/finalize step, identify any session-doc-specific boundary or backlog rewrite interaction that leaves the file dirty, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports completion until the target document's closeout is verifiably committed.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.

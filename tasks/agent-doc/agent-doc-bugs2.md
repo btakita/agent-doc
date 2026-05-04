@@ -523,7 +523,39 @@ Verification:
 Git:
 - `agent-doc`: `2153b02` `fix: persist jetbrains route errors`
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:6e9c0c6a -->
+❯ The tmux pane for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md was incorrectly closed. Please do a through investigation into the root cause. Fix the root cause. spec-test-build-install-commit-push
+### Re: monsterrodholders pane-close root cause + fix — gpt-5
+
+I traced the latest `src/boost-client/tasks/monsterrodholders.md` pane loss to the post-success supervisor path, not to another sync/route ownership bug.
+
+The live session log for pane `%166` showed this exact sequence:
+- `document_cycle ... event=commit_success`
+- `codex_exit code=0`
+- `ctrl_d_prompt_user`
+- `user_quit_after_ctrl_d`
+- `session_end`
+
+So the pane was already healthy and the document cycle had already committed. The close happened because `start.rs` treated forwarded `Ctrl-D`/stdin EOF as a reason to enter the quit-prompt branch even after a successful routed Codex turn, which let the claimed tmux pane die immediately after success.
+
+I fixed that by making the supervisor inspect the latest session-log run before applying the Ctrl-D clean-exit policy:
+- `src/startup_miss.rs` now records whether the latest harness run already saw a committed `document_cycle`
+- `src/start.rs` now restarts fresh instead of prompting to quit when `Ctrl-D`/stdin EOF arrives after that committed-cycle signal, so successful routed/editor-owned Codex runs keep their pane attached
+- I updated the product/spec/skill surfaces (`README.md`, `SPEC.md`, `CLAUDE.md`, `.claude/skills/agent-doc/SKILL.md`, `specs/supervisor.md`, `specs/codex-support.md`, `VERSIONS.md`) to lock that contract in
+
+While getting the required full suite green, I also fixed a separate Codex test-harness race in `src/agent/codex.rs`: fake fast-exit Codex children can close stdin before the parent writes the prompt under full-suite load, so prompt writes now tolerate an early `Broken pipe` and let child output/exit status decide the result.
+
+Verification / build / install:
+- `cargo test` (`1793 passed; 0 failed`)
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+- `src/agent-doc`: `3ca7f17` `fix: keep successful routed codex panes attached`
+- pushed to `origin/20260422/codex-agent-backend`
+
+No actionable follow-up items remain from this fix, so I did not add a backlog entry in this cycle.
+<!-- agent:boundary:eaa921b0 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

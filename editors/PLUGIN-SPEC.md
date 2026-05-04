@@ -85,7 +85,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Precondition:** Active file is `.md`.
 - **Behavior:**
   1. Save the active document to disk.
-  2. Run `agent-doc route --dispatch-only <relative-path>` via subprocess from project root.
+  2. Run `agent-doc route --dispatch-only <relative-path>` via subprocess from project root. This must stay a bare reopen send into the owning session, not a post-`/clear` restart shortcut.
   3. Show an immediate in-flight info notification while route is running, then an inline hint on success and a persistent error notification on failure. Failure UI must preserve the exact route error text in a copyable surface (for example, copy action plus saved diagnostics file) instead of only a transient toast.
   4. Register the file for prompt polling (Section 2.6).
 - **Run action statelessness:** Do not block manual Run behind a plugin-local "already in progress" gate. Repeated Run presses should still dispatch the bare reopen and let the CLI own pane targeting.
@@ -133,7 +133,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 
 - **Show Session Status:** Run `agent-doc session status <relative-path>`. Plugins must display the exact CLI output instead of paraphrasing actor/registry/supervisor state themselves.
 - **Restart Session:** Run `agent-doc session restart <relative-path>`. Plugins must not send raw tmux control keys as a substitute for the actor-owned restart path.
-- **Clear Session Context:** Run `agent-doc session clear <relative-path>` so Codex/Claude clear behavior stays aligned with the binary-owned launch-contract tracking.
+- **Clear Session Context:** Run `agent-doc session clear <relative-path>` so Codex/Claude clear behavior stays aligned with the binary-owned clear-command path. The next Run action must still dispatch the bare reopen into the same live session.
 - **Copy Session Diagnostics:** Run `agent-doc session doctor <relative-path>`, preserve the exact text in an IDE diagnostics surface, and provide a one-click copy path.
 - **Verification floor:** Plugin tests must cover exact session-status display, `session clear` command wiring, and a persistent stage-specific route-dispatch failure surface.
 

@@ -111,7 +111,8 @@ object TerminalUtil {
      * This calls `agent-doc route --dispatch-only <path>` which:
      * 1. Reads the session UUID from the file's frontmatter
      * 2. Looks up the tmux pane for that session
-     * 3. Resolves the active harness trigger and sends the bare reopen via `tmux send-keys`
+     * 3. Resolves the active harness trigger and sends the bare reopen through the
+     *    owning supervisor into the live session
      * 4. Auto-starts a new agent session if needed
      */
     fun sendToTerminal(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {

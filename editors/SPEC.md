@@ -5,7 +5,7 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 1. Run (Submit)
 
 - **Trigger:** `Ctrl+Shift+Alt+A` (configurable)
-- **Behavior:** Save the active `.md` file, call `agent-doc route --dispatch-only <relative-path>` from the project root.
+- **Behavior:** Save the active `.md` file, call `agent-doc route --dispatch-only <relative-path>` from the project root. This action must send the bare harness trigger into the owning live session; it must not restart Codex just because the latest tracked prompt was `/clear`.
 - **Feedback:** Show an immediate in-flight info notification while `agent-doc route` is running, then finish with an inline hint near the cursor. Error notifications persist.
 - **Availability:** Only enabled when a `.md` file is active.
 
@@ -43,7 +43,7 @@ Common behavior required of all `agent-doc` editor plugins.
 
 - **Show Session Status:** Run `agent-doc session status <relative-path>` and surface the full output in an IDE-owned diagnostics surface.
 - **Restart Session:** Run `agent-doc session restart <relative-path>` and show an inline success hint once the restart request is accepted.
-- **Clear Session Context:** Run `agent-doc session clear <relative-path>` so the authoritative session receives the harness-native clear command instead of the plugin pasting `/clear` directly into tmux.
+- **Clear Session Context:** Run `agent-doc session clear <relative-path>` so the authoritative session receives the harness-native clear command instead of the plugin pasting `/clear` directly into tmux. The next Run action must still dispatch the bare reopen into that same session.
 - **Copy Session Diagnostics:** Run `agent-doc session doctor <relative-path>`, show the output in an IDE-owned diagnostics surface, and offer a one-click copy path for the exact text.
 - **Verification floor:** editor-plugin tests must cover exact session-status display, `session clear` command routing, and a persistent route-dispatch failure surface with the exact stage-specific CLI output.
 

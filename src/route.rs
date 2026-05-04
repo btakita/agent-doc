@@ -662,9 +662,12 @@ fn reapply_codex_launch_contract_after_clear(
     session_id: &str,
     file_path: &str,
     harness: &HarnessConfig,
+    respect_tracked_clear_restart: bool,
 ) -> Result<String> {
     let latest_prompt = crate::codex_hook::load_latest_prompt_for_file(file)?;
-    if !tracked_codex_clear_requires_fresh_restart(harness, latest_prompt.as_deref()) {
+    if !respect_tracked_clear_restart
+        || !tracked_codex_clear_requires_fresh_restart(harness, latest_prompt.as_deref())
+    {
         return Ok(pane.to_string());
     }
 
@@ -1391,7 +1394,7 @@ fn dispatch_only_reopen_existing_pane(
     pane_id: &str,
 ) -> Result<String> {
     let dispatch_pane = reapply_codex_launch_contract_after_clear(
-        tmux, file, pane_id, session_id, file_path, harness,
+        tmux, file, pane_id, session_id, file_path, harness, false,
     )?;
     let log_status = crate::startup_miss::session_log_status(file, session_id)
         .ok()
@@ -1663,11 +1666,14 @@ fn load_authoritative_actor_dispatch_target(
     session_id: &str,
     file_path: &str,
     harness: &HarnessConfig,
+    respect_tracked_clear_restart: bool,
 ) -> Result<Option<AuthoritativeActorDispatchTarget>> {
-    if tracked_codex_clear_requires_fresh_restart(
-        harness,
-        crate::codex_hook::load_latest_prompt_for_file(file)?.as_deref(),
-    ) {
+    if respect_tracked_clear_restart
+        && tracked_codex_clear_requires_fresh_restart(
+            harness,
+            crate::codex_hook::load_latest_prompt_for_file(file)?.as_deref(),
+        )
+    {
         return Ok(None);
     }
 
@@ -1866,7 +1872,7 @@ fn resolve_or_create_pane_dispatch_only(
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
     if let Some(actor) =
-        load_authoritative_actor_dispatch_target(tmux, file, session_id, file_path, harness)?
+        load_authoritative_actor_dispatch_target(tmux, file, session_id, file_path, harness, false)?
     {
         return route_via_authoritative_actor(
             tmux,
@@ -2114,7 +2120,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
     if let Some(actor) =
-        load_authoritative_actor_dispatch_target(tmux, file, session_id, file_path, harness)?
+        load_authoritative_actor_dispatch_target(tmux, file, session_id, file_path, harness, true)?
     {
         return route_via_authoritative_actor(
             tmux,
@@ -2465,6 +2471,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     session_id,
                     file_path,
                     harness,
+                    true,
                 )?;
                 register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
                 match ensure_existing_pane_ready_for_dispatch(
@@ -9720,6 +9727,121 @@ Body\n\
     }
 
     #[test]
+    fn resolve_or_create_pane_dispatch_only_does_not_restart_after_tracked_codex_clear() {
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/codex-hooks/sessions")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-clear-no-restart");
+        let session = "codex";
+        let cwd = test_cwd();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &stale_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("dispatch-only-clear-no-restart.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-dispatch-only-clear-no-restart";
+        sessions::register(session_id, &stale_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.path()
+                .join(".agent-doc/codex-hooks/sessions/clear.json"),
+            serde_json::json!({
+                "session_id": "codex-clear-session",
+                "doc_path": file_path,
+                "last_turn_id": "turn-clear",
+                "last_prompt": "/clear",
+                "updated_at": 42u64
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "ready",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::Restart { .. } => {
+                restart_called_for_ipc.store(true, Ordering::Relaxed);
+                IpcResponse::ok_empty()
+            }
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let resolved = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("dispatch-only reroute should keep sending the bare reopen after session clear");
+        assert_eq!(resolved, actor_pane);
+        assert!(
+            !restart_called.load(Ordering::Relaxed),
+            "dispatch-only reroute must not restart Codex just because the latest tracked prompt was /clear"
+        );
+
+        let trigger =
+            routed_trigger_submit_bytes(&HarnessConfig::codex().trigger_command(&file_path));
+        assert_eq!(*injects.lock().unwrap(), vec![trigger]);
+
+        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        assert!(
+            !stale_content.contains("STALE:agent-doc "),
+            "dispatch-only reroute should still avoid the stale registered pane after session clear: {stale_content}"
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
     fn load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_identity() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -9769,6 +9891,7 @@ Body\n\
             session_id,
             &file_path,
             &HarnessConfig::claude(),
+            true,
         )
         .expect("normalized Claude harness name should not fail the authoritative actor lookup")
         .expect("healthy actor record should remain dispatchable");

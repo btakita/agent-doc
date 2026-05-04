@@ -271,8 +271,49 @@ The fragility is in the handoff logic between those timelines, not in any single
 
 The fix I just landed reduces one of those windows by following same-file restart handoffs instead of pinning the stale pane. The broader architectural weakness is still that normal routing is cross-checking multiple mutable sources instead of leaning on one truly authoritative owner model. That is why this has felt fragile: the system is doing distributed reconciliation across document state, tmux state, and harness state, and each additional recovery heuristic increases surface area for edge cases.
 
-That broader simplification direction is the same reason I narrowed the earlier running-pane plan toward explicit pane-ownership invariants and a smaller normal-path allowlist.
-<!-- agent:boundary:19ceface -->
+❯ That broader simplification direction is the same reason I narrowed the earlier running-pane plan toward explicit pane-ownership invariants and a smaller normal-path allowlist.
+❯ Why do we have tracking that can drift? There should be "no drift" tracking. Please propose a solution that will never have race conditions.
+### Re: no-drift tracking design — gpt-5
+
+You do not get to "never race" this by adding better reconciliation. You only get there by removing concurrent ownership decisions.
+
+A defensible no-drift design is:
+- one authoritative owner record per document
+- one single writer that is allowed to mutate that owner record
+- every other component becomes a client, never an owner
+
+Concretely, I would make the supervisor session the only authority for ownership, and give each live session a monotonically increasing generation/lease token.
+
+Rules:
+- the document does not own the pane
+- tmux registry does not own the pane
+- sync/route/editor plugins do not own the pane
+- only the supervisor-owned session record owns the pane
+- any reopen, reroute, restart, or handoff must create a new generation token
+- any message coming from an older generation is ignored, never reconciled back in
+
+That means route/sync stop asking "which source looks most right right now?" They instead ask one question: "what is the current committed session generation for this document?" If the answer is absent, fail closed. If present, act only on that generation. If the pane changed but the generation did not advance, that state is invalid and must be rejected, not heuristically repaired.
+
+So the architectural proposal is an actor model:
+- one per-document session actor
+- serialized command log: start, attach, reroute, restart, handoff, close
+- actor persists `(doc_id, session_id, pane_id, generation, state)`
+- editor/plugin/sync send commands to the actor
+- actor alone performs tmux mutations and writes the registry projection
+- registry becomes a cache/projection, not a source of truth
+- session log becomes audit/debug only, not ownership proof
+
+If you want the strongest version, remove passive ownership discovery entirely:
+- no process-tree provenance
+- no session-log provenance for live routing decisions
+- no "find live owner" heuristic
+- no cross-checking document state against pane state to infer authority
+- only explicit actor state transitions
+
+That is the only serious path to "no drift". The tradeoff is also clear: less opportunistic recovery, more fail-closed behavior, and more explicit restart/reattach operations. But that is exactly how you buy determinism.
+
+So the short answer is: the current design drifts because multiple subsystems are allowed to infer ownership. The replacement is to stop inferring ownership at all.
+<!-- agent:boundary:72e24cf7 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

@@ -127,12 +127,21 @@ Implemented a first-class exact-search path for literal queries. `tsift search -
 
 Added regression coverage for the exact backend, CLI flag parsing, rewrite behavior, stale-index bypass, and workspace-root behavior; updated `SPEC.md`, `VERSIONS.md`, `Cargo.toml`, and `Cargo.lock` for `tsift v0.1.23`. Verification in `src/tsift` passed: `cargo test`, `make check`, `cargo build --release`, and `cargo install --path . --force`. The installed binary is now `tsift 0.1.23`. Committed and pushed in `src/tsift` as `b0b236a` (`feat: add exact literal search backend`).
 
-Top remaining backlog item: `#fpt7`.
-<!-- agent:boundary:c17e6b2a -->
+❯ Top remaining backlog item: `#fpt7`.
+❯ Would tagpath help with a more effective search? Would tagpath help sift with retrieval?
+### Re: tagpath for search and retrieval — gpt-5
+
+Yes, but in a bounded role.
+
+`tagpath` already helps `tsift` on the symbol side: during indexing, symbol names are canonicalized into tag lists, and `symbol_search()` can match by exact name or overlapping tags. That is the right use of `tagpath`: identifier normalization, aliasing across naming conventions, and better symbol recall when the query and the code use different spellings.
+
+It would not replace `sift` for general retrieval. `sift` is still the broad file-content/BM25 engine, and the new `--exact` path covers literal text lookup. `tagpath` has no document corpus or general ranking model for arbitrary prose or file contents, so by itself it will not make lexical retrieval fast or solve timeout cases.
+
+The useful next integration point is alongside `sift`, not instead of it: parse the query into canonical tags, expand aliases, search the symbol index by tags first, then use those symbol/tag hits to boost or filter the `sift` results. So the architecture I would keep is: `rg -F` for exact text, `sift` for lexical or hybrid retrieval, and `tagpath` for identifier semantics and reranking. If we want better retrieval from here, the high-value step is tag-aware reranking inside `tsift search`, not replacing `sift` with `tagpath`.
+<!-- agent:boundary:a4ce3477 -->
 <!-- /agent:exchange -->
 
 <!--
----
 Can tsift use rtk to compress tool call output in the context?
 -->
 

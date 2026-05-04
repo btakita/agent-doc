@@ -9,9 +9,9 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 `agent-doc start <FILE> [--force]`
 
 - Starts the configured harness in the current tmux pane and registers the pane as the session owner.
-- If another pane still proves live ownership of the same document session, `start` must reuse and focus that pane instead of spawning a duplicate.
-- If the registry points at an alive pane but ownership proof is currently weak, `start` must consult supervisor health and the session log before replacing anything.
-- `--force` bypasses reuse/restart/stale-owner logic and rebinds the current pane directly, but the registry rebind must still record supersession provenance in the session log.
+- If another alive pane is already bound to the same document session, normal `start` must fail closed instead of reusing, restarting, or replacing it.
+- That failure must print concrete tmux inspection/capture/kill commands so the user can decide which pane to keep and which pane to kill manually.
+- `--force` is the only supported escape hatch for intentionally rebinding the current pane during repair work, and the registry rebind must still record supersession provenance in the session log.
 - When a fresh start falls back to a new session binding because the configured session is dead, `.agent-doc/config.toml` must be updated to the new live session.
 - Harness launches must auto-add writable roots for parent-repo patchback and nested submodule git metadata when needed.
 
@@ -27,6 +27,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - If unresolved prompt-bearing drift exists and the pane is busy, route may attempt one scoped `agent-doc fix <FILE>` pass and then one bounded fresh-restart recovery, but it must still fail closed if no clean dispatch path emerges.
 - For live same-document panes with no new prompt-bearing drift, route may focus the pane and return success without sending a duplicate reopen.
 - Fresh auto-starts and live reroutes both require a real per-document cycle acknowledgment after dispatch; accepted input alone is not sufficient.
+- Route auto-start may not create a duplicate hidden fallback pane just because split/join heuristics failed. If the target session already has an `agent-doc` window but no safe registered anchor, or if `split-window` fails beside the chosen anchor, route must fail closed with tmux cleanup commands instead of creating and stashing a second pane.
 - Once route has created a fresh pane for a document, that pane stays authoritative for the reroute. A concurrent geometry-only registry rebind must not hand dispatch back to an older same-session pane and make the fresh pane disposable.
 - Route must never transiently register an existing pane to a different file just to probe readiness. If a candidate pane is already bound to another document, reroute fails closed instead of emitting a temporary cross-file `session_superseded` / `session_end origin=registry_rebind`.
 - Route progress diagnostics must be UTF-8 safe when trimming captured tmux lines for stderr/status output. Prompt/status lines containing Unicode glyphs such as `…` or `·` must never panic the binary during a live reroute.
@@ -92,6 +93,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Once a live pane is reserved for one file during the pass, later files in the same pass must treat it as unavailable.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
 - Before replacing a missing pane, sync must first attempt closeout recovery for `response_captured` or `write_applied` cycles. If that recovery fails, sync must fail closed and preserve the durable capture instead of provisioning another pane.
+- Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.
 - If any visible file stays blocked under passive `--no-autostart`, sync must preserve the current visible tmux layout and warn instead of reconciling the remaining foreign pane set into a new authoritative layout.
 

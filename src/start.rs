@@ -9,31 +9,18 @@
 //!   - Codex: frontmatter `agent_args` > frontmatter `codex_args` >
 //!     config `agent_args` > config `codex_args`
 //! - Requires an active tmux session; bails immediately if not inside tmux.
-//! - If another pane already proves live ownership of the same document
-//!   session, focuses and reuses that pane instead of spawning a duplicate
-//!   supervisor in the current pane. When that pane lives in another tmux
-//!   session, `start` switches the caller's current client to the target
-//!   session before selecting the pane. Once that live-owner proof exists,
-//!   missing or stale supervisor IPC state must not authorize a replacement
-//!   pane for the same document.
+//! - If another pane already owns the same document session, `start` fails
+//!   closed instead of reusing, restarting, or superseding that pane. The
+//!   error includes tmux inspection/cleanup commands so the user can decide
+//!   which pane to keep and which pane(s) to kill manually.
 //! - If the configured project tmux session is dead and a fresh start must
 //!   register the current pane in another live tmux session, `start` updates
 //!   `.agent-doc/config.toml` to that live session so later route/claim work
 //!   follows the new binding instead of the stale dead session.
-//! - If `sessions.json` points at an alive pane but no live owner can still be
-//!   proven for the document, `start` first consults the per-session supervisor:
-//!   healthy supervisors are reused, restartable supervisors are restarted in
-//!   place, halted supervisors may be replaced only through a later
-//!   registry-rebind that records supersession provenance, and unavailable
-//!   supervisors fail closed instead of rebinding the document to a fresh pane.
-//!   Exception: when the unavailable registered pane is stranded in a stash
-//!   window and neither the startup-miss marker nor the session log still prove
-//!   an open owner there, `start` clears that stale stash registration and
-//!   claims the current pane instead of leaving the document blocked behind the
-//!   dead stash binding.
-//!   If that alive pane still carries the active startup-miss marker for the
-//!   document, `start` must also fail closed instead of rebinding the document
-//!   to a fresh pane.
+//! - If `sessions.json` points at an alive pane that is not the current pane,
+//!   `start` must also fail closed instead of attempting a supervisor-driven
+//!   reuse/restart or a registry rebind. Normal `start` is never allowed to
+//!   decide which live pane should disappear.
 //! - Registers the session UUID → current tmux pane ID in `sessions.json` so
 //!   other subcommands (`route`, `focus`, etc.) can locate the pane.
 //! - Runs the configured harness binary as a blocking child process inside a persistent restart loop
@@ -878,170 +865,7 @@ fn spawn_auto_trigger_thread(
 
 #[derive(Debug, PartialEq, Eq)]
 enum ExistingSessionPaneAction {
-    Reuse(String),
-    ClearStale(String),
-}
-
-/// Supervisor health as observed by the `start` reuse probe.
-#[derive(Debug)]
-enum SupervisorHealth {
-    /// Supervisor is reachable, child is running and healthy.
-    Healthy,
-    /// Supervisor is reachable, and an automatic in-place restart is still allowed.
-    Restartable,
-    /// Supervisor halted itself after repeated failures; do not revive it in place.
-    Halted { restart_count: u32 },
-    /// Socket exists but supervisor did not respond or errored.
-    Unreachable,
-    /// No supervisor socket found at all.
-    NoSocket,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StaleRegisteredPaneAction {
-    ReuseRegistered,
-    RestartRegistered,
-    ClearStaleHalted { restart_count: u32 },
-    FailClosedUnavailable,
-}
-
-fn pane_window_name(tmux: &sessions::Tmux, pane_id: &str) -> Option<String> {
-    let window_id = tmux.pane_window(pane_id).ok()?;
-    let output = tmux
-        .cmd()
-        .args(["display-message", "-t", &window_id, "-p", "#{window_name}"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-fn is_stash_window_name(window_name: &str) -> bool {
-    window_name == "stash" || window_name.starts_with("stash-")
-}
-
-fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
-    let canonical = match file.canonicalize() {
-        Ok(c) => c,
-        Err(_) => return SupervisorHealth::NoSocket,
-    };
-    let project_root = match snapshot::find_project_root(&canonical) {
-        Some(r) => r,
-        None => return SupervisorHealth::NoSocket,
-    };
-    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
-    if !sock.exists() {
-        return SupervisorHealth::NoSocket;
-    }
-    match crate::supervisor::ipc::send_command(&sock, &IpcMethod::State) {
-        Ok(resp) if resp.ok => {
-            if let Some(data) = &resp.data {
-                let running = data
-                    .get("running")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let state = data.get("state").and_then(|v| v.as_str()).unwrap_or("");
-                let restart_count = data
-                    .get("restart_count")
-                    .and_then(|v| v.as_u64())
-                    .and_then(|v| u32::try_from(v).ok())
-                    .unwrap_or(0);
-                if running && state == "healthy" {
-                    SupervisorHealth::Healthy
-                } else if state == "halted" {
-                    SupervisorHealth::Halted { restart_count }
-                } else {
-                    SupervisorHealth::Restartable
-                }
-            } else {
-                SupervisorHealth::Restartable
-            }
-        }
-        Ok(_) => SupervisorHealth::Unreachable,
-        Err(_) => SupervisorHealth::Unreachable,
-    }
-}
-
-fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
-    let canonical = match file.canonicalize() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    let project_root = match snapshot::find_project_root(&canonical) {
-        Some(r) => r,
-        None => return false,
-    };
-    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
-    let method = IpcMethod::Restart {
-        mode: "continue".to_string(),
-    };
-    match crate::supervisor::ipc::send_command(&sock, &method) {
-        Ok(resp) => resp.ok,
-        Err(_) => false,
-    }
-}
-
-fn stale_registered_pane_action(supervisor_health: SupervisorHealth) -> StaleRegisteredPaneAction {
-    match supervisor_health {
-        SupervisorHealth::Healthy => StaleRegisteredPaneAction::ReuseRegistered,
-        SupervisorHealth::Restartable => StaleRegisteredPaneAction::RestartRegistered,
-        SupervisorHealth::Halted { restart_count } => {
-            StaleRegisteredPaneAction::ClearStaleHalted { restart_count }
-        }
-        SupervisorHealth::Unreachable | SupervisorHealth::NoSocket => {
-            StaleRegisteredPaneAction::FailClosedUnavailable
-        }
-    }
-}
-
-fn should_fail_closed_for_unresolved_startup_miss_rebind(
-    current_pane: &str,
-    registered_pane: &str,
-    miss: Option<&crate::startup_miss::StartupMiss>,
-) -> bool {
-    current_pane != registered_pane && miss.is_some_and(|miss| miss.pane_id == registered_pane)
-}
-
-fn should_fail_closed_for_open_session_log_rebind(
-    registered_pane: &str,
-    status: Option<&crate::startup_miss::SessionLogStatus>,
-) -> bool {
-    status.is_some_and(|status| {
-        status.latest_start_pane.as_deref() == Some(registered_pane) && status.latest_session_open()
-    })
-}
-
-fn should_clear_stale_unavailable_stash_registration(
-    tmux: &sessions::Tmux,
-    current_pane: &str,
-    registered_pane: &str,
-    miss: Option<&crate::startup_miss::StartupMiss>,
-    status: Option<&crate::startup_miss::SessionLogStatus>,
-) -> bool {
-    current_pane != registered_pane
-        && pane_window_name(tmux, registered_pane)
-            .as_deref()
-            .is_some_and(is_stash_window_name)
-        && !should_fail_closed_for_unresolved_startup_miss_rebind(
-            current_pane,
-            registered_pane,
-            miss,
-        )
-        && !should_fail_closed_for_open_session_log_rebind(registered_pane, status)
-}
-
-fn open_session_log_rebind_diagnostic(
-    file: &Path,
-    session_id: &str,
-    registered_pane: &str,
-) -> Result<Option<String>> {
-    let status = crate::startup_miss::session_log_status(file, session_id)?;
-    if !should_fail_closed_for_open_session_log_rebind(registered_pane, status.as_ref()) {
-        return Ok(None);
-    }
-    crate::startup_miss::session_log_diagnostic(file, session_id)
+    Refuse(String),
 }
 
 fn session_log_open_owner_pane(
@@ -1099,56 +923,60 @@ fn existing_session_pane_action_from_entry(
     if let Some(owner) = live_owner.or(session_log_owner)
         && owner != current_pane
     {
-        return Some(ExistingSessionPaneAction::Reuse(owner.to_string()));
+        return Some(ExistingSessionPaneAction::Refuse(owner.to_string()));
     }
 
     let entry = entry?;
     if entry.pane == current_pane || !tmux.pane_alive(&entry.pane) {
         return None;
     }
-    Some(ExistingSessionPaneAction::ClearStale(entry.pane.clone()))
+    Some(ExistingSessionPaneAction::Refuse(entry.pane.clone()))
 }
 
-fn focus_existing_session_pane(
+fn format_existing_pane_conflict_error(
     tmux: &sessions::Tmux,
+    file: &Path,
     current_pane: &str,
-    target_pane: &str,
-) -> Result<()> {
-    let target_session = tmux.pane_session(target_pane).ok();
-    let current_session = tmux.pane_session(current_pane).ok();
-
-    let mut cmd = tmux.cmd();
-    if should_switch_client_for_focus(
-        current_session.as_deref(),
-        target_session.as_deref(),
-        std::env::var_os("TMUX").is_some(),
-    ) && let Some(target_session) = target_session.as_deref()
-    {
-        cmd.args(["switch-client", "-t", target_session]);
-        cmd.arg(";");
-    }
-    cmd.args(["select-window", "-t", target_pane]);
-    cmd.arg(";");
-    cmd.args(["select-pane", "-t", target_pane]);
-    let status = cmd
-        .status()
-        .context("failed to execute tmux focus command for existing session pane")?;
-    if !status.success() {
-        anyhow::bail!("tmux focus command failed for pane {}", target_pane);
-    }
-    Ok(())
-}
-
-fn should_switch_client_for_focus(
-    current_session: Option<&str>,
-    target_session: Option<&str>,
-    inside_tmux: bool,
-) -> bool {
-    inside_tmux
-        && matches!(
-            (current_session, target_session),
-            (Some(current), Some(target)) if current != target
-        )
+    conflicting_pane: &str,
+) -> String {
+    let conflict_session = tmux.pane_session(conflicting_pane).unwrap_or_default();
+    let conflict_window = tmux.pane_window(conflicting_pane).unwrap_or_default();
+    let current_session = tmux.pane_session(current_pane).unwrap_or_default();
+    let current_window = tmux.pane_window(current_pane).unwrap_or_default();
+    format!(
+        "refusing to start {} in pane {} because pane {} is already bound to this document.\n\
+\n\
+Existing owner:\n\
+  pane={} session={} window={}\n\
+\n\
+Current launcher pane:\n\
+  pane={} session={} window={}\n\
+\n\
+Inspect the conflicting panes first:\n\
+  tmux list-panes -a -F '#{{session_name}} #{{window_name}} #{{pane_id}} #{{pane_current_command}} #{{pane_current_path}}'\n\
+  tmux capture-pane -pt {} | tail -n 80\n\
+  tmux capture-pane -pt {} | tail -n 80\n\
+\n\
+If you want to keep the existing owner, kill this launcher pane yourself and rerun from the owner pane:\n\
+  tmux kill-pane -t {}\n\
+\n\
+If you want to replace the existing owner, kill it yourself first and then rerun `agent-doc start` from pane {}:\n\
+  tmux kill-pane -t {}",
+        file.display(),
+        current_pane,
+        conflicting_pane,
+        conflicting_pane,
+        conflict_session,
+        conflict_window,
+        current_pane,
+        current_session,
+        current_window,
+        conflicting_pane,
+        current_pane,
+        current_pane,
+        current_pane,
+        conflicting_pane
+    )
 }
 
 /// Put stdin into raw mode so the outer pty line discipline doesn't translate
@@ -1707,135 +1535,33 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
     if !force {
         if let Some(action) = existing_session_pane_action(&tmux, &session_id, file, &pane_id)? {
             match action {
-                ExistingSessionPaneAction::Reuse(existing_pane) => {
-                    if sessions::lookup(&session_id)?.as_deref() != Some(existing_pane.as_str()) {
-                        crate::sync::reregister_recovered_owner(
-                            &tmux,
-                            file,
-                            &session_id,
-                            &existing_pane,
-                        )?;
-                        eprintln!(
-                            "[start] recovered live owner for {} in pane {}",
-                            file.display(),
-                            existing_pane
-                        );
-                    }
-                    eprintln!(
-                        "session {} for {} is already running in pane {} — switching focus",
-                        &session_id[..8.min(session_id.len())],
-                        file.display(),
-                        existing_pane
-                    );
-                    if let Err(e) = focus_existing_session_pane(&tmux, &pane_id, &existing_pane) {
-                        eprintln!(
-                            "[start] warning: failed to focus pane {}: {}",
-                            existing_pane, e
-                        );
-                    }
-                    return Ok(());
-                }
-                ExistingSessionPaneAction::ClearStale(stale_pane) => {
-                    if should_fail_closed_for_unresolved_startup_miss_rebind(
-                        &pane_id,
-                        &stale_pane,
-                        unresolved_startup_miss.as_ref(),
-                    ) {
-                        let miss = unresolved_startup_miss
-                            .as_ref()
-                            .expect("guard checked presence");
+                ExistingSessionPaneAction::Refuse(conflicting_pane) => {
+                    if let Some(miss) = unresolved_startup_miss.as_ref()
+                        && miss.pane_id == conflicting_pane
+                    {
                         let miss_ts = crate::startup_miss::format_timestamp(miss.timestamp);
                         anyhow::bail!(
-                            "startup-miss from {} still belongs to alive pane {} for {} — refusing to start a replacement pane over the existing owner",
+                            "startup-miss from {} still belongs to alive pane {} for {}.\n\n{}",
                             miss_ts,
-                            stale_pane,
-                            file.display()
+                            conflicting_pane,
+                            file.display(),
+                            format_existing_pane_conflict_error(
+                                &tmux,
+                                file,
+                                &pane_id,
+                                &conflicting_pane
+                            )
                         );
                     }
-                    match stale_registered_pane_action(query_supervisor_health(file, &session_id)) {
-                        StaleRegisteredPaneAction::ReuseRegistered => {
-                            eprintln!(
-                                "[start] registered pane {} has a healthy supervisor for {} despite missing live-owner proof — switching focus",
-                                stale_pane,
-                                file.display()
-                            );
-                            if let Err(e) =
-                                focus_existing_session_pane(&tmux, &pane_id, &stale_pane)
-                            {
-                                eprintln!(
-                                    "[start] warning: failed to focus pane {}: {}",
-                                    stale_pane, e
-                                );
-                            }
-                            return Ok(());
-                        }
-                        StaleRegisteredPaneAction::RestartRegistered => {
-                            eprintln!(
-                                "[start] registered pane {} has a restartable supervisor for {} despite missing live-owner proof — restarting in place",
-                                stale_pane,
-                                file.display()
-                            );
-                            if restart_via_supervisor(file, &session_id) {
-                                if let Err(e) =
-                                    focus_existing_session_pane(&tmux, &pane_id, &stale_pane)
-                                {
-                                    eprintln!(
-                                        "[start] warning: failed to focus pane {}: {}",
-                                        stale_pane, e
-                                    );
-                                }
-                                return Ok(());
-                            }
-                            eprintln!(
-                                "[start] supervisor restart failed for pane {} — starting replacement via registry rebind so supersession provenance is preserved",
-                                stale_pane
-                            );
-                        }
-                        StaleRegisteredPaneAction::ClearStaleHalted { restart_count } => {
-                            if let Some(detail) =
-                                open_session_log_rebind_diagnostic(file, &session_id, &stale_pane)?
-                            {
-                                anyhow::bail!(
-                                    "registered pane {} for {} still has open session-log provenance ({}), but the supervisor reported halted after {} restarts — refusing to replace the pane without a recorded child exit or session_end",
-                                    stale_pane,
-                                    file.display(),
-                                    detail,
-                                    restart_count
-                                );
-                            }
-                            eprintln!(
-                                "[start] registered pane {} for {} has a halted supervisor after {} restarts — starting fresh via registry rebind so supersession provenance is preserved",
-                                stale_pane,
-                                file.display(),
-                                restart_count
-                            );
-                        }
-                        StaleRegisteredPaneAction::FailClosedUnavailable => {
-                            let session_log_status =
-                                crate::startup_miss::session_log_status(file, &session_id)?;
-                            if should_clear_stale_unavailable_stash_registration(
-                                &tmux,
-                                &pane_id,
-                                &stale_pane,
-                                unresolved_startup_miss.as_ref(),
-                                session_log_status.as_ref(),
-                            ) {
-                                eprintln!(
-                                    "[start] registered pane {} for {} is stranded in stash with unavailable supervisor and no open provenance — clearing stale registration and starting fresh in {}",
-                                    stale_pane,
-                                    file.display(),
-                                    pane_id
-                                );
-                                let _ = sessions::deregister(&session_id)?;
-                            } else {
-                                anyhow::bail!(
-                                    "registered pane {} for {} is still alive but no live owner was proven and the supervisor is unavailable — refusing to replace the pane without ownership proof or registry-rebind provenance",
-                                    stale_pane,
-                                    file.display()
-                                );
-                            }
-                        }
-                    }
+                    anyhow::bail!(
+                        "{}",
+                        format_existing_pane_conflict_error(
+                            &tmux,
+                            file,
+                            &pane_id,
+                            &conflicting_pane
+                        )
+                    );
                 }
             }
         }
@@ -2401,7 +2127,8 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                             }
                             RestartContinueExitStrategy::RestartFresh => {
                                 suppress_stale_ctrl_d_until_prompt = ctrl_d_forwarded
-                                    && (committed_cycle_after_latest_run || clean_exit_before_prompt);
+                                    && (committed_cycle_after_latest_run
+                                        || clean_exit_before_prompt);
                                 if ctrl_d_forwarded && committed_cycle_after_latest_run {
                                     eprintln!(
                                         "\n{} exited after stdin EOF/Ctrl-D, but this run already committed a document cycle. Restarting fresh to keep the pane attached...",
@@ -3064,7 +2791,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_session_pane_action_reuses_proven_live_owner() {
+    fn existing_session_pane_action_refuses_proven_live_owner() {
         let iso = IsolatedTmux::new("start-duplicate-live-pane");
         let tmp = tempfile::TempDir::new().unwrap();
         let pane_a = iso.new_session("test", tmp.path()).unwrap();
@@ -3089,12 +2816,12 @@ mod tests {
         );
         assert_eq!(
             action,
-            Some(ExistingSessionPaneAction::Reuse(pane_a.clone()))
+            Some(ExistingSessionPaneAction::Refuse(pane_a.clone()))
         );
     }
 
     #[test]
-    fn existing_session_reuse_keeps_launcher_pane_in_original_session() {
+    fn existing_session_refusal_keeps_launcher_pane_in_original_session() {
         let iso = IsolatedTmux::new("start-reuse-keeps-launcher-session");
         let tmp = tempfile::TempDir::new().unwrap();
         let owner_pane = iso.new_session("sess-a", tmp.path()).unwrap();
@@ -3119,12 +2846,12 @@ mod tests {
         );
         assert_eq!(
             action,
-            Some(ExistingSessionPaneAction::Reuse(owner_pane.clone()))
+            Some(ExistingSessionPaneAction::Refuse(owner_pane.clone()))
         );
         assert_eq!(
             iso.pane_session(&launcher_pane).unwrap(),
             "sess-b",
-            "proving an existing live owner must not relocate the launcher pane"
+            "refusing an existing live owner must not relocate the launcher pane"
         );
         assert_eq!(iso.pane_session(&owner_pane).unwrap(), "sess-a");
     }
@@ -3150,7 +2877,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_session_pane_action_clears_alive_stale_registration_without_owner() {
+    fn existing_session_pane_action_refuses_alive_stale_registration_without_owner() {
         let iso = IsolatedTmux::new("start-stale-alive-pane");
         let tmp = tempfile::TempDir::new().unwrap();
         let pane_a = iso.new_session("test", tmp.path()).unwrap();
@@ -3170,12 +2897,12 @@ mod tests {
             existing_session_pane_action_from_entry(&iso, &pane_b, Some(&entry), None, None);
         assert_eq!(
             action,
-            Some(ExistingSessionPaneAction::ClearStale(pane_a.clone()))
+            Some(ExistingSessionPaneAction::Refuse(pane_a.clone()))
         );
     }
 
     #[test]
-    fn existing_session_pane_action_reuses_session_log_owner_without_process_tree_proof() {
+    fn existing_session_pane_action_refuses_session_log_owner_without_process_tree_proof() {
         let iso = IsolatedTmux::new("start-session-log-owner-pane");
         let tmp = tempfile::TempDir::new().unwrap();
         let pane_a = iso.new_session("test", tmp.path()).unwrap();
@@ -3200,7 +2927,7 @@ mod tests {
         );
         assert_eq!(
             action,
-            Some(ExistingSessionPaneAction::Reuse(pane_a.clone()))
+            Some(ExistingSessionPaneAction::Refuse(pane_a.clone()))
         );
     }
 
@@ -3222,176 +2949,6 @@ mod tests {
 
         let action = existing_session_pane_action_from_entry(&iso, &pane, Some(&entry), None, None);
         assert_eq!(action, None);
-    }
-
-    #[test]
-    fn stale_registered_pane_uses_supervisor_before_fail_closed_or_rebind() {
-        assert_eq!(
-            stale_registered_pane_action(SupervisorHealth::Healthy),
-            StaleRegisteredPaneAction::ReuseRegistered
-        );
-        assert_eq!(
-            stale_registered_pane_action(SupervisorHealth::Restartable),
-            StaleRegisteredPaneAction::RestartRegistered
-        );
-        assert_eq!(
-            stale_registered_pane_action(SupervisorHealth::Halted { restart_count: 5 }),
-            StaleRegisteredPaneAction::ClearStaleHalted { restart_count: 5 }
-        );
-        assert_eq!(
-            stale_registered_pane_action(SupervisorHealth::Unreachable),
-            StaleRegisteredPaneAction::FailClosedUnavailable
-        );
-        assert_eq!(
-            stale_registered_pane_action(SupervisorHealth::NoSocket),
-            StaleRegisteredPaneAction::FailClosedUnavailable
-        );
-    }
-
-    #[test]
-    fn unresolved_startup_miss_blocks_cross_pane_rebind() {
-        let miss = crate::startup_miss::StartupMiss {
-            file: "tasks/software/corky.md".to_string(),
-            pane_id: "%42".to_string(),
-            session_id: "session-123".to_string(),
-            harness: "codex".to_string(),
-            timestamp: 5,
-            origin: crate::startup_miss::StartupMissOrigin::RoutedTrigger,
-            cycle_baseline_id: None,
-        };
-
-        assert!(should_fail_closed_for_unresolved_startup_miss_rebind(
-            "%84",
-            "%42",
-            Some(&miss)
-        ));
-        assert!(!should_fail_closed_for_unresolved_startup_miss_rebind(
-            "%42",
-            "%42",
-            Some(&miss)
-        ));
-        assert!(!should_fail_closed_for_unresolved_startup_miss_rebind(
-            "%84",
-            "%43",
-            Some(&miss)
-        ));
-        assert!(!should_fail_closed_for_unresolved_startup_miss_rebind(
-            "%84", "%42", None
-        ));
-    }
-
-    #[test]
-    fn open_session_log_blocks_cross_pane_rebind() {
-        let status = crate::startup_miss::SessionLogStatus {
-            latest_start_pane: Some("%42".to_string()),
-            latest_start_timestamp: Some(10),
-            latest_run_timestamp: Some(11),
-            latest_run_event: Some("claude_start mode=fresh restart_count=0".to_string()),
-            saw_committed_cycle_after_latest_run: false,
-            last_event: Some("claude_start mode=fresh restart_count=0".to_string()),
-            saw_process_exit_after_latest_start: false,
-            saw_session_end_after_latest_start: false,
-            saw_process_exit_after_latest_run: false,
-            saw_session_end_after_latest_run: false,
-        };
-
-        assert!(should_fail_closed_for_open_session_log_rebind(
-            "%42",
-            Some(&status)
-        ));
-        assert!(!should_fail_closed_for_open_session_log_rebind(
-            "%43",
-            Some(&status)
-        ));
-    }
-
-    #[test]
-    fn closed_session_log_does_not_block_cross_pane_rebind() {
-        let status = crate::startup_miss::SessionLogStatus {
-            latest_start_pane: Some("%42".to_string()),
-            latest_start_timestamp: Some(10),
-            latest_run_timestamp: Some(11),
-            latest_run_event: Some("claude_start mode=fresh restart_count=0".to_string()),
-            saw_committed_cycle_after_latest_run: false,
-            last_event: Some(
-                "session_end origin=registry_rebind pane=%42 next_pane=%84".to_string(),
-            ),
-            saw_process_exit_after_latest_start: true,
-            saw_session_end_after_latest_start: true,
-            saw_process_exit_after_latest_run: true,
-            saw_session_end_after_latest_run: true,
-        };
-
-        assert!(!should_fail_closed_for_open_session_log_rebind(
-            "%42",
-            Some(&status)
-        ));
-        assert!(!should_fail_closed_for_open_session_log_rebind("%42", None));
-    }
-
-    #[test]
-    fn stash_registration_with_unavailable_supervisor_can_be_cleared_when_proven_closed() {
-        let iso = IsolatedTmux::new("start-clear-stale-stash");
-        let tmp = TempDir::new().unwrap();
-        let stashed_pane = iso.new_session("test", tmp.path()).unwrap();
-        let current_pane = iso.split_window(&stashed_pane, tmp.path(), "-dh").unwrap();
-        iso.stash_pane(&stashed_pane, "test").unwrap();
-
-        assert!(should_clear_stale_unavailable_stash_registration(
-            &iso,
-            &current_pane,
-            &stashed_pane,
-            None,
-            None
-        ));
-    }
-
-    #[test]
-    fn stash_registration_with_open_session_log_still_blocks_rebind() {
-        let iso = IsolatedTmux::new("start-block-open-stash");
-        let tmp = TempDir::new().unwrap();
-        let stashed_pane = iso.new_session("test", tmp.path()).unwrap();
-        let current_pane = iso.split_window(&stashed_pane, tmp.path(), "-dh").unwrap();
-        iso.stash_pane(&stashed_pane, "test").unwrap();
-
-        let status = crate::startup_miss::SessionLogStatus {
-            latest_start_pane: Some(stashed_pane.clone()),
-            latest_start_timestamp: Some(10),
-            latest_run_timestamp: Some(11),
-            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_committed_cycle_after_latest_run: false,
-            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
-            saw_process_exit_after_latest_start: false,
-            saw_session_end_after_latest_start: false,
-            saw_process_exit_after_latest_run: false,
-            saw_session_end_after_latest_run: false,
-        };
-
-        assert!(!should_clear_stale_unavailable_stash_registration(
-            &iso,
-            &current_pane,
-            &stashed_pane,
-            None,
-            Some(&status)
-        ));
-    }
-
-    #[test]
-    fn non_stash_registration_still_fails_closed_when_supervisor_is_unavailable() {
-        let iso = IsolatedTmux::new("start-non-stash-unavailable");
-        let tmp = TempDir::new().unwrap();
-        let registered_pane = iso.new_session("test", tmp.path()).unwrap();
-        let current_pane = iso
-            .split_window(&registered_pane, tmp.path(), "-dh")
-            .unwrap();
-
-        assert!(!should_clear_stale_unavailable_stash_registration(
-            &iso,
-            &current_pane,
-            &registered_pane,
-            None,
-            None
-        ));
     }
 
     #[test]
@@ -3419,30 +2976,18 @@ mod tests {
     }
 
     #[test]
-    fn focus_existing_session_switches_client_for_cross_session_target() {
-        assert!(should_switch_client_for_focus(
-            Some("sess-a"),
-            Some("sess-b"),
-            true
-        ));
-    }
-
-    #[test]
-    fn focus_existing_session_skips_switch_when_target_session_matches() {
-        assert!(!should_switch_client_for_focus(
-            Some("sess-a"),
-            Some("sess-a"),
-            true
-        ));
-    }
-
-    #[test]
-    fn focus_existing_session_skips_switch_outside_tmux() {
-        assert!(!should_switch_client_for_focus(
-            Some("sess-a"),
-            Some("sess-b"),
-            false
-        ));
+    fn format_existing_pane_conflict_error_includes_manual_tmux_commands() {
+        let iso = IsolatedTmux::new("start-conflict-error");
+        let tmp = TempDir::new().unwrap();
+        let owner_pane = iso.new_session("test", tmp.path()).unwrap();
+        let launcher_pane = iso.split_window(&owner_pane, tmp.path(), "-dh").unwrap();
+        let doc = tmp.path().join("tasks/software/corky.md");
+        let rendered = format_existing_pane_conflict_error(&iso, &doc, &launcher_pane, &owner_pane);
+        assert!(rendered.contains("tmux list-panes -a"));
+        assert!(rendered.contains(&format!("tmux kill-pane -t {}", launcher_pane)));
+        assert!(rendered.contains(&format!("tmux kill-pane -t {}", owner_pane)));
+        assert!(rendered.contains(&owner_pane));
+        assert!(rendered.contains(&launcher_pane));
     }
 
     #[test]
@@ -4017,13 +3562,8 @@ mod tests {
         let stop = StopSignal::new().unwrap();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let shared = Arc::new(SupervisorShared::new("test", "writer-stop".to_string()));
-        let handle = spawn_writer_thread(
-            shared,
-            writer_arc,
-            stop.read_fd(),
-            stop_flag.clone(),
-            None,
-        );
+        let handle =
+            spawn_writer_thread(shared, writer_arc, stop.read_fd(), stop_flag.clone(), None);
 
         // Writer thread should be alive, blocked in poll()
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -4147,111 +3687,6 @@ mod tests {
     }
 
     #[test]
-    fn supervisor_health_no_socket_for_nonexistent_file() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let fake_file = tmp.path().join("nonexistent.md");
-        let health = query_supervisor_health(&fake_file, "no-such-session");
-        assert!(matches!(health, SupervisorHealth::NoSocket));
-    }
-
-    #[test]
-    fn supervisor_health_no_socket_when_no_agent_doc_dir() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let file = tmp.path().join("test.md");
-        std::fs::write(&file, "# test").unwrap();
-        let health = query_supervisor_health(&file, "some-session-id");
-        assert!(matches!(health, SupervisorHealth::NoSocket));
-    }
-
-    #[test]
-    fn supervisor_health_unreachable_with_stale_socket() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let agent_doc_dir = tmp.path().join(".agent-doc").join("supervisor");
-        std::fs::create_dir_all(&agent_doc_dir).unwrap();
-        let sock_path = agent_doc_dir.join("test-session.sock");
-        std::fs::write(&sock_path, "").unwrap();
-        let file = tmp.path().join("test.md");
-        std::fs::write(&file, "# test").unwrap();
-        let health = query_supervisor_health(&file, "test-session");
-        assert!(matches!(health, SupervisorHealth::Unreachable));
-    }
-
-    #[test]
-    fn supervisor_health_healthy_with_live_supervisor() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc/supervisor")).unwrap();
-        let file = tmp.path().join("test.md");
-        std::fs::write(&file, "# test").unwrap();
-        let session_id = "health-test-session";
-        let ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), session_id, |method| {
-            match method {
-                IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                    "running": true,
-                    "state": "healthy",
-                    "restart_count": 0,
-                    "cwd_source": "test",
-                })),
-                _ => IpcResponse::err("not implemented"),
-            }
-        })
-        .unwrap();
-        let health = query_supervisor_health(&file, session_id);
-        assert!(matches!(health, SupervisorHealth::Healthy));
-        drop(ipc);
-    }
-
-    #[test]
-    fn supervisor_health_reports_halted_state() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc/supervisor")).unwrap();
-        let file = tmp.path().join("test.md");
-        std::fs::write(&file, "# test").unwrap();
-        let session_id = "halted-test-session";
-        let ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), session_id, |method| {
-            match method {
-                IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                    "running": false,
-                    "state": "halted",
-                    "restart_count": 5,
-                    "cwd_source": "test",
-                })),
-                _ => IpcResponse::err("not implemented"),
-            }
-        })
-        .unwrap();
-        let health = query_supervisor_health(&file, session_id);
-        assert!(matches!(
-            health,
-            SupervisorHealth::Halted { restart_count: 5 }
-        ));
-        drop(ipc);
-    }
-
-    #[test]
-    fn supervisor_health_reports_restartable_when_not_running() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc/supervisor")).unwrap();
-        let file = tmp.path().join("test.md");
-        std::fs::write(&file, "# test").unwrap();
-        let session_id = "notrun-test-session";
-        let ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), session_id, |method| {
-            match method {
-                IpcMethod::State => IpcResponse::ok(serde_json::json!({
-                    "running": false,
-                    "state": "healthy",
-                    "restart_count": 0,
-                    "cwd_source": "test",
-                })),
-                _ => IpcResponse::err("not implemented"),
-            }
-        })
-        .unwrap();
-        let health = query_supervisor_health(&file, session_id);
-        assert!(matches!(health, SupervisorHealth::Restartable));
-        drop(ipc);
-    }
-
-    #[test]
     fn exit_provenance_fields_capture_signal_termination() {
         let status = portable_pty::ExitStatus::with_signal("Hangup");
         let rendered = exit_provenance_fields(&status);
@@ -4275,31 +3710,5 @@ mod tests {
             rendered.contains("exit_status=\"Exited with code 7\""),
             "got: {rendered}"
         );
-    }
-
-    #[test]
-    fn restart_via_supervisor_returns_false_for_nonexistent() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let file = tmp.path().join("test.md");
-        std::fs::write(&file, "# test").unwrap();
-        assert!(!restart_via_supervisor(&file, "no-such-session"));
-    }
-
-    #[test]
-    fn restart_via_supervisor_succeeds_with_live_supervisor() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc/supervisor")).unwrap();
-        let file = tmp.path().join("test.md");
-        std::fs::write(&file, "# test").unwrap();
-        let session_id = "restart-test-session";
-        let ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), session_id, |method| {
-            match method {
-                IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
-                _ => IpcResponse::err("not implemented"),
-            }
-        })
-        .unwrap();
-        assert!(restart_via_supervisor(&file, session_id));
-        drop(ipc);
     }
 }

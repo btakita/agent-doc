@@ -59,6 +59,8 @@ Last-call-wins: any `claim` overwrites the previous mapping for that document's 
 
 **Duplicate-pane guard:** When a document's registry entry is stale but there are still live panes whose process trees or supervisor PID still prove that document, route first computes the full candidate set. It only auto-picks when the winner is unambiguous: a single provable owner overall, or a single owner in the active tmux window while every other candidate is already stashed. Otherwise route fails closed with an ambiguity report and direct inspect/claim/kill commands.
 
+**No hidden fallback-pane guard:** When route needs a fresh pane, it may split beside a visible authoritative anchor or create a brand-new window only when no `agent-doc` window exists yet. If `split-window` fails beside the chosen anchor, or if the target session already has an `agent-doc` window but no safe registered anchor pane, route must fail closed and show tmux inspect/kill commands instead of creating a hidden stash fallback pane.
+
 **Failed fresh-start cleanup guard:** If route creates a new pane, registers it, and later fails closed because fresh-start acknowledgment was not observed, cleanup must preserve that pane when it is still the live registered owner for the document. The operator should see the startup-ack failure, not a killed pane.
 
 ## Stash Window Routing
@@ -85,6 +87,7 @@ The stash system preserves running Claude sessions when the user switches editor
 - The stash window is resized to 200 rows before join operations to prevent minimum-size failures
 - Focus never leaves window `@0` during stash operations (`-d` flags are always set)
 - Successful route replacements do not kill older stash panes unless the cleanup path has explicit provenance that the older pane is a throwaway artifact from the current recovery attempt
+- Normal route/start/sync/preflight/finalize flows must not kill tmux panes. Pane-kill cleanup is reserved for explicit repair surfaces after the operator has decided which pane is expendable.
 - Scoped `agent-doc fix <FILE>` may kill redundant unregistered stash panes for that document, but only after it has already rebound the file to a unique provable winner
 
 **Editor-to-tmux truth table:**

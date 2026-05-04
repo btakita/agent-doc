@@ -99,6 +99,10 @@
 //!   swapping another visible pane back into stash.
 //! - **Auto-start inhibit**: Setting `AGENT_DOC_NO_AUTOSTART` prevents `auto_start_in_session`
 //!   from spawning a new pane. The call returns `Err` with a descriptive message.
+//! - **No duplicate fallback panes**: If route cannot split beside a visible authoritative
+//!   pane, or if the target session already has an `agent-doc` window but no safe registered
+//!   anchor, it must fail closed and print tmux inspection/cleanup commands instead of creating
+//!   a second hidden pane in stash.
 //! - **Non-fatal pane focus**: `select_pane` failures are logged as warnings and never abort
 //!   the routing flow. The command is still sent even if focus fails.
 //! - **Cycle acknowledgment for prompt-bearing reruns**: Fresh auto-start success is not
@@ -440,6 +444,40 @@ fn format_associated_pane_resolution_error(
         ));
         lines.push(format!("    kill: tmux kill-pane -t {}", candidate.pane_id));
     }
+    lines.join("\n")
+}
+
+fn format_duplicate_pane_policy_error(
+    session_name: &str,
+    file_path: &str,
+    anchor_pane: Option<&str>,
+    cause: &str,
+) -> String {
+    let mut lines = vec![
+        format!(
+            "refusing to provision a duplicate tmux pane for {} in session '{}': {}",
+            file_path, session_name, cause
+        ),
+        "Inspect the existing panes first:".to_string(),
+        format!(
+            "  tmux list-panes -t {}:agent-doc -F '#{{pane_id}} #{{window_name}} #{{pane_current_command}} #{{pane_current_path}}'",
+            session_name
+        ),
+        format!(
+            "  tmux list-panes -a -F '#{{session_name}} #{{window_name}} #{{pane_id}} #{{pane_current_command}} #{{pane_current_path}}' | grep ' {}$'",
+            file_path
+        ),
+    ];
+    if let Some(anchor_pane) = anchor_pane {
+        lines.push(format!(
+            "  tmux capture-pane -pt {} | tail -n 80",
+            anchor_pane
+        ));
+        lines.push(format!("  tmux kill-pane -t {}", anchor_pane));
+    } else {
+        lines.push("  tmux kill-pane -t <pane_id>".to_string());
+    }
+    lines.push(format!("Then rerun: agent-doc {}", file_path));
     lines.join("\n")
 }
 
@@ -4322,46 +4360,29 @@ fn auto_start_in_session(
                 pane
             }
             Err(e) => {
-                eprintln!(
-                    "[route] warning: split-window failed alongside {} ({}), stashing in stash window",
-                    target, e
+                anyhow::bail!(
+                    "{}",
+                    format_duplicate_pane_policy_error(
+                        session_name,
+                        file_path,
+                        Some(target),
+                        &format!("split-window failed alongside pane {} ({})", target, e)
+                    )
                 );
-                // Create in a new window, then immediately stash it so it
-                // doesn't appear as a visible "claude" window.
-                let pane = tmux.auto_start(session_name, &cwd)?;
-                if let Err(stash_err) = tmux.stash_pane(&pane, session_name) {
-                    eprintln!(
-                        "[route] warning: stash failed ({}), pane {} remains in new window",
-                        stash_err, pane
-                    );
-                } else {
-                    eprintln!("[route] split failed, stashed pane in stash window");
-                }
-                pane
             }
         }
     } else {
-        // Check if an "agent-doc" named window already exists in the target session.
-        // If yes, stash the new pane to prevent window proliferation.
         let has_agent_doc_window = has_named_window(tmux, session_name, "agent-doc");
         if has_agent_doc_window {
-            eprintln!(
-                "[route] no registered pane but 'agent-doc' window exists in session '{}', creating + stashing",
-                session_name
+            anyhow::bail!(
+                "{}",
+                format_duplicate_pane_policy_error(
+                    session_name,
+                    file_path,
+                    None,
+                    "the target session already has an 'agent-doc' window but no safe registered anchor pane was found"
+                )
             );
-            let pane = tmux.auto_start(session_name, &cwd)?;
-            if let Err(stash_err) = tmux.stash_pane(&pane, session_name) {
-                eprintln!(
-                    "[route] warning: stash failed ({}), pane {} remains in new window",
-                    stash_err, pane
-                );
-            } else {
-                eprintln!(
-                    "[route] stashed new pane {} to avoid window proliferation",
-                    pane
-                );
-            }
-            pane
         } else {
             eprintln!(
                 "[route] no registered pane found in session '{}', creating new window",
@@ -9572,42 +9593,20 @@ Body\n\
     }
 
     #[test]
-    fn else_branch_stashes_when_agent_doc_window_exists() {
-        // When no registered pane is found but an "agent-doc" window already
-        // exists, the new pane should be stashed to prevent window proliferation.
-        let iso = IsolatedTmux::new("route-test-else-stash");
+    fn duplicate_pane_policy_error_includes_manual_tmux_commands() {
+        let iso = IsolatedTmux::new("route-test-duplicate-policy");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
-
-        // Create a session and rename its window to "agent-doc"
-        let existing_pane = iso.auto_start(session, &cwd).unwrap();
-        let _ = iso
-            .cmd()
-            .args(["rename-window", "-t", &format!("{}:", session), "agent-doc"])
-            .status();
-
-        // Simulate what the else branch does: auto_start + stash
-        let new_pane = iso.auto_start(session, &cwd).unwrap();
-        assert!(iso.pane_alive(&new_pane));
-
-        // The new pane should be in a different window initially
-        let existing_win = iso.pane_window(&existing_pane).unwrap();
-        let new_win_before = iso.pane_window(&new_pane).unwrap();
-        assert_ne!(existing_win, new_win_before);
-
-        // Stash it
-        iso.stash_pane(&new_pane, session).unwrap();
-
-        // After stash: pane is alive and in the stash window
-        assert!(iso.pane_alive(&new_pane));
-        let stash_win = iso.find_stash_window(session);
-        assert!(stash_win.is_some(), "stash window should exist");
-        let new_win_after = iso.pane_window(&new_pane).unwrap();
-        assert_eq!(
-            new_win_after,
-            stash_win.unwrap(),
-            "new pane should be in stash window"
+        let rendered = format_duplicate_pane_policy_error(
+            session,
+            "tasks/agent-doc/agent-doc-bugs2.md",
+            Some("%42"),
+            "split-window failed alongside pane %42 (too small)",
         );
+        assert!(rendered.contains("tmux list-panes -t test:agent-doc"));
+        assert!(rendered.contains("tmux kill-pane -t %42"));
+        assert!(rendered.contains("agent-doc tasks/agent-doc/agent-doc-bugs2.md"));
+        assert!(rendered.contains("split-window failed alongside pane %42"));
+        let _ = iso;
     }
 
     #[test]

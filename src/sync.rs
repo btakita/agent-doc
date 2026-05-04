@@ -831,27 +831,13 @@ fn capture_dead_pane_diagnostics(
     }
     let _ = crate::startup_miss::append_session_log_event(file, session_id, &event);
 
-    let pane_killed = match tmux.kill_pane(pane_id) {
-        Ok(()) => {
-            let _ = crate::startup_miss::append_session_log_event(
-                file,
-                session_id,
-                &format!("pane_death_cleanup pane={pane_id} action=kill"),
-            );
-            true
-        }
-        Err(err) => {
-            let _ = crate::startup_miss::append_session_log_event(
-                file,
-                session_id,
-                &format!(
-                    "pane_death_cleanup pane={pane_id} action=keep_dead reason={}",
-                    sanitize_excerpt(&err.to_string()).unwrap_or_else(|| "unknown".to_string())
-                ),
-            );
-            false
-        }
-    };
+    let _ = crate::startup_miss::append_session_log_event(
+        file,
+        session_id,
+        &format!(
+            "pane_death_cleanup pane={pane_id} action=keep_dead policy=normal_sync_never_kills"
+        ),
+    );
 
     Ok(Some(DeadPaneDiagnostics {
         observed_window,
@@ -859,7 +845,7 @@ fn capture_dead_pane_diagnostics(
         cycle_phase,
         capture_path,
         last_visible_excerpt,
-        pane_killed,
+        pane_killed: false,
     }))
 }
 
@@ -5396,10 +5382,13 @@ mod tests {
         assert!(repair.recorded_session_loss);
         assert!(repair.repaired_stale_preflight);
         assert!(!iso.pane_alive(&pane));
-        assert_eq!(
-            dead.pane_killed,
-            !iso.pane_dead(&pane),
-            "pane_killed should reflect whether the retained dead pane could be safely removed"
+        assert!(
+            iso.pane_dead(&pane),
+            "normal sync should retain the dead pane"
+        );
+        assert!(
+            !dead.pane_killed,
+            "normal sync should record the no-kill policy for dead panes"
         );
     }
 

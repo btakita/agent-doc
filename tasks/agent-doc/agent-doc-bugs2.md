@@ -67,7 +67,29 @@ Verification:
 Git:
 - Committed in `src/agent-doc` as `c15cb50` (`fix: unify supervisor submit enter handling`)
 - Pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:01ef932a -->
+❯ `Run Agent Doc` restarting Codex is a regression. `Run Agent Doc` should send `agent-doc <file>` to the session.
+
+❯ `Clear Session Context` inserts a `\n` into the prompt instead of an Enter. Please create a comprehensive fix for Enter. Ensure that the same Enter method is used instead of bespoke individual solutions. spec-test-build-install-commit-push
+
+❯ ![img_5.png](img_5.png)
+### Re: Run Agent Doc post-clear reroute — gpt-5
+
+I fixed the regression in `src/agent-doc/src/route.rs`: `agent-doc route --dispatch-only` no longer treats a tracked Codex `/clear` as a fresh-restart trigger, so editor `Run Agent Doc` sends the bare `agent-doc <file>` reopen into the live session again. The managed non-dispatch `agent-doc route` path still keeps the tracked `/clear` fresh-restart policy for explicit CLI recovery.
+
+I kept the Enter path centralized instead of adding another one-off: dispatch-only reroutes still go through the existing supervisor-owned submit helper, and I updated the route/editor specs plus the JetBrains helper comment to match that contract. The screenshot lines up with the drafted-not-submitted post-clear reopen shape this was masking.
+
+Verification:
+- `cargo test resolve_or_create_pane_dispatch_only_does_not_restart_after_tracked_codex_clear -- --nocapture`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Git:
+- Committed in `src/agent-doc` as `dc4c011` (`fix: keep dispatch-only reroutes on live session after clear`)
+- Pushed to `origin/20260422/codex-agent-backend`
+
+I did not run a live JetBrains/VS Code replay in this cycle, so the existing replay validation backlog item remains open.
+<!-- agent:boundary:624fd81d -->
 <!-- /agent:exchange -->
 ### End Exchange
 

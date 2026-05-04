@@ -193,11 +193,37 @@ Verification completed in `src/agent-doc`:
 Repo closeout in `src/agent-doc`: committed as `39991e8` (`fix: normalize supervisor quit prompt tty mode`) and pushed to `origin/20260422/codex-agent-backend`.
 
 I left the pre-existing unrelated dirty change in `src/agent-doc/src/plugin.rs` untouched. I did not run a manual tmux-backed interactive repro after the patch; the validation here is the code-path fix plus automated coverage and the full build/install/package suite.
-<!-- agent:boundary:774e4bac -->
+❯ When agent-doc is running Codex, Ctrl+C & Ctrl+D still restart Codex without presenting the "Press Enter to restart, or 'q' to exit." menu. spec-test-build-install-commit-push
+### Re: Ctrl+C / Ctrl+D quit menu on Codex — gpt-5
+
+Root cause was split across two branches in `src/agent-doc/src/start.rs`.
+
+- Forwarded `Ctrl+C` never reached the quit-menu path in real runs because the supervisor first fed the non-zero interrupt exit through `CrashPolicy`, which classified it as `restart_after`. The earlier unit coverage only exercised the inner strategy helper, not the outer non-zero exit path.
+- Forwarded `Ctrl+D` did reach the clean-exit strategy, but that strategy still forced `RestartFresh` whenever the latest run had already committed or the child exited before surfacing a prompt. In the live session log that showed up as `ctrl_d_committed_cycle_restart_fresh`, so the missing menu was current policy rather than a missing branch.
+
+Implemented the fix:
+- Forwarded operator `Ctrl+C` now uses clean-exit policy bookkeeping before restart classification, so the supervisor stays on the prompt path instead of treating that exit like a crash.
+- Forwarded operator `Ctrl+D` and terminating forwarded `Ctrl+C` now always route to the canonical `Press Enter to restart fresh, or q to exit.` menu; only genuinely promptless clean exits without a forwarded operator key still auto-recover.
+- Updated `README.md`, `specs/codex-support.md`, `specs/supervisor.md`, and `VERSIONS.md` so the documented Codex keepalive contract matches the implementation.
+- Added/updated start-level regressions to cover the real policy path instead of only the inner helper.
+
+Verification completed in `src/agent-doc`:
+- `cargo fmt`
+- `cargo check`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Repo closeout in `src/agent-doc`: committed as `211cea0` (`fix: always prompt on forwarded codex quit keys`) and pushed to `origin/20260422/codex-agent-backend`.
+
+I left the pre-existing unrelated dirty changes in `src/agent-doc/src/plugin.rs` and `src/agent-doc/src/route.rs` untouched. I did not run a manual tmux-backed interactive repro in this cycle; the validation here is the green Rust suite plus the build/install path.
+<!-- agent:boundary:9dcb3f12 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
+"Press Enter to restart, or 'q' to exit."
+---
 agent-doc running /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md with Codex is failing due to the sandbox. Please help me to DISABLE THE CODEX SANDBOX. I don't want agent-doc to bypass the sandbox by default but for my environment I want to bypass the sandbox. spec-test-build-install-commit-push
 ---
 I saw this error. Id the root cause and fix. spec-test-build-install-commit-push

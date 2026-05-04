@@ -55,7 +55,7 @@ Implemented the phase-1 single-owner session actor contract.
 - Left pre-existing unrelated dirty files in `src/agent-doc` untouched: `README.md`, `specs/codex-support.md`, `specs/supervisor.md`, `src/plugin.rs`.
 
 `#sgown1` was already completed and `preflight` reaped the stale checked backlog item during recovery, so there are no additional follow-up backlog mutations for this cycle. The umbrella tracker `#sgown` remains open for `#sgown2`-`#sgown9`.
-<!-- agent:boundary:3c62d3bc -->
+<!-- agent:boundary:88e06337 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -79,7 +79,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgown2] Add the durable actor record store with atomic generation updates and keep sessions.json as a read projection during migration. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown3] Move supervisor ownership, prompt-readiness, and closeout state transitions onto actor commands. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown4] Convert route to actor-owned dispatch with bounded actor acknowledgement instead of heuristic owner election. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgownorch] [recommended] Define which single-owner transition steps may use bounded sidecar subagents versus single-owner execution only, after #sgown4 lands. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md

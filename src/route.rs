@@ -514,7 +514,10 @@ fn parse_actor_state(raw: &str) -> Option<crate::session_actor::ActorState> {
 fn supervisor_socket_path(file: &Path, session_id: &str) -> Option<std::path::PathBuf> {
     let canonical = file.canonicalize().ok()?;
     let project_root = snapshot::find_project_root(&canonical)?;
-    Some(crate::supervisor::ipc::socket_path(&project_root, session_id))
+    Some(crate::supervisor::ipc::socket_path(
+        &project_root,
+        session_id,
+    ))
 }
 
 fn query_supervisor_runtime(file: &Path, session_id: &str) -> SupervisorRuntime {
@@ -1694,7 +1697,10 @@ fn route_via_authoritative_actor(
 
     if let Some(reason) = authoritative_actor_dispatch_blocker_reason(actor_state) {
         if let Err(e) = tmux.select_pane(&dispatch_pane) {
-            eprintln!("[route] warning: failed to focus pane {}: {}", dispatch_pane, e);
+            eprintln!(
+                "[route] warning: failed to focus pane {}: {}",
+                dispatch_pane, e
+            );
         }
         if prompt_bearing_marker.is_none() {
             eprintln!(
@@ -3159,13 +3165,12 @@ fn dispatch_via_supervisor_ipc(
     let method = IpcMethod::Inject {
         bytes: format!("{payload}\n"),
     };
-    let response =
-        crate::supervisor::ipc::send_command(&sock, &method).with_context(|| {
-            format!(
-                "failed to dispatch authoritative actor trigger for {} via supervisor IPC",
-                file.display()
-            )
-        })?;
+    let response = crate::supervisor::ipc::send_command(&sock, &method).with_context(|| {
+        format!(
+            "failed to dispatch authoritative actor trigger for {} via supervisor IPC",
+            file.display()
+        )
+    })?;
     if !response.ok {
         let message = response
             .error
@@ -3181,7 +3186,10 @@ fn dispatch_via_supervisor_ipc(
     if let Err(e) = tmux.select_pane(pane) {
         eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
     }
-    eprintln!("[route] Dispatched {} via supervisor IPC → pane {}", trigger, pane);
+    eprintln!(
+        "[route] Dispatched {} via supervisor IPC → pane {}",
+        trigger, pane
+    );
 
     let Some(tracker) = tracker else {
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
@@ -3228,7 +3236,9 @@ fn authoritative_actor_dispatch_blocker_reason(
 ) -> Option<&'static str> {
     match state {
         crate::session_actor::ActorState::Ready => None,
-        crate::session_actor::ActorState::Starting => Some("the authoritative actor is still starting"),
+        crate::session_actor::ActorState::Starting => {
+            Some("the authoritative actor is still starting")
+        }
         crate::session_actor::ActorState::Busy => Some("the authoritative actor is busy"),
         crate::session_actor::ActorState::WaitingInput => {
             Some("the authoritative actor is waiting for user input")
@@ -9190,8 +9200,7 @@ Body\n\
         let actor_pane = iso.auto_start(session, &cwd).unwrap();
 
         let doc = dir.path().join("session.md");
-        let snapshot =
-            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
@@ -9269,7 +9278,10 @@ Body\n\
 
         let trigger = format!("{}\n", HarnessConfig::codex().trigger_command(&file_path));
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
-        assert_eq!(sessions::lookup(session_id).unwrap().as_deref(), Some(actor_pane.as_str()));
+        assert_eq!(
+            sessions::lookup(session_id).unwrap().as_deref(),
+            Some(actor_pane.as_str())
+        );
 
         let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(
@@ -9300,8 +9312,7 @@ Body\n\
         let actor_pane = iso.auto_start(session, &cwd).unwrap();
 
         let doc = dir.path().join("dispatch-only.md");
-        let content =
-            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n";
+        let content = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n";
         std::fs::write(&doc, content).unwrap();
         crate::snapshot::save(
             &doc,
@@ -9372,7 +9383,10 @@ Body\n\
 
         let trigger = format!("{}\n", HarnessConfig::codex().trigger_command(&file_path));
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
-        assert_eq!(sessions::lookup(session_id).unwrap().as_deref(), Some(actor_pane.as_str()));
+        assert_eq!(
+            sessions::lookup(session_id).unwrap().as_deref(),
+            Some(actor_pane.as_str())
+        );
 
         let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(

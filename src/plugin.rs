@@ -340,13 +340,12 @@ fn install_jetbrains_local() -> Result<()> {
     let dist_dir = project_root.join("editors/jetbrains/build/distributions");
 
     // Pick the newest built version overall; prefer signed only within the same version.
-    let zip_path = find_best_local_zip(&dist_dir)
-        .with_context(|| {
-            format!(
-                "No agent-doc-jetbrains*.zip found in {}",
-                dist_dir.display()
-            )
-        })?;
+    let zip_path = find_best_local_zip(&dist_dir).with_context(|| {
+        format!(
+            "No agent-doc-jetbrains*.zip found in {}",
+            dist_dir.display()
+        )
+    })?;
 
     eprintln!("Installing from local build: {}", zip_path.display());
 
@@ -557,7 +556,11 @@ mod tests {
     fn find_local_zip_prefers_newest_version_even_if_only_older_build_is_signed() {
         let tmp = TempDir::new().unwrap();
         let dist = tmp.path();
-        fs::write(dist.join("agent-doc-jetbrains-0.2.80-signed.zip"), b"signed-old").unwrap();
+        fs::write(
+            dist.join("agent-doc-jetbrains-0.2.80-signed.zip"),
+            b"signed-old",
+        )
+        .unwrap();
         fs::write(dist.join("agent-doc-jetbrains-0.2.91.zip"), b"unsigned-new").unwrap();
 
         let signed = find_local_zip(dist, true).unwrap();
@@ -577,7 +580,11 @@ mod tests {
     fn find_best_local_zip_prefers_newest_version_over_older_signed_artifact() {
         let tmp = TempDir::new().unwrap();
         let dist = tmp.path();
-        fs::write(dist.join("agent-doc-jetbrains-0.2.80-signed.zip"), b"signed-old").unwrap();
+        fs::write(
+            dist.join("agent-doc-jetbrains-0.2.80-signed.zip"),
+            b"signed-old",
+        )
+        .unwrap();
         fs::write(dist.join("agent-doc-jetbrains-0.2.91.zip"), b"unsigned-new").unwrap();
 
         let chosen = find_best_local_zip(dist).unwrap();

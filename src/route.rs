@@ -565,7 +565,7 @@ fn reapply_codex_launch_contract_after_clear(
             file.display()
         );
     }
-    register_dispatch_target(session_id, &dispatch_pane, file_path)?;
+    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
     Ok(dispatch_pane)
 }
 
@@ -1047,7 +1047,7 @@ fn dispatch_only_send_reopen(
         );
     }
 
-    register_dispatch_target(session_id, pane, file_path)?;
+    register_dispatch_target(tmux, session_id, pane, file_path)?;
     send_command_once_checked(tmux, pane, file_path, harness)?;
     crate::ops_log::log_op(
         file,
@@ -1124,7 +1124,7 @@ fn dispatch_only_reopen_existing_pane(
             harness,
         );
     }
-    register_dispatch_target(session_id, &dispatch_pane, file_path)?;
+    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
     match ensure_existing_pane_ready_for_dispatch(
         tmux,
         file,
@@ -1133,14 +1133,7 @@ fn dispatch_only_reopen_existing_pane(
         prompt_bearing_marker,
     )? {
         ExistingPaneDispatchReadiness::Ready => {
-            dispatch_only_send_reopen(
-                tmux,
-                file,
-                session_id,
-                &dispatch_pane,
-                file_path,
-                harness,
-            )
+            dispatch_only_send_reopen(tmux, file, session_id, &dispatch_pane, file_path, harness)
         }
         ExistingPaneDispatchReadiness::BusyAlreadyRunning => Ok(dispatch_pane),
         ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
@@ -1835,7 +1828,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             pane_route_provenance(tmux, registered_pane)
                         ),
                     );
-                    register_dispatch_target(session_id, owner, file_path)?;
+                    register_dispatch_target(tmux, session_id, owner, file_path)?;
                     rescue_from_stash(
                         tmux,
                         owner,
@@ -1887,7 +1880,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                             );
                         }
                     }
-                    register_dispatch_target(session_id, &owner, file_path)?;
+                    register_dispatch_target(tmux, session_id, &owner, file_path)?;
                     let dispatch_start =
                         dispatch_routed_reopen(tmux, file, &owner, file_path, harness)?;
                     require_routed_cycle_ack(
@@ -2027,7 +2020,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     file_path,
                     harness,
                 )?;
-                register_dispatch_target(session_id, &registered_pane, file_path)?;
+                register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
                 match ensure_existing_pane_ready_for_dispatch(
                     tmux,
                     file,
@@ -2068,7 +2061,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                         );
                     }
                 }
-                register_dispatch_target(session_id, &registered_pane, file_path)?;
+                register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
                 let dispatch_start =
                     dispatch_routed_reopen(tmux, file, &registered_pane, file_path, harness)?;
@@ -2136,7 +2129,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
             "[route] found existing running pane {} for {}, re-registering",
             existing, file_path
         );
-        register_dispatch_target(session_id, existing, file_path)?;
+        register_dispatch_target(tmux, session_id, existing, file_path)?;
         match ensure_existing_pane_ready_for_dispatch(
             tmux,
             file,
@@ -2177,7 +2170,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                 );
             }
         }
-        register_dispatch_target(session_id, existing, file_path)?;
+        register_dispatch_target(tmux, session_id, existing, file_path)?;
         let dispatch_start = dispatch_routed_reopen(tmux, file, existing, file_path, harness)?;
         let ack_pane = require_routed_cycle_ack(
             tmux,
@@ -2200,7 +2193,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
         && is_agent_process(tmux, &new_pane, harness)
     {
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
-        register_dispatch_target(session_id, &new_pane, file_path)?;
+        register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
         match ensure_existing_pane_ready_for_dispatch(
             tmux,
             file,
@@ -2239,7 +2232,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                 );
             }
         }
-        register_dispatch_target(session_id, &new_pane, file_path)?;
+        register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
         let dispatch_start = dispatch_routed_reopen(tmux, file, &new_pane, file_path, harness)?;
         let ack_pane = require_routed_cycle_ack(
             tmux,
@@ -2514,7 +2507,7 @@ fn optimistic_busy_pane_dispatch(
         detail,
         harness.binary
     );
-    register_dispatch_target(session_id, pane, file_path)?;
+    register_dispatch_target(tmux, session_id, pane, file_path)?;
     let dispatch_start = dispatch_routed_reopen(tmux, file, pane, file_path, harness)?;
     let ack_pane = require_routed_cycle_ack(
         tmux,
@@ -2623,7 +2616,7 @@ fn rescue_from_stash(
                 Err(e) => eprintln!("[route] join-pane rescue failed for {} ({})", pane_id, e),
             }
         }
-        if let Err(e) = register_dispatch_target(session_id, pane_id, file_path) {
+        if let Err(e) = register_dispatch_target(tmux, session_id, pane_id, file_path) {
             eprintln!("[route] warning: re-register failed: {}", e);
         }
     }
@@ -2723,19 +2716,63 @@ fn registry_base_dir_for_dispatch(file_path: &str) -> std::path::PathBuf {
         })
 }
 
-fn register_dispatch_target(session_id: &str, pane_id: &str, file_path: &str) -> Result<()> {
-    let base_dir = registry_base_dir_for_dispatch(file_path);
+fn register_dispatch_target(
+    tmux: &Tmux,
+    session_id: &str,
+    pane_id: &str,
+    file_path: &str,
+) -> Result<()> {
+    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
+    let requested_str = requested.to_string_lossy().to_string();
+    let base_dir = registry_base_dir_for_dispatch(&requested_str);
+    ensure_dispatch_target_can_bind_file(tmux, &base_dir, pane_id, &requested_str)?;
     let window = sessions::pane_window(pane_id).unwrap_or_default();
     let cwd = base_dir.to_string_lossy().to_string();
     sessions::register_full_with_cwd_in(
         &base_dir,
         session_id,
         pane_id,
-        file_path,
+        &requested_str,
         std::process::id(),
         &window,
         &cwd,
     )
+}
+
+fn ensure_dispatch_target_can_bind_file(
+    tmux: &Tmux,
+    base_dir: &Path,
+    pane: &str,
+    file_path: &str,
+) -> Result<()> {
+    let registry = sessions::load_in(base_dir).with_context(|| {
+        format!(
+            "failed to load route registry before dispatch registration from {}",
+            base_dir.display()
+        )
+    })?;
+    if pane_registration_matches_file(&registry, pane, file_path) {
+        return Ok(());
+    }
+
+    let requested = canonical_dispatch_file(std::path::Path::new(file_path));
+    if let Some(entry) = registry.values().find(|entry| entry.pane == pane) {
+        let registered = canonical_registered_file(entry);
+        let registered_is_live_owner = !entry.session_id.is_empty()
+            && crate::sync::find_live_owner_pane(tmux, &registered, &entry.session_id).as_deref()
+                == Some(pane);
+        if !registered_is_live_owner {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "route dispatch target {} is registered for {}, not {}; refusing cross-file dispatch",
+            pane,
+            registered.display(),
+            requested.display()
+        );
+    }
+
+    Ok(())
 }
 
 fn pane_registration_matches_file(
@@ -2781,6 +2818,7 @@ fn ensure_dispatch_target_matches_file(pane: &str, file_path: &str) -> Result<()
 }
 
 fn resolve_fresh_dispatch_target_after_ready_wait(
+    tmux: &Tmux,
     session_id: &str,
     pane: &str,
     file_path: &str,
@@ -2811,7 +2849,7 @@ fn resolve_fresh_dispatch_target_after_ready_wait(
     // sync/layout path rebinds the same document session back to another pane
     // during the ready wait, keep the fresh pane authoritative instead of
     // handing dispatch back to the older pane and making the new pane disposable.
-    register_dispatch_target(session_id, pane, file_path)?;
+    register_dispatch_target(tmux, session_id, pane, file_path)?;
     Ok(pane.to_string())
 }
 
@@ -3295,7 +3333,7 @@ fn retry_routed_cycle_ack_after_fresh_restart(
 
     wait_for_busy_restart_handoff(tmux, file, file_path, session_id, pane);
     let dispatch_pane =
-        resolve_fresh_dispatch_target_after_ready_wait(session_id, pane, file_path, None)?;
+        resolve_fresh_dispatch_target_after_ready_wait(tmux, session_id, pane, file_path, None)?;
     let ready = wait_for_agent_ready_outcome(
         tmux,
         &dispatch_pane,
@@ -4340,7 +4378,7 @@ fn auto_start_in_session(
     evict_previous_stash_pane(tmux, session_id, &new_pane, session_name, harness);
 
     // Register immediately so subsequent route calls find this pane
-    register_dispatch_target(session_id, &new_pane, file_path)?;
+    register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
     drop(startup_locks);
 
     // Focus the new pane immediately so the user sees Claude starting
@@ -4384,6 +4422,7 @@ fn auto_start_in_session(
         // dispatch, but keep the deliberately created fresh pane authoritative
         // for same-document rebind churn instead of treating it as disposable.
         let dispatch_pane = resolve_fresh_dispatch_target_after_ready_wait(
+            tmux,
             session_id,
             &new_pane,
             file_path,
@@ -4552,10 +4591,11 @@ fn auto_start_in_session(
     }
 
     let final_pane = if skip_wait {
-        register_dispatch_target(session_id, &new_pane, file_path)?;
+        register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
         new_pane
     } else {
         resolve_fresh_dispatch_target_after_ready_wait(
+            tmux,
             session_id,
             &new_pane,
             file_path,
@@ -4907,6 +4947,72 @@ mod tests {
         assert!(
             err.to_string().contains("refusing cross-file dispatch"),
             "error should explain the rejected cross-file dispatch: {err}"
+        );
+    }
+
+    #[test]
+    fn register_dispatch_target_rejects_cross_file_rebind_and_preserves_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let iso = IsolatedTmux::new("route-test-cross-file-rebind-guard");
+        let session = "test";
+
+        let tasks = dir.path().join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let first = tasks.join("agent-doc-bugs2.md");
+        let second = tasks.join("tsift.md");
+        std::fs::write(&first, "# first\n").unwrap();
+        std::fs::write(&second, "# second\n").unwrap();
+        let pane_a = iso.auto_start(session, dir.path()).unwrap();
+        let pane_b = iso.split_window(&pane_a, dir.path(), "-dh").unwrap();
+
+        sessions::register_full_with_cwd_in(
+            dir.path(),
+            "session-a",
+            &pane_a,
+            &first.to_string_lossy(),
+            1234,
+            "@128",
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd_in(
+            dir.path(),
+            "session-b",
+            &pane_b,
+            &second.to_string_lossy(),
+            5678,
+            "@128",
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
+        crate::startup_miss::append_session_log_event(
+            &first,
+            "session-a",
+            &format!(
+                "session_start file={} pane={} session=session-a",
+                first.display(),
+                pane_a
+            ),
+        )
+        .unwrap();
+
+        let err = register_dispatch_target(&iso, "session-b", &pane_a, &second.to_string_lossy())
+            .expect_err("cross-file dispatch target rebind must fail closed");
+        assert!(
+            err.to_string().contains("refusing cross-file dispatch"),
+            "error should explain the rejected cross-file dispatch: {err}"
+        );
+        assert_eq!(
+            sessions::lookup_in(dir.path(), "session-a").unwrap(),
+            Some(pane_a.clone()),
+            "the original authoritative pane must stay bound to its file"
+        );
+        assert_eq!(
+            sessions::lookup_in(dir.path(), "session-b").unwrap(),
+            Some(pane_b),
+            "the requesting file must keep its own registered pane"
         );
     }
 
@@ -6940,14 +7046,12 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect_err("dispatch-only route should now fail closed instead of injecting into a busy live pane");
-
-        let after = wait_for_pane_contains(
-            &iso,
-            &pane,
-            "Working...",
-            std::time::Duration::from_secs(1),
+        .expect_err(
+            "dispatch-only route should now fail closed instead of injecting into a busy live pane",
         );
+
+        let after =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(1));
         assert!(
             !after.contains("EARLY:agent-doc "),
             "dispatch-only route must not inject a reopen into the busy authoritative pane: {after}"
@@ -7031,12 +7135,8 @@ Body\n\
             "unexpected error: {err:#}"
         );
 
-        let after = wait_for_pane_contains(
-            &iso,
-            &pane,
-            "Working...",
-            std::time::Duration::from_secs(1),
-        );
+        let after =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(1));
         assert!(
             !after.contains("EARLY:agent-doc "),
             "dispatch-only route must not inject into a pane that never reached a ready prompt: {after}"
@@ -8983,6 +9083,7 @@ Body\n\
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-fresh-start-blocked-handoff");
 
         let doc = dir.path().join("fresh-start-blocked-handoff.md");
         std::fs::write(&doc, "# Session\n").unwrap();
@@ -9003,6 +9104,7 @@ Body\n\
         .unwrap();
 
         let resolved = resolve_fresh_dispatch_target_after_ready_wait(
+            &iso,
             session_id,
             new_pane,
             &file_path,

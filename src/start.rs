@@ -484,6 +484,18 @@ fn clean_exit_before_prompt_seen(auto_trigger_enabled: bool, prompt_visible_once
     !auto_trigger_enabled && !prompt_visible_once
 }
 
+fn strip_stale_ctrl_d_before_prompt(
+    data: &[u8],
+    suppress_stale_ctrl_d_until_prompt: bool,
+    prompt_visible_once: bool,
+) -> Option<Vec<u8>> {
+    if !suppress_stale_ctrl_d_until_prompt || prompt_visible_once || !data.contains(&0x04) {
+        return None;
+    }
+
+    Some(data.iter().copied().filter(|byte| *byte != 0x04).collect())
+}
+
 fn committed_cycle_after_latest_run_from_status(
     status: Option<&crate::startup_miss::SessionLogStatus>,
     file: &Path,
@@ -1290,6 +1302,9 @@ struct SupervisorShared {
     auto_trigger_outcome: AtomicU8,
     /// Whether the current child ever surfaced an idle harness prompt.
     prompt_visible_once: AtomicBool,
+    /// Whether the current keepalive successor should ignore stale inherited
+    /// Ctrl+D bytes until the child surfaces an idle prompt.
+    suppress_stale_ctrl_d_until_prompt: AtomicBool,
 }
 
 impl SupervisorShared {
@@ -1310,6 +1325,7 @@ impl SupervisorShared {
             ctrl_d_forwarded: AtomicBool::new(false),
             auto_trigger_outcome: AtomicU8::new(AutoTriggerOutcome::NotNeeded as u8),
             prompt_visible_once: AtomicBool::new(false),
+            suppress_stale_ctrl_d_until_prompt: AtomicBool::new(false),
         }
     }
 
@@ -1440,6 +1456,9 @@ fn spawn_reader_thread(
                         record_recent_output(&shared, &filtered);
                         if current_child_prompt_visible(&shared, &harness) {
                             shared.prompt_visible_once.store(true, Ordering::Relaxed);
+                            shared
+                                .suppress_stale_ctrl_d_until_prompt
+                                .store(false, Ordering::Relaxed);
                         }
                         let mut lock = stdout.lock();
                         if lock.write_all(&filtered).is_err() || lock.flush().is_err() {
@@ -1459,6 +1478,7 @@ fn spawn_reader_thread(
 /// cleanly before the supervisor needs stdin for the restart prompt.
 #[cfg(unix)]
 fn spawn_writer_thread(
+    shared: Arc<SupervisorShared>,
     writer: Arc<Mutex<SharedPtyWriter>>,
     stop_fd: std::os::unix::io::RawFd,
     stop: Arc<AtomicBool>,
@@ -1516,6 +1536,22 @@ fn spawn_writer_thread(
                         break; // EOF or error
                     }
                     let data = &buf[..n as usize];
+                    let maybe_filtered = strip_stale_ctrl_d_before_prompt(
+                        data,
+                        shared
+                            .suppress_stale_ctrl_d_until_prompt
+                            .load(Ordering::Relaxed),
+                        shared.prompt_visible_once.load(Ordering::Relaxed),
+                    );
+                    let data = maybe_filtered.as_deref().unwrap_or(data);
+                    if data.is_empty() {
+                        if debug {
+                            eprintln!(
+                                "[stdin->pty] suppressed stale Ctrl+D before keepalive prompt"
+                            );
+                        }
+                        continue;
+                    }
                     // Detect Ctrl+D (\x04) — in raw mode this is a byte, not EOF.
                     // The pty slave's line discipline interprets it as EOF for the child.
                     if let Some(ref flag) = ctrl_d_flag
@@ -1560,6 +1596,7 @@ fn spawn_writer_thread(
 /// Non-Unix fallback: blocking stdin read (no stop signal support).
 #[cfg(not(unix))]
 fn spawn_writer_thread(
+    _shared: Arc<SupervisorShared>,
     writer: Arc<Mutex<SharedPtyWriter>>,
     _stop_fd: (),
     stop: Arc<AtomicBool>,
@@ -1997,6 +2034,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
     let mut restart_count: u32 = 0;
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
     let mut failed_resume_tracker = FailedResumeTracker::default();
+    let mut suppress_stale_ctrl_d_until_prompt = false;
     let supervisor_exit_reason = loop {
         // Build args for this iteration
         let auto_trigger;
@@ -2072,6 +2110,9 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             .auto_trigger_outcome
             .store(AutoTriggerOutcome::NotNeeded as u8, Ordering::Relaxed);
         shared.prompt_visible_once.store(false, Ordering::Relaxed);
+        shared
+            .suppress_stale_ctrl_d_until_prompt
+            .store(suppress_stale_ctrl_d_until_prompt, Ordering::Relaxed);
         shared.recent_output.lock().unwrap().clear();
 
         // Spawn I/O forwarding threads
@@ -2081,6 +2122,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         let ctrl_d_flag = Arc::new(AtomicBool::new(false));
         #[cfg(unix)]
         let writer_thread = spawn_writer_thread(
+            shared.clone(),
             writer_arc.clone(),
             writer_stop.read_fd(),
             writer_stop_flag.clone(),
@@ -2088,6 +2130,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         );
         #[cfg(not(unix))]
         let writer_thread = spawn_writer_thread(
+            shared.clone(),
             writer_arc.clone(),
             (),
             writer_stop_flag.clone(),
@@ -2266,6 +2309,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                                 raw_mode.resume();
                                 first_run = true;
                                 restart_count += 1;
+                                suppress_stale_ctrl_d_until_prompt = false;
                             }
                         }
                     }
@@ -2351,10 +2395,13 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                                         raw_mode.resume();
                                         first_run = true;
                                         restart_count += 1;
+                                        suppress_stale_ctrl_d_until_prompt = false;
                                     }
                                 }
                             }
                             RestartContinueExitStrategy::RestartFresh => {
+                                suppress_stale_ctrl_d_until_prompt =
+                                    ctrl_d_forwarded && committed_cycle_after_latest_run;
                                 if ctrl_d_forwarded && committed_cycle_after_latest_run {
                                     eprintln!(
                                         "\n{} exited after stdin EOF/Ctrl-D, but this run already committed a document cycle. Restarting fresh to keep the pane attached...",
@@ -2398,6 +2445,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                                 restart_count += 1;
                             }
                             RestartContinueExitStrategy::Resume => {
+                                suppress_stale_ctrl_d_until_prompt = false;
                                 eprintln!(
                                     "\n{} exited cleanly. Restarting in resume mode to keep the session attached...",
                                     harness.binary
@@ -2438,6 +2486,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                     first_run = true;
                 }
                 restart_count += 1;
+                suppress_stale_ctrl_d_until_prompt = false;
             }
             RestartAction::Halt => {
                 eprintln!(
@@ -3463,6 +3512,25 @@ mod tests {
     }
 
     #[test]
+    fn strip_stale_ctrl_d_before_prompt_drops_inherited_ctrl_d_bytes() {
+        let filtered =
+            strip_stale_ctrl_d_before_prompt(b"\x04status\x04", true, false).expect("filtered");
+        assert_eq!(filtered, b"status");
+    }
+
+    #[test]
+    fn strip_stale_ctrl_d_before_prompt_keeps_ctrl_d_once_prompt_is_visible() {
+        assert!(
+            strip_stale_ctrl_d_before_prompt(b"\x04", true, true).is_none(),
+            "prompt-visible children should still receive a fresh Ctrl+D"
+        );
+        assert!(
+            strip_stale_ctrl_d_before_prompt(b"\x04", false, false).is_none(),
+            "non-keepalive runs should not rewrite forwarded Ctrl+D"
+        );
+    }
+
+    #[test]
     fn committed_cycle_after_latest_run_falls_back_to_cycle_state() {
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
@@ -3928,7 +3996,14 @@ mod tests {
 
         let stop = StopSignal::new().unwrap();
         let stop_flag = Arc::new(AtomicBool::new(false));
-        let handle = spawn_writer_thread(writer_arc, stop.read_fd(), stop_flag.clone(), None);
+        let shared = Arc::new(SupervisorShared::new("test", "writer-stop".to_string()));
+        let handle = spawn_writer_thread(
+            shared,
+            writer_arc,
+            stop.read_fd(),
+            stop_flag.clone(),
+            None,
+        );
 
         // Writer thread should be alive, blocked in poll()
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -3981,7 +4056,8 @@ mod tests {
         let stop = StopSignal::new().unwrap();
         let stop_fd = stop.read_fd();
         let stop_flag = Arc::new(AtomicBool::new(false));
-        let handle = spawn_writer_thread(writer_arc, stop_fd, stop_flag.clone(), None);
+        let shared = Arc::new(SupervisorShared::new("test", "writer-epipe".to_string()));
+        let handle = spawn_writer_thread(shared, writer_arc, stop_fd, stop_flag.clone(), None);
 
         // Inject a byte into stdin to trigger a write attempt.
         // The write will fail (EPIPE) and the thread should exit.

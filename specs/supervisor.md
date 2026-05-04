@@ -286,6 +286,8 @@ The final supervisor-owned closeout must append `supervisor_exit reason=...` bef
 
 Session-log consumers must treat any event whose first token is `session_end` as a closeout boundary, even when origin metadata follows on the same line (for example `session_end origin=registry_rebind ...` or `session_end origin=sync_missing_pane`). Provenance analysis must not require the whole line to equal the bare literal `session_end`.
 
+When a committed Codex run restarts fresh solely to keep the claimed pane attached after forwarded `Ctrl-D`/stdin EOF, the successor run must not inherit that completed run's pre-prompt `Ctrl-D` byte. The supervisor may suppress only stale pre-prompt `Ctrl-D` bytes for that keepalive successor, and only until the successor surfaces a fresh idle prompt; after that prompt appears, new `Ctrl-D` input must flow normally again.
+
 When pane-loss recovery discovers that the current cycle is already `response_captured` or `write_applied`, the same session log must also record the recovery attempt before the synthetic `session_end origin=sync_missing_pane` closeout. The minimum provenance is:
 - `sync_missing_pane_closeout_recovery_start ... phase=response_captured|write_applied durable_capture=<bool>`
 - either `sync_missing_pane_closeout_recovery_result ... outcome=...` or `sync_missing_pane_closeout_recovery_failed ... reason=...`

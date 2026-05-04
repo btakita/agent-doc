@@ -953,6 +953,39 @@ fn should_preserve_failed_route_pane(
         && tmux.pane_alive(pane_id)
 }
 
+fn dispatch_only_starting_pane_ready_timeout() -> Duration {
+    if cfg!(test) {
+        Duration::from_millis(250)
+    } else {
+        Duration::from_secs(2)
+    }
+}
+
+fn dispatch_only_requires_ready_probe(
+    status: Option<&crate::startup_miss::SessionLogStatus>,
+    pane: &str,
+    harness: &HarnessConfig,
+) -> bool {
+    let Some(status) = status else {
+        return false;
+    };
+    if !status.latest_session_open()
+        || status.latest_start_pane.as_deref() != Some(pane)
+        || status.saw_committed_cycle_after_latest_run
+    {
+        return false;
+    }
+
+    status
+        .latest_run_event
+        .as_deref()
+        .and_then(|event| event.split_whitespace().next())
+        .is_some_and(|token| {
+            token == format!("{}_start", harness.binary)
+                || token == format!("{}_restart", harness.binary)
+        })
+}
+
 fn dispatch_only_send_reopen(
     tmux: &Tmux,
     file: &Path,
@@ -961,6 +994,37 @@ fn dispatch_only_send_reopen(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<String> {
+    let log_status = crate::startup_miss::session_log_status(file, session_id)
+        .ok()
+        .flatten();
+    if dispatch_only_requires_ready_probe(log_status.as_ref(), pane, harness) {
+        let ready_outcome = wait_for_agent_ready_outcome(
+            tmux,
+            pane,
+            dispatch_only_starting_pane_ready_timeout(),
+            harness,
+        );
+        if !ready_outcome.is_ready() {
+            let detail = ready_outcome.blocker_reason().unwrap_or("timed_out");
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome={}",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    detail
+                ),
+            );
+            anyhow::bail!(
+                "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({detail}); wait for the pane to become ready and reroute again",
+                harness.binary,
+                pane,
+                file.display()
+            );
+        }
+    }
+
     if let Ok(content) = sessions::capture_pane(tmux, pane)
         && let Some(reason) = dispatch_only_blocker_reason(harness, &content)
     {
@@ -6573,6 +6637,90 @@ Body\n\
         assert!(
             after.contains("EARLY:agent-doc "),
             "dispatch-only route should send the bare reopen even while the pane is busy: {after}"
+        );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_dispatch_only_fails_closed_while_latest_run_is_still_starting() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-starting-pane");
+        let session = "codex";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-dispatch-only-starting-pane.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-dispatch-only-starting-pane";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        crate::startup_miss::append_session_log_event(
+            &doc,
+            session_id,
+            &format!(
+                "session_start file={} pane={} session={}",
+                doc.display(),
+                pane,
+                session_id
+            ),
+        )
+        .unwrap();
+        crate::startup_miss::append_session_log_event(
+            &doc,
+            session_id,
+            "codex_start mode=fresh restart_count=0",
+        )
+        .unwrap();
+
+        let busy_agent = write_mock_busy_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("Working..."),
+            "busy mock session should be active in pane: {content}"
+        );
+
+        let err = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err(
+            "dispatch-only route must fail closed while the latest run is still in the fresh-start boot window",
+        );
+        assert!(
+            err.to_string().contains("still booting"),
+            "unexpected error: {err:#}"
+        );
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "Working...",
+            std::time::Duration::from_secs(1),
+        );
+        assert!(
+            !after.contains("EARLY:agent-doc "),
+            "dispatch-only route must not inject into a pane that never reached a ready prompt: {after}"
         );
     }
 

@@ -35,6 +35,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - When route/startup acknowledgment times out, the binary records `.agent-doc/state/startup-miss/<doc-hash>.json` with pane/session provenance and shows a visible diagnostic in tmux.
 - On the next route/start/sync path, the tool must distinguish between a stale startup-miss marker and a still-stranded owner. A same-pane marker may only be cleared once newer session-log provenance proves a later open run.
 - Successful cycle acknowledgment clears the startup-miss marker.
+- `route --dispatch-only` may skip the heavy cycle-ack / auto-fix path, but it must still fail closed when the target pane's latest open session-log run is only a fresh `*_start`/`*_restart` and no dispatch-ready prompt appears during a short ready probe. A bare reopen must not be injected into a still-booting pane.
 
 ### Live-child ack rules
 

@@ -418,7 +418,7 @@ fn line_looks_like_soft_prompt_request(trimmed: &str) -> bool {
         || lower.starts_with("need you to ")
 }
 
-fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool {
+pub(crate) fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool {
     if trimmed.is_empty() || normalized_prompt_preview_line(trimmed).is_some() {
         return false;
     }
@@ -804,7 +804,10 @@ fn classify_prompt_bearing_changes_raw(diff: &str) -> Vec<PromptBearingChange> {
     // and append only truly-missing prompt blocks.
     for text in extract_prompt_target_blocks(diff) {
         if changes.iter().any(|existing| {
-            existing.kind == PromptBearingChangeKind::PromptTarget && existing.text == text
+            existing.kind == PromptBearingChangeKind::PromptTarget
+                && (existing.text == text
+                    || ((existing.text.contains(&text) || text.contains(&existing.text))
+                        && prompt_change_is_already_answered(&existing.text)))
         }) {
             continue;
         }

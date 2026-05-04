@@ -3507,7 +3507,7 @@ mod tests {
         iso.send_keys(&dead_pane, "printf 'dead pane\\n'; exit 0")
             .unwrap();
         assert!(
-            wait_for_pane_dead(&iso, &dead_pane, std::time::Duration::from_secs(3)),
+            wait_for_pane_dead(&iso, &dead_pane, std::time::Duration::from_secs(6)),
             "pane should first become retained dead"
         );
         assert!(

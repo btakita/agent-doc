@@ -557,89 +557,128 @@ fn is_response_heading_line(trimmed: &str) -> bool {
         || trimmed.starts_with("##### Re:")
 }
 
-fn strip_answered_prompt_prefixes(exchange_content: &str) -> String {
-    fn fence_open(trimmed: &str) -> Option<(char, usize)> {
-        let fc = trimmed.chars().next()?;
-        if fc != '`' && fc != '~' {
-            return None;
-        }
-        let fl = trimmed.chars().take_while(|&c| c == fc).count();
-        if fl >= 3 { Some((fc, fl)) } else { None }
+fn fence_open(trimmed: &str) -> Option<(char, usize)> {
+    let fc = trimmed.chars().next()?;
+    if fc != '`' && fc != '~' {
+        return None;
     }
+    let fl = trimmed.chars().take_while(|&c| c == fc).count();
+    if fl >= 3 { Some((fc, fl)) } else { None }
+}
 
-    fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
-        let fc = trimmed.chars().next().unwrap_or('\0');
-        if fc != fence_char {
-            return false;
-        }
-        let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
-        fl >= fence_len && trimmed[fl..].trim().is_empty()
+fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
+    let fc = trimmed.chars().next().unwrap_or('\0');
+    if fc != fence_char {
+        return false;
     }
+    let fl = trimmed.chars().take_while(|&c| c == fence_char).count();
+    fl >= fence_len && trimmed[fl..].trim().is_empty()
+}
 
-    fn strip_answered_prompt_prefix(line: &str) -> Option<String> {
-        let trimmed = line.trim_start();
-        let rest = trimmed.strip_prefix('❯')?.trim_start();
-        if rest.is_empty() || !crate::diff::text_line_looks_like_prompt_target(rest) {
-            return None;
-        }
-        let indent_len = line.len() - trimmed.len();
-        Some(format!("{}{}", &line[..indent_len], rest))
+fn prefix_prompt_line(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() || trimmed.starts_with('❯') {
+        return None;
     }
+    let indent_len = line.len() - trimmed.len();
+    Some(format!("{}❯ {}", &line[..indent_len], trimmed))
+}
+
+fn answered_prompt_prelude_should_be_prefixed(lines: &[&str]) -> bool {
+    let Some(first) = lines.iter().find_map(|line| {
+        let trimmed = line.trim();
+        (!trimmed.is_empty()).then_some(trimmed)
+    }) else {
+        return false;
+    };
+
+    first.starts_with('❯')
+        || crate::diff::text_line_looks_like_prompt_target(first)
+        || !crate::diff::line_looks_like_plain_response_after_prompt(first)
+}
+
+fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
+    // When a response heading is present, the contiguous prose block
+    // immediately above it is the user prelude for that turn. Canonicalize
+    // that prelude back to `❯ ...` so answered prompts keep their visual
+    // marker after staging/cleanup instead of collapsing to bare lines.
 
     let lines: Vec<&str> = exchange_content.split_inclusive('\n').collect();
     if lines.is_empty() {
         return exchange_content.to_string();
     }
 
-    let mut response_after = vec![false; lines.len()];
+    let mut line_in_fence = vec![false; lines.len()];
     let mut in_fence = false;
     let mut fence_char = '\0';
     let mut fence_len = 0usize;
-    let mut seen_response = false;
-    for idx in (0..lines.len()).rev() {
+    for idx in 0..lines.len() {
         let line = lines[idx].trim_end_matches('\n');
         let trimmed = line.trim();
-        response_after[idx] = seen_response;
         if !in_fence {
             if let Some((fc, fl)) = fence_open(trimmed) {
                 in_fence = true;
                 fence_char = fc;
                 fence_len = fl;
+                line_in_fence[idx] = true;
                 continue;
             }
         } else {
+            line_in_fence[idx] = true;
             if fence_close(trimmed, fence_char, fence_len) {
                 in_fence = false;
             }
             continue;
         }
-        if is_response_heading_line(trimmed) {
-            seen_response = true;
+    }
+
+    let mut prefix_targets = vec![false; lines.len()];
+    for idx in 0..lines.len() {
+        let trimmed = lines[idx].trim_end_matches('\n').trim();
+        if line_in_fence[idx] || !is_response_heading_line(trimmed) {
+            continue;
+        }
+
+        let mut block_indices = Vec::new();
+        let mut cursor = idx;
+        while cursor > 0 {
+            cursor -= 1;
+            let line = lines[cursor].trim_end_matches('\n');
+            let trimmed = line.trim();
+            if line_in_fence[cursor]
+                || trimmed.is_empty()
+                || trimmed.starts_with("<!--")
+                || is_response_heading_line(trimmed)
+            {
+                break;
+            }
+            block_indices.push(cursor);
+        }
+        block_indices.reverse();
+        if block_indices.is_empty() {
+            continue;
+        }
+
+        let block_lines: Vec<&str> = block_indices
+            .iter()
+            .map(|&line_idx| lines[line_idx])
+            .collect();
+        if !answered_prompt_prelude_should_be_prefixed(&block_lines) {
+            continue;
+        }
+        for line_idx in block_indices {
+            prefix_targets[line_idx] = true;
         }
     }
 
     let mut normalized = String::with_capacity(exchange_content.len());
     let mut changed = false;
-    in_fence = false;
-    fence_char = '\0';
-    fence_len = 0;
     for (idx, segment) in lines.iter().enumerate() {
         let line = segment.trim_end_matches('\n');
-        let trimmed = line.trim();
-        if !in_fence {
-            if let Some((fc, fl)) = fence_open(trimmed) {
-                in_fence = true;
-                fence_char = fc;
-                fence_len = fl;
-            }
-        } else if fence_close(trimmed, fence_char, fence_len) {
-            in_fence = false;
-        }
-
-        if !in_fence && response_after[idx] {
-            if let Some(stripped) = strip_answered_prompt_prefix(line) {
-                normalized.push_str(&stripped);
-                changed |= stripped != line;
+        if prefix_targets[idx] {
+            if let Some(prefixed) = prefix_prompt_line(line) {
+                normalized.push_str(&prefixed);
+                changed |= prefixed != line;
             } else {
                 normalized.push_str(line);
             }
@@ -679,7 +718,7 @@ pub(crate) fn normalize_committed_exchange_artifacts(content: &str) -> String {
         }
         rebuilt.push_str(&body[last..comp.open_end]);
         if comp.name == "exchange" {
-            let normalized = strip_answered_prompt_prefixes(comp.content(body));
+            let normalized = canonicalize_answered_prompt_prefixes(comp.content(body));
             changed |= normalized != comp.content(body);
             rebuilt.push_str(&normalized);
         } else {
@@ -1912,7 +1951,8 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
 
     // Reposition the snapshot to the same clean shape we stage into git.
     if let Ok(Some(snap_content)) = crate::snapshot::load(file) {
-        let new_snap = crate::template::reposition_boundary_to_end_clean(&snap_content);
+        let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&snap_content);
+        let new_snap = crate::template::reposition_boundary_to_end_clean(&prompt_canonicalized);
         if new_snap != snap_content {
             match crate::snapshot::save(file, &new_snap) {
                 Ok(()) => {
@@ -1947,17 +1987,24 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
     if ipc_listener_active {
         eprintln!("[commit] skipping working-tree boundary reposition — IPC listener active");
     } else if let Ok(working) = std::fs::read_to_string(file) {
+        let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&working);
         let normalize_prefix_lines = crate::snapshot::load(file)
             .ok()
             .flatten()
             .map(|snapshot| {
-                crate::write::extract_post_commit_normalization_targets(&snapshot, &working)
+                crate::write::extract_post_commit_normalization_targets(
+                    &snapshot,
+                    &prompt_canonicalized,
+                )
             })
             .unwrap_or_default();
         let prefix_repaired = if normalize_prefix_lines.is_empty() {
-            working.clone()
+            prompt_canonicalized
         } else {
-            crate::write::normalize_exchange_prefixes_for_targets(&working, &normalize_prefix_lines)
+            crate::write::normalize_exchange_prefixes_for_targets(
+                &prompt_canonicalized,
+                &normalize_prefix_lines,
+            )
         };
         let repositioned =
             crate::template::reposition_boundary_to_end_preserve_head(&prefix_repaired);
@@ -2223,7 +2270,9 @@ fn stage_snapshot_for_commit(
         // collapses the working tree/snapshot back to the same clean shape, so
         // moving the boundary across cycles cannot produce phantom marker-only
         // diffs on previously committed headings.
-        let staged_content = strip_guard_markers(&strip_head_markers(snap));
+        let staged_content = strip_guard_markers(&strip_head_markers(
+            &canonicalize_answered_prompt_prefixes(snap),
+        ));
         let rel_path = relative_to(resolved, git_root);
 
         if let Ok(hash) = hash_object(git_root, &staged_content) {
@@ -3465,6 +3514,93 @@ mod tests {
         assert!(
             snap.matches("(HEAD)").count() == 0,
             "snapshot should not retain transient head markers; got:\n{snap}"
+        );
+    }
+
+    #[test]
+    fn commit_staged_blob_restores_answered_prompt_prefixes() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let initial = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, initial).unwrap();
+        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_abs = root.join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, initial).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let cycle = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n\nI restarted Codex. Deploy 503 fixes again.\n### Re: retry production deploy — gpt-5\nNo state change.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, cycle).unwrap();
+        fs::write(&snap_abs, cycle).unwrap();
+
+        commit(&doc).expect("commit should canonicalize answered prompt prefixes");
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let blob = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            blob.contains("❯ I restarted Codex. Deploy 503 fixes again.\n"),
+            "committed blob should preserve the user prompt prefix:\n{blob}"
+        );
+        assert!(
+            !blob.contains("\nI restarted Codex. Deploy 503 fixes again.\n"),
+            "committed blob must not keep the bare prompt line:\n{blob}"
+        );
+
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working.contains("❯ I restarted Codex. Deploy 503 fixes again.\n"),
+            "working tree should preserve the user prompt prefix after closeout:\n{working}"
+        );
+
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("❯ I restarted Codex. Deploy 503 fixes again.\n"),
+            "snapshot should preserve the user prompt prefix after closeout:\n{snap}"
         );
     }
 

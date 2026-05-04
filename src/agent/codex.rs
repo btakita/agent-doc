@@ -197,8 +197,7 @@ fn command_execution_required_ssh_failure(
         return None;
     }
 
-    first_required_ssh_failure_line(aggregated_output, lowered_terms, false)
-        .map(str::to_string)
+    first_required_ssh_failure_line(aggregated_output, lowered_terms, false).map(str::to_string)
 }
 
 fn transcript_has_required_ssh_failure(text: &str, match_terms: &[String]) -> Option<String> {

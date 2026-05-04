@@ -153,7 +153,7 @@ Repo closeout in `src/agent-doc`: committed as `294896f` (`fix: restore codex ct
 Left the pre-existing unrelated dirty change in `src/agent-doc/src/plugin.rs` untouched.
 
 `Ctrl+D`'s existing quit-menu path remains in place; this cycle fixed the missing equivalent path for actual stdin-forwarded `Ctrl+C`.
-<!-- agent:boundary:1e9ede29 -->
+<!-- agent:boundary:097c423d -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -177,7 +177,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgown6] Add operator-facing session CLI and plugin controls: status, history, attach, restart, clear, doctor, and session diagnostics UI. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown7] Move destructive or heuristic recovery behind explicit repair-only commands and remove it from normal turn paths. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown8] Delete the remaining normal-path ownership inference from process-tree, session-log, and registry-rebind logic. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown9] Add regression and plugin verification for generation monotonicity, stale-generation rejection, sync/layout preservation, and stage-specific dispatch failures. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md

@@ -445,14 +445,14 @@ fn restart_continue_exit_strategy(
     clean_exit_before_prompt: bool,
     committed_cycle_after_latest_run: bool,
 ) -> RestartContinueExitStrategy {
+    if clean_exit_before_prompt {
+        return RestartContinueExitStrategy::RestartFresh;
+    }
     if ctrl_d_forwarded {
         if committed_cycle_after_latest_run {
             return RestartContinueExitStrategy::RestartFresh;
         }
         return RestartContinueExitStrategy::PromptUser;
-    }
-    if clean_exit_before_prompt {
-        return RestartContinueExitStrategy::RestartFresh;
     }
     if failed_resume && recent_failed_resumes >= FAILED_RESUME_THRESHOLD {
         return RestartContinueExitStrategy::PromptUser;
@@ -2400,8 +2400,8 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                                 }
                             }
                             RestartContinueExitStrategy::RestartFresh => {
-                                suppress_stale_ctrl_d_until_prompt =
-                                    ctrl_d_forwarded && committed_cycle_after_latest_run;
+                                suppress_stale_ctrl_d_until_prompt = ctrl_d_forwarded
+                                    && (committed_cycle_after_latest_run || clean_exit_before_prompt);
                                 if ctrl_d_forwarded && committed_cycle_after_latest_run {
                                     eprintln!(
                                         "\n{} exited after stdin EOF/Ctrl-D, but this run already committed a document cycle. Restarting fresh to keep the pane attached...",
@@ -2411,6 +2411,18 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                                         &mut session_log,
                                         &format!(
                                             "ctrl_d_committed_cycle_restart_fresh restart_count={}",
+                                            restart_count + 1
+                                        ),
+                                    );
+                                } else if ctrl_d_forwarded && clean_exit_before_prompt {
+                                    eprintln!(
+                                        "\n{} exited after stdin EOF/Ctrl-D before ever surfacing a prompt. Restarting fresh instead of prompting so the claimed pane can recover...",
+                                        harness.binary
+                                    );
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "ctrl_d_before_prompt_restart_fresh restart_count={}",
                                             restart_count + 1
                                         ),
                                     );
@@ -3480,6 +3492,14 @@ mod tests {
         assert_eq!(
             restart_continue_exit_strategy(false, true, 0, false, false),
             RestartContinueExitStrategy::PromptUser
+        );
+    }
+
+    #[test]
+    fn restart_continue_strategy_restarts_fresh_before_prompt_even_after_ctrl_d() {
+        assert_eq!(
+            restart_continue_exit_strategy(false, true, 0, true, false),
+            RestartContinueExitStrategy::RestartFresh
         );
     }
 

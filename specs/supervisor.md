@@ -150,6 +150,12 @@ on claude exit with code c:
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user
                          (Enter to restart fresh / q to exit) so the user can
                          choose to quit the supervisor cleanly
+                         EXCEPT when that same fresh/fresh-restart Codex child
+                         exits before it ever surfaces an idle prompt: treat
+                         the forwarded `Ctrl-D`/stdin EOF as failed startup
+                         provenance, restart fresh automatically, and suppress
+                         only the stale inherited pre-prompt `Ctrl-D` bytes on
+                         the successor run until a fresh idle prompt appears
                          EXCEPT when that same child run already recorded a
                          committed `document_cycle`: in that case restart fresh
                          instead of prompting so a successful routed/editor-owned

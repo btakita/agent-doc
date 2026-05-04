@@ -33,16 +33,15 @@
 //!   Exception: if a fresh/fresh-restart Codex child exits cleanly before it ever
 //!   surfaces an idle prompt, treat that as failed startup provenance and restart
 //!   fresh instead of chaining `--continue`.
-//!   If stdin EOF/Ctrl-D was forwarded, supervisor prompts the user instead
-//!   (`Enter` = restart fresh, `q` = exit) so the pane can be quit cleanly.
-//!   Exception: when that same child run already committed a document cycle,
-//!   restart fresh instead of prompting so successful routed/editor-owned runs
-//!   keep their claimed pane attached.
-//!   Prompt decisions are logged explicitly. Prompt-time stdin EOF on that
-//!   Ctrl-D path restarts fresh instead of silently quitting, so routed or
-//!   detached Codex sessions do not lose the claimed tmux pane just because
-//!   the supervisor prompt had no readable stdin. Non-empty non-`q` input is
-//!   rejected and re-prompted instead of silently restarting fresh.
+//!   If stdin EOF/Ctrl-D was forwarded, Codex restarts fresh instead of
+//!   surfacing a quit prompt, so ordinary routed/editor-owned turns cannot
+//!   tear down the claimed tmux pane from inherited or detached stdin state.
+//!   Prompt decisions are still logged explicitly for the remaining
+//!   resume-failure prompt path. Prompt-time stdin EOF on that path restarts
+//!   fresh instead of silently quitting, so routed or detached Codex sessions
+//!   do not lose the claimed tmux pane just because the supervisor prompt had
+//!   no readable stdin. Non-empty non-`q` input is rejected and re-prompted
+//!   instead of silently restarting fresh.
 //!   If the resume handoff just failed, the first failure restarts fresh and
 //!   repeated failures escalate to that same prompt instead of looping blindly.
 //! - Prints the truncated session UUID and pane ID to stderr on registration.
@@ -177,9 +176,6 @@ const SHARED_WRITER_WRITE_POLL_INTERVAL_MS: i32 = 50;
 const SHARED_WRITER_CHUNK_MAX: usize = 1024;
 const COMMITTED_CYCLE_SETTLE_TIMEOUT: Duration = Duration::from_millis(1500);
 const COMMITTED_CYCLE_SETTLE_POLL_INTERVAL: Duration = Duration::from_millis(50);
-#[cfg(test)]
-const EARLY_CTRL_D_EOF_RESTART_WINDOW: Duration = Duration::from_secs(15);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 enum AutoTriggerOutcome {
@@ -309,10 +305,6 @@ enum PromptEofPolicy {
     RestartFresh,
 }
 
-fn ctrl_d_prompt_eof_policy(_run_duration: Duration, _restart_count: u32) -> PromptEofPolicy {
-    PromptEofPolicy::RestartFresh
-}
-
 fn classify_prompt_decision(bytes_read: usize, input: &str) -> PromptDecision {
     if bytes_read == 0 {
         return PromptDecision::QuitEof;
@@ -430,16 +422,13 @@ fn restart_continue_exit_strategy(
     ctrl_d_forwarded: bool,
     recent_failed_resumes: usize,
     clean_exit_before_prompt: bool,
-    committed_cycle_after_latest_run: bool,
+    _committed_cycle_after_latest_run: bool,
 ) -> RestartContinueExitStrategy {
     if clean_exit_before_prompt {
         return RestartContinueExitStrategy::RestartFresh;
     }
     if ctrl_d_forwarded {
-        if committed_cycle_after_latest_run {
-            return RestartContinueExitStrategy::RestartFresh;
-        }
-        return RestartContinueExitStrategy::PromptUser;
+        return RestartContinueExitStrategy::RestartFresh;
     }
     if failed_resume && recent_failed_resumes >= FAILED_RESUME_THRESHOLD {
         return RestartContinueExitStrategy::PromptUser;
@@ -1585,6 +1574,8 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
     // Register session → pane (with relative file path)
     let file_str = file.to_string_lossy();
     let supervisor_instance_id = uuid::Uuid::new_v4().to_string();
+    let prior_entry = sessions::lookup_entry(&session_id)?;
+    let pane_window = sessions::pane_window(&pane_id).unwrap_or_default();
     sessions::register_supervisor(
         &session_id,
         &pane_id,
@@ -1597,13 +1588,45 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
     // Open session log
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let mut session_log = open_session_log(&canonical, &session_id);
+    let start_generation = if prior_entry
+        .as_ref()
+        .is_some_and(|entry| entry.pane != pane_id)
+    {
+        crate::session_actor::infer_latest_generation(&canonical, &session_id).unwrap_or(1)
+    } else {
+        let generations = crate::session_actor::next_generation(&canonical, &session_id).unwrap_or(
+            crate::session_actor::OwnershipGeneration {
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        );
+        log_event(
+            &mut session_log,
+            &crate::session_actor::format_transition_event(
+                crate::session_actor::OwnershipTransitionEvent {
+                    caller: "start",
+                    reason: "session_start",
+                    prior_generation: generations.prior_generation,
+                    new_generation: generations.new_generation,
+                    old_pane: prior_entry.as_ref().map(|entry| entry.pane.as_str()),
+                    new_pane: &pane_id,
+                    old_window: prior_entry.as_ref().and_then(|entry| {
+                        (!entry.window.is_empty()).then_some(entry.window.as_str())
+                    }),
+                    new_window: Some(pane_window.as_str()),
+                },
+            ),
+        );
+        generations.new_generation
+    };
     log_event(
         &mut session_log,
         &format!(
-            "session_start file={} pane={} session={}",
+            "session_start file={} pane={} session={} generation={}",
             file.display(),
             pane_id,
-            &session_id[..8]
+            &session_id[..8],
+            start_generation
         ),
     );
 
@@ -1796,8 +1819,6 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             args
         };
 
-        let run_started_at = Instant::now();
-
         // Build PtySpawnConfig and spawn child under pty
         let cfg = PtySpawnConfig {
             program: harness.binary.clone(),
@@ -1981,8 +2002,6 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                 Duration::ZERO
             },
         );
-        let run_duration = run_started_at.elapsed();
-
         if matches!(
             auto_trigger_outcome,
             AutoTriggerOutcome::Sent | AutoTriggerOutcome::NotNeeded
@@ -2069,53 +2088,21 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                         ) {
                             RestartContinueExitStrategy::PromptUser => {
                                 raw_mode.suspend();
-                                if ctrl_d_forwarded {
-                                    eprintln!(
-                                        "\n{} exited after stdin EOF/Ctrl-D.",
-                                        harness.binary
-                                    );
-                                    log_event(
-                                        &mut session_log,
-                                        &format!(
-                                            "ctrl_d_prompt_user restart_count={}",
-                                            restart_count
-                                        ),
-                                    );
-                                } else {
-                                    eprintln!(
-                                        "\n{} failed to re-establish a prompt after resume {} times in the last {}s.",
-                                        harness.binary,
-                                        recent_failures,
-                                        FAILED_RESUME_WINDOW.as_secs()
-                                    );
-                                }
-                                let prompt_kind = if ctrl_d_forwarded {
-                                    "ctrl_d"
-                                } else {
-                                    "resume_failure"
-                                };
-                                let quit_event = if ctrl_d_forwarded {
-                                    "user_quit_after_ctrl_d"
-                                } else {
-                                    "user_quit_after_resume_failure"
-                                };
+                                eprintln!(
+                                    "\n{} failed to re-establish a prompt after resume {} times in the last {}s.",
+                                    harness.binary,
+                                    recent_failures,
+                                    FAILED_RESUME_WINDOW.as_secs()
+                                );
                                 match prompt_for_restart_or_quit(
                                     &mut session_log,
-                                    prompt_kind,
+                                    "resume_failure",
                                     "Press Enter to restart fresh, or 'q' to exit.",
-                                    quit_event,
-                                    if ctrl_d_forwarded {
-                                        ctrl_d_prompt_eof_policy(run_duration, restart_count)
-                                    } else {
-                                        PromptEofPolicy::Quit
-                                    },
+                                    "user_quit_after_resume_failure",
+                                    PromptEofPolicy::RestartFresh,
                                 ) {
                                     PromptOutcome::Quit => {
-                                        break match prompt_kind {
-                                            "ctrl_d" => "user_quit_after_ctrl_d",
-                                            "resume_failure" => "user_quit_after_resume_failure",
-                                            _ => "user_quit",
-                                        };
+                                        break "user_quit_after_resume_failure";
                                     }
                                     PromptOutcome::RestartFresh => {
                                         raw_mode.resume();
@@ -2126,9 +2113,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                                 }
                             }
                             RestartContinueExitStrategy::RestartFresh => {
-                                suppress_stale_ctrl_d_until_prompt = ctrl_d_forwarded
-                                    && (committed_cycle_after_latest_run
-                                        || clean_exit_before_prompt);
+                                suppress_stale_ctrl_d_until_prompt = ctrl_d_forwarded;
                                 if ctrl_d_forwarded && committed_cycle_after_latest_run {
                                     eprintln!(
                                         "\n{} exited after stdin EOF/Ctrl-D, but this run already committed a document cycle. Restarting fresh to keep the pane attached...",
@@ -2150,6 +2135,18 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                                         &mut session_log,
                                         &format!(
                                             "ctrl_d_before_prompt_restart_fresh restart_count={}",
+                                            restart_count + 1
+                                        ),
+                                    );
+                                } else if ctrl_d_forwarded {
+                                    eprintln!(
+                                        "\n{} exited after stdin EOF/Ctrl-D. Restarting fresh instead of offering a quit prompt so the tmux pane stays attached...",
+                                        harness.binary
+                                    );
+                                    log_event(
+                                        &mut session_log,
+                                        &format!(
+                                            "ctrl_d_restart_fresh restart_count={}",
                                             restart_count + 1
                                         ),
                                     );
@@ -3033,10 +3030,10 @@ mod tests {
     }
 
     #[test]
-    fn restart_continue_strategy_prompts_user_after_ctrl_d() {
+    fn restart_continue_strategy_restarts_fresh_after_ctrl_d() {
         assert_eq!(
             restart_continue_exit_strategy(false, true, 0, false, false),
-            RestartContinueExitStrategy::PromptUser
+            RestartContinueExitStrategy::RestartFresh
         );
     }
 
@@ -3053,26 +3050,6 @@ mod tests {
         assert_eq!(
             restart_continue_exit_strategy(false, true, 0, false, true),
             RestartContinueExitStrategy::RestartFresh
-        );
-    }
-
-    #[test]
-    fn ctrl_d_prompt_eof_policy_restarts_fresh_for_early_first_exit() {
-        assert_eq!(
-            ctrl_d_prompt_eof_policy(Duration::from_secs(8), 0),
-            PromptEofPolicy::RestartFresh
-        );
-    }
-
-    #[test]
-    fn ctrl_d_prompt_eof_policy_restarts_fresh_after_grace_window_or_restart() {
-        assert_eq!(
-            ctrl_d_prompt_eof_policy(EARLY_CTRL_D_EOF_RESTART_WINDOW + Duration::from_secs(1), 0),
-            PromptEofPolicy::RestartFresh
-        );
-        assert_eq!(
-            ctrl_d_prompt_eof_policy(Duration::from_secs(5), 1),
-            PromptEofPolicy::RestartFresh
         );
     }
 
@@ -3209,15 +3186,15 @@ mod tests {
         );
         assert_eq!(
             restart_continue_exit_strategy(false, true, 0, false, false),
-            RestartContinueExitStrategy::PromptUser
+            RestartContinueExitStrategy::RestartFresh
         );
     }
 
     #[test]
-    fn ctrl_d_with_failed_resume_still_prompts_user() {
+    fn ctrl_d_with_failed_resume_still_restarts_fresh() {
         assert_eq!(
             restart_continue_exit_strategy(true, true, 1, false, false),
-            RestartContinueExitStrategy::PromptUser
+            RestartContinueExitStrategy::RestartFresh
         );
     }
 

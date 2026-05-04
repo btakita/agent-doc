@@ -83,3 +83,6 @@ Command sub-specs:
 - [Session And Tmux Commands](specs/07-session-tmux-commands.md)
 - [Closeout Commands](specs/07-closeout-commands.md)
 - [Orchestration Commands](specs/07-orchestration-commands.md)
+
+Session-routing supplements:
+- [Session Actor Contract](specs/08a-session-actor-contract.md)

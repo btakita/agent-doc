@@ -100,6 +100,7 @@ mod resync;
 mod route;
 mod run;
 mod security;
+mod session_actor;
 mod session_check;
 mod session_cmd;
 mod sessions;

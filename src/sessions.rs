@@ -284,9 +284,30 @@ pub fn deregister(session_id: &str) -> Result<bool> {
 }
 
 pub fn register_with_pid(session_id: &str, pane_id: &str, file: &str, pid: u32) -> Result<()> {
+    register_with_pid_internal(session_id, pane_id, file, pid, "register", "register")
+}
+
+fn register_with_pid_internal(
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    transition_caller: &'static str,
+    transition_reason: &'static str,
+) -> Result<()> {
     // Query the window ID for this pane
     let window = pane_window(pane_id).unwrap_or_default();
-    register_full_internal_call(session_id, pane_id, file, pid, &window, None, None)
+    register_full_internal_call(
+        session_id,
+        pane_id,
+        file,
+        pid,
+        &window,
+        None,
+        None,
+        transition_caller,
+        transition_reason,
+    )
 }
 
 /// Like `register_with_pid` but accepts an explicit `cwd` override.
@@ -300,7 +321,17 @@ pub fn register_with_pid_and_cwd(
     cwd: &str,
 ) -> Result<()> {
     let window = pane_window(pane_id).unwrap_or_default();
-    register_full_with_cwd_internal_call(session_id, pane_id, file, pid, &window, cwd, None)
+    register_full_with_cwd_internal_call(
+        session_id,
+        pane_id,
+        file,
+        pid,
+        &window,
+        cwd,
+        None,
+        "claim",
+        "claim_bind",
+    )
 }
 
 pub fn register_supervisor(
@@ -319,6 +350,8 @@ pub fn register_supervisor(
         &window,
         None,
         Some(supervisor_instance_id),
+        "start",
+        "supervisor_register",
     )
 }
 
@@ -340,6 +373,8 @@ pub fn register_supervisor_in(
         &window,
         &base_dir.to_string_lossy(),
         supervisor_instance_id,
+        "sync",
+        "recover_owner",
     )
 }
 
@@ -351,7 +386,17 @@ pub fn register_full(
     pid: u32,
     window: &str,
 ) -> Result<()> {
-    register_full_internal_call(session_id, pane_id, file, pid, window, None, None)
+    register_full_internal_call(
+        session_id,
+        pane_id,
+        file,
+        pid,
+        window,
+        None,
+        None,
+        "test",
+        "test_register",
+    )
 }
 
 /// Like `register_full` but with an explicit `base_dir` for the registry.
@@ -379,6 +424,8 @@ pub fn register_full_in(
         window,
         &cwd,
         None,
+        "test",
+        "test_register",
     )
 }
 
@@ -392,7 +439,17 @@ pub fn register_full_with_cwd(
     window: &str,
     cwd: &str,
 ) -> Result<()> {
-    register_full_with_cwd_internal_call(session_id, pane_id, file, pid, window, cwd, None)
+    register_full_with_cwd_internal_call(
+        session_id,
+        pane_id,
+        file,
+        pid,
+        window,
+        cwd,
+        None,
+        "test",
+        "test_register",
+    )
 }
 
 /// Like `register_full_with_cwd` but with an explicit `base_dir` for the registry.
@@ -417,6 +474,8 @@ pub fn register_full_with_cwd_in(
         window,
         cwd,
         None,
+        "route",
+        "dispatch_bind",
     )
 }
 
@@ -430,6 +489,8 @@ fn register_full_with_cwd_and_instance_in(
     window: &str,
     cwd: &str,
     supervisor_instance_id: &str,
+    transition_caller: &'static str,
+    transition_reason: &'static str,
 ) -> Result<()> {
     let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
     let mut registry = load_in(base_dir)?;
@@ -443,6 +504,8 @@ fn register_full_with_cwd_and_instance_in(
         window,
         cwd,
         Some(supervisor_instance_id),
+        transition_caller,
+        transition_reason,
     )
 }
 
@@ -454,6 +517,8 @@ fn register_full_internal_call(
     window: &str,
     cwd: Option<&str>,
     supervisor_instance_id: Option<&str>,
+    transition_caller: &'static str,
+    transition_reason: &'static str,
 ) -> Result<()> {
     let base_dir = std::env::current_dir()?;
     let resolved_cwd = cwd
@@ -471,6 +536,8 @@ fn register_full_internal_call(
         window,
         &resolved_cwd,
         supervisor_instance_id,
+        transition_caller,
+        transition_reason,
     )
 }
 
@@ -482,6 +549,8 @@ fn register_full_with_cwd_internal_call(
     window: &str,
     cwd: &str,
     supervisor_instance_id: Option<&str>,
+    transition_caller: &'static str,
+    transition_reason: &'static str,
 ) -> Result<()> {
     let base_dir = std::env::current_dir()?;
     let _lock = RegistryLock::acquire(&registry_path_in(&base_dir))?;
@@ -496,6 +565,8 @@ fn register_full_with_cwd_internal_call(
         window,
         cwd,
         supervisor_instance_id,
+        transition_caller,
+        transition_reason,
     )
 }
 
@@ -510,6 +581,8 @@ fn register_full_internal(
     window: &str,
     cwd: &str,
     supervisor_instance_id: Option<&str>,
+    transition_caller: &'static str,
+    transition_reason: &'static str,
 ) -> Result<()> {
     let started = chrono_now();
     let registry_key = canonical_registry_key_in(base_dir, file);
@@ -530,7 +603,15 @@ fn register_full_internal(
     }
 
     if let Some(previous) = registry.get(&registry_key).cloned() {
-        log_session_rebind(base_dir, session_id, &previous, pane_id, window);
+        log_session_rebind(
+            base_dir,
+            session_id,
+            &previous,
+            pane_id,
+            window,
+            transition_caller,
+            transition_reason,
+        );
     }
 
     registry.insert(
@@ -555,12 +636,20 @@ fn log_session_rebind(
     previous: &SessionEntry,
     new_pane: &str,
     new_window: &str,
+    transition_caller: &str,
+    transition_reason: &str,
 ) {
     if previous.pane == new_pane {
         return;
     }
 
     let log_file = resolve_log_file_path(base_dir, &previous.file);
+    let generations = crate::session_actor::next_generation(&log_file, session_id).unwrap_or(
+        crate::session_actor::OwnershipGeneration {
+            prior_generation: 0,
+            new_generation: 1,
+        },
+    );
     let old_window = if previous.window.is_empty() {
         "unknown"
     } else {
@@ -572,9 +661,36 @@ fn log_session_rebind(
         new_window
     };
 
+    let transition = crate::session_actor::format_transition_event(
+        crate::session_actor::OwnershipTransitionEvent {
+            caller: transition_caller,
+            reason: transition_reason,
+            prior_generation: generations.prior_generation,
+            new_generation: generations.new_generation,
+            old_pane: Some(previous.pane.as_str()),
+            new_pane,
+            old_window: Some(old_window),
+            new_window: Some(new_window),
+        },
+    );
+    if let Err(err) =
+        crate::startup_miss::append_session_log_event(&log_file, session_id, &transition)
+    {
+        eprintln!(
+            "[registry] warning: failed to append ownership transition for {}: {}",
+            session_id, err
+        );
+        return;
+    }
+
     let superseded = format!(
-        "session_superseded old_pane={} new_pane={} old_window={} new_window={}",
-        previous.pane, new_pane, old_window, new_window
+        "session_superseded old_pane={} new_pane={} old_window={} new_window={} prior_generation={} new_generation={}",
+        previous.pane,
+        new_pane,
+        old_window,
+        new_window,
+        generations.prior_generation,
+        generations.new_generation
     );
     if let Err(err) =
         crate::startup_miss::append_session_log_event(&log_file, session_id, &superseded)
@@ -589,8 +705,8 @@ fn log_session_rebind(
         &log_file,
         session_id,
         &format!(
-            "session_end origin=registry_rebind pane={} next_pane={}",
-            previous.pane, new_pane
+            "session_end origin=registry_rebind pane={} next_pane={} generation={} next_generation={}",
+            previous.pane, new_pane, generations.prior_generation, generations.new_generation
         ),
     ) {
         eprintln!(
@@ -1184,7 +1300,7 @@ mod tests {
         std::fs::write(&doc, "# rebind\n").unwrap();
         std::fs::write(
             dir.path().join(".agent-doc/logs/session-rebind.log"),
-            "[1] session_start file=tasks/rebind.md pane=%42 session=session-rebind\n[2] codex_start mode=fresh restart_count=0\n",
+            "[1] session_start file=tasks/rebind.md pane=%42 session=session-rebind generation=1\n[2] codex_start mode=fresh restart_count=0\n",
         )
         .unwrap();
 
@@ -1216,11 +1332,16 @@ mod tests {
 
         let log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/session-rebind.log")).unwrap();
+        assert!(log.contains(
+            "ownership_transition caller=test reason=test_register prior_generation=1 new_generation=2 old_pane=%42 new_pane=%84 old_window=@7 new_window=@9"
+        ));
         assert!(
             log.contains(
-                "session_superseded old_pane=%42 new_pane=%84 old_window=@7 new_window=@9"
+                "session_superseded old_pane=%42 new_pane=%84 old_window=@7 new_window=@9 prior_generation=1 new_generation=2"
             )
         );
-        assert!(log.contains("session_end origin=registry_rebind pane=%42 next_pane=%84"));
+        assert!(log.contains(
+            "session_end origin=registry_rebind pane=%42 next_pane=%84 generation=1 next_generation=2"
+        ));
     }
 }

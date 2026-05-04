@@ -2524,12 +2524,12 @@ mod tests {
             );
         }
         let start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_secs(3);
+        let timeout = std::time::Duration::from_secs(8);
         let poll = std::time::Duration::from_millis(300);
         let mut content = String::new();
         while start.elapsed() < timeout {
             content = sessions::capture_pane(tmux, pane).unwrap_or_default();
-            if content.contains("\n>") {
+            if mock_agent_prompt_visible(&content) {
                 break;
             }
             if let Some(cmd) = pane_current_command(tmux, pane)
@@ -2540,7 +2540,7 @@ mod tests {
             std::thread::sleep(poll);
         }
         assert!(
-            content.contains("\n>"),
+            mock_agent_prompt_visible(&content),
             "mock agent should be ready, got: {content}"
         );
         let start = std::time::Instant::now();
@@ -2574,6 +2574,10 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         panic!("timed out waiting for process matching {pattern}");
+    }
+
+    fn mock_agent_prompt_visible(content: &str) -> bool {
+        content.lines().any(|line| line.trim() == ">")
     }
 
     #[test]

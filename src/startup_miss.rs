@@ -692,7 +692,7 @@ mod tests {
         fs::create_dir_all(&logs_dir).unwrap();
         fs::write(
             logs_dir.join("session-123.log"),
-            "[1] session_start file=test.md pane=%41 session=session-123\n[2] ipc_started project_root=/tmp/project\n[3] codex_start mode=fresh restart_count=0\n",
+            "[1] session_start file=test.md pane=%41 session=session-123 generation=1\n[2] ipc_started project_root=/tmp/project\n[3] codex_start mode=fresh restart_count=0\n",
         )
         .unwrap();
 
@@ -725,7 +725,7 @@ mod tests {
         fs::create_dir_all(&logs_dir).unwrap();
         fs::write(
             logs_dir.join("session-789.log"),
-            "[1] session_start file=test.md pane=%52 session=session-789\n[2] codex_start mode=fresh restart_count=0\n[3] codex_exit code=0 restart_count=0\n[4] codex_restart mode=continue restart_count=1\n",
+            "[1] session_start file=test.md pane=%52 session=session-789 generation=1\n[2] codex_start mode=fresh restart_count=0\n[3] codex_exit code=0 restart_count=0\n[4] codex_restart mode=continue restart_count=1\n",
         )
         .unwrap();
 
@@ -753,7 +753,7 @@ mod tests {
         fs::create_dir_all(&logs_dir).unwrap();
         fs::write(
             logs_dir.join("session-456.log"),
-            "[1] session_start file=test.md pane=%52 session=session-456\n[2] codex_exit code=0 restart_count=0\n[3] session_end\n",
+            "[1] session_start file=test.md pane=%52 session=session-456 generation=1\n[2] codex_exit code=0 restart_count=0\n[3] session_end\n",
         )
         .unwrap();
 
@@ -776,11 +776,12 @@ mod tests {
         fs::write(
             logs_dir.join("session-commit.log"),
             concat!(
-                "[1] session_start file=test.md pane=%52 session=session-commit\n",
-                "[2] codex_start mode=fresh restart_count=0\n",
-                "[3] document_cycle phase=response_captured cycle=cycle-1 event=response_captured capture_id=cycle-1\n",
-                "[4] document_cycle phase=committed cycle=cycle-1 event=commit_success capture_id=cycle-1\n",
-                "[5] codex_exit code=0 restart_count=0\n",
+                "[1] ownership_transition caller=start reason=session_start prior_generation=0 new_generation=1 old_pane=none new_pane=%52 old_window=none new_window=@1\n",
+                "[2] session_start file=test.md pane=%52 session=session-commit generation=1\n",
+                "[3] codex_start mode=fresh restart_count=0\n",
+                "[4] document_cycle phase=response_captured cycle=cycle-1 event=response_captured capture_id=cycle-1\n",
+                "[5] document_cycle phase=committed cycle=cycle-1 event=commit_success capture_id=cycle-1\n",
+                "[6] codex_exit code=0 restart_count=0\n",
             ),
         )
         .unwrap();
@@ -805,10 +806,11 @@ mod tests {
         fs::write(
             logs_dir.join("session-rebind.log"),
             concat!(
-                "[1] session_start file=test.md pane=%52 session=session-rebind\n",
+                "[1] session_start file=test.md pane=%52 session=session-rebind generation=1\n",
                 "[2] codex_start mode=fresh restart_count=0\n",
-                "[3] session_superseded old_pane=%52 new_pane=%84 old_window=@1 new_window=@2\n",
-                "[4] session_end origin=registry_rebind pane=%52 next_pane=%84\n",
+                "[3] ownership_transition caller=route reason=dispatch_bind prior_generation=1 new_generation=2 old_pane=%52 new_pane=%84 old_window=@1 new_window=@2\n",
+                "[4] session_superseded old_pane=%52 new_pane=%84 old_window=@1 new_window=@2 prior_generation=1 new_generation=2\n",
+                "[5] session_end origin=registry_rebind pane=%52 next_pane=%84 generation=1 next_generation=2\n",
             ),
         )
         .unwrap();
@@ -820,7 +822,9 @@ mod tests {
         assert!(status.latest_session_closed());
         assert_eq!(
             status.last_event.as_deref(),
-            Some("session_end origin=registry_rebind pane=%52 next_pane=%84")
+            Some(
+                "session_end origin=registry_rebind pane=%52 next_pane=%84 generation=1 next_generation=2"
+            )
         );
     }
 
@@ -833,7 +837,7 @@ mod tests {
         let log_path = log_dir.join("session-loss.log");
         std::fs::write(
             &log_path,
-            "[1] session_start file=test.md pane=%61 session=session-loss\n[2] codex_start mode=fresh restart_count=0\n",
+            "[1] session_start file=test.md pane=%61 session=session-loss generation=1\n[2] codex_start mode=fresh restart_count=0\n",
         )
         .unwrap();
 

@@ -223,14 +223,38 @@ That policy came from an earlier keepalive hardening pass. The original goal was
 
 The fix in `211cea0` removes that direct-restart behavior for forwarded operator quit keys. Forwarded `Ctrl+D` now goes to the `Enter` / `q` menu instead of `ctrl_d_committed_cycle_restart_fresh`, and terminating forwarded `Ctrl+C` goes there too. The only remaining automatic fresh-restart case is a genuinely promptless clean exit with no forwarded operator key, which is a startup-recovery path rather than a user quit path.
 
-No repo changes were made in this follow-up closeout beyond recording this response.
-<!-- agent:boundary:653e7d9f -->
+❯ No repo changes were made in this follow-up closeout beyond recording this response.
+❯ Can we remove the ctrl_d_committed_cycle_restart_fresh policy? Ctrl+D should never directly restart Codex or Claude. Ctrl+D 1x for Codex and 2x for Claude should surface the "Press Enter to restart, or 'q' to exit." menu. Enter would then restart Codex or Claude. 'q' + Enter would stop the supervisor process. spec-test-build-install-commit-push
+### Re: `ctrl_d_committed_cycle_restart_fresh` policy — gpt-5
+
+Removed that policy.
+
+Root cause:
+- `src/agent-doc/src/start.rs` still carried a committed-cycle `Ctrl+D` exception and its settle probe even after the higher-level contract had moved back to "show the quit menu."
+- That left `ctrl_d_committed_cycle_restart_fresh` as a real supervisor policy branch instead of treating forwarded operator quit keys as authoritative.
+
+Implemented:
+- Deleted the committed-cycle `Ctrl+D` restart-fresh branch and the related settle probe/tests from `src/agent-doc/src/start.rs`.
+- Forwarded stdin `Ctrl+D` now always reaches the canonical `Press Enter to restart fresh, or 'q' to exit.` prompt; only promptless clean exits without a forwarded operator quit key still auto-restart fresh.
+- Updated `README.md`, `SPEC.md`, `CLAUDE.md`, `specs/codex-support.md`, `specs/supervisor.md`, and `VERSIONS.md` so the documented contract matches the code again.
+
+Claude did not need a policy change here; its clean-exit prompt behavior was already correct. This cycle removes the remaining Codex-specific exception.
+
+Verification completed in `src/agent-doc`:
+- `cargo fmt`
+- `cargo check`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Repo closeout in `src/agent-doc`: committed as `d92aad5` (`fix: always prompt on forwarded ctrl-d`) and pushed to `origin/20260422/codex-agent-backend`.
+
+I left the pre-existing unrelated dirty changes in `src/agent-doc/src/plugin.rs` and `src/agent-doc/src/route.rs` untouched. No follow-up backlog mutations were needed for this fix.
+<!-- agent:boundary:9ea335f8 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
-Why was ctrl_d_committed_cycle_restart_fresh in the policy? Ctrl+D should never directly restart Codex or Claude. Ctrl+D 1x for Codex and 2x for Claude should surface the "Press Enter to restart, or 'q' to exit." menu. Enter would then restart Codex or Claude. 'q' + Enter would stop the supervisor process. spec-test-build-install-commit-push
----
 "Press Enter to restart, or 'q' to exit."
 ---
 agent-doc running /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md with Codex is failing due to the sandbox. Please help me to DISABLE THE CODEX SANDBOX. I don't want agent-doc to bypass the sandbox by default but for my environment I want to bypass the sandbox. spec-test-build-install-commit-push

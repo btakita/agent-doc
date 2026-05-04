@@ -761,6 +761,18 @@ fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
     }
 }
 
+fn prompt_visible_requires_ready_transition(shared: &SupervisorShared) -> bool {
+    let first_prompt_for_child = !shared.prompt_visible_once.swap(true, Ordering::Relaxed);
+    if first_prompt_for_child {
+        return true;
+    }
+    shared
+        .actor_state
+        .lock()
+        .unwrap()
+        .is_some_and(|state| state != crate::session_actor::ActorState::Ready)
+}
+
 fn latest_prompt_candidate_line(
     shared: &SupervisorShared,
     harness: &crate::harness::HarnessConfig,
@@ -1364,7 +1376,7 @@ fn spawn_reader_thread(
                         }
                         record_recent_output(&shared, &filtered);
                         if current_child_prompt_visible(&shared, &harness) {
-                            if !shared.prompt_visible_once.swap(true, Ordering::Relaxed) {
+                            if prompt_visible_requires_ready_transition(&shared) {
                                 shared.transition_actor_state(
                                     crate::session_actor::ActorState::Ready,
                                     "supervisor",
@@ -3633,6 +3645,27 @@ mod tests {
             "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
         );
         assert!(!current_child_prompt_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn prompt_visible_requires_ready_transition_on_first_prompt() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        assert!(prompt_visible_requires_ready_transition(&shared));
+        assert!(
+            !prompt_visible_requires_ready_transition(&shared),
+            "a repeated prompt without an intervening busy transition should not retrigger ready"
+        );
+    }
+
+    #[test]
+    fn prompt_visible_requires_ready_transition_after_busy_dispatch() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        shared.prompt_visible_once.store(true, Ordering::Relaxed);
+        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Busy);
+        assert!(
+            prompt_visible_requires_ready_transition(&shared),
+            "a busy actor that surfaces the prompt again must return to ready"
+        );
     }
 
     // --- StopSignal + writer thread tests ---

@@ -79,6 +79,10 @@ Later phases may refine caller values without changing the field names.
 - The phase-3 supervisor path reports these actor transitions explicitly:
   `prompt_ready`, `ipc_inject` / `auto_trigger_inject` busy dispatch, clean-exit
   `waiting_input`, `supervisor_halted`, and final `closed`.
+- `prompt_visible_once` remains a child-lifecycle fact for restart heuristics, but
+  prompt-driven `busy -> ready` recovery must fire after every later routed or
+  auto-trigger dispatch that returns the same child to an idle prompt; it is not
+  a spawn-only one-shot transition.
 - The phase-4 route path now consumes that authoritative actor record directly
   when the supervisor is healthy: it dispatches the bare reopen through
   supervisor IPC to the actor-owned pane, waits for the normal routed

@@ -55,7 +55,22 @@ Verification:
 - `cargo test sync::` in `src/agent-doc`: surfaced one existing red `resync` regression (`purge_unregistered_stash_panes_kills_retained_dead_stash_pane`) on the broad run; the same test passed immediately when rerun alone, so I did not use that suite as proof of this fix.
 
 I added two follow-ups to the backlog: `#resyncflake` for the red retained-dead-pane test, and `#vssplitreplay` for a live mixed-root replay against the exact `agent-doc-bugs2.md` + `claudescore-3.md` split.
-<!-- agent:boundary:4d936ab6 -->
+When I select the opposite side of the editor (left->right, right->left), I do not receive a confirmation prompt of the sync the first time I try. Is there debounce logic that is preventing the sync from occurring? Please look at the JB Idea logs and the opts.log. Remove any logic that would prevent the sync from occurring and from being low latency. spec-test-build-install-commit-push
+### Re: opposite-pane sync latency — gpt-5
+
+Yes. The active IntelliJ log confirms the first opposite-pane sync was being blocked by editor-side suppression, not tmux. In `/home/brian/.cache/JetBrains/IntelliJIdea2026.1/log/idea.log`, the sequence at `2026-05-03 23:25:05` shows a real split sync to `claudescore-3.md`, then at `2026-05-03 23:25:09` the listener logged `bounce-back: suppressed re-focus of agent-doc-bugs2.md`. I also did not find any `opts.log` under the active IntelliJ cache/config/share roots, so there was no second log source to inspect beyond `idea.log`.
+
+I removed that suppression path and shortened automatic tab-sync coalescing from `500ms` to `100ms` in both JetBrains and VS Code. The shared planners now dispatch every real opposite-pane selection and only dedup an exact unchanged selection state. I also fixed a separate local-install bug in `agent-doc plugin install --local jetbrains`: it could prefer an older signed zip over a newer unsigned build.
+
+Verification:
+- `npm test` in `src/agent-doc/editors/vscode`: passed.
+- `./gradlew test buildPlugin` and `./gradlew signPlugin` in `src/agent-doc/editors/jetbrains`: passed.
+- `cargo test` in `src/agent-doc`: passed after the installer fix (`1804` main unit/integration tests plus the integration/doc-test tail).
+- `npm run package`: produced `agent-doc-0.2.11.vsix`.
+- `cargo run -- plugin install --local vscode`: installed `0.2.11`.
+- `cargo run -- plugin install --local jetbrains`: installed the local plugin into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
+- Code commit pushed in `src/agent-doc`: `4d36c77` on `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:e444a7c0 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

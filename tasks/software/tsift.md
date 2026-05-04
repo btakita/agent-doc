@@ -111,8 +111,16 @@ Scheduled in backlog in priority order.
 2. `#exactsearch` — first-class exact-text lookup path for literal queries.
 3. `#contentfts` — deferred evaluation of a native content/FTS index after the first two land.
 
-Top backlog item: `#searchcache`.
-<!-- agent:boundary:b20fe3de -->
+❯ Top backlog item: `#searchcache`.
+❯ do [#g8be]. spec-test-build-install-commit-push
+### Re: #g8be spec-test-build-install-commit-push — gpt-5
+
+Implemented the stable sift cache plumbing. `tsift search` now resolves a root-owned `.tsift/search-cache` and passes it through both the in-process lexical path and the timed `__search-worker`, so repeated searches can reuse sift corpus/BM25 artifacts without creating nested cache state. Scoped and federated searches now share that same root-owned cache, and `SPEC.md` plus `VERSIONS.md` now document the behavior at `tsift v0.1.22`.
+
+Added regression coverage in the direct search helpers and the compiled CLI search surface, including assertions that both `--timeout 0` and the helper-process path populate the stable cache directory. Verification passed in `src/tsift`: `make check`, `cargo build --release`, and `cargo install --path . --force`. The local binary is now `tsift v0.1.22`. Committed and pushed in `src/tsift` as `4e95bf9` (`feat: add stable sift search cache`).
+
+Top remaining backlog item: `#p886`.
+<!-- agent:boundary:3bf439ff -->
 <!-- /agent:exchange -->
 
 <!--
@@ -123,7 +131,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#g8be] searchcache=Wire a stable .tsift/search-cache into tsift search/__search-worker so sift reuses corpus and BM25 artifacts across repeated searches.
 - [ ] [#p886] exactsearch=Add a first-class exact-text search path for literal queries (for example `tsift search --exact` backed by `rg -F`) instead of routing every rg-style lookup through lexical BM25.
 - [ ] [#fpt7] contentfts=Evaluate whether tsift needs a native content/FTS index after cache + exact-search land; only build it if rg-backed exact lookup still leaves important gaps.
 <!-- /agent:backlog -->

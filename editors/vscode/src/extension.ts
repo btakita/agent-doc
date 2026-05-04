@@ -6,7 +6,12 @@ import { execFile } from 'child_process';
 import * as native from './native';
 import { consumeClaimedPatch, isPatchAlreadyApplied } from './patchGuard';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
-import { buildTabChangeCommand, type TabSyncState } from './tabSync';
+import {
+    buildSyncCommandArgs,
+    buildTabChangeCommand,
+    flattenVisibleColumns,
+    type TabSyncState,
+} from './tabSync';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -42,10 +47,6 @@ function resolveAgentDoc(): string {
 
 function isMarkdown(editor: vscode.TextEditor | undefined): boolean {
     return editor?.document.languageId === 'markdown';
-}
-
-function isMarkdownUri(uri: vscode.Uri): boolean {
-    return uri.fsPath.endsWith('.md');
 }
 
 function getWorkspaceRoot(uri: vscode.Uri): string | undefined {
@@ -436,19 +437,55 @@ function detectSplit(editor: vscode.TextEditor): SplitInfo {
     return { orientation, position };
 }
 
-function collectVisibleMdFiles(root: string): string[] {
-    const files: string[] = [];
-    for (const group of vscode.window.tabGroups.all) {
-        const activeTab = group.activeTab;
-        if (activeTab?.input instanceof vscode.TabInputText) {
-            const uri = activeTab.input.uri;
-            if (isMarkdownUri(uri) && uri.fsPath.startsWith(root)) {
+function collectVisibleMarkdownColumns(root: string): string[][] {
+    const columns = new Map<number, string[]>();
+    let maxColumn = 0;
+
+    for (const editor of vscode.window.visibleTextEditors) {
+        const viewColumn = editor.viewColumn;
+        if (viewColumn === undefined) continue;
+        maxColumn = Math.max(maxColumn, viewColumn);
+
+        const column = columns.get(viewColumn) ?? [];
+        if (isMarkdown(editor)) {
+            const uri = editor.document.uri;
+            if (uri.fsPath.startsWith(root)) {
                 const rel = relativePath(root, uri.fsPath);
-                if (!files.includes(rel)) files.push(rel);
+                if (!column.includes(rel)) column.push(rel);
             }
         }
+        columns.set(viewColumn, column);
     }
-    return files;
+
+    if (maxColumn === 0) {
+        return [];
+    }
+
+    const orderedColumns: string[][] = [];
+    for (let column = 1; column <= maxColumn; column += 1) {
+        orderedColumns.push(columns.get(column) ?? []);
+    }
+    return orderedColumns;
+}
+
+function formatSyncLayoutSummary(columns: string[][], focusFile?: string): string {
+    const summarizedColumns = columns
+        .map((column) => column.join(','))
+        .join(' | ');
+    return `Sync: --col ${summarizedColumns}${focusFile ? ` [focus: ${focusFile}]` : ''}`;
+}
+
+function buildSyncLayoutCommand(
+    columns: string[][],
+    focusFile?: string,
+    noAutostart = false,
+): string[] {
+    if (!focusFile) {
+        const firstVisible = flattenVisibleColumns(columns)[0];
+        if (!firstVisible) return ['sync'];
+        return buildSyncCommandArgs(columns, firstVisible, { noAutostart });
+    }
+    return buildSyncCommandArgs(columns, focusFile, { noAutostart });
 }
 
 // ---------------------------------------------------------------------------
@@ -548,7 +585,8 @@ async function syncLayoutAction(): Promise<void> {
 }
 
 async function syncLayoutInternal(root: string, notify: boolean, noAutostart: boolean): Promise<void> {
-    const visibleMd = collectVisibleMdFiles(root);
+    const visibleColumns = collectVisibleMarkdownColumns(root);
+    const visibleMd = flattenVisibleColumns(visibleColumns);
     if (visibleMd.length === 0) {
         if (notify) showHint('No .md files open');
         return;
@@ -565,21 +603,10 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
     }
 
     try {
-        // Always use sync --col format for consistency with JetBrains plugin.
-        // Group all visible files into a single column (VS Code doesn't easily
-        // expose multi-column layout structure via API).
-        const colArg = visibleMd.join(',');
-        const args = ['sync', '--col', colArg];
-        if (focusFile) {
-            args.push('--focus', focusFile);
-        }
-        if (noAutostart) {
-            args.push('--no-autostart');
-        }
-
+        const args = buildSyncLayoutCommand(visibleColumns, focusFile, noAutostart);
         const output = await runCli(args, root);
         if (notify) {
-            showHint(`Sync: --col ${colArg}${focusFile ? ` [focus: ${focusFile}]` : ''}`);
+            showHint(formatSyncLayoutSummary(visibleColumns, focusFile));
         }
     } catch (err: any) {
         if (notify) showError(`sync failed: ${err.message}`);
@@ -602,11 +629,13 @@ function onTabChanged(): void {
     if (!root) return;
 
     // Build a signature of the current visible md file set + active file
-    const visibleMd = collectVisibleMdFiles(root);
+    const visibleColumns = collectVisibleMarkdownColumns(root);
+    const visibleMd = flattenVisibleColumns(visibleColumns);
     const activeFile = relativePath(root, editor.document.uri.fsPath);
     const planned = buildTabChangeCommand({
         activeFile,
         visibleMd,
+        visibleColumns,
         previous: lastTabSyncState,
     });
     if (planned === null) return;
@@ -621,6 +650,7 @@ function onTabChanged(): void {
             const next = buildTabChangeCommand({
                 activeFile,
                 visibleMd,
+                visibleColumns,
                 previous: lastTabSyncState,
             });
             if (next === null) return;
@@ -1417,8 +1447,10 @@ export function activate(context: vscode.ExtensionContext): void {
                 const root = getWorkspaceRoot(newUri);
                 if (!root) continue;
                 const newRel = relativePath(root, newUri.fsPath);
-                const visibleMd = collectVisibleMdFiles(root);
-                runCli(['sync', '--col', visibleMd.join(','), '--focus', newRel, '--rename'], root).catch(() => {});
+                const visibleColumns = collectVisibleMarkdownColumns(root);
+                const args = buildSyncLayoutCommand(visibleColumns, newRel, false);
+                args.push('--rename');
+                runCli(args, root).catch(() => {});
             }
         })
     );

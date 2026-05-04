@@ -62,7 +62,10 @@ Verification in `src/tsift`: `cargo test` passed (`452` unit tests + `54` exit-c
 Not by itself. I reproduced the exact output from `/home/brian/work/btakita/agent-loop/src/session-share`, and it happens because `tsift` indexes that repo root, not the whole parent workspace. In that repo, `run_sync` is outside the indexed tree, so `tsift explain run_sync` legitimately returns `Symbol \`run_sync\` not found in index.`
 
 From the workspace root `/home/brian/work/btakita/agent-loop`, the same command resolves normally to `src/corky/src/search/ragie.rs:97` and returns callers/callees. So this is a scope/index-root mismatch, not evidence that the agent is malfunctioning. The practical effect is narrower context: if the agent needed that symbol, it would miss the cross-repo definition until it reruns from the broader root or reindexes the correct workspace.
-<!-- agent:boundary:e6676cc1 -->
+`agent-doc plan` blocked this cycle because it found no live document changes relative to the current snapshot, so I did not write or finalize a new response.
+
+The earlier preflight briefly saw a trailing line that looked like `Why was this symbol search attempted? spec-test-build-install-commit-push`, but by the time the binary planning step ran, that change was no longer present in the document. If you want that answered in the session doc, add the prompt back to [tasks/software/tsift.md](/home/brian/work/btakita/agent-loop/tasks/software/tsift.md) and rerun `agent-doc`.
+<!-- agent:boundary:fbb89042 -->
 <!-- /agent:exchange -->
 
 <!--

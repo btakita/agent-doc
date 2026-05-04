@@ -50,16 +50,15 @@
 //!   the agent-doc window for left-column files (`split_before`), last pane for right-column
 //!   files. This places the new pane adjacent to its column neighbors instead of always splitting
 //!   beside an arbitrary registered pane.
-//! - **`send_command(tmux, pane, file_path, harness)`**: Flashes a tmux display-message on the
-//!   target pane, sends the harness trigger command via send-keys, focuses the pane, then polls
-//!   up to 5 seconds verifying the command was accepted (retrying Enter if still visible in
-//!   input). Codex reroutes intentionally keep the payload to the bare `agent-doc <FILE>` reopen
-//!   so the harness re-enters the binary-owned document flow instead of treating a multiline pasted
-//!   prompt as ordinary chat text.
-//! - **Dispatch-only editor reroutes** bypass that acceptance loop on purpose. They send the same
-//!   bare reopen once, without Enter retries or managed-route recovery choreography, and they fail
-//!   closed up front when the pane is visibly stuck in an interactive shell blocker such as
-//!   `reverse-i-search`.
+//! - **`send_command(tmux, pane, file_path, harness)`**: Used only for direct tmux/shell
+//!   launch paths. Existing managed sessions reroute through supervisor IPC instead of typing
+//!   directly into the pane. Codex reroutes intentionally keep the payload to the bare
+//!   `agent-doc <FILE>` reopen so the harness re-enters the binary-owned document flow instead of
+//!   treating a multiline pasted prompt as ordinary chat text.
+//! - **Dispatch-only editor reroutes** still bypass the managed acceptance/cycle-ack loop on
+//!   purpose, but for existing managed sessions they now send the same bare reopen through one
+//!   supervisor IPC inject instead of direct pane keystrokes. They fail closed up front when the
+//!   pane is visibly stuck in an interactive shell blocker such as `reverse-i-search`.
 //! - **`await_idle(file, debounce)`**: Polls file mtime every 100ms until `debounce` has
 //!   elapsed since last modification, or until `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
@@ -1348,7 +1347,14 @@ fn dispatch_only_send_reopen(
     }
 
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
-    send_command_once_checked(tmux, &dispatch_pane, file_path, harness)?;
+    let _ = dispatch_via_supervisor_ipc_once(
+        tmux,
+        file,
+        &dispatch_pane,
+        session_id,
+        file_path,
+        harness,
+    )?;
     crate::ops_log::log_op(
         file,
         &format!(
@@ -2504,7 +2510,14 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                 register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
                 let dispatch_start =
-                    dispatch_routed_reopen(tmux, file, &registered_pane, file_path, harness)?;
+                    dispatch_existing_managed_reopen(
+                        tmux,
+                        file,
+                        session_id,
+                        &registered_pane,
+                        file_path,
+                        harness,
+                    )?;
                 require_routed_cycle_ack(
                     tmux,
                     file,
@@ -2616,7 +2629,14 @@ fn resolve_or_create_pane_with_auto_fix_retry(
             }
         }
         register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
-        let dispatch_start = dispatch_routed_reopen(tmux, file, &new_pane, file_path, harness)?;
+        let dispatch_start = dispatch_existing_managed_reopen(
+            tmux,
+            file,
+            session_id,
+            &new_pane,
+            file_path,
+            harness,
+        )?;
         let ack_pane = require_routed_cycle_ack(
             tmux,
             file,
@@ -2891,7 +2911,8 @@ fn optimistic_busy_pane_dispatch(
         harness.binary
     );
     register_dispatch_target(tmux, session_id, pane, file_path)?;
-    let dispatch_start = dispatch_routed_reopen(tmux, file, pane, file_path, harness)?;
+    let dispatch_start =
+        dispatch_existing_managed_reopen(tmux, file, session_id, pane, file_path, harness)?;
     let ack_pane = require_routed_cycle_ack(
         tmux,
         file,
@@ -3100,13 +3121,14 @@ fn send_command_once_unchecked(
     Ok(trigger)
 }
 
-fn dispatch_via_supervisor_ipc(
+fn dispatch_via_supervisor_ipc_with_mode(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
     session_id: &str,
     file_path: &str,
     harness: &HarnessConfig,
+    await_start_proof: bool,
 ) -> Result<RoutedDispatchStartProof> {
     let Some(sock) = supervisor_socket_path(file, session_id) else {
         anyhow::bail!(
@@ -3161,6 +3183,10 @@ fn dispatch_via_supervisor_ipc(
         trigger, pane
     );
 
+    if !await_start_proof {
+        return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
+    }
+
     let Some(tracker) = tracker else {
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     };
@@ -3199,6 +3225,44 @@ fn dispatch_via_supervisor_ipc(
         timeout.as_secs()
     );
     Ok(RoutedDispatchStartProof::CommandAcceptedOnly)
+}
+
+fn dispatch_via_supervisor_ipc(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    session_id: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<RoutedDispatchStartProof> {
+    dispatch_via_supervisor_ipc_with_mode(
+        tmux,
+        file,
+        pane,
+        session_id,
+        file_path,
+        harness,
+        true,
+    )
+}
+
+fn dispatch_via_supervisor_ipc_once(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    session_id: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<RoutedDispatchStartProof> {
+    dispatch_via_supervisor_ipc_with_mode(
+        tmux,
+        file,
+        pane,
+        session_id,
+        file_path,
+        harness,
+        false,
+    )
 }
 
 fn authoritative_actor_dispatch_blocker_reason(
@@ -3434,6 +3498,17 @@ fn send_command_once_checked(
     ensure_dispatch_target_matches_file(pane, file_path)?;
     let _ = send_command_once_unchecked(tmux, pane, file_path, harness)?;
     Ok(())
+}
+
+fn dispatch_existing_managed_reopen(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<RoutedDispatchStartProof> {
+    dispatch_via_supervisor_ipc(tmux, file, pane, session_id, file_path, harness)
 }
 
 fn dispatch_routed_reopen(
@@ -3986,9 +4061,10 @@ fn retry_routed_cycle_ack_after_fresh_restart(
         };
     }
 
-    let dispatch_start = match dispatch_routed_reopen(
+    let dispatch_start = match dispatch_existing_managed_reopen(
         tmux,
         file,
+        session_id,
         &dispatch_pane,
         file_path,
         harness,
@@ -5024,7 +5100,13 @@ fn auto_start_in_session(
                 )?;
                 RoutedDispatchStartProof::CommandAcceptedOnly
             } else {
-                dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness)?
+                dispatch_routed_reopen(
+                    tmux,
+                    file,
+                    &dispatch_pane,
+                    file_path,
+                    harness,
+                )?
             }
         } else {
             eprintln!(
@@ -5042,7 +5124,13 @@ fn auto_start_in_session(
                 )
                 .map(|_| RoutedDispatchStartProof::CommandAcceptedOnly)
             } else {
-                dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness)
+                dispatch_routed_reopen(
+                    tmux,
+                    file,
+                    &dispatch_pane,
+                    file_path,
+                    harness,
+                )
             };
             match dispatch_result {
                 Ok(proof) => {
@@ -6858,6 +6946,8 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
 
     #[test]
     fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
+        use std::sync::{Arc, Mutex};
+
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -6877,7 +6967,20 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        sessions::register("route-live-child-extended-ack", &pane, &file_path).unwrap();
+        let session_id = "route-live-child-extended-ack";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
 
         let doc_for_thread = doc.clone();
         std::thread::spawn(move || {
@@ -6890,7 +6993,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
             &doc,
             None,
             &[],
-            "route-live-child-extended-ack",
+            session_id,
             &file_path,
             session,
             &HarnessConfig::codex(),
@@ -6898,6 +7001,11 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         )
         .expect("route should tolerate a delayed but real live-child cycle start");
         assert_eq!(routed, pane);
+        assert_eq!(
+            *injects.lock().unwrap(),
+            vec![format!("{}\n", HarnessConfig::codex().trigger_command(&file_path))],
+            "route should dispatch the bare Codex reopen through supervisor IPC before waiting for the delayed live-child ack"
+        );
 
         let state = crate::cycle_state::load(&doc)
             .unwrap()
@@ -6906,6 +7014,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
             state.phase,
             crate::cycle_state::CyclePhase::PreflightStarted
         );
+        ipc.stop();
     }
 
     #[test]
@@ -7040,6 +7149,8 @@ Body\n\
 
     #[test]
     fn resolve_or_create_pane_keeps_live_child_reroute_optimistic_when_cycle_ack_is_missing() {
+        use std::sync::{Arc, Mutex};
+
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -7060,6 +7171,22 @@ Body\n\
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         sessions::register("route-live-child-skip", &pane, &file_path).unwrap();
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(
+            dir.path(),
+            "route-live-child-skip",
+            move |method| match method {
+                IpcMethod::Inject { bytes } => {
+                    injects_for_ipc.lock().unwrap().push(bytes.clone());
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
 
         let resolved = resolve_or_create_pane(
             &iso,
@@ -7074,21 +7201,19 @@ Body\n\
         )
         .expect("route should stay optimistic when the correct live Codex pane accepts the reopen");
         assert_eq!(resolved, pane);
-
-        let content = wait_for_pane_contains(
-            &iso,
-            &pane,
-            "GOT:agent-doc ",
-            std::time::Duration::from_secs(3),
-        );
+        let injects = injects.lock().unwrap().clone();
         assert!(
-            content.contains("GOT:agent-doc "),
-            "route should still dispatch the trigger to the registered pane: {content}"
+            !injects.is_empty()
+                && injects
+                    .iter()
+                    .all(|inject| inject == &format!("{}\n", HarnessConfig::codex().trigger_command(&file_path))),
+            "route should still dispatch the trigger through supervisor IPC before accepting the optimistic startup-miss path: {injects:?}"
         );
         let miss = crate::startup_miss::load(&doc)
             .unwrap()
             .expect("optimistic route should still record a startup miss");
         assert_eq!(miss.pane_id, pane);
+        ipc.stop();
     }
 
     #[test]
@@ -7127,6 +7252,7 @@ Body\n\
         let ipc_tmux = iso.clone();
         let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
         let injected_pane_for_ipc = injected_pane.clone();
+        *injected_pane.lock().unwrap() = Some(pane.clone());
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
                 match method {
@@ -7399,6 +7525,7 @@ Body\n\
     #[test]
     fn resolve_or_create_pane_restarts_fresh_before_dispatch_after_tracked_codex_clear() {
         use std::sync::{
+            Mutex,
             Arc,
             atomic::{AtomicBool, Ordering},
         };
@@ -7448,9 +7575,8 @@ Body\n\
         let restart_called_for_ipc = restart_called.clone();
         let supervisor_instance_id = "busy-reroute-supervisor".to_string();
         let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
-        let ipc_tmux = iso.clone();
-        let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
-        let injected_pane_for_ipc = injected_pane.clone();
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
                 match method {
@@ -7470,9 +7596,7 @@ Body\n\
                     }
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                     IpcMethod::Inject { bytes } => {
-                        if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
-                            let _ = ipc_tmux.send_keys(&target, &bytes);
-                        }
+                        injects_for_ipc.lock().unwrap().push(bytes.clone());
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
                     IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
@@ -7529,20 +7653,11 @@ Body\n\
             restart_called.load(Ordering::Relaxed),
             "route should request a fresh restart before dispatch"
         );
-
-        let content = wait_for_pane_contains(
-            &iso,
-            &pane,
-            "FRESH:agent-doc ",
-            std::time::Duration::from_secs(5),
-        );
+        let trigger = HarnessConfig::codex().trigger_command(&file_path);
+        let injects = injects.lock().unwrap().clone();
         assert!(
-            content.contains("FRESH:agent-doc "),
-            "route should inject into the fresh post-clear session: {content}"
-        );
-        assert!(
-            !content.contains("STALE:agent-doc "),
-            "route should not dispatch into the pre-clear session: {content}"
+            injects == vec![format!("{trigger}\n")],
+            "route should inject exactly one bare reopen through supervisor IPC after the fresh restart: {injects:?}"
         );
 
         ipc.stop();
@@ -7752,6 +7867,8 @@ Body\n\
 
     #[test]
     fn dispatch_only_send_reopen_skips_acceptance_polling_enter_retries() {
+        use std::sync::{Arc, Mutex};
+
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -7784,6 +7901,22 @@ Body\n\
             content.contains(&format!("> {}", trigger)),
             "mock session should keep a stale visible trigger line in pane output: {content}"
         );
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(
+            dir.path(),
+            "route-test-dispatch-only-no-enter-retries",
+            move |method| match method {
+                IpcMethod::Inject { bytes } => {
+                    injects_for_ipc.lock().unwrap().push(bytes.clone());
+                    IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                }
+                IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+                IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+            },
+        )
+        .unwrap();
 
         sessions::register(
             "route-test-dispatch-only-no-enter-retries",
@@ -7800,21 +7933,11 @@ Body\n\
             &HarnessConfig::codex(),
         )
         .expect("dispatch-only reopen should still send once when no explicit blocker is visible");
-
-        let after = wait_for_pane_contains(
-            &iso,
-            &pane,
-            &format!("GOT:{trigger}"),
-            std::time::Duration::from_secs(3),
-        );
         assert!(
-            after.contains(&format!("GOT:{trigger}")),
-            "dispatch-only reopen should still send the bare reopen: {after}"
+            *injects.lock().unwrap() == vec![format!("{trigger}\n")],
+            "dispatch-only reopen must use exactly one supervisor inject without extra Enter retries"
         );
-        assert!(
-            !after.contains("EXTRA:"),
-            "dispatch-only reopen must not keep sending Enter retries after the one-shot reopen: {after}"
-        );
+        ipc.stop();
     }
 
     #[test]
@@ -8002,6 +8125,19 @@ Body\n\
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         let session_id = "route-dispatch-only-startup-miss";
         sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } => {
+                let normalized = bytes.replace("\r\n", "\r").replace('\n', "\r");
+                let _ = ipc_tmux.send_keys_raw(&pane_for_ipc, &normalized);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
         crate::startup_miss::record(
             &doc,
             &pane,
@@ -8032,6 +8168,7 @@ Body\n\
             after.contains("GOT:agent-doc "),
             "dispatch-only route should send despite the retained startup-miss marker: {after}"
         );
+        ipc.stop();
     }
 
     #[test]
@@ -8073,7 +8210,20 @@ Body\n\
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        sessions::register("route-live-pane-busy-interrupt-retry", &pane, &file_path).unwrap();
+        let session_id = "route-live-pane-busy-interrupt-retry";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
 
         let doc_for_thread = doc.clone();
         let current_for_thread = current.clone();
@@ -8088,7 +8238,7 @@ Body\n\
             &doc,
             None,
             &[],
-            "route-live-pane-busy-interrupt-retry",
+            session_id,
             &file_path,
             session,
             &HarnessConfig::codex(),
@@ -8110,6 +8260,7 @@ Body\n\
             after.contains("GOT:agent-doc "),
             "route should dispatch the reopen after the interrupt recovery retry: {after}"
         );
+        ipc.stop();
     }
 
     #[test]
@@ -8148,7 +8299,20 @@ Body\n\
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        sessions::register("route-live-pane-busy-ctrl-g-retry", &pane, &file_path).unwrap();
+        let session_id = "route-live-pane-busy-ctrl-g-retry";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
 
         let doc_for_thread = doc.clone();
         let current_for_thread = current.clone();
@@ -8163,7 +8327,7 @@ Body\n\
             &doc,
             None,
             &[],
-            "route-live-pane-busy-ctrl-g-retry",
+            session_id,
             &file_path,
             session,
             &HarnessConfig::codex(),
@@ -8185,6 +8349,7 @@ Body\n\
             after.contains("GOT:agent-doc "),
             "route should dispatch the reopen after the ctrl-g interrupt recovery probe: {after}"
         );
+        ipc.stop();
     }
 
     #[test]
@@ -8628,7 +8793,20 @@ Body\n\
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        sessions::register("route-live-pane-busy-auto-fix", &pane, &file_path).unwrap();
+        let session_id = "route-live-pane-busy-auto-fix";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
 
         let doc_for_thread = doc.clone();
         let current_for_thread = current.clone();
@@ -8643,7 +8821,7 @@ Body\n\
             &doc,
             None,
             &[],
-            "route-live-pane-busy-auto-fix",
+            session_id,
             &file_path,
             session,
             &HarnessConfig::codex(),
@@ -8662,12 +8840,14 @@ Body\n\
             after.contains("GOT:agent-doc "),
             "route should inject the reopen after the scoped fix retry: {after}"
         );
+        ipc.stop();
     }
 
     #[test]
     fn resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route() {
         use std::sync::{
             Arc,
+            Mutex,
             atomic::{AtomicBool, Ordering},
         };
 
@@ -8710,6 +8890,8 @@ Body\n\
 
         let restart_called = Arc::new(AtomicBool::new(false));
         let restart_called_for_ipc = restart_called.clone();
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
         let mut ipc =
             crate::supervisor::ipc::SupervisorIpc::start(dir.path(), session_id, move |method| {
                 match method {
@@ -8724,6 +8906,7 @@ Body\n\
                     }
                     IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                     IpcMethod::Inject { bytes } => {
+                        injects_for_ipc.lock().unwrap().push(bytes.clone());
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
                     IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
@@ -8791,22 +8974,9 @@ Body\n\
         let replacement_pane = replacement.join().unwrap();
         assert!(restart_called.load(Ordering::Relaxed));
         assert_eq!(routed, replacement_pane);
-
-        let replacement_after = wait_for_pane_contains(
-            &iso,
-            &replacement_pane,
-            "GOT:agent-doc ",
-            std::time::Duration::from_secs(5),
-        );
         assert!(
-            replacement_after.contains("GOT:agent-doc "),
-            "route should dispatch into the replacement pane after restart handoff: {replacement_after}"
-        );
-
-        let busy_after = sessions::capture_pane(&iso, &busy_pane).unwrap_or_default();
-        assert!(
-            !busy_after.contains("GOT:agent-doc "),
-            "route must not keep dispatching into the stale busy pane after restart handoff: {busy_after}"
+            *injects.lock().unwrap() == vec![format!("{}\n", HarnessConfig::codex().trigger_command(&file_path))],
+            "route should dispatch exactly one bare Codex reopen through supervisor IPC after the restart handoff"
         );
 
         ipc.stop();
@@ -8919,7 +9089,20 @@ Body\n\
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        sessions::register("route-live-same-cycle", &pane, &file_path).unwrap();
+        let session_id = "route-live-same-cycle";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
 
         let doc_for_thread = doc.clone();
         let snapshot_for_thread = snapshot.to_string();
@@ -8939,7 +9122,7 @@ Body\n\
             &doc,
             None,
             &[],
-            "route-live-same-cycle",
+            session_id,
             &file_path,
             session,
             &HarnessConfig::codex(),
@@ -8964,6 +9147,7 @@ Body\n\
             .unwrap()
             .expect("optimistic same-cycle reroute should still record a startup miss");
         assert_eq!(miss.pane_id, pane);
+        ipc.stop();
     }
 
     #[test]
@@ -8988,7 +9172,21 @@ Body\n\
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        sessions::register("route-live-ok", &pane, &file_path).unwrap();
+        let session_id = "route-live-ok";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } => {
+                let normalized = bytes.replace("\r\n", "\r").replace('\n', "\r");
+                let _ = ipc_tmux.send_keys_raw(&pane_for_ipc, &normalized);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
 
         let doc_for_thread = doc.clone();
         let snapshot_for_thread = snapshot.to_string();
@@ -9015,7 +9213,7 @@ Body\n\
             &doc,
             None,
             &[],
-            "route-live-ok",
+            session_id,
             &file_path,
             session,
             &HarnessConfig::codex(),
@@ -9038,6 +9236,7 @@ Body\n\
             !content.contains("EXTRA:"),
             "route should not append follow-up prompt text onto the Codex reopen payload: {content}"
         );
+        ipc.stop();
     }
 
     #[test]
@@ -9062,7 +9261,21 @@ Body\n\
         crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
             .unwrap();
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        sessions::register("route-live-content-edit-ok", &pane, &file_path).unwrap();
+        let session_id = "route-live-content-edit-ok";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } => {
+                let normalized = bytes.replace("\r\n", "\r").replace('\n', "\r");
+                let _ = ipc_tmux.send_keys_raw(&pane_for_ipc, &normalized);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
 
         let doc_for_thread = doc.clone();
         let snapshot_for_thread = snapshot.to_string();
@@ -9089,7 +9302,7 @@ Body\n\
             &doc,
             None,
             &[],
-            "route-live-content-edit-ok",
+            session_id,
             &file_path,
             session,
             &HarnessConfig::codex(),
@@ -9112,6 +9325,7 @@ Body\n\
             !content.contains("EXTRA:"),
             "route must not append content-edit text onto the Codex reopen payload: {content}"
         );
+        ipc.stop();
     }
 
     #[test]
@@ -10354,6 +10568,8 @@ Body\n\
 
     #[test]
     fn alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path() {
+        use std::sync::{Arc, Mutex};
+
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -10371,11 +10587,16 @@ Body\n\
         launch_mock_agent_doc_without_file_arg(&iso, &pane, &mock_agent);
         let mock_agent_pid =
             wait_for_process_pid(&mock_agent.display().to_string(), Duration::from_secs(3));
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
 
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": mock_agent_pid })),
             IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-            IpcMethod::Inject { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
             IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
@@ -10395,16 +10616,10 @@ Body\n\
         )
         .expect("route should recover the live owner via supervisor pid");
         assert_eq!(resolved, pane);
-
-        let content = wait_for_pane_contains(
-            &iso,
-            &pane,
-            "GOT:agent-doc ",
-            std::time::Duration::from_secs(3),
-        );
         assert!(
-            content.contains("GOT:agent-doc "),
-            "route should dispatch to the registered pane recovered from supervisor pid: {content}"
+            *injects.lock().unwrap()
+                == vec![format!("{}\n", HarnessConfig::codex().trigger_command(&file_path))],
+            "route should dispatch to the registered pane via supervisor IPC after recovering the live owner via supervisor pid"
         );
 
         ipc.stop();

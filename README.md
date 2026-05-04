@@ -49,7 +49,7 @@ agent-doc route --dispatch-only session.md
 agent-doc run session.md
 ```
 
-The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only <file>` via a hotkey, and agent-doc injects the correct harness-specific trigger into the owning pane. Claude Code panes receive `/agent-doc <file>`; Codex panes receive plain `agent-doc <file>`.
+The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only <file>` via a hotkey, and agent-doc dispatches the correct harness-specific trigger through the owning supervisor into the right pane. Claude Code panes receive `/agent-doc <file>`; Codex panes receive plain `agent-doc <file>`.
 
 ## Key Features
 
@@ -57,6 +57,7 @@ The typical edit cycle: write in your editor, trigger `agent-doc route --dispatc
 - **CRDT merge** — yrs-based conflict-free merge for concurrent edits between agent writes and user edits
 - **IPC-first writes** — socket IPC (Unix domain sockets); editor plugin receives JSON patches instead of file overwrites; preserves cursor position, undo history, and avoids "externally modified" dialogs
 - **Tmux routing** — persistent per-document agent sessions; `route` dispatches to the correct pane or auto-starts one using the active harness's trigger shape (`/agent-doc` for Claude Code, plain `agent-doc` for Codex); reconciler always runs (no early exits) handling 0/1/2+ panes uniformly
+- **Existing managed reroutes are supervisor-owned** — once a Claude/Codex session is running under `agent-doc start`, route/reopen traffic goes through supervisor IPC instead of direct pane `send-keys`, so editor reroutes and restart handoffs share one dispatch boundary
 - **Fresh reroutes keep the new pane authoritative** — after route creates a fresh pane for a document, later same-session registry churn cannot hand the reopen back to an older pane and make the new pane disappear from the `agent-doc` window
 - **Codex forwarded `Ctrl+C` and EOF/Ctrl-D now always hand control back to the operator** — after a stdin-forwarded `Ctrl+C` that terminates the child, or a forwarded stdin EOF/Ctrl-D, agent-doc returns to an explicit canonical `Enter`/`q` prompt mode so the operator can intentionally restart fresh or exit the supervisor cleanly even when the parent harness keeps stdin in raw-ish mode, including immediately after a successfully committed turn
 - **Only genuinely promptless clean exits auto-recover** — if a fresh/fresh-restart Codex child clean-exits before it ever surfaces an idle prompt and no operator `Ctrl+D` was forwarded, agent-doc still treats that as failed startup provenance and restarts fresh automatically instead of stopping for the quit prompt

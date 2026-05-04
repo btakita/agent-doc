@@ -22,6 +22,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Routes a harness-native reopen command into the authoritative pane for the document.
 - When `.agent-doc/session-actors.json` has a healthy authoritative record for the document, route must treat that actor generation as the owner-of-record and dispatch through supervisor IPC instead of re-electing a pane from tmux/process heuristics.
 - Normal-path ownership proof is the authoritative actor record first, then the supervisor-backed registered binding from `sessions.json`.
+- Existing managed reroutes must use supervisor IPC for the reopen path; they must not fall back to typing directly into a live Claude/Codex pane.
 - Actor-backed reroutes may refresh `sessions.json` as a projection of the actor pane, but they must not opportunistically steal another same-file pane or re-register to a heuristic winner while the authoritative actor is healthy.
 - Session-log owners, `registry_rebind` successors, and generic same-file process-tree matches are repair/diagnostic signals only; route must fail closed with explicit inspect/claim/kill guidance instead of promoting them back to authority on the normal path.
 - Route must fail closed on ambiguity and list concrete follow-up commands instead of guessing.
@@ -40,7 +41,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - When route/startup acknowledgment times out, the binary records `.agent-doc/state/startup-miss/<doc-hash>.json` with pane/session provenance and shows a visible diagnostic in tmux.
 - On the next route/start/sync path, the tool must distinguish between a stale startup-miss marker and a still-stranded owner. A same-pane marker may only be cleared once newer session-log provenance proves a later open run.
 - Successful cycle acknowledgment clears the startup-miss marker.
-- `route --dispatch-only` still uses a one-shot bare reopen instead of the managed acceptance/cycle-ack path, but it must reuse the same bounded ready/repair/restart checks before injecting into an existing pane. A bare reopen must not be injected into a still-booting or otherwise busy Codex pane.
+- `route --dispatch-only` still uses a one-shot bare reopen instead of the managed acceptance/cycle-ack path, but for an existing managed session that one-shot reopen must go through supervisor IPC instead of direct pane keystrokes. It must reuse the same bounded ready/repair/restart checks before injecting into an existing pane, and a bare reopen must not be injected into a still-booting or otherwise busy Codex pane.
 - If that first dispatch-only starting-pane probe times out, route must spend one bounded recovery window looking for a newer same-file startup generation or supervisor handoff before it surfaces a `still booting` refusal. A same-file successor pane may be followed; a cross-file rebind must still fail closed.
 
 ### Live-child ack rules

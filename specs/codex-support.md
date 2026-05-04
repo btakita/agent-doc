@@ -122,7 +122,7 @@ Key differences from Claude Code:
 3. ✅ Refactored `start.rs::run()`:
    - Binary name parameterized (spawn, error messages, log events)
    - Restart args use `harness.restart_args()` (append vs replace)
-   - Clean exit handling is harness-aware: Codex auto-restarts in resume mode after a normal `codex exec` turn instead of dropping into the Claude-style `Enter`/`q` prompt, but stdin EOF/Ctrl-D prompts the user (`Enter` = restart fresh, `q` = exit), and failed resume handoffs stop chaining blind resumes by restarting fresh on the first failure and escalating to that same prompt on repeated failures
+   - Clean exit handling is harness-aware: Codex auto-restarts in resume mode after a normal `codex exec` turn instead of dropping into the Claude-style `Enter`/`q` prompt, but stdin EOF/Ctrl-D normally prompts the user (`Enter` = restart fresh, `q` = exit); if that child run already committed an `agent-doc` document cycle, the supervisor restarts fresh instead so routed/editor-owned runs keep their pane attached. Failed resume handoffs still stop chaining blind resumes by restarting fresh on the first failure and escalating to that same prompt on repeated failures
    - Prompt detection now requires a prompt line that appears in pane content produced after the resumed child starts; a stale prompt still visible in tmux history no longer counts as resume proof
    - Trigger command uses `harness.trigger_command()`
    - `--no-mcp` and `ENABLE_TOOL_SEARCH` gated by `supports_*` flags

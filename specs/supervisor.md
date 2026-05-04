@@ -150,6 +150,10 @@ on claude exit with code c:
                          EXCEPT when stdin EOF (Ctrl+D) detected → prompt user
                          (Enter to restart fresh / q to exit) so the user can
                          choose to quit the supervisor cleanly
+                         EXCEPT when that same child run already recorded a
+                         committed `document_cycle`: in that case restart fresh
+                         instead of prompting so a successful routed/editor-owned
+                         turn cannot immediately tear down the claimed tmux pane
                          AND the supervisor must log the prompt outcome
                          (`user_quit*`, `user_restart_fresh`, invalid input) so
                          later `session_start` / `session_end` transitions keep

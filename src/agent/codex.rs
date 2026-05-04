@@ -268,6 +268,22 @@ impl Codex {
         }
     }
 
+    fn write_prompt_to_child(
+        stdin: &mut std::process::ChildStdin,
+        prompt: &str,
+    ) -> std::io::Result<()> {
+        use std::io::Write;
+
+        match stdin.write_all(prompt.as_bytes()) {
+            Ok(()) => Ok(()),
+            // Tiny fake codex scripts used in unit tests can finish and close
+            // stdin before the parent writes the prompt. Treat that as
+            // non-fatal and let the child exit/output determine the result.
+            Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
     fn build_command(&self, session_id: Option<&str>, _fork: bool, model: Option<&str>) -> Command {
         let mut cmd = Command::new(&self.command);
 
@@ -479,9 +495,8 @@ impl Codex {
             .stderr(std::process::Stdio::piped())
             .spawn()
             .and_then(|mut child| {
-                use std::io::Write;
                 if let Some(ref mut stdin) = child.stdin {
-                    stdin.write_all(prompt.as_bytes())?;
+                    Self::write_prompt_to_child(stdin, prompt)?;
                 }
                 child.wait_with_output()
             })?;
@@ -566,9 +581,8 @@ impl Codex {
             .spawn()?;
 
         {
-            use std::io::Write;
             if let Some(ref mut stdin) = child.stdin {
-                stdin.write_all(prompt.as_bytes())?;
+                Self::write_prompt_to_child(stdin, prompt)?;
             }
             child.stdin.take();
         }

@@ -53,6 +53,7 @@ pub struct SessionLogStatus {
     pub latest_start_timestamp: Option<u64>,
     pub latest_run_timestamp: Option<u64>,
     pub latest_run_event: Option<String>,
+    pub saw_committed_cycle_after_latest_run: bool,
     pub last_event: Option<String>,
     pub saw_process_exit_after_latest_start: bool,
     pub saw_session_end_after_latest_start: bool,
@@ -288,6 +289,7 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
     let mut latest_start_timestamp = None;
     let mut latest_run_timestamp = None;
     let mut latest_run_event = None;
+    let mut saw_committed_cycle_after_latest_run = false;
     let mut last_event = None;
     let mut saw_process_exit_after_latest_start = false;
     let mut saw_session_end_after_latest_start = false;
@@ -317,6 +319,7 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
                 .find_map(|part| part.strip_prefix("pane=").map(ToOwned::to_owned));
             latest_run_timestamp = None;
             latest_run_event = None;
+            saw_committed_cycle_after_latest_run = false;
             last_event = Some(event.to_string());
             saw_process_exit_after_latest_start = false;
             saw_session_end_after_latest_start = false;
@@ -332,6 +335,7 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
         if is_harness_run_start_event(event) {
             latest_run_timestamp = timestamp.or(latest_start_timestamp);
             latest_run_event = Some(event.to_string());
+            saw_committed_cycle_after_latest_run = false;
             last_event = Some(event.to_string());
             saw_process_exit_after_latest_run = false;
             saw_session_end_after_latest_run = false;
@@ -339,6 +343,9 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
         }
 
         last_event = Some(event.to_string());
+        if event.starts_with("document_cycle phase=committed ") && latest_run_timestamp.is_some() {
+            saw_committed_cycle_after_latest_run = true;
+        }
         if event.contains("_exit code=") {
             saw_process_exit_after_latest_start = true;
             if latest_run_timestamp.is_some() {
@@ -366,6 +373,7 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
         latest_start_timestamp,
         latest_run_timestamp,
         latest_run_event,
+        saw_committed_cycle_after_latest_run,
         last_event,
         saw_process_exit_after_latest_start,
         saw_session_end_after_latest_start,
@@ -686,6 +694,7 @@ mod tests {
             status.latest_run_event.as_deref(),
             Some("codex_start mode=fresh restart_count=0")
         );
+        assert!(!status.saw_committed_cycle_after_latest_run);
         assert!(status.latest_session_open());
         assert!(!status.latest_session_closed());
         assert_eq!(
@@ -719,6 +728,7 @@ mod tests {
             status.latest_run_event.as_deref(),
             Some("codex_restart mode=continue restart_count=1")
         );
+        assert!(!status.saw_committed_cycle_after_latest_run);
         assert!(status.latest_session_open());
         assert!(!status.latest_session_closed());
         assert_eq!(latest_open_run_timestamp(&status), Some(4));
@@ -741,8 +751,38 @@ mod tests {
             .expect("session log status");
         assert_eq!(status.latest_start_pane.as_deref(), Some("%52"));
         assert_eq!(status.latest_run_timestamp, None);
+        assert!(!status.saw_committed_cycle_after_latest_run);
         assert!(!status.latest_session_open());
         assert!(status.latest_session_closed());
+    }
+
+    #[test]
+    fn session_log_status_tracks_committed_cycle_after_latest_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        let logs_dir = tmp.path().join(".agent-doc/logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(
+            logs_dir.join("session-commit.log"),
+            concat!(
+                "[1] session_start file=test.md pane=%52 session=session-commit\n",
+                "[2] codex_start mode=fresh restart_count=0\n",
+                "[3] document_cycle phase=response_captured cycle=cycle-1 event=response_captured capture_id=cycle-1\n",
+                "[4] document_cycle phase=committed cycle=cycle-1 event=commit_success capture_id=cycle-1\n",
+                "[5] codex_exit code=0 restart_count=0\n",
+            ),
+        )
+        .unwrap();
+
+        let status = session_log_status(&doc, "session-commit")
+            .unwrap()
+            .expect("session log status");
+        assert!(status.saw_committed_cycle_after_latest_run);
+        assert!(status.latest_session_closed());
+        assert_eq!(
+            status.last_event.as_deref(),
+            Some("codex_exit code=0 restart_count=0")
+        );
     }
 
     #[test]

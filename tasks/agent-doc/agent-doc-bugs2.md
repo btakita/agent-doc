@@ -167,18 +167,37 @@ Implemented the phase-6 operator-facing session controls. Plan: tasks/agent-doc/
 - Left the pre-existing unrelated dirty change in src/plugin.rs untouched.
 
 #sgown6 is complete. The remaining transition steps stay open for #sgown7-#sgown9.
-<!-- agent:boundary:71c3b5c7 -->
-<!-- /agent:exchange -->
-### End Exchange
-
-<!--
-The "Press Enter to restart, or 'q' to exit." menu for both Claude and Codex managed sessions have issues with the Enter key. spec-test-build-install-commit-push 
+❯ The "Press Enter to restart, or 'q' to exit." menu for both Claude and Codex managed sessions have issues with the Enter key. spec-test-build-install-commit-push
 ```
 claude exited cleanly.
                       Press Enter to restart, or 'q' to exit.
                                                              q^M^M^M^M
 ```
----
+### Re: Enter-key quit menu on managed Claude/Codex sessions — gpt-5
+
+Root cause was in `src/agent-doc/src/start.rs`: the supervisor quit menu still called `read_line()` after restoring whatever stdin termios the parent harness originally handed to `agent-doc`. In the managed Claude/Codex binding sessions from this repro, that inherited stdin could remain raw-ish enough that pressing `Enter` produced literal `^M` bytes instead of terminating the prompt read, so the menu appeared but the restart/quit prompt never consumed the input correctly.
+
+Implemented the fix:
+- `start.rs` now derives an explicit canonical prompt tty mode from the saved stdin termios before every supervisor restart/quit prompt, re-enabling canonical input, echo, signal handling, and `ICRNL`/newline output without changing the raw child-forwarding path.
+- Added a start-level regression that asserts the prompt tty normalization keeps the Enter-friendly flags enabled.
+- Updated `README.md`, `VERSIONS.md`, `specs/codex-support.md`, and `specs/supervisor.md` so the documented keepalive/quit-menu contract matches the new prompt-mode requirement.
+
+Verification completed in `src/agent-doc`:
+- `cargo check`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `npm test` and `npm run package` in `editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `editors/jetbrains`
+
+Repo closeout in `src/agent-doc`: committed as `39991e8` (`fix: normalize supervisor quit prompt tty mode`) and pushed to `origin/20260422/codex-agent-backend`.
+
+I left the pre-existing unrelated dirty change in `src/agent-doc/src/plugin.rs` untouched. I did not run a manual tmux-backed interactive repro after the patch; the validation here is the code-path fix plus automated coverage and the full build/install/package suite.
+<!-- agent:boundary:774e4bac -->
+<!-- /agent:exchange -->
+### End Exchange
+
+<!--
 agent-doc running /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md with Codex is failing due to the sandbox. Please help me to DISABLE THE CODEX SANDBOX. I don't want agent-doc to bypass the sandbox by default but for my environment I want to bypass the sandbox. spec-test-build-install-commit-push
 ---
 I saw this error. Id the root cause and fix. spec-test-build-install-commit-push

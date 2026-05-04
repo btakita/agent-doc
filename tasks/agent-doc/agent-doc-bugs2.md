@@ -35,10 +35,10 @@ Active backlog:
 - [ ] [#jbpdrop] [recommended] Critical: a completed JetBrains-triggered run must not remove its tmux pane from the `agent-doc` window; audit post-success pane-death/cleanup and plugin-triggered sync/layout paths until pane retention is explicit and regression-tested. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
 - 7 more active item(s)
 
-Icebox:
-- [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
-- [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement: `#jberr`.
-- [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
+❯ Icebox:
+❯ - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
+❯ - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement: `#jberr`.
+❯ - [ ] [#tmuxcrash] Closed on April 30, 2026 after the `session_end` metadata closeout fix in `startup_miss.rs` and the routed-dispatch binding hardening in `route.rs`. Final child closed: `#tmuxcrash-rn2d`.
 ❯ When I select tsift.md in the left editor, the left tmux pane remains on agent-doc-bugs2.md. Even when I run `agent-doc sync ...`, the left tmux pane remains on agent-doc-bugs2.md. Please identify root cause and fix the root cause. spec-test-build-install-commit-push
 ### Re: tsift sync alias root cause + fix — gpt-5
 
@@ -102,7 +102,7 @@ Git:
 - `agent-doc`: `5c8fd99` pushed to `origin/20260422/codex-agent-backend`
 - parent repo: `df36c03f0` pushed to `origin/main`
 
-I did not run the live JetBrains `boost-client`/`session-share` replay in this harness, so `#jbsubroot` remains open for that final IDE/tmux validation pass.
+❯ I did not run the live JetBrains `boost-client`/`session-share` replay in this harness, so `#jbsubroot` remains open for that final IDE/tmux validation pass.
 ❯ do [#prreap]. spec-test-build-install-commit-push
 ### Re: prreap active Codex prompt pane protection — gpt-5
 I fixed the sync/rebind path that was still willing to record synthetic `registered_pane_missing` for an alive Codex pane whose ownership proof had weakened while the user still had live input drafted in the composer.
@@ -117,8 +117,8 @@ Verification:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Git:
-- `agent-doc`: `ad20837` pushed to `origin/20260422/codex-agent-backend`
+❯ Git:
+❯ - `agent-doc`: `ad20837` pushed to `origin/20260422/codex-agent-backend`
 ❯ agent-doc caused the tmux pane for src/boost-client/tasks/monsterrodholders.md to close. Please investigate and fix the root cause. spec-test-build-install-commit-push
 ### Re: monsterrodholders pane-close root cause + fix — gpt-5
 
@@ -149,7 +149,7 @@ Git:
 
 Yes. `specs/07-commands.md` has crossed the point where command closeout, session-check / repair, routing / startup-miss behavior, and orchestration are changing independently enough that one file is no longer the cleanest boundary.
 
-I would keep `specs/07-commands.md` as the top-level command index and move the long normative sections into focused sibling specs, with the first split between closeout/write/commit/session-check and route/start/sync/startup-miss behavior. I did not do that refactor in this turn.
+❯ I would keep `specs/07-commands.md` as the top-level command index and move the long normative sections into focused sibling specs, with the first split between closeout/write/commit/session-check and route/start/sync/startup-miss behavior. I did not do that refactor in this turn.
 ❯ Split `specs/07-commands.md` into separate spec files. Please create a skill/runbook to break up long spec files. I believe we have a similar skill/runbook or entry in AGENTS.md which does the same for the AGENTS.md file.
 ### Re: specs/07-commands.md split — gpt-5
 
@@ -169,7 +169,7 @@ Verification passed:
 - `make check`
 - `cargo run --quiet -- audit-docs`
 
-I did not commit or push the `src/agent-doc` repo changes in this turn.
+❯ I did not commit or push the `src/agent-doc` repo changes in this turn.
 ❯ Should split-spec-files and splitting AGENTS.md/CLAUDE.md be part of the agent-doc package for distribution? I think many users won't have split rules and some may have custom split rules. Can we make agent-doc's rules defer to the user's custom rules if we do decide to distribute the skill/runbook?
 ### Re: split runbook distribution boundary — gpt-5
 
@@ -183,7 +183,7 @@ My recommendation is:
 
 That defer-to-custom boundary is already the right model in `skill.rs`: managed root mirrors get refreshed, but custom root `AGENTS.md` is preserved untouched. I would extend that same ownership test to any future split/install automation: only auto-split or rewrite files that carry an agent-doc managed signature or exactly match the generated baseline. Everything else should be opt-in.
 
-So the packaged contract should be: ship the runbook, ship the managed-harness layout, and let local projects override the top-level instruction structure without fighting the installer.
+❯ So the packaged contract should be: ship the runbook, ship the managed-harness layout, and let local projects override the top-level instruction structure without fighting the installer.
 ❯ The split rules should also apply to Claude Code harnesses. Probably any code harness including Gemini when we add support for Gemini.
 ### Re: split policy across harnesses — gpt-5
 
@@ -196,7 +196,7 @@ The right contract is:
 - future harnesses like Gemini should plug into the same rule once they have an agent-doc-managed install surface
 - user-owned root instruction files should still be left alone unless they are clearly agent-doc-managed or still exactly match the generated baseline
 
-That fits the current `skill.rs` shape already: one shared source surface, harness-specific rendering, and explicit preservation of custom root `AGENTS.md`. So if we distribute this, I would describe the rule in terms of managed-vs-custom ownership across harnesses, not in terms of any one harness.
+❯ That fits the current `skill.rs` shape already: one shared source surface, harness-specific rendering, and explicit preservation of custom root `AGENTS.md`. So if we distribute this, I would describe the rule in terms of managed-vs-custom ownership across harnesses, not in terms of any one harness.
 ❯ Update files if you have not already. spec-test-build-install-commit-push
 ### Re: split-rule files updated; verification blocker remains — gpt-5
 
@@ -231,7 +231,7 @@ With the suite green, I committed and pushed the pending `src/agent-doc` spec/pa
 - commit: `2a47293` `docs: split command specs and bundle split runbook`
 - branch: `origin/20260422/codex-agent-backend`
 
-Plan executed: `tasks/agent-doc/plan-tmux-route-resync-suite-failures.md`
+❯ Plan executed: `tasks/agent-doc/plan-tmux-route-resync-suite-failures.md`
 ❯ do [#patchregr]. spec-test-build-install-commit-push
 ### Re: patchregr closeout — gpt-5
 
@@ -249,8 +249,8 @@ Full verification also passed:
 
 Plan executed: `tasks/agent-doc/plan-response-patchback-uncommitted-regression.md`
 
-No new `src/agent-doc` source diff was required in this cycle, so there was nothing new to commit or push there. The only committed mutation from this turn is the session-doc closeout itself plus marking `#patchregr` done.
-do [#jbsubroot]. spec-test-build-install-commit-push
+❯ No new `src/agent-doc` source diff was required in this cycle, so there was nothing new to commit or push there. The only committed mutation from this turn is the session-doc closeout itself plus marking `#patchregr` done.
+❯ do [#jbsubroot]. spec-test-build-install-commit-push
 ### Re: jbsubroot passive mixed-root replay + route validation — gpt-5
 
 I reproduced the remaining `#jbsubroot` gap in the live tmux stack. `sync --no-autostart` was correctly refusing to provision `src/boost-client/tasks/monsterrodholders.md`, but it still fell through into tmux-router reconcile and could collapse the shared `agent-doc` window down to the surviving `session-share` pane, which made a foreign pane authoritative anyway.
@@ -271,7 +271,7 @@ Live replay:
 Git:
 - `agent-doc`: `2bd6a26` pushed to `origin/20260422/codex-agent-backend`
 
-Plan executed: `tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md`
+❯ Plan executed: `tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md`
 ❯ do [#jbnsrf]. spec-test-build-install-commit-push
 ### Re: jbnsrf restart repro validation — gpt-5
 
@@ -290,7 +290,7 @@ Verification:
 Git:
 - no new  source diff in this cycle, so there was nothing to commit or push there
 
-Plan executed:
+❯ Plan executed:
 ### Re: jbnsrf correction — gpt-5
 
 The prior `#jbnsrf` closeout was malformed by shell expansion in the write command. This is the corrected result.
@@ -312,14 +312,14 @@ Verification:
 Git:
 - no new `src/agent-doc` source diff in this cycle, so there was nothing to commit or push there
 
-Plan executed: `tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md`
+❯ Plan executed: `tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md`
 ❯ Should agent-doc use a sqlite db instead of a json file to better manage state concurrently?
 ### Re: sqlite vs json for concurrent state — gpt-5
 Not yet.
 
 The current concurrency pressure in `agent-doc` is mostly not "JSON is the wrong serialization format". The binary already splits state across per-document cycle files, snapshots, captures, and a locked `sessions.json` registry, and it takes explicit advisory locks around document writes and short git closeout sections. Most of the bugs we have been fixing here are higher-level ownership / routing / ack / recovery problems across tmux, editor IPC, and closeout sequencing, not corruption from two processes racing to parse the same JSON blob.
 
-SQLite would become worthwhile if we decide we need real cross-record transactions, queryable history, or many concurrent writers mutating shared state as a database problem. Right now it would add migration and operational complexity without removing the main failure modes we are seeing. I would keep JSON plus explicit locks for now, and only switch if we can point to concrete storage-layer races that the current per-file protocol cannot close cleanly.
+❯ SQLite would become worthwhile if we decide we need real cross-record transactions, queryable history, or many concurrent writers mutating shared state as a database problem. Right now it would add migration and operational complexity without removing the main failure modes we are seeing. I would keep JSON plus explicit locks for now, and only switch if we can point to concrete storage-layer races that the current per-file protocol cannot close cleanly.
 ❯ do [#jbpdrop]. spec-test-build-install-commit-push
 ### Re: #jbpdrop — gpt-5
 
@@ -334,9 +334,9 @@ Verification completed:
 - `cargo run --quiet -- audit-docs`
 - `./gradlew test buildPlugin`
 
-Committed and pushed in `src/agent-doc`:
-- `369a83e` `fix: keep fresh route pane authoritative`
-- branch `20260422/codex-agent-backend`
+❯ Committed and pushed in `src/agent-doc`:
+❯ - `369a83e` `fix: keep fresh route pane authoritative`
+❯ - branch `20260422/codex-agent-backend`
 ❯ do [#jbptrk]. spec-test-build-install-commit-push
 ### Re: jbptrk live replay closeout — gpt-5
 
@@ -462,9 +462,9 @@ Live replay:
 - immediate second reroute reused live owner `%164`, rescued it from stash, reached readiness, sent the bare reopen, and returned normally with no panic
 - `src/boost-client/.agent-doc/sessions.json` now binds `monsterrodholders.md` to live pane `%164` on window `@128`
 
-Git:
-- `src/agent-doc`: `7563ecf` `fix: keep route wait logging utf8 safe`
-- pushed to `origin/20260422/codex-agent-backend`
+❯ Git:
+❯ - `src/agent-doc`: `7563ecf` `fix: keep route wait logging utf8 safe`
+❯ - pushed to `origin/20260422/codex-agent-backend`
 ❯ do [#sceno]. spec-test-build-install-commit-push
 ### Re: sceno closeout — gpt-5
 
@@ -495,9 +495,9 @@ Verification:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Git:
-- `agent-doc`: `7dcf001` `fix: harden optional closeout sidecar reads`
-- pushed to `origin/20260422/codex-agent-backend`
+❯ Git:
+❯ - `agent-doc`: `7dcf001` `fix: harden optional closeout sidecar reads`
+❯ - pushed to `origin/20260422/codex-agent-backend`
 ❯ do [#jberr]. spec-test-build-install-commit-push
 ### Re: jb route error persistence — gpt-5
 
@@ -520,9 +520,9 @@ Verification:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Git:
-- `agent-doc`: `2153b02` `fix: persist jetbrains route errors`
-- pushed to `origin/20260422/codex-agent-backend`
+❯ Git:
+❯ - `agent-doc`: `2153b02` `fix: persist jetbrains route errors`
+❯ - pushed to `origin/20260422/codex-agent-backend`
 ❯ The tmux pane for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md was incorrectly closed. Please do a through investigation into the root cause. Fix the root cause. spec-test-build-install-commit-push
 ### Re: monsterrodholders pane-close root cause + fix — gpt-5
 
@@ -554,10 +554,10 @@ Git:
 - `src/agent-doc`: `3ca7f17` `fix: keep successful routed codex panes attached`
 - pushed to `origin/20260422/codex-agent-backend`
 
-No actionable follow-up items remain from this fix, so I did not add a backlog entry in this cycle.
+❯ No actionable follow-up items remain from this fix, so I did not add a backlog entry in this cycle.
 ### Re: closeout recovery — gpt-5
 
-No new prompt-bearing document changes were present after the committed closeout. I left the later local note edits untouched and reopened/closed the binary-owned closeout path so this Codex session could finish cleanly.
+❯ No new prompt-bearing document changes were present after the committed closeout. I left the later local note edits untouched and reopened/closed the binary-owned closeout path so this Codex session could finish cleanly.
 ❯ do [#ssheperm]. spec-test-build-install-commit-push
 ### Re: ssheperm bare SSH socket drift — gpt-5
 
@@ -597,12 +597,32 @@ Git:
 - `src/agent-doc`: `90bcd5e` `fix: detect bare ssh socket capability drift`
 - pushed to `origin/20260422/codex-agent-backend`
 
-No follow-up backlog item remains from this fix.
-<!-- agent:boundary:e8db2d1c -->
+❯ No follow-up backlog item remains from this fix.
+❯ commit + push all uncommitted files
+### Re: commit + push all uncommitted files — gpt-5
+
+Completed the requested repo closeout.
+
+Committed and pushed:
+- `src/agent-doc`: `d65a7c1` `fix: preserve live prompt repair state`
+- `src/session-share/claudescore.com`: `f1d5fa5` `chore: refresh tsift index`
+- `src/session-share`: `e2faf2af` `docs: capture session task updates`
+- root `agent-loop`: `6615e8606` `docs: refresh agent-doc harness surfaces`
+
+Verification for `src/agent-doc` passed before commit:
+- `cargo test`
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+The only remaining local change before this closeout was this session document itself; `finalize` is committing that boundary now.
+<!-- agent:boundary:d28d7f29 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
+agent-doc running /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md with Codex is failing due to the sandbox. Please help me to DISABLE THE CODEX SANDBOX. I don't want agent-doc to bypass the sandbox by default but for my environment I want to bypass the sandbox. spec-test-build-install-commit-push
+---
 There is a significant delay between changing the selected editor document and the tmux pane changing. 
 ---
 I saw this error. Id the root cause and fix. spec-test-build-install-commit-push

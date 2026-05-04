@@ -119,8 +119,16 @@ Implemented the stable sift cache plumbing. `tsift search` now resolves a root-o
 
 Added regression coverage in the direct search helpers and the compiled CLI search surface, including assertions that both `--timeout 0` and the helper-process path populate the stable cache directory. Verification passed in `src/tsift`: `make check`, `cargo build --release`, and `cargo install --path . --force`. The local binary is now `tsift v0.1.22`. Committed and pushed in `src/tsift` as `4e95bf9` (`feat: add stable sift search cache`).
 
-Top remaining backlog item: `#p886`.
-<!-- agent:boundary:3bf439ff -->
+❯ Top remaining backlog item: `#p886`.
+❯ do [#p886]. spec-test-build-install-commit-push
+### Re: #p886 spec-test-build-install-commit-push — gpt-5
+
+Implemented a first-class exact-search path for literal queries. `tsift search --exact <query>` now routes through `rg -F`, the CLI also accepts `--strategy exact`, and the rewrite hook now translates `rg ...` / `grep -r ...` into `tsift search --exact ...` instead of lexical BM25. Exact searches bypass the lexical stale-index precheck and the workspace shared-root-index requirement, so literal lookups still work when `.tsift/index.db` is stale/missing or when a workspace only has scoped indexes.
+
+Added regression coverage for the exact backend, CLI flag parsing, rewrite behavior, stale-index bypass, and workspace-root behavior; updated `SPEC.md`, `VERSIONS.md`, `Cargo.toml`, and `Cargo.lock` for `tsift v0.1.23`. Verification in `src/tsift` passed: `cargo test`, `make check`, `cargo build --release`, and `cargo install --path . --force`. The installed binary is now `tsift 0.1.23`. Committed and pushed in `src/tsift` as `b0b236a` (`feat: add exact literal search backend`).
+
+Top remaining backlog item: `#fpt7`.
+<!-- agent:boundary:c17e6b2a -->
 <!-- /agent:exchange -->
 
 <!--
@@ -131,7 +139,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#p886] exactsearch=Add a first-class exact-text search path for literal queries (for example `tsift search --exact` backed by `rg -F`) instead of routing every rg-style lookup through lexical BM25.
 - [ ] [#fpt7] contentfts=Evaluate whether tsift needs a native content/FTS index after cache + exact-search land; only build it if rg-backed exact lookup still leaves important gaps.
 <!-- /agent:backlog -->
 

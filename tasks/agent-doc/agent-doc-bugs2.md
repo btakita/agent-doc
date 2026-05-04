@@ -223,7 +223,7 @@ It also narrows the implementation contract:
 I committed and pushed the plan as `65bcea0ff` on `origin/main`.
 
 No tests/build/install ran in this cycle because `#rnpane` was a planning-only backlog item and the repo change was limited to the plan document.
-❯ There are some errors with the JB Plugin `Run Agent Doc`. The processes were booted and ready. spec-test-build-install-commit-push
+❯ There are some errors with the JB Plugin `Run Agent Doc`. The codex sessions were booted and ready. spec-test-build-install-commit-push
 ```
 resync: stash pane %173 is registered in its own project root — skipping kill
 resync: stash pane %161 is registered in its own project root — skipping kill
@@ -258,8 +258,21 @@ Verification in `src/agent-doc` passed:
 - `cargo build`
 - `cargo install --path . --force`
 
-I did not add a new backlog item because the existing `#edispatch` replay already covers the remaining live JetBrains + VS Code validation for this editor-trigger path.
-<!-- agent:boundary:f71cbd0d -->
+❯ I did not add a new backlog item because the existing `#edispatch` replay already covers the remaining live JetBrains + VS Code validation for this editor-trigger path.
+❯ Why is agent-doc tracking between the document + tmux pane supervisor process so fragile? This needs to "just work". For example, the
+### Re: fragile document/pane/supervisor tracking — gpt-5
+
+Because `agent-doc` is still reconciling three different timelines that can drift briefly but materially:
+- the document/cycle-state timeline
+- the tmux registry + pane/window topology timeline
+- the supervisor/session-log timeline for the harness child
+
+The fragility is in the handoff logic between those timelines, not in any single one of them. A routed editor action can land while Codex is between `codex_exit`, fresh restart, registry rebind, prompt reappearance, and document-cycle acknowledgement. If route makes a decision from only one of those sources in that window, it can target the stale pane, miss the live successor, or misclassify the pane as `still booting`.
+
+The fix I just landed reduces one of those windows by following same-file restart handoffs instead of pinning the stale pane. The broader architectural weakness is still that normal routing is cross-checking multiple mutable sources instead of leaning on one truly authoritative owner model. That is why this has felt fragile: the system is doing distributed reconciliation across document state, tmux state, and harness state, and each additional recovery heuristic increases surface area for edge cases.
+
+That broader simplification direction is the same reason I narrowed the earlier running-pane plan toward explicit pane-ownership invariants and a smaller normal-path allowlist.
+<!-- agent:boundary:19ceface -->
 <!-- /agent:exchange -->
 ### End Exchange
 

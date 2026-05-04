@@ -968,8 +968,26 @@ So the short version is:
 - **4.2 risk:** they may use alleged breach as a reason not to pay you.
 - **10.1 risk:** they may use overlapping IP/indemnity language to expand your financial exposure.
 
-Those are not just drafting niceties. They are the remaining clauses most likely to matter if the relationship ends badly.
-<!-- agent:boundary:812cce5b -->
+❯ Those are not just drafting niceties. They are the remaining clauses most likely to matter if the relationship ends badly.
+❯ Is "with the narrower indemnity and liability-cap structure added elsewhere in the agreement" clear? Would it be understood what this means?
+### Re: wording clarity on indemnity/liability-cap reference — gpt-5
+
+It is **somewhat** clear, but I would not call it ideal.
+
+A lawyer or contracts person would probably understand what you mean. But for a business-side email, `the narrower indemnity and liability-cap structure added elsewhere in the agreement` is a little abstract because it does not say **which clauses** you mean or **what change** you want made.
+
+I would make it more explicit.
+
+Better version:
+
+> In Section 10.1, please revise the third-party rights / indemnity language so it is consistent with the narrower indemnity language in Section 12 and the limitation-of-liability clause in Section 5.
+
+If you want it slightly plainer:
+
+> In Section 10.1, please revise the third-party rights / indemnity language so it does not create broader indemnity or liability exposure than the indemnity and liability-cap provisions elsewhere in the agreement.
+
+My recommendation: use the **first** version, because naming the sections makes the request easier to follow and harder to sidestep.
+<!-- agent:boundary:8124e224 -->
 <!-- /agent:exchange -->
 
 ## Queue

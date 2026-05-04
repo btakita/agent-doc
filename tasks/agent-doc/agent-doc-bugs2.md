@@ -350,8 +350,14 @@ Added backlog items:
 
 All of them point back to `tasks/agent-doc/plan-single-owner-session-actor-transition.md` so the backlog and the plan stay aligned.
 
+❯ No tests/build/install ran in this cycle because the requested work was backlog capture only.
+❯ In each of the backlog items, please add bookkeeping steps such as spec, test, install, commit, push, etc
+### Re: backlog bookkeeping for the single-owner transition — gpt-5
+
+I revised the backlog text for `#sgown1` through `#sgown9` plus `#sgown` so each item now carries explicit bookkeeping steps for spec, tests, build/install, commit, and push while keeping the shared plan link to `tasks/agent-doc/plan-single-owner-session-actor-transition.md`.
+
 No tests/build/install ran in this cycle because the requested work was backlog capture only.
-<!-- agent:boundary:3965cb8a -->
+<!-- agent:boundary:4730ba54 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -375,16 +381,16 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgown1] Freeze the actor-owned session contract, generation semantics, and ownership-transition instrumentation. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown2] Add the durable actor record store with atomic generation updates and keep sessions.json as a read projection during migration. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown3] Move supervisor ownership, prompt-readiness, and closeout state transitions onto actor commands. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown4] Convert route to actor-owned dispatch with bounded actor acknowledgement instead of heuristic owner election. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown5] Convert sync/focus flows to projection-only reconciliation around actor-owned panes. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown6] Add operator-facing session CLI and plugin controls: status, history, attach, restart, clear, doctor, and session diagnostics UI. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown7] Move destructive or heuristic recovery behind explicit repair-only commands and remove it from normal turn paths. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown8] Delete the remaining normal-path ownership inference from process-tree, session-log, and registry-rebind logic. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown9] Add regression and plugin verification for generation monotonicity, stale-generation rejection, sync/layout preservation, and stage-specific dispatch failures. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown] Umbrella tracker for the single-owner session actor transition. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgown1] Freeze the actor-owned session contract, generation semantics, and ownership-transition instrumentation. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgown2] Add the durable actor record store with atomic generation updates and keep sessions.json as a read projection during migration. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgown3] Move supervisor ownership, prompt-readiness, and closeout state transitions onto actor commands. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgown4] Convert route to actor-owned dispatch with bounded actor acknowledgement instead of heuristic owner election. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgown5] Convert sync/focus flows to projection-only reconciliation around actor-owned panes. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgown6] Add operator-facing session CLI and plugin controls: status, history, attach, restart, clear, doctor, and session diagnostics UI. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgown7] Move destructive or heuristic recovery behind explicit repair-only commands and remove it from normal turn paths. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgown8] Delete the remaining normal-path ownership inference from process-tree, session-log, and registry-rebind logic. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgown9] Add regression and plugin verification for generation monotonicity, stale-generation rejection, sync/layout preservation, and stage-specific dispatch failures. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgown] Umbrella tracker for the single-owner session actor transition. Bookkeeping: keep spec/test/build/install/commit/push coverage aligned across #sgown1-#sgown9. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.
 - [ ] [#devmdcmt] [recommended] Response was written into `src/session-share/tasks/buildparty-investor-demo/dev.md` but the closeout was not committed. Create a fix plan only: reproduce the exact `agent-doc` write/finalize path for this template/CRDT doc, compare it with `#rspcmt`, trace where append/write can persist content without the expected commit/finalize step, identify any session-doc-specific boundary or backlog rewrite interaction that leaves the file dirty, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports completion until the target document's closeout is verifiably committed.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.

@@ -1721,7 +1721,9 @@ fn route_via_authoritative_actor(
     let dispatch_pane = actor.record.pane_id.clone();
     let actor_state = actor.actor_state();
 
-    if sessions::lookup(session_id)?.as_deref() != Some(dispatch_pane.as_str()) {
+    if lookup_dispatch_registration(file_path, session_id)?.as_deref()
+        != Some(dispatch_pane.as_str())
+    {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1853,7 +1855,7 @@ fn resolve_or_create_pane_dispatch_only(
     harness: &HarnessConfig,
     created_panes: &mut Vec<String>,
 ) -> Result<String> {
-    let registered = sessions::lookup(session_id)?;
+    let registered = lookup_dispatch_registration(file_path, session_id)?;
     let cycle_baseline = crate::cycle_state::load(file)?;
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
@@ -1992,7 +1994,7 @@ fn resolve_or_create_pane_dispatch_only(
         ));
     }
 
-    let claimed_panes: std::collections::HashSet<String> = sessions::load()
+    let claimed_panes: std::collections::HashSet<String> = load_dispatch_registry(file_path)
         .unwrap_or_default()
         .values()
         .filter(|entry| tmux.pane_alive(&entry.pane))
@@ -2101,7 +2103,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
         target_session,
         "route::resolve_or_create_pane"
     );
-    let registered = sessions::lookup(session_id)?;
+    let registered = lookup_dispatch_registration(file_path, session_id)?;
     let cycle_baseline = crate::cycle_state::load(file)?;
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
@@ -2236,7 +2238,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     file_path, registered_pane, miss_ts
                 ),
             );
-            let _ = sessions::deregister(session_id)?;
+            let _ = deregister_dispatch_registration(file_path, session_id)?;
             let _ = crate::startup_miss::clear(file);
             // Fall through to Strategy 3 (auto-start)
             eprintln!("[route] No active pane found, auto-starting...");
@@ -2399,7 +2401,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                 file_path, provenance
                             ),
                         );
-                        let _ = sessions::deregister(session_id)?;
+                        let _ = deregister_dispatch_registration(file_path, session_id)?;
                         stale_registration_cleared = true;
                     }
                     SupervisorHealth::Halted { restart_count } => {
@@ -2436,7 +2438,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                                 file_path, provenance
                             ),
                         );
-                        let _ = sessions::deregister(session_id)?;
+                        let _ = deregister_dispatch_registration(file_path, session_id)?;
                         stale_registration_cleared = true;
                     }
                 },
@@ -2531,7 +2533,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
     // Strategy 2: Lazy claim (only when a registered pane died)
     // Skip panes running non-agent processes to avoid claiming corky/shells.
     // Also skip panes already claimed by another document (pane theft prevention).
-    let claimed_panes: std::collections::HashSet<String> = sessions::load()
+    let claimed_panes: std::collections::HashSet<String> = load_dispatch_registry(file_path)
         .unwrap_or_default()
         .values()
         .filter(|e| tmux.pane_alive(&e.pane))
@@ -2914,7 +2916,7 @@ fn wait_for_busy_restart_handoff(
 ) {
     let registry_base_dir = registry_base_dir_for_dispatch(file_path);
     let timeout = if cfg!(test) {
-        Duration::from_secs(10)
+        Duration::from_secs(20)
     } else {
         Duration::from_secs(5)
     };
@@ -2942,6 +2944,31 @@ fn wait_for_busy_restart_handoff(
             } else {
                 handed_off_pane = None;
             }
+        }
+        match crate::sync::resolve_associated_panes(
+            crate::sync::find_associated_panes(tmux, file, session_id),
+            None,
+        ) {
+            crate::sync::AssociatedPaneResolution::Selected { winner, .. }
+                if winner.pane_id != previous_pane && !winner.is_stash() =>
+            {
+                if let Err(err) =
+                    register_dispatch_target(tmux, session_id, &winner.pane_id, file_path)
+                {
+                    eprintln!(
+                        "[route] warning: failed to project restart handoff pane {} into the registry for {}: {}",
+                        winner.pane_id, file_path, err
+                    );
+                }
+                eprintln!(
+                    "[route] supervisor restart for {} has not refreshed the registry yet, but a unique associated pane {} is alive via {} — adopting it as the handoff target before retry",
+                    file_path,
+                    winner.pane_id,
+                    winner.source_summary()
+                );
+                return;
+            }
+            _ => {}
         }
         std::thread::sleep(poll);
     }
@@ -3222,6 +3249,32 @@ fn registry_base_dir_for_dispatch(file_path: &str) -> std::path::PathBuf {
         .unwrap_or_else(|| {
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         })
+}
+
+fn lookup_dispatch_registration(file_path: &str, session_id: &str) -> Result<Option<String>> {
+    let base_dir = registry_base_dir_for_dispatch(file_path);
+    sessions::lookup_in(&base_dir, session_id)
+}
+
+fn load_dispatch_registry(file_path: &str) -> Result<sessions::SessionRegistry> {
+    let base_dir = registry_base_dir_for_dispatch(file_path);
+    sessions::load_in(&base_dir)
+}
+
+fn deregister_dispatch_registration(file_path: &str, session_id: &str) -> Result<bool> {
+    let base_dir = registry_base_dir_for_dispatch(file_path);
+    let registry_path = sessions::registry_path_in(&base_dir);
+    let _lock = sessions::RegistryLock::acquire(&registry_path)?;
+    let mut registry = sessions::load_in(&base_dir)?;
+    let removed_key = registry.iter().find_map(|(key, entry)| {
+        ((entry.session_id == session_id) || (entry.session_id.is_empty() && key == session_id))
+            .then(|| key.clone())
+    });
+    let removed = removed_key.and_then(|key| registry.remove(&key)).is_some();
+    if removed {
+        sessions::save_in(&base_dir, &registry)?;
+    }
+    Ok(removed)
 }
 
 fn register_dispatch_target(
@@ -3578,9 +3631,9 @@ fn attempt_busy_existing_pane_auto_fix(
     );
     let test_hook_changed = maybe_run_test_busy_auto_fix_hook(tmux, file, pane)?;
     let fix_outcome = resync::apply_targeted_fix_for_route(tmux, file)?;
-    let pane_still_authoritative = sessions::lookup(session_id)?.as_deref() == Some(pane);
-    let supervisor_health =
-        pane_still_authoritative.then(|| query_supervisor_health(file, session_id));
+    let post_fix_binding = lookup_dispatch_registration(file_path, session_id)?;
+    let pane_still_authoritative = post_fix_binding.as_deref() == Some(pane);
+    let supervisor_health = Some(query_supervisor_health(file, session_id));
     let mut restarted = false;
     if !test_hook_changed
         && !fix_outcome.made_changes()
@@ -3590,6 +3643,22 @@ fn attempt_busy_existing_pane_auto_fix(
         if restarted {
             eprintln!(
                 "[route] scoped fix left pane {} authoritative for {} — restarted the supervisor once before retrying route",
+                pane, file_path
+            );
+        }
+    } else if !test_hook_changed
+        && !pane_still_authoritative
+        && post_fix_binding.is_none()
+        && fix_outcome.fixed_issues > 0
+        && fix_outcome.pruned_dead_entries == 0
+        && !fix_outcome.reregistered_owner
+        && fix_outcome.killed_redundant_stash_panes == 0
+        && matches!(supervisor_health, Some(SupervisorHealth::Restartable))
+    {
+        restarted = restart_via_supervisor(file, session_id);
+        if restarted {
+            eprintln!(
+                "[route] scoped fix deregistered stale pane {} for {}, but the supervisor is still restartable — restarting once to wait for a clean handoff before retrying route",
                 pane, file_path
             );
         }
@@ -7240,7 +7309,7 @@ Body\n\
         let replacement = std::thread::spawn(move || {
             let wait_start = std::time::Instant::now();
             while !restart_called_for_thread.load(Ordering::Relaxed)
-                && wait_start.elapsed() < Duration::from_secs(2)
+                && wait_start.elapsed() < Duration::from_secs(10)
             {
                 std::thread::sleep(Duration::from_millis(25));
             }

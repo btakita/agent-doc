@@ -3728,6 +3728,15 @@ fn find_live_owner_pane_excluding_with_logging(
             find_alive_pane_via_open_session_log(tmux, file, session_id, excluded_pane, log_hits)
         })
         .or_else(|| {
+            find_alive_pane_via_registry_rebind_successor(
+                tmux,
+                file,
+                session_id,
+                excluded_pane,
+                log_hits,
+            )
+        })
+        .or_else(|| {
             let file_path = file.to_string_lossy();
             find_alive_pane_for_file_inner(tmux, file_path.as_ref(), excluded_pane, log_hits)
         })
@@ -4568,6 +4577,32 @@ mod tests {
             Some(owner_pane.as_str()),
             "latest open session-log owner must win over older same-file process-tree matches"
         );
+    }
+
+    #[test]
+    fn find_live_owner_pane_reuses_live_registry_rebind_successor() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent_doc_session: live-rebind-owner\n---\n").unwrap();
+
+        let iso = IsolatedTmux::new("sync-live-rebind-owner");
+        let successor_pane = iso.new_session("test", tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/live-rebind-owner.log"),
+            format!(
+                "[1] session_start file=tasks/owned.md pane=%70 session=live-rebind-owner\n[2] codex_start mode=fresh restart_count=0\n[3] session_superseded old_pane=%70 new_pane={} old_window=@1 new_window=@2\n[4] session_end origin=registry_rebind pane=%70 next_pane={}\n",
+                successor_pane,
+                successor_pane
+            ),
+        )
+        .unwrap();
+
+        let owner = find_live_owner_pane(&iso, &doc, "live-rebind-owner");
+        assert_eq!(owner.as_deref(), Some(successor_pane.as_str()));
     }
 
     #[test]
@@ -7598,6 +7633,34 @@ mod tests {
         assert!(
             !registered_pane_proves_live_owner(&iso, &doc, "owned-session", &pane),
             "a merely alive pane should not count as a live owner without ownership proof"
+        );
+    }
+
+    #[test]
+    fn registered_pane_proves_live_owner_accepts_live_registry_rebind_successor() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd = ScopedCurrentDir::set(tmp.path());
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("tasks")).unwrap();
+
+        let doc = tmp.path().join("tasks/owned.md");
+        std::fs::write(&doc, "---\nagent_doc_session: owned-rebind-session\n---\n").unwrap();
+
+        let iso = IsolatedTmux::new("sync-owned-rebind-proof");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/owned-rebind-session.log"),
+            format!(
+                "[1] session_start file=tasks/owned.md pane=%70 session=owned-rebind-session\n[2] codex_start mode=fresh restart_count=0\n[3] session_superseded old_pane=%70 new_pane={} old_window=@1 new_window=@2\n[4] session_end origin=registry_rebind pane=%70 next_pane={}\n",
+                pane, pane
+            ),
+        )
+        .unwrap();
+
+        assert!(
+            registered_pane_proves_live_owner(&iso, &doc, "owned-rebind-session", &pane),
+            "a live registry-rebind successor should count as ownership proof without PID/process-tree fallback"
         );
     }
 

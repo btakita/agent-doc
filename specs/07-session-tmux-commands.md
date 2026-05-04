@@ -38,6 +38,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - On the next route/start/sync path, the tool must distinguish between a stale startup-miss marker and a still-stranded owner. A same-pane marker may only be cleared once newer session-log provenance proves a later open run.
 - Successful cycle acknowledgment clears the startup-miss marker.
 - `route --dispatch-only` still uses a one-shot bare reopen instead of the managed acceptance/cycle-ack path, but it must reuse the same bounded ready/repair/restart checks before injecting into an existing pane. A bare reopen must not be injected into a still-booting or otherwise busy Codex pane.
+- If that first dispatch-only starting-pane probe times out, route must spend one bounded recovery window looking for a newer same-file startup generation or supervisor handoff before it surfaces a `still booting` refusal. A same-file successor pane may be followed; a cross-file rebind must still fail closed.
 
 ### Live-child ack rules
 

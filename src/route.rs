@@ -999,6 +999,111 @@ fn dispatch_only_starting_pane_ready_timeout() -> Duration {
     }
 }
 
+fn dispatch_only_starting_pane_recovery_timeout() -> Duration {
+    if cfg!(test) {
+        Duration::from_millis(400)
+    } else {
+        Duration::from_secs(5)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StartingPaneRecoveryTarget {
+    SamePane,
+    DifferentPane(String),
+}
+
+fn starting_pane_generation_changed(
+    initial_status: Option<&crate::startup_miss::SessionLogStatus>,
+    current_status: &crate::startup_miss::SessionLogStatus,
+    pane: &str,
+) -> bool {
+    if current_status.latest_start_pane.as_deref() != Some(pane)
+        || !current_status.latest_session_open()
+    {
+        return false;
+    }
+
+    let Some(initial_status) = initial_status else {
+        return false;
+    };
+
+    current_status.latest_start_timestamp != initial_status.latest_start_timestamp
+        || current_status.latest_run_timestamp != initial_status.latest_run_timestamp
+        || current_status.latest_run_event != initial_status.latest_run_event
+}
+
+fn starting_pane_recovery_target(
+    initial_status: Option<&crate::startup_miss::SessionLogStatus>,
+    current_status: Option<&crate::startup_miss::SessionLogStatus>,
+    current_pane: &str,
+    registered_pane: Option<&str>,
+) -> Option<StartingPaneRecoveryTarget> {
+    let current_status = current_status?;
+
+    if let Some(registered_pane) = registered_pane
+        && registered_pane != current_pane
+        && current_status.latest_start_pane.as_deref() == Some(registered_pane)
+        && current_status.latest_session_open()
+    {
+        return Some(StartingPaneRecoveryTarget::DifferentPane(
+            registered_pane.to_string(),
+        ));
+    }
+
+    if starting_pane_generation_changed(initial_status, current_status, current_pane) {
+        return Some(StartingPaneRecoveryTarget::SamePane);
+    }
+
+    None
+}
+
+fn wait_for_starting_pane_recovery_target(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    current_pane: &str,
+    file_path: &str,
+    initial_status: Option<&crate::startup_miss::SessionLogStatus>,
+) -> Option<StartingPaneRecoveryTarget> {
+    let registry_base_dir = registry_base_dir_for_dispatch(file_path);
+    let deadline = std::time::Instant::now() + dispatch_only_starting_pane_recovery_timeout();
+    let poll = Duration::from_millis(100);
+
+    while std::time::Instant::now() < deadline {
+        let current_status = crate::startup_miss::session_log_status(file, session_id)
+            .ok()
+            .flatten();
+        let registry = sessions::load_in(&registry_base_dir).ok();
+        let registered_pane = sessions::lookup_in(&registry_base_dir, session_id)
+            .ok()
+            .flatten();
+
+        match starting_pane_recovery_target(
+            initial_status,
+            current_status.as_ref(),
+            current_pane,
+            registered_pane.as_deref(),
+        ) {
+            Some(StartingPaneRecoveryTarget::DifferentPane(pane))
+                if registry.as_ref().is_some_and(|registry| {
+                    pane_registration_matches_file(registry, &pane, file_path)
+                }) && tmux.pane_alive(&pane) =>
+            {
+                return Some(StartingPaneRecoveryTarget::DifferentPane(pane));
+            }
+            Some(StartingPaneRecoveryTarget::SamePane) => {
+                return Some(StartingPaneRecoveryTarget::SamePane);
+            }
+            _ => {}
+        }
+
+        std::thread::sleep(poll);
+    }
+
+    None
+}
+
 fn dispatch_only_requires_ready_probe(
     status: Option<&crate::startup_miss::SessionLogStatus>,
     pane: &str,
@@ -1032,38 +1137,91 @@ fn dispatch_only_send_reopen(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<String> {
-    let log_status = crate::startup_miss::session_log_status(file, session_id)
+    let mut dispatch_pane = pane.to_string();
+    let mut log_status = crate::startup_miss::session_log_status(file, session_id)
         .ok()
         .flatten();
-    if dispatch_only_requires_ready_probe(log_status.as_ref(), pane, harness) {
+    let mut recovery_attempts = 0usize;
+    while dispatch_only_requires_ready_probe(log_status.as_ref(), &dispatch_pane, harness) {
         let ready_outcome = wait_for_agent_ready_outcome(
             tmux,
-            pane,
+            &dispatch_pane,
             dispatch_only_starting_pane_ready_timeout(),
             harness,
         );
-        if !ready_outcome.is_ready() {
-            let detail = ready_outcome.blocker_reason().unwrap_or("timed_out");
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome={}",
-                    file.display(),
-                    pane,
-                    harness.binary,
-                    detail
-                ),
-            );
-            anyhow::bail!(
-                "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({detail}); wait for the pane to become ready and reroute again",
-                harness.binary,
-                pane,
-                file.display()
-            );
+        if ready_outcome.is_ready() {
+            break;
         }
+
+        if recovery_attempts < 2
+            && let Some(target) = wait_for_starting_pane_recovery_target(
+                tmux,
+                file,
+                session_id,
+                &dispatch_pane,
+                file_path,
+                log_status.as_ref(),
+            )
+        {
+            recovery_attempts += 1;
+            match target {
+                StartingPaneRecoveryTarget::SamePane => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_dispatch_only_starting_pane_retry_same_pane file={} pane={} harness={} attempt={}",
+                            file.display(),
+                            dispatch_pane,
+                            harness.binary,
+                            recovery_attempts
+                        ),
+                    );
+                    log_status = crate::startup_miss::session_log_status(file, session_id)
+                        .ok()
+                        .flatten();
+                    continue;
+                }
+                StartingPaneRecoveryTarget::DifferentPane(next_pane) => {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_dispatch_only_starting_pane_handoff file={} old_pane={} new_pane={} harness={} attempt={}",
+                            file.display(),
+                            dispatch_pane,
+                            next_pane,
+                            harness.binary,
+                            recovery_attempts
+                        ),
+                    );
+                    dispatch_pane = next_pane;
+                    log_status = crate::startup_miss::session_log_status(file, session_id)
+                        .ok()
+                        .flatten();
+                    continue;
+                }
+            }
+        }
+
+        let detail = ready_outcome.blocker_reason().unwrap_or("timed_out");
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome={}",
+                file.display(),
+                dispatch_pane,
+                harness.binary,
+                detail
+            ),
+        );
+        anyhow::bail!(
+            "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({detail}); wait for the pane to become ready and reroute again",
+            harness.binary,
+            dispatch_pane,
+            file.display()
+        );
     }
 
-    if let Ok(content) = sessions::capture_pane(tmux, pane)
+    if let Ok(content) = sessions::capture_pane(tmux, &dispatch_pane)
         && let Some(reason) = dispatch_only_blocker_reason(harness, &content)
     {
         crate::ops_log::log_op(
@@ -1071,7 +1229,7 @@ fn dispatch_only_send_reopen(
             &format!(
                 "route_dispatch_only_blocked file={} pane={} harness={} reason={}",
                 file.display(),
-                pane,
+                dispatch_pane,
                 harness.binary,
                 reason
             ),
@@ -1079,20 +1237,20 @@ fn dispatch_only_send_reopen(
         anyhow::bail!(
             "dispatch-only {} reopen refused to inject into pane {} for {} because the pane still shows {}; restore an idle prompt and retry",
             harness.binary,
-            pane,
+            dispatch_pane,
             file.display(),
             reason
         );
     }
 
-    register_dispatch_target(tmux, session_id, pane, file_path)?;
-    send_command_once_checked(tmux, pane, file_path, harness)?;
+    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+    send_command_once_checked(tmux, &dispatch_pane, file_path, harness)?;
     crate::ops_log::log_op(
         file,
         &format!(
             "route_dispatch_only_sent file={} pane={} harness={}",
             file.display(),
-            pane,
+            dispatch_pane,
             harness.binary
         ),
     );
@@ -1100,9 +1258,9 @@ fn dispatch_only_send_reopen(
         "[route] dispatch-only {} reopen for {} was sent to pane {} without acceptance polling",
         harness.binary,
         file.display(),
-        pane
+        dispatch_pane
     );
-    Ok(pane.to_string())
+    Ok(dispatch_pane)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -7228,6 +7386,95 @@ Body\n\
         assert!(
             !after.contains("EXTRA:"),
             "dispatch-only reopen must not keep sending Enter retries after the one-shot reopen: {after}"
+        );
+    }
+
+    #[test]
+    fn starting_pane_recovery_target_follows_same_file_handoff() {
+        let initial = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%151".to_string()),
+            latest_start_timestamp: Some(10),
+            latest_run_timestamp: Some(11),
+            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_committed_cycle_after_latest_run: false,
+            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_process_exit_after_latest_start: false,
+            saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: false,
+            saw_session_end_after_latest_run: false,
+        };
+        let handed_off = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%183".to_string()),
+            latest_start_timestamp: Some(20),
+            latest_run_timestamp: Some(21),
+            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_committed_cycle_after_latest_run: false,
+            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_process_exit_after_latest_start: false,
+            saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: false,
+            saw_session_end_after_latest_run: false,
+        };
+
+        assert_eq!(
+            starting_pane_recovery_target(Some(&initial), Some(&handed_off), "%151", Some("%183")),
+            Some(StartingPaneRecoveryTarget::DifferentPane(
+                "%183".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn starting_pane_recovery_target_retries_same_pane_after_new_generation() {
+        let initial = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%151".to_string()),
+            latest_start_timestamp: Some(10),
+            latest_run_timestamp: Some(11),
+            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_committed_cycle_after_latest_run: false,
+            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_process_exit_after_latest_start: false,
+            saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: false,
+            saw_session_end_after_latest_run: false,
+        };
+        let restarted = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%151".to_string()),
+            latest_start_timestamp: Some(12),
+            latest_run_timestamp: Some(13),
+            latest_run_event: Some("codex_start mode=fresh_restart restart_count=1".to_string()),
+            saw_committed_cycle_after_latest_run: false,
+            last_event: Some("codex_start mode=fresh_restart restart_count=1".to_string()),
+            saw_process_exit_after_latest_start: false,
+            saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: false,
+            saw_session_end_after_latest_run: false,
+        };
+
+        assert_eq!(
+            starting_pane_recovery_target(Some(&initial), Some(&restarted), "%151", Some("%151")),
+            Some(StartingPaneRecoveryTarget::SamePane)
+        );
+    }
+
+    #[test]
+    fn starting_pane_recovery_target_ignores_unchanged_open_start() {
+        let initial = crate::startup_miss::SessionLogStatus {
+            latest_start_pane: Some("%151".to_string()),
+            latest_start_timestamp: Some(10),
+            latest_run_timestamp: Some(11),
+            latest_run_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_committed_cycle_after_latest_run: false,
+            last_event: Some("codex_start mode=fresh restart_count=0".to_string()),
+            saw_process_exit_after_latest_start: false,
+            saw_session_end_after_latest_start: false,
+            saw_process_exit_after_latest_run: false,
+            saw_session_end_after_latest_run: false,
+        };
+
+        assert_eq!(
+            starting_pane_recovery_target(Some(&initial), Some(&initial), "%151", Some("%151")),
+            None
         );
     }
 

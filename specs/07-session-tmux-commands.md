@@ -105,6 +105,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - If two visible files point at the same pane, sync must either find one decisive owner or drop the duplicate from the synthetic registry so tmux-router cannot alias both files onto one pane.
 - Once a live pane is reserved for one file during the pass, later files in the same pass must treat it as unavailable.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
+- If an editor supplies `--window W`, `W` must already be an `agent-doc` window for the target tmux session. When the named session has no visible `agent-doc` window, normal sync must fail closed and preserve layout instead of reconciling remembered docs onto an arbitrary non-`agent-doc` window.
 - Post-sync registry updates must fail closed if tmux-router reports a
   geometry-only pane assignment that disagrees with a still-live authoritative
   actor pane for that document.

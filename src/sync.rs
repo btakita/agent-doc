@@ -1892,6 +1892,10 @@ fn window_name_for_window_id(tmux: &Tmux, window_id: &str) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
+fn target_is_agent_doc_window(tmux: &Tmux, target: &str) -> bool {
+    window_name_for_window_id(tmux, target).as_deref() == Some("agent-doc")
+}
+
 fn is_stash_window_name(window_name: &str) -> bool {
     window_name == "stash" || window_name.starts_with("stash-")
 }
@@ -2100,6 +2104,8 @@ fn run_with_options(
         (None, Some(session_name)) => Some(format!("{session_name}:agent-doc")),
         (None, None) => None,
     };
+    let explicit_window_is_agent_doc =
+        window.is_some_and(|target| target_is_agent_doc_window(tmux, target));
     if let Some(ref session_name) = target_session {
         if let Some(resolved_window_id) =
             resolve_agent_doc_window_id(tmux, session_name, "agent-doc")
@@ -2119,6 +2125,17 @@ fn run_with_options(
             );
             eprintln!("{}", warning);
             sync_log(&warning);
+            if let Some(target) = window
+                && !explicit_window_is_agent_doc
+            {
+                let refusal = format!(
+                    "[sync] explicit window {} is not an agent-doc window; preserving layout instead of reconciling onto the wrong tmux window",
+                    target
+                );
+                eprintln!("{}", refusal);
+                sync_log(&refusal);
+                return Ok(());
+            }
         }
     }
     let window = effective_window.as_deref();
@@ -7251,6 +7268,103 @@ mod tests {
             .as_deref(),
             Some("4"),
             "mixed-root windowless sync should stay on the shared workspace root pin instead of the caller cwd or focused child root"
+        );
+    }
+
+    #[test]
+    fn explicit_non_agent_window_preserves_layout_when_session_lacks_agent_doc_window() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let subroot = root.join("src/boost-client");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+        let _cwd = ScopedCurrentDir::set(root);
+
+        let non_agent = root.join("tasks/test1.md");
+        std::fs::write(
+            &non_agent,
+            "# plain markdown without agent-doc frontmatter\n",
+        )
+        .unwrap();
+        let child_doc = subroot.join("tasks/monsterrodholders.md");
+        std::fs::write(
+            &child_doc,
+            "---\nagent_doc_session: monster-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-explicit-non-agent-window");
+        let root_pane = iso.new_session("test", root).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "notes"])
+            .unwrap();
+        let root_window = iso.pane_window(&root_pane).unwrap();
+
+        let child_pane = iso
+            .raw_cmd(&[
+                "new-window",
+                "-t",
+                "test:",
+                "-n",
+                "workspace",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-c",
+                subroot.to_string_lossy().as_ref(),
+            ])
+            .unwrap()
+            .trim()
+            .to_string();
+        let child_window = iso.pane_window(&child_pane).unwrap();
+        assert_ne!(
+            child_window, root_window,
+            "repro needs a separate child window"
+        );
+
+        sessions::register_full_with_cwd_in(
+            &subroot,
+            "monster-session",
+            &child_pane,
+            &child_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &child_pane).unwrap(),
+            &child_window,
+            &subroot.to_string_lossy(),
+        )
+        .unwrap();
+
+        run_with_options(
+            &[
+                non_agent.to_string_lossy().to_string(),
+                child_doc.to_string_lossy().to_string(),
+            ],
+            Some(root_window.as_str()),
+            None,
+            AutoStartMode::Full,
+            &iso,
+        )
+        .unwrap();
+
+        assert_eq!(
+            iso.list_panes_ordered(&root_window).unwrap(),
+            vec![root_pane.clone()],
+            "full sync should preserve the explicit non-agent window instead of reconciling child agent-doc panes onto it"
+        );
+        assert!(
+            iso.pane_alive(&child_pane),
+            "the child document pane should stay alive when sync cannot find a named agent-doc window"
+        );
+        let entry = lookup_registry_entry_for_file_session(&child_doc, "monster-session")
+            .expect("child registry entry should remain present");
+        assert_eq!(
+            entry.pane, child_pane,
+            "sync should not replace the child pane when the explicit target window is not an agent-doc window"
         );
     }
 

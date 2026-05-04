@@ -11072,9 +11072,19 @@ Body\n\
         // Verify that provision_pane with a file in the first column
         // computes split_before=true via is_first_column and places the new
         // pane at the leftmost position in the agent-doc window.
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let tasks = dir.path().join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let file_a = tasks.join("file_a.md");
+        let file_b = tasks.join("file_b.md");
+        std::fs::write(&file_a, "# A\n").unwrap();
+        std::fs::write(&file_b, "# B\n").unwrap();
+
         let iso = IsolatedTmux::new("route-test-auto-start-col-left");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = dir.path().to_path_buf();
 
         // Create a window with 2 panes to simulate existing agent-doc layout
         let pane_left = iso.auto_start(session, &cwd).unwrap();
@@ -11093,10 +11103,10 @@ Body\n\
         let col_args = vec!["tasks/file_a.md".to_string(), "tasks/file_b.md".to_string()];
 
         // Call provision_pane with file in the FIRST column
-        let file_a = Path::new("tasks/file_a.md");
+        let file_a_rel = Path::new("tasks/file_a.md");
         let result = provision_pane(
             &iso,
-            file_a,
+            file_a_rel,
             "route-test-provision-first-col-session-a",
             "tasks/file_a.md",
             Some(session),
@@ -11130,9 +11140,19 @@ Body\n\
         // Verify that provision_pane with a file in the second column
         // computes split_before=false via is_first_column and places the new
         // pane at the rightmost position in the agent-doc window.
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let tasks = dir.path().join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let file_a = tasks.join("file_a.md");
+        let file_b = tasks.join("file_b.md");
+        std::fs::write(&file_a, "# A\n").unwrap();
+        std::fs::write(&file_b, "# B\n").unwrap();
+
         let iso = IsolatedTmux::new("route-test-auto-start-col-right");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = dir.path().to_path_buf();
 
         // Create a window with 2 panes to simulate existing agent-doc layout
         let pane_left = iso.auto_start(session, &cwd).unwrap();
@@ -11151,10 +11171,10 @@ Body\n\
         let col_args = vec!["tasks/file_a.md".to_string(), "tasks/file_b.md".to_string()];
 
         // Call provision_pane with file in the SECOND column
-        let file_b = Path::new("tasks/file_b.md");
+        let file_b_rel = Path::new("tasks/file_b.md");
         let result = provision_pane(
             &iso,
-            file_b,
+            file_b_rel,
             "route-test-provision-second-col-session-b",
             "tasks/file_b.md",
             Some(session),
@@ -11266,9 +11286,19 @@ Body\n\
         // Regression: provision_pane must use screen position, not creation order.
         // After rearranging panes so creation order != screen order,
         // split_before=false should split from the rightmost pane by screen position.
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let tasks = dir.path().join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let file_a = tasks.join("file_a.md");
+        let file_b = tasks.join("file_b.md");
+        std::fs::write(&file_a, "# A\n").unwrap();
+        std::fs::write(&file_b, "# B\n").unwrap();
+
         let iso = IsolatedTmux::new("route-test-provision-rearranged");
         let session = "test";
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = dir.path().to_path_buf();
 
         let pane_a = iso.auto_start(session, &cwd).unwrap();
         let window = iso.pane_window(&pane_a).unwrap();
@@ -11283,10 +11313,10 @@ Body\n\
 
         // Provision a right-column file — should split from pane_a (rightmost by screen).
         let col_args = vec!["tasks/file_a.md".to_string(), "tasks/file_b.md".to_string()];
-        let file_b = Path::new("tasks/file_b.md");
+        let file_b_rel = Path::new("tasks/file_b.md");
         let result = provision_pane(
             &iso,
-            file_b,
+            file_b_rel,
             "route-test-provision-rearranged-session-b",
             "tasks/file_b.md",
             Some(session),

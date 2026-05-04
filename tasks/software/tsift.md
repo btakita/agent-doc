@@ -101,7 +101,18 @@ The stable-cache part is straightforward. `sift` already supports this: its own 
 The exact-literal part is a different question. The current `tsift` SQLite index is not a text corpus index; it stores `file_state`, `symbols`, `call_edges`, and `dir_state`, but no file contents or FTS table ([src/tsift/src/index.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/index.rs:283), [src/tsift/src/index.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/index.rs:294)). So you cannot make exact content lookup fast from the existing `.tsift/index.db` alone. That leaves two sane designs. First, the pragmatic one: add `--exact` (or a heuristic for quoted hyphen/underscore identifier-like queries) and route that branch to `rg -F` against the resolved search root instead of `sift`. This is especially justified because `tsift` currently rewrites `rg ...` into `tsift search ... --strategy lexical`, which is exactly the translation causing the slowdown here ([src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:7648)). Second, the heavier one: extend `.tsift/index.db` with a content/FTS table and build your own exact-text index. That would make `tsift` more self-contained, but at that point you are no longer just "using sift better"; you are building a second lexical engine beside it.
 
 So: no, I do not think you are outgrowing `sift` for ranked lexical / hybrid retrieval. But you probably *are* outgrowing the idea that `sift` should replace every `rg` / `grep` use case. The better architecture is split responsibility: keep `sift` for scored retrieval over broad corpora, keep the SQLite symbol index for names/graphs, and add a first-class exact-text path for literal queries. If you want the smallest high-value next step, I would do it in this order: 1. stable `.tsift/search-cache` plumbing into `__search-worker`; 2. `tsift search --exact` backed by `rg -F`; 3. only consider a content FTS table later if `rg` integration proves insufficient.
-<!-- agent:boundary:fb7b64f3 -->
+
+❯ Please schedule the recommended #next-steps for more optimal lookup.
+### Re: next steps for optimal lookup — gpt-5
+
+Scheduled in backlog in priority order.
+
+1. `#searchcache` — stable `.tsift/search-cache` plumbing into `tsift search` / `__search-worker`.
+2. `#exactsearch` — first-class exact-text lookup path for literal queries.
+3. `#contentfts` — deferred evaluation of a native content/FTS index after the first two land.
+
+Top backlog item: `#searchcache`.
+<!-- agent:boundary:b20fe3de -->
 <!-- /agent:exchange -->
 
 <!--
@@ -112,6 +123,9 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#g8be] searchcache=Wire a stable .tsift/search-cache into tsift search/__search-worker so sift reuses corpus and BM25 artifacts across repeated searches.
+- [ ] [#p886] exactsearch=Add a first-class exact-text search path for literal queries (for example `tsift search --exact` backed by `rg -F`) instead of routing every rg-style lookup through lexical BM25.
+- [ ] [#fpt7] contentfts=Evaluate whether tsift needs a native content/FTS index after cache + exact-search land; only build it if rg-backed exact lookup still leaves important gaps.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

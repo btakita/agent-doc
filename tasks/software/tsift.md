@@ -73,7 +73,19 @@ It does not look like `#spec-test-build-install-commit-push` caused the lookup. 
 I could not recover the exact prompt that triggered `tsift explain run_sync`; the retained markdown only preserves the command output fragment, not the preceding reasoning. The most likely explanation is routine code navigation: `src/session-share/AGENTS.md` explicitly recommends `tsift explain <symbol>` for caller/callee inspection, and the agent likely saw a `run_sync` identifier while inspecting code or transcript material and probed it. The lookup then failed because it ran from `src/session-share`, whose index does not include the sibling workspace code where `run_sync` actually resolves.
 
 So the short version is: this was most likely an ad hoc symbol-inspection attempt in the other session, and the failure was caused by index scope, not by the `spec-test-build-install-commit-push` directive itself.
-<!-- agent:boundary:a24dbe18 -->
+❯ I saw this error. Why was there no reindex?:
+```
+• Ran tsift search "claudescore-3"
+  └ Error: tsift search timed out after 30s (strategy: lexical). The search root looks fresh, so reindexing is unlikely
+    to help. Re-run with `--timeout 0` to disable the timeout, narrow `--path` / `--scope`, or try a different
+    strategy.
+```
+### Re: why there was no reindex — gpt-5
+
+Because that timeout path is intentionally the opposite case. `tsift search` autoindexes before the search starts when the index is missing or stale, via `precheck_search_indexes()` in [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3493). After a timeout, it re-checks the same targets with `search_timeout_message()` and only tells you to rebuild if the index became stale or disappeared while the worker was running ([src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3451), [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:8050)).
+
+So when you saw `The search root looks fresh, so reindexing is unlikely to help`, tsift had already decided: the index was present and looked current, and the problem was the lexical search taking longer than 30s, not index drift. In other words, this was treated as a slow/broad query (`"claudescore-3"` over that root), not a stale-index case. A reindex would only have been suggested if the post-timeout re-check found `index is stale` or `index is missing` instead.
+<!-- agent:boundary:fcbe60b1 -->
 <!-- /agent:exchange -->
 
 <!--

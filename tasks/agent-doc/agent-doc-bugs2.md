@@ -278,7 +278,20 @@ Updated the contract docs and version notes in `README.md`, `specs/07-session-tm
 Verification completed in `src/agent-doc`: `cargo fmt`, `cargo test`, `cargo build`, and `cargo install --path . --force` all passed. Closeout commit: `65a8840` (`fix: drop legacy normal-path owner inference`), pushed to `origin/20260422/codex-agent-backend`.
 
 `#sgown8` is complete. The umbrella tracker `#sgown` remains open for `#sgown9`.
-<!-- agent:boundary:a8e9a639 -->
+❯ do [#sgown9]
+### Re: #sgown9 — gpt-5
+
+Implemented the phase-9 verification closeout. Plan: `tasks/agent-doc/plan-single-owner-session-actor-transition.md`.
+
+- Added explicit actor-store regressions in `src/session_actor.rs` for stale-generation/session rejection after a newer authoritative owner lands, so the single-owner generation boundary is now covered directly instead of only via higher-level route/sync behavior.
+- Added editor verification helpers/tests for the operator session surface: VS Code now has dedicated `sessionUi` coverage for exact `session status` display, actor-backed `session clear` command wiring, and persistent stage-specific route-failure presentation; JetBrains now has matching unit coverage for exact session-status output and `session clear` command construction.
+- Hardened the VS Code plugin to keep routed dispatch failures in a durable output channel (`Agent Doc Route Failures`) instead of only a transient error toast, while preserving the exact binary-owned failure text for the user.
+- Updated the actor + plugin specs and `VERSIONS.md` so the phase-9 verification floor is documented alongside the single-owner session actor contract.
+- Verification completed in `src/agent-doc`: `cargo fmt`, `cargo test`, `cargo build`, `cargo install --path . --force`, `npm test`, `npm run package`, and `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` all passed.
+- Repo closeout in `src/agent-doc`: committed as `f341583` (`test: verify actor and plugin session surfaces`) and pushed to `origin/20260422/codex-agent-backend`.
+
+`#sgown9` is complete, and the umbrella tracker `#sgown` is complete as well.
+<!-- agent:boundary:87eb9f31 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -304,8 +317,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgown9] Add regression and plugin verification for generation monotonicity, stale-generation rejection, sync/layout preservation, and stage-specific dispatch failures. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown] Umbrella tracker for the single-owner session actor transition. Bookkeeping: keep spec/test/build/install/commit/push coverage aligned across #sgown1-#sgown9. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.
 - [ ] [#devmdcmt] [recommended] `agent-doc` left `src/session-share/tasks/buildparty-investor-demo/dev.md` in a synthetic `write_stream` cycle with `phase=write_applied` after the response had already landed, so `session-check` still failed until an explicit later `agent-doc commit` closed it. Create a fix plan only: reproduce the exact template/CRDT closeout path that writes the response, verify why no terminal commit/finalize step followed, compare the failure with `#rspcmt`, trace any boundary/backlog/session-check interaction that allows `write_applied` to survive as a nonterminal state, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports a completed turn until the document closeout is verifiably committed.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.

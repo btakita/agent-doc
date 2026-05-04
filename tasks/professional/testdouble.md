@@ -886,7 +886,41 @@ So:
 - **If clearly messy / unprofessional-looking:** resend in clean format, but keep the note brief and matter-of-fact.
 
 If you want, I can prepare a cleaned plain-text resend version now so it is ready in case you decide the formatting warrants it.
-<!-- agent:boundary:385b0353 -->
+❯ Please review the v2 contract. /home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md
+
+❯ Does it look good?
+### Re: v2 contract review — gpt-5
+
+Much better than v1. I would not call it fully clean yet, but it is materially improved and most of the highest-risk items were addressed.
+
+What is fixed:
+
+- The worst invoice-forfeiture language is largely gone. Section 2.2 now preserves payment for work properly performed through termination, subject only to finally determined damages or written agreement ([Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:31)).
+- The first-60-days termination clause no longer says you automatically forfeit outstanding invoices ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:110)).
+- They added a real liability cap and a consequential-damages exclusion ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:130)).
+- The work-for-hire section now has a real background-technology carveout ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:144)).
+- The standalone indemnity section is much narrower and limited to third-party claims ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:250)).
+
+What I would still clean up before signing:
+
+1. Section 4.2 still says post-60-day termination payment is due only if you have not materially breached the agreement ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:114)). That partially reopens the payment dispute risk. I would ask them to delete that qualifier or align it to the Section 2.2 standard.
+
+2. Section 10.1 still contains a separate broad IP warranty/indemnity hook: if third-party rights are violated, you indemnify the company for all damages, losses, expenses, costs, and attorneys' fees whatsoever ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:219)). That should be reconciled with the narrower Section 12 indemnity and the new liability-cap structure, otherwise you still have overlap and ambiguity.
+
+3. Exhibit A still says `Price: $100/hr @ 40hrs week` and separately says `No more than 40hrs/week without prior written consent` ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:348)). That is better treated as `anticipated at up to 40 hrs/week` unless they really intend a harder commitment.
+
+4. The document quality is still rough. Section 2.2 includes literal backticks around the inserted text, numbering/formatting is inconsistent, and `BackgroundTechnology` is missing a space ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:36), [same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:159)). I would want a clean final copy before signing.
+
+Lower-signal but still unchanged business terms to be aware of:
+
+- The 12-month non-circumvention / client bypass restriction is still there ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:61)).
+- Ohio venue and prevailing-party attorneys' fees are still there ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:270)).
+- Insurance is still vague and engagement-specific rather than concretely defined up front ([same file](/home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.md:164)).
+
+Bottom line: I would not reject v2 outright. It is substantially safer than v1. But I would ask for one more cleanup pass on the remaining payment qualifier, the Section 10.1 overlap, the 40-hours wording, and the formatting artifacts before signing.
+
+If you want, I can draft the shortest possible follow-up note asking for just those remaining v2 fixes.
+<!-- agent:boundary:8dc148e1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -897,9 +931,7 @@ If you want, I can prepare a cleaned plain-text resend version now so it is read
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#td-payment-termination] Ask Test Double to revise the payment/termination terms so you do not forfeit outstanding invoices for early termination or unrelated breach after cure failure.
-- [ ] [#td-liability-cap] Ask for a reasonable liability cap and narrower indemnity, since the agreement currently has uncapped indemnity and no contractor-side cap.
-- [ ] [#td-ip-carveout] If you plan to reuse preexisting tools, libraries, or templates, get a written carveout so §5 does not sweep them into work-for-hire ownership.
+- [ ] [#td-v2-cleanup] [recommended] Ask Test Double for one more cleanup pass on v2: remove the §4.2 material-breach payment qualifier or align it to §2.2, reconcile §10.1 with the narrowed indemnity/liability-cap structure, clarify the Exhibit A 40 hrs/week wording, and issue a clean final copy without stray markup artifacts.
 - [ ] [#td-subcontract-consent] Get written confirmation from Test Double before using any substitute, because §10.1 requires prior written consent for further subcontractors/subconsultants.
 <!-- /agent:backlog -->
 

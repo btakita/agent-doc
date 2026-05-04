@@ -269,8 +269,16 @@ Verification completed in `src/agent-doc`:
 Repo closeout in `src/agent-doc`: committed as `38dbc8a` (`feat: isolate sync repair behind explicit commands`) and pushed to `origin/20260422/codex-agent-backend`.
 
 `#sgown7` is complete. The umbrella tracker `#sgown` remains open for `#sgown8`-`#sgown9`.
+❯ do [#sgown8]
+### Re: #sgown8 — gpt-5
+Implemented. Normal route/start/sync ownership resolution no longer promotes latest-open session-log owners, `registry_rebind` successors, or generic same-file process-tree matches back into normal-path authority. Normal-path ownership is now limited to the authoritative actor record or a supervisor-backed registered binding; legacy associated-pane evidence stays available for repair/resync diagnostics and explicit recovery paths.
 
-<!-- agent:boundary:df0c6541 -->
+Updated the contract docs and version notes in `README.md`, `specs/07-session-tmux-commands.md`, `specs/08a-session-actor-contract.md`, and `VERSIONS.md`. I also tightened the route/sync coverage so the stricter ownership boundary is tested directly, including the busy-restart handoff timing and the live `registry_rebind` rejection case.
+
+Verification completed in `src/agent-doc`: `cargo fmt`, `cargo test`, `cargo build`, and `cargo install --path . --force` all passed. Closeout commit: `65a8840` (`fix: drop legacy normal-path owner inference`), pushed to `origin/20260422/codex-agent-backend`.
+
+`#sgown8` is complete. The umbrella tracker `#sgown` remains open for `#sgown9`.
+<!-- agent:boundary:a8e9a639 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -296,7 +304,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgown8] Delete the remaining normal-path ownership inference from process-tree, session-log, and registry-rebind logic. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown9] Add regression and plugin verification for generation monotonicity, stale-generation rejection, sync/layout preservation, and stage-specific dispatch failures. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown] Umbrella tracker for the single-owner session actor transition. Bookkeeping: keep spec/test/build/install/commit/push coverage aligned across #sgown1-#sgown9. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.

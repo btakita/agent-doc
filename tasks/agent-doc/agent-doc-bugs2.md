@@ -975,9 +975,9 @@ Repo closeout:
 `origin/20260422/codex-agent-backend`
 
 ❯ I did not run a live JetBrains-managed replay in this cycle. The existing replay items
-`#jbqbusy`,
-`#jbipcr`, and
-`#edispatch` remain the manual validation path; I did not add a new backlog item.
+❯ `#jbqbusy`,
+❯ `#jbipcr`, and
+❯ `#edispatch` remain the manual validation path; I did not add a new backlog item.
 
 ### Re: JB Plugin
 `Run Agent Doc` Enter submit path — gpt-5
@@ -1044,9 +1044,11 @@ Verification:
 - `cargo build`
 - `cargo install --path . --force`
 
-Commit: `df5c7c6` (`fix: route managed reroutes through supervisor ipc`)
-Push: `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:6d3039f4 -->
+❯ Commit: `df5c7c6` (`fix: route managed reroutes through supervisor ipc`)
+❯ Push: `origin/20260422/codex-agent-backend`
+### Re: closeout repair — gpt-5
+Follow-up closeout only: reopening the binary-owned response path so the supervisor-routing response above remains the active committed tail for this turn. No additional repo changes were made beyond the already-pushed `src/agent-doc` commit `df5c7c6`.
+<!-- agent:boundary:68f8994e -->
 <!-- /agent:exchange -->
 ### End Exchange
 

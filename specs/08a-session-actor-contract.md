@@ -30,6 +30,9 @@ Authoritative fields:
   new document session owner or rebinds authority to another pane.
 - Harness child restarts inside the same owning supervisor do not create a new
   ownership generation by themselves.
+- Same-generation lifecycle updates such as prompt readiness, dispatch-busy,
+  waiting-for-input, blocked, and closed must preserve the authoritative
+  generation while still updating `state` and `last_transition`.
 - Legacy logs without explicit generation markers may infer historical
   generations from repeated `session_start` events for diagnostics, but new
   writes must emit explicit generation metadata.
@@ -71,6 +74,11 @@ Later phases may refine caller values without changing the field names.
   generation, pane/window binding, harness, state, and last transition.
 - Store updates must be monotonic and fail closed on generation regressions; a
   stale writer must not overwrite a newer generation.
+- Same-generation state transitions must also fail closed when the caller's
+  `session_id` or `pane_id` no longer matches the authoritative record.
+- The phase-3 supervisor path reports these actor transitions explicitly:
+  `prompt_ready`, `ipc_inject` / `auto_trigger_inject` busy dispatch, clean-exit
+  `waiting_input`, `supervisor_halted`, and final `closed`.
 - `sessions.json` remains a projection/binding helper during migration, not the
   final actor store.
 - Session logs are the source of transition provenance and generation history.

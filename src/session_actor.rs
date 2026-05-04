@@ -65,6 +65,19 @@ pub enum ActorState {
     Blocked,
 }
 
+impl ActorState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Ready => "ready",
+            Self::Busy => "busy",
+            Self::WaitingInput => "waiting_input",
+            Self::Closed => "closed",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActorLastTransition {
     pub caller: String,
@@ -376,6 +389,68 @@ pub fn record_session_start(
     )
 }
 
+pub fn transition_state(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    state: ActorState,
+    caller: &str,
+    reason: &str,
+) -> Result<ActorRecord> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(base_dir) = crate::snapshot::find_project_root(&canonical) else {
+        anyhow::bail!(
+            "failed to locate project root for actor record {}",
+            canonical.display()
+        );
+    };
+    let file_key = canonical.to_string_lossy().to_string();
+    let Some(current) = load_record_in(&base_dir, &file_key)? else {
+        anyhow::bail!(
+            "missing authoritative actor record for {}",
+            canonical.display()
+        );
+    };
+    if current.session_id != session_id {
+        anyhow::bail!(
+            "stale actor transition for {}: session {} no longer owns generation {} (current session {})",
+            canonical.display(),
+            session_id,
+            current.generation,
+            current.session_id
+        );
+    }
+    if current.pane_id != pane_id {
+        anyhow::bail!(
+            "stale actor transition for {}: pane {} no longer owns generation {} (current pane {})",
+            canonical.display(),
+            pane_id,
+            current.generation,
+            current.pane_id
+        );
+    }
+    let harness = if current.harness.trim().is_empty() {
+        detect_document_harness_in(&base_dir, &file_key)
+    } else {
+        current.harness.clone()
+    };
+    store_record_in(
+        &base_dir,
+        &file_key,
+        ActorRecordUpdate {
+            session_id,
+            pane_id,
+            window_id: &current.window_id,
+            harness: &harness,
+            state,
+            caller,
+            reason,
+            generation: current.generation,
+            expected_prior_generation: Some(current.generation),
+        },
+    )
+}
+
 pub fn infer_latest_generation_from_content(content: &str) -> u64 {
     let mut latest_explicit = 0u64;
     let mut legacy_session_starts = 0u64;
@@ -603,5 +678,59 @@ mod tests {
         assert_eq!(record.last_transition.prior_generation, 0);
         assert_eq!(record.last_transition.new_generation, 1);
         assert_eq!(record.harness, "codex");
+    }
+
+    #[test]
+    fn transition_state_updates_same_generation_without_rebinding() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-4\nagent: codex\n---\nBody\n",
+        );
+
+        record_session_start(&file, "session-4", "%71", "@8", 1).unwrap();
+        let record = transition_state(
+            &file,
+            "session-4",
+            "%71",
+            ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        assert_eq!(record.generation, 1);
+        assert_eq!(record.state, ActorState::Ready);
+        assert_eq!(record.last_transition.prior_generation, 1);
+        assert_eq!(record.last_transition.new_generation, 1);
+        assert_eq!(record.last_transition.caller, "supervisor");
+        assert_eq!(record.last_transition.reason, "prompt_ready");
+    }
+
+    #[test]
+    fn transition_state_rejects_stale_pane_updates() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-5\nagent: codex\n---\nBody\n",
+        );
+
+        record_session_start(&file, "session-5", "%81", "@9", 1).unwrap();
+        let err = transition_state(
+            &file,
+            "session-5",
+            "%82",
+            ActorState::Closed,
+            "supervisor",
+            "session_end",
+        )
+        .expect_err("stale pane must not update authoritative actor state");
+
+        assert!(
+            format!("{err}").contains("no longer owns generation"),
+            "unexpected error: {err}"
+        );
     }
 }

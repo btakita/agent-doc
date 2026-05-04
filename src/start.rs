@@ -99,7 +99,7 @@ use anyhow::{Context, Result};
 use portable_pty::PtySize;
 use std::collections::VecDeque;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};
 use std::time::{Duration, Instant};
@@ -725,6 +725,11 @@ fn auto_trigger_inject_command(
     if stop.load(Ordering::Relaxed) {
         return AutoTriggerOutcome::Cancelled;
     }
+    shared.transition_actor_state(
+        crate::session_actor::ActorState::Busy,
+        "dispatch",
+        "auto_trigger_inject",
+    );
     match writer.write_all_interruptibly(&payload, stop) {
         Ok(()) => AutoTriggerOutcome::Sent,
         Err(err) if err.kind() == io::ErrorKind::Interrupted && stop.load(Ordering::Relaxed) => {
@@ -1087,10 +1092,39 @@ impl StopSignal {
 /// Shared writer handle: outer Mutex guards replace/clear, inner Mutex guards concurrent writes.
 type SharedWriter = Mutex<Option<Arc<Mutex<SharedPtyWriter>>>>;
 
+#[derive(Debug, Clone)]
+struct SessionActorRuntime {
+    file: PathBuf,
+    session_id: String,
+    pane_id: String,
+}
+
+impl SessionActorRuntime {
+    fn transition(
+        &self,
+        state: crate::session_actor::ActorState,
+        caller: &str,
+        reason: &str,
+    ) -> Result<crate::session_actor::ActorRecord> {
+        crate::session_actor::transition_state(
+            &self.file,
+            &self.session_id,
+            &self.pane_id,
+            state,
+            caller,
+            reason,
+        )
+    }
+}
+
 /// Shared state between the main supervisor loop and the IPC handler thread.
 struct SupervisorShared {
     /// Current supervisor state for IPC `state` queries.
     supervisor_state: Mutex<SupervisorState>,
+    /// Authoritative actor lifecycle context for this pane generation.
+    actor_runtime: Option<SessionActorRuntime>,
+    /// Best-known actor lifecycle state for IPC `state` responses.
+    actor_state: Mutex<Option<crate::session_actor::ActorState>>,
     /// PID of the long-lived `agent-doc start` supervisor process.
     supervisor_pid: u32,
     /// Stable identity for this supervisor process across child restarts.
@@ -1125,9 +1159,21 @@ struct SupervisorShared {
 }
 
 impl SupervisorShared {
+    #[cfg(test)]
     fn new(cwd_source: &'static str, supervisor_instance_id: String) -> Self {
+        Self::with_actor_runtime(cwd_source, supervisor_instance_id, None, None)
+    }
+
+    fn with_actor_runtime(
+        cwd_source: &'static str,
+        supervisor_instance_id: String,
+        actor_runtime: Option<SessionActorRuntime>,
+        actor_state: Option<crate::session_actor::ActorState>,
+    ) -> Self {
         Self {
             supervisor_state: Mutex::new(SupervisorState::Healthy),
+            actor_runtime,
+            actor_state: Mutex::new(actor_state),
             supervisor_pid: std::process::id(),
             supervisor_instance_id,
             restart_count: AtomicU32::new(0),
@@ -1143,6 +1189,30 @@ impl SupervisorShared {
             auto_trigger_outcome: AtomicU8::new(AutoTriggerOutcome::NotNeeded as u8),
             prompt_visible_once: AtomicBool::new(false),
             suppress_stale_ctrl_d_until_prompt: AtomicBool::new(false),
+        }
+    }
+
+    fn transition_actor_state(
+        &self,
+        state: crate::session_actor::ActorState,
+        caller: &str,
+        reason: &str,
+    ) {
+        let Some(runtime) = self.actor_runtime.as_ref() else {
+            return;
+        };
+        match runtime.transition(state, caller, reason) {
+            Ok(record) => {
+                *self.actor_state.lock().unwrap() = Some(record.state);
+            }
+            Err(err) => {
+                eprintln!(
+                    "[session-actor] warning: failed to record {} transition for {}: {}",
+                    state.as_str(),
+                    runtime.file.display(),
+                    err
+                );
+            }
         }
     }
 
@@ -1168,9 +1238,15 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
     match method {
         IpcMethod::State => {
             let state = shared.supervisor_state.lock().unwrap();
+            let actor_state = shared
+                .actor_state
+                .lock()
+                .unwrap()
+                .map(|state| state.as_str().to_string());
             IpcResponse::ok(serde_json::json!({
                 "running": shared.running.load(Ordering::Relaxed),
                 "state": state.as_str(),
+                "actor_state": actor_state,
                 "restart_count": shared.restart_count.load(Ordering::Relaxed),
                 "cwd_source": shared.cwd_source,
                 "supervisor_pid": shared.supervisor_pid,
@@ -1194,7 +1270,15 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
                 Some(writer_arc) => {
                     let mut w = writer_arc.lock().unwrap();
                     match w.write_all_blocking(bytes.as_bytes()) {
-                        Ok(()) => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
+                        Ok(()) => {
+                            drop(w);
+                            shared.transition_actor_state(
+                                crate::session_actor::ActorState::Busy,
+                                "dispatch",
+                                "ipc_inject",
+                            );
+                            IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                        }
                         Err(e) => IpcResponse::err(format!("write error: {e}")),
                     }
                 }
@@ -1202,6 +1286,11 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
             }
         }
         IpcMethod::Restart { mode } => {
+            shared.transition_actor_state(
+                crate::session_actor::ActorState::Busy,
+                "supervisor",
+                "ipc_restart_requested",
+            );
             *shared.restart_mode.lock().unwrap() = mode;
             shared.restart_requested.store(true, Ordering::Relaxed);
             shared.kill_child();
@@ -1272,7 +1361,13 @@ fn spawn_reader_thread(
                         }
                         record_recent_output(&shared, &filtered);
                         if current_child_prompt_visible(&shared, &harness) {
-                            shared.prompt_visible_once.store(true, Ordering::Relaxed);
+                            if !shared.prompt_visible_once.swap(true, Ordering::Relaxed) {
+                                shared.transition_actor_state(
+                                    crate::session_actor::ActorState::Ready,
+                                    "supervisor",
+                                    "prompt_ready",
+                                );
+                            }
                             shared
                                 .suppress_stale_ctrl_d_until_prompt
                                 .store(false, Ordering::Relaxed);
@@ -1758,11 +1853,18 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
     // Find project root for IPC socket placement
     let project_root =
         snapshot::find_project_root(&canonical).unwrap_or_else(|| resolved_cwd.path.clone());
+    let actor_runtime = SessionActorRuntime {
+        file: canonical.clone(),
+        session_id: session_id.clone(),
+        pane_id: pane_id.clone(),
+    };
 
     // Create shared state for IPC handler
-    let shared = Arc::new(SupervisorShared::new(
+    let shared = Arc::new(SupervisorShared::with_actor_runtime(
         resolved_cwd.source.as_str(),
         supervisor_instance_id,
+        Some(actor_runtime),
+        Some(crate::session_actor::ActorState::Starting),
     ));
 
     // Start IPC listener
@@ -1791,7 +1893,20 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
     let mut failed_resume_tracker = FailedResumeTracker::default();
     let mut suppress_stale_ctrl_d_until_prompt = false;
+    let mut child_launch_count: u32 = 0;
     let supervisor_exit_reason = loop {
+        if child_launch_count > 0 {
+            let restart_reason = if first_run {
+                "restart_fresh_spawn"
+            } else {
+                "restart_continue_spawn"
+            };
+            shared.transition_actor_state(
+                crate::session_actor::ActorState::Busy,
+                "supervisor",
+                restart_reason,
+            );
+        }
         // Build args for this iteration
         let auto_trigger;
         let args = if !first_run {
@@ -1834,6 +1949,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             env: resolved_env.clone(),
             size: initial_size,
         };
+        child_launch_count += 1;
         let mut session = crate::supervisor::pty::PtySession::spawn(cfg)
             .with_context(|| format!("failed to spawn {}", harness.binary))?;
 
@@ -2043,6 +2159,11 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             RestartAction::PromptUser => {
                 match clean_exit_resolution(&harness) {
                     CleanExitResolution::PromptUser => {
+                        shared.transition_actor_state(
+                            crate::session_actor::ActorState::WaitingInput,
+                            "supervisor",
+                            "clean_exit_prompt",
+                        );
                         // Temporarily restore cooked mode so read_line() works with
                         // normal line editing (echo, backspace, etc.)
                         raw_mode.suspend();
@@ -2094,6 +2215,11 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                             committed_cycle_after_latest_run,
                         ) {
                             RestartContinueExitStrategy::PromptUser => {
+                                shared.transition_actor_state(
+                                    crate::session_actor::ActorState::WaitingInput,
+                                    "supervisor",
+                                    "resume_failure_prompt",
+                                );
                                 raw_mode.suspend();
                                 eprintln!(
                                     "\n{} failed to re-establish a prompt after resume {} times in the last {}s.",
@@ -2232,6 +2358,11 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                 suppress_stale_ctrl_d_until_prompt = false;
             }
             RestartAction::Halt => {
+                shared.transition_actor_state(
+                    crate::session_actor::ActorState::Blocked,
+                    "supervisor",
+                    "supervisor_halted",
+                );
                 eprintln!(
                     "\nSupervisor halted after {} restarts (flapping detected).",
                     restart_count
@@ -2250,6 +2381,11 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         rw.stop();
     }
     ipc.stop();
+    shared.transition_actor_state(
+        crate::session_actor::ActorState::Closed,
+        "supervisor",
+        supervisor_exit_reason,
+    );
     log_event(
         &mut session_log,
         &format!(

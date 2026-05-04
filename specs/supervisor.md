@@ -113,7 +113,7 @@ Protocol: length-prefixed JSON (same frame format as `ipc_socket.rs`, so the exi
 |--------|---------|----------|-------|
 | `restart` | `{ "mode": "fresh" \| "continue" }` | `{ "ok": true, "pid": <u32> }` | Kills current claude, relaunches |
 | `inject` | `{ "bytes": "<base64>" }` | `{ "ok": true, "n": <usize> }` | Write bytes to pty master |
-| `state` | — | `{ "running": bool, "pid": u32?, "cwd": string, "restart_count": u32, "last_exit": i32? }` | |
+| `state` | — | `{ "running": bool, "pid": u32?, "restart_count": u32, "state": "...", "actor_state": "..."? }` | Includes both supervisor health and the current actor lifecycle state when available |
 | `pid` | — | `{ "pid": u32? }` | Convenience shortcut |
 | `stop` | `{ "graceful": bool }` | `{ "ok": true }` | Shuts down supervisor + child |
 
@@ -123,7 +123,24 @@ Socket is created with mode `0600`. Opaque to anything except the FFI library, w
 
 1. **`/agent-doc` routing from a different tmux pane:** instead of `tmux send-keys`, the route subcommand opens the supervisor socket and calls `inject` with `/agent-doc <file>\r`. Removes the 5s sleep hack + race conditions in `start.rs:229`.
 2. **Editor plugin "restart claude" button:** IntelliJ plugin opens the socket, calls `restart`, displays the returned pid.
-3. **Crash-state introspection for health dashboards:** `state` returns last exit code + restart count so a cleanup hook can escalate (e.g., "5 restarts in 60s → stop and notify").
+3. **Crash-state introspection for health dashboards:** `state` returns restart count plus supervisor/actor state so a cleanup hook can escalate (e.g., "5 restarts in 60s → stop and notify").
+
+### Actor state reporting
+
+The supervisor is responsible for keeping the authoritative session-actor store
+in sync with the live child lifecycle without creating a new ownership
+generation:
+
+- child launch after the initial `session_start` moves the actor to `busy`
+- idle prompt visibility moves it to `ready`
+- clean-exit or resume-failure prompts move it to `waiting_input`
+- halted restart policy moves it to `blocked`
+- final supervisor exit moves it to `closed`
+- IPC or auto-trigger dispatch writes also mark the actor `busy` before bytes
+  are injected into the child pty
+
+Those updates must fail closed when the supervising pane/session no longer owns
+the authoritative generation.
 
 Both `route` and `resync` also use the supervisor socket as part of the registered-document ownership proof. The primary top-down check now requires the canonical document-path entry in `sessions.json` to agree with the live pane, the recorded supervisor PID, and the reported `supervisor_instance_id`. When tmux argv/path inspection no longer proves ownership, the socket's `Pid` method remains a secondary fallback that maps the live supervisor PID back to the tmux pane before treating the registration as stale.
 

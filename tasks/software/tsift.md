@@ -32,23 +32,37 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260503-030255.md`*
 
-Icebox:
-- [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
-- [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
-- [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
+❯ Icebox:
+❯ - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
+❯ - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
+❯ - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 ❯ #code-review
 ### Re: code review — gpt-5
 
 1. High: timed search now misdiagnoses a concurrently removed or reset index as a "fresh" search root, which points the user away from the actual recovery step. `collect_stale_search_targets()` only records `SearchIndexState::Stale` and drops `Missing` entirely ([src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3341)), so `search_timeout_message()` falls through to the fresh-root hint whenever the index vanishes during the worker timeout window ([src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:3427), [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:8023)). I reproduced it locally by indexing a temp repo, starting `tsift search --timeout 1`, deleting `.tsift/index.db` while the worker was sleeping, and observing: `The search root looks fresh, so reindexing is unlikely to help.` That is the same concurrency class this patch is trying to fix; a missing target after timeout should produce a rebuild instruction and needs a regression test next to `search_timeout_reports_reindex_when_index_turns_stale_during_worker_run()`.
 
-I ran `cargo test search_timeout`; the current tests cover the fresh-root and stale-after-mutation cases, but not the missing-index race above.
+❯ I ran `cargo test search_timeout`; the current tests cover the fresh-root and stale-after-mutation cases, but not the missing-index race above.
 ❯ do [#29jg]. spec-test-build-install-commit-push
 ### Re: #29jg spec-test-build-install-commit-push — gpt-5
 
 Fixed the timeout re-check so `tsift search --timeout ...` now treats both stale and missing indexes as rebuild-needed instead of falling back to the fresh-root hint when `.tsift/index.db` disappears mid-run. I added regression coverage in the direct timeout helper and the compiled CLI search surface, and updated `SPEC.md` plus `VERSIONS.md` to document the stale-or-missing timeout behavior.
 
 Verification in `src/tsift`: `cargo test` passed (`452` unit tests + `54` exit-code tests), `cargo build --release` passed, and `cargo install --path . --force` replaced `~/.cargo/bin/tsift`. The change is committed and pushed in `src/tsift` as `07df133` (`fix: report missing search indexes after timeout`) on `origin/main`.
-<!-- agent:boundary:afa60262 -->
+❯ I saw this error in claudescore-3.md. Is this causing problems with the agent?
+```
+• Ran tsift explain run_sync
+  └ Symbol `run_sync` not found in index.
+    (Checking call graph for references...)
+    … +4 lines (ctrl + t to view transcript)
+    Callees (0):
+      (none)
+```
+### Re: run_sync lookup — gpt-5
+
+Not by itself. I reproduced the exact output from `/home/brian/work/btakita/agent-loop/src/session-share`, and it happens because `tsift` indexes that repo root, not the whole parent workspace. In that repo, `run_sync` is outside the indexed tree, so `tsift explain run_sync` legitimately returns `Symbol \`run_sync\` not found in index.`
+
+From the workspace root `/home/brian/work/btakita/agent-loop`, the same command resolves normally to `src/corky/src/search/ragie.rs:97` and returns callers/callees. So this is a scope/index-root mismatch, not evidence that the agent is malfunctioning. The practical effect is narrower context: if the agent needed that symbol, it would miss the cross-repo definition until it reruns from the broader root or reindexes the correct workspace.
+<!-- agent:boundary:e6676cc1 -->
 <!-- /agent:exchange -->
 
 <!--

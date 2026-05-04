@@ -336,7 +336,40 @@ For this repo, the acceptance gate is the normal parallel suite. `cargo test -- 
 I am correcting that standard here for this session. If a future parallel run fails, the turn stays open until the parallel failure is fixed or a concrete blocker is documented without claiming a successful verification closeout.
 
 No repo changes were made in this response cycle.
-<!-- agent:boundary:a042bfe3 -->
+❯ The JB Plugin's `Run Agent Doc` often does not successfully send the key to the tmux pane.
+```
+[route] target tmux session: 4
+Error: authoritative actor generation 81 for tasks/agent-doc/agent-doc-bugs2.md owns pane %192 but route will not inject a new trigger because the authoritative actor is busy
+```
+
+❯ In addition, when `Run Agent Doc` does successfully send `agent-doc ...` to the tmux pane, Enter is not successfully pressed. A `\n` is inserted into the prompt instead.
+
+❯ spec-test-build-install-commit-push
+### Re: JB Plugin `Run Agent Doc` reroute submit path — gpt-5
+
+Both symptoms came from the same boundary mismatch in `src/agent-doc/src/start.rs`.
+
+Root cause:
+- The authoritative-actor reroute path was sending `agent-doc ...\n` through supervisor IPC, while the local auto-trigger path already used carriage-return submit semantics.
+- In raw managed Codex/Claude PTYs, that let `Run Agent Doc` draft a literal newline into the composer instead of acting like Enter.
+- Once the reopen was drafted instead of submitted, the actor stayed in the routed/busy state, which is why later JetBrains reruns often failed with `authoritative actor ... is busy` instead of actually resubmitting the document.
+
+Implemented:
+- `src/agent-doc/src/start.rs` now normalizes supervisor-injected submit bytes so `\n` and `\r\n` are written to the managed PTY as `\r` before they reach the child harness.
+- The auto-trigger path now reuses the same normalization helper, so the built-in startup submit and the reroute/editor IPC submit path share one Enter contract.
+- Added start-level regression coverage for the normalization helper and for IPC inject writes.
+- Updated `specs/08-session-routing.md` and `VERSIONS.md` so the authoritative-actor dispatch contract explicitly requires Enter-like carriage-return submission at the supervisor PTY boundary.
+
+Verification completed in `src/agent-doc`:
+- `cargo check`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+Repo closeout in `src/agent-doc`: committed as `1e807fd` (`fix: normalize supervisor ipc submit bytes`) and pushed to `origin/20260422/codex-agent-backend`.
+
+I did not run a live JetBrains-managed tmux repro after the patch, so I added a recommended backlog follow-up for that manual replay.
+<!-- agent:boundary:027d6cf2 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -364,6 +397,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc against a healthy authoritative actor session and confirm rerouted submits no longer draft a literal newline before the reopen.
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.
 - [ ] [#devmdcmt] [recommended] `agent-doc` left `src/session-share/tasks/buildparty-investor-demo/dev.md` in a synthetic `write_stream` cycle with `phase=write_applied` after the response had already landed, so `session-check` still failed until an explicit later `agent-doc commit` closed it. Create a fix plan only: reproduce the exact template/CRDT closeout path that writes the response, verify why no terminal commit/finalize step followed, compare the failure with `#rspcmt`, trace any boundary/backlog/session-check interaction that allows `write_applied` to survive as a nonterminal state, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports a completed turn until the document closeout is verifiably committed.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.

@@ -707,8 +707,7 @@ fn auto_trigger_inject_command(
         return AutoTriggerOutcome::Cancelled;
     }
 
-    let mut payload = trigger_cmd.as_bytes().to_vec();
-    payload.push(b'\r');
+    let payload = normalize_supervisor_inject_bytes(&format!("{trigger_cmd}\n"));
 
     let Some(mut writer) = lock_writer_interruptibly(&writer_arc, stop) else {
         return AutoTriggerOutcome::Cancelled;
@@ -728,6 +727,26 @@ fn auto_trigger_inject_command(
         }
         Err(_) => AutoTriggerOutcome::SendFailed,
     }
+}
+
+fn normalize_supervisor_inject_bytes(bytes: &str) -> Vec<u8> {
+    let mut normalized = Vec::with_capacity(bytes.len());
+    let raw = bytes.as_bytes();
+    let mut index = 0usize;
+    while index < raw.len() {
+        match raw[index] {
+            b'\r' => {
+                normalized.push(b'\r');
+                if raw.get(index + 1) == Some(&b'\n') {
+                    index += 1;
+                }
+            }
+            b'\n' => normalized.push(b'\r'),
+            byte => normalized.push(byte),
+        }
+        index += 1;
+    }
+    normalized
 }
 
 fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
@@ -1252,7 +1271,8 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
             match guard.as_ref() {
                 Some(writer_arc) => {
                     let mut w = writer_arc.lock().unwrap();
-                    match w.write_all_blocking(bytes.as_bytes()) {
+                    let normalized = normalize_supervisor_inject_bytes(&bytes);
+                    match w.write_all_blocking(&normalized) {
                         Ok(()) => {
                             drop(w);
                             shared.transition_actor_state(
@@ -3461,6 +3481,40 @@ mod tests {
             auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
             AutoTriggerOutcome::Sent
         );
+        assert_eq!(
+            written.lock().unwrap().as_slice(),
+            b"agent-doc tasks/software/tsift.md\r"
+        );
+    }
+
+    #[test]
+    fn normalize_supervisor_inject_bytes_converts_line_feeds_to_carriage_returns() {
+        assert_eq!(
+            normalize_supervisor_inject_bytes("agent-doc tasks/software/tsift.md\n"),
+            b"agent-doc tasks/software/tsift.md\r"
+        );
+        assert_eq!(
+            normalize_supervisor_inject_bytes("line one\r\nline two\nline three\r"),
+            b"line one\rline two\rline three\r"
+        );
+    }
+
+    #[test]
+    fn handle_ipc_inject_normalizes_submit_newline_before_writing() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
+        ))));
+
+        let response = handle_ipc(
+            IpcMethod::Inject {
+                bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
+            },
+            &shared,
+        );
+
+        assert!(response.ok);
         assert_eq!(
             written.lock().unwrap().as_slice(),
             b"agent-doc tasks/software/tsift.md\r"

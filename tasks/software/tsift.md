@@ -64,8 +64,16 @@ Not by itself. I reproduced the exact output from `/home/brian/work/btakita/agen
 From the workspace root `/home/brian/work/btakita/agent-loop`, the same command resolves normally to `src/corky/src/search/ragie.rs:97` and returns callers/callees. So this is a scope/index-root mismatch, not evidence that the agent is malfunctioning. The practical effect is narrower context: if the agent needed that symbol, it would miss the cross-repo definition until it reruns from the broader root or reindexes the correct workspace.
 `agent-doc plan` blocked this cycle because it found no live document changes relative to the current snapshot, so I did not write or finalize a new response.
 
-The earlier preflight briefly saw a trailing line that looked like `Why was this symbol search attempted? spec-test-build-install-commit-push`, but by the time the binary planning step ran, that change was no longer present in the document. If you want that answered in the session doc, add the prompt back to [tasks/software/tsift.md](/home/brian/work/btakita/agent-loop/tasks/software/tsift.md) and rerun `agent-doc`.
-<!-- agent:boundary:fbb89042 -->
+❯ The earlier preflight briefly saw a trailing line that looked like `Why was this symbol search attempted? spec-test-build-install-commit-push`, but by the time the binary planning step ran, that change was no longer present in the document. If you want that answered in the session doc, add the prompt back to [tasks/software/tsift.md](/home/brian/work/btakita/agent-loop/tasks/software/tsift.md) and rerun `agent-doc`.
+❯ Why was this symbol search attempted? spec-test-build-install-commit-push
+### Re: why that symbol lookup happened — gpt-5
+
+It does not look like `#spec-test-build-install-commit-push` caused the lookup. That tag belongs to this `tsift.md` session. The quoted `tsift explain run_sync` line came from the separate `claudescore-3.md` session, whose current task is `do [#pfqcal2]. spec-test-benchmarks-news-commit-push`, not this tsift preset.
+
+I could not recover the exact prompt that triggered `tsift explain run_sync`; the retained markdown only preserves the command output fragment, not the preceding reasoning. The most likely explanation is routine code navigation: `src/session-share/AGENTS.md` explicitly recommends `tsift explain <symbol>` for caller/callee inspection, and the agent likely saw a `run_sync` identifier while inspecting code or transcript material and probed it. The lookup then failed because it ran from `src/session-share`, whose index does not include the sibling workspace code where `run_sync` actually resolves.
+
+So the short version is: this was most likely an ad hoc symbol-inspection attempt in the other session, and the failure was caused by index scope, not by the `spec-test-build-install-commit-push` directive itself.
+<!-- agent:boundary:a24dbe18 -->
 <!-- /agent:exchange -->
 
 <!--

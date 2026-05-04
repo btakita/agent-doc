@@ -69,7 +69,20 @@ Implemented the phase-2 durable actor store.
 - Left pre-existing unrelated dirty files in `src/agent-doc` untouched: `README.md`, `specs/codex-support.md`, `specs/supervisor.md`, `src/plugin.rs`.
 
 `#sgown2` is complete. The umbrella backlog item for the remaining transition steps stays open for `#sgown3`-`#sgown9`.
-<!-- agent:boundary:32f01cd3 -->
+❯ do [#sgown3]
+### Re: #sgown3 — gpt-5
+
+Implemented the phase-3 supervisor-to-actor state transition path. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+
+- Added same-generation actor state transitions in `src/session_actor.rs`, including stale pane/session rejection so an old supervisor cannot overwrite a newer authoritative generation.
+- `src/start.rs` now reports actor lifecycle updates from the live supervisor path: dispatch busy, prompt ready, waiting for user input, halted, and closed. Supervisor IPC `state` now also exposes `actor_state` alongside supervisor health.
+- Updated `specs/08a-session-actor-contract.md` and the staged `specs/supervisor.md` hunks to document same-generation lifecycle transitions and the supervisor-owned actor reporting contract.
+- Verification completed: `cargo check`, `cargo test`, `cargo build`, `cargo install --path . --force`.
+- Repo closeout: committed in `src/agent-doc` as `f89ddaa` (`feat: track supervisor actor state transitions`) and pushed to `origin/20260422/codex-agent-backend`.
+- Left pre-existing unrelated dirty files untouched in `src/agent-doc`: `README.md`, `specs/codex-support.md`, `src/plugin.rs`, plus additional unstaged local edits in `specs/supervisor.md` outside the `#sgown3` hunks.
+
+`#sgown3` is complete. Later transition steps remain open in the backlog.
+<!-- agent:boundary:8855c927 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -93,7 +106,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgown3] Move supervisor ownership, prompt-readiness, and closeout state transitions onto actor commands. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown4] Convert route to actor-owned dispatch with bounded actor acknowledgement instead of heuristic owner election. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgownorch] [recommended] Define which single-owner transition steps may use bounded sidecar subagents versus single-owner execution only, after #sgown4 lands. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown5] Convert sync/focus flows to projection-only reconciliation around actor-owned panes. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md

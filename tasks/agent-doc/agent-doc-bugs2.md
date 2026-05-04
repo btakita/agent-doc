@@ -396,8 +396,11 @@ So the operating model I recommend is:
 
 I added one backlog follow-up to define that subagent boundary explicitly once `#sgown4` lands, so the execution model is written down before the later UI and verification phases.
 
-No tests/build/install ran in this cycle because the requested work here was answer-only, not implementation.
-<!-- agent:boundary:c6237d32 -->
+❯ No tests/build/install ran in this cycle because the requested work here was answer-only, not implementation.
+### Re: closeout normalization artifact — gpt-5
+
+That line was a closeout note, not a new implementation request. No additional repo work ran in this recovery cycle; I only reopened the binary-owned closeout path so the trailing prompt marker could be reconciled cleanly.
+<!-- agent:boundary:aa7db71b -->
 <!-- /agent:exchange -->
 ### End Exchange
 

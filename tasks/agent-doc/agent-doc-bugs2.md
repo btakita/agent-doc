@@ -112,7 +112,9 @@ Git:
 - Pushed to `origin/20260422/codex-agent-backend`
 
 I did not run a live JetBrains/VS Code replay in this cycle, so the existing editor replay validation backlog remains the right place to confirm the end-to-end repro is gone.
-<!-- agent:boundary:347bdcf1 -->
+The `\n` issue is still present for `Run Agent Doc` and `Clear Session Context`. Fix and run a live JetBrains/VS Code replay to verify the fix. spec-test-build-install-commit-push
+There’s no suspended/background shell job to foreground in this session. If you meant the aborted work from the previous turn, tell me to continue that repro/fix and I’ll resume it directly.
+<!-- agent:boundary:cd5d2a84 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

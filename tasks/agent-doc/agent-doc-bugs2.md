@@ -361,8 +361,23 @@ I revised the backlog text for `#sgown1` through `#sgown9` plus `#sgown` so each
 
 I revised the backlog text for `#sgown1` through `#sgown9` plus `#sgown` so each item now carries explicit bookkeeping steps for spec, tests, build/install, commit, and push while keeping the shared plan link to `tasks/agent-doc/plan-single-owner-session-actor-transition.md`.
 
-No tests/build/install ran in this cycle because the requested work was backlog capture only.
-<!-- agent:boundary:a970eaf4 -->
+❯ No tests/build/install ran in this cycle because the requested work was backlog capture only.
+❯ Should we run the entire plan in a subagent orchestra?
+### Re: subagent orchestra for the single-owner transition — gpt-5
+
+No. I would not run the entire `#sgown` plan as one subagent orchestra.
+
+That transition changes the ownership model itself, so `#sgown2` through `#sgown8` are tightly coupled and share the same write surface in `src/agent-doc`. Running the whole migration as parallel subagents would increase merge churn and make it harder to prove the actor/generation invariants hold across each intermediate state.
+
+What does make sense is a narrower split:
+- keep the core ownership-model work serialized: `#sgown1` -> `#sgown5` -> `#sgown7` -> `#sgown8`
+- treat `#sgown6` as a sidecar once the actor contract is stable enough for real operator/UI surfaces
+- treat `#sgown9` as parallel verification once the corresponding implementation slice lands
+
+So my recommendation is: keep `#sgown` as a sequential migration plan, and only use orchestration for bounded sub-steps with disjoint write scopes after the actor store and route contract are in place.
+
+No tests/build/install ran in this cycle because the requested work here was answer-only, not implementation.
+<!-- agent:boundary:8f6d7867 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

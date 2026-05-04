@@ -135,7 +135,22 @@ Verification in `src/agent-doc`:
 - `cargo install --path . --force`
 
 I fixed the code for `#edispatch`'s prerequisite route path in this cycle, but I did not run the live JetBrains + VS Code replay itself, so `#edispatch` stays open for that validation step.
-<!-- agent:boundary:213aa580 -->
+❯ Unify Claude Code + Codex pane management. They both use tmux. Why are there drastic differences in behavior? Claude Code pane management has been more reliable, so I prefer how the Claude Code pane management has acted. spec-test-build-install-commit-push
+### Re: Codex/Claude pane management — gpt-5
+
+The big behavior split was not tmux itself. It was our Codex `route --dispatch-only` policy. Claude and the managed reroute path already treated a live busy pane conservatively: wait for a dispatch-ready prompt, try one scoped repair/restart ladder, then fail closed. Codex dispatch-only still kept an older optimistic branch that could fire a bare `agent-doc <FILE>` reopen into an authoritative pane even while that pane was visibly busy. That is why the two harnesses felt drastically different even though both sat on tmux.
+
+I changed `src/agent-doc/src/route.rs` so dispatch-only Codex reroutes now reuse that same bounded ready/repair/restart guard before they inject into an existing pane. The final send is still a one-shot bare reopen, but still-booting or otherwise busy Codex panes now fail closed instead of taking the optimistic send path. I kept the two narrow exceptions that were already deliberate and useful: the short boot-window ready probe still owns the "still booting" refusal, and a stale startup-miss marker on an otherwise live pane still allows one reopen.
+
+I also updated the README/spec wording to match the new contract and pushed `a7029fc` to `origin/20260422/codex-agent-backend`.
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+
+`#edispatch` is still the remaining live-editor validation step; I changed the route semantics it depends on here, but I did not rerun the JetBrains + VS Code manual replay in this cycle.
+<!-- agent:boundary:ef352e34 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -159,6 +174,9 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbpdrop] [recommended] Completed runs must not stash or remove the authoritative tmux pane from the `agent-doc` window without explicit user action. Freeze the current `agent-doc-bugs2.md` Codex repro (`session_start ... pane=%169`, repeated `commit_success` / `route_dispatch_only_sent`, no later `session_end` for `%169`, pane later recoverable via `agent-doc sync`), identify the reconcile/sync/layout path that still moved the pane, then harden post-success tmux handling and add regression coverage. Plan: `tasks/agent-doc/plan-jb-completed-run-pane-retention.md`
+- [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.
+- [ ] [#devmdcmt] [recommended] Response was written into `src/session-share/tasks/buildparty-investor-demo/dev.md` but the closeout was not committed. Create a fix plan only: reproduce the exact `agent-doc` write/finalize path for this template/CRDT doc, compare it with `#rspcmt`, trace where append/write can persist content without the expected commit/finalize step, identify any session-doc-specific boundary or backlog rewrite interaction that leaves the file dirty, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports completion until the target document's closeout is verifiably committed.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where `finalize`/`write --commit` can report success without a persisted commit, identify any stash/sync/session-check interaction that can leave the response uncommitted, then add regression coverage and a fail-closed acceptance criterion so agent-doc never reports a completed closeout until the response commit is verifiably present.

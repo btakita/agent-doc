@@ -79,6 +79,11 @@ Later phases may refine caller values without changing the field names.
 - The phase-3 supervisor path reports these actor transitions explicitly:
   `prompt_ready`, `ipc_inject` / `auto_trigger_inject` busy dispatch, clean-exit
   `waiting_input`, `supervisor_halted`, and final `closed`.
+- The phase-4 route path now consumes that authoritative actor record directly
+  when the supervisor is healthy: it dispatches the bare reopen through
+  supervisor IPC to the actor-owned pane, waits for the normal routed
+  acknowledgment window, and only refreshes `sessions.json` as a projection of
+  the actor binding.
 - `sessions.json` remains a projection/binding helper during migration, not the
   final actor store.
 - Session logs are the source of transition provenance and generation history.

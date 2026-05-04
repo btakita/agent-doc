@@ -196,6 +196,24 @@ enum SupervisorHealth {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct SupervisorRuntime {
+    health: SupervisorHealth,
+    actor_state: Option<crate::session_actor::ActorState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthoritativeActorDispatchTarget {
+    record: crate::session_actor::ActorRecord,
+    runtime: SupervisorRuntime,
+}
+
+impl AuthoritativeActorDispatchTarget {
+    fn actor_state(&self) -> crate::session_actor::ActorState {
+        self.runtime.actor_state.unwrap_or(self.record.state)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingPromptBearingRouteContext {
     marker: String,
 }
@@ -481,18 +499,36 @@ fn format_duplicate_pane_policy_error(
     lines.join("\n")
 }
 
-fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
-    let canonical = match file.canonicalize() {
-        Ok(c) => c,
-        Err(_) => return SupervisorHealth::NoSocket,
+fn parse_actor_state(raw: &str) -> Option<crate::session_actor::ActorState> {
+    match raw.trim() {
+        "starting" => Some(crate::session_actor::ActorState::Starting),
+        "ready" => Some(crate::session_actor::ActorState::Ready),
+        "busy" => Some(crate::session_actor::ActorState::Busy),
+        "waiting_input" => Some(crate::session_actor::ActorState::WaitingInput),
+        "closed" => Some(crate::session_actor::ActorState::Closed),
+        "blocked" => Some(crate::session_actor::ActorState::Blocked),
+        _ => None,
+    }
+}
+
+fn supervisor_socket_path(file: &Path, session_id: &str) -> Option<std::path::PathBuf> {
+    let canonical = file.canonicalize().ok()?;
+    let project_root = snapshot::find_project_root(&canonical)?;
+    Some(crate::supervisor::ipc::socket_path(&project_root, session_id))
+}
+
+fn query_supervisor_runtime(file: &Path, session_id: &str) -> SupervisorRuntime {
+    let Some(sock) = supervisor_socket_path(file, session_id) else {
+        return SupervisorRuntime {
+            health: SupervisorHealth::NoSocket,
+            actor_state: None,
+        };
     };
-    let project_root = match snapshot::find_project_root(&canonical) {
-        Some(r) => r,
-        None => return SupervisorHealth::NoSocket,
-    };
-    let sock = crate::supervisor::ipc::socket_path(&project_root, session_id);
     if !sock.exists() {
-        return SupervisorHealth::NoSocket;
+        return SupervisorRuntime {
+            health: SupervisorHealth::NoSocket,
+            actor_state: None,
+        };
     }
     match crate::supervisor::ipc::send_command(&sock, &IpcMethod::State) {
         Ok(resp) if resp.ok => {
@@ -507,19 +543,37 @@ fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
                     .and_then(|v| v.as_u64())
                     .and_then(|v| u32::try_from(v).ok())
                     .unwrap_or(0);
-                if running && state == "healthy" {
+                let actor_state = data
+                    .get("actor_state")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_actor_state);
+                let health = if running && state == "healthy" {
                     SupervisorHealth::Healthy
                 } else if state == "halted" {
                     SupervisorHealth::Halted { restart_count }
                 } else {
                     SupervisorHealth::Restartable
+                };
+                SupervisorRuntime {
+                    health,
+                    actor_state,
                 }
             } else {
-                SupervisorHealth::Restartable
+                SupervisorRuntime {
+                    health: SupervisorHealth::Restartable,
+                    actor_state: None,
+                }
             }
         }
-        Ok(_) | Err(_) => SupervisorHealth::Unreachable,
+        Ok(_) | Err(_) => SupervisorRuntime {
+            health: SupervisorHealth::Unreachable,
+            actor_state: None,
+        },
     }
+}
+
+fn query_supervisor_health(file: &Path, session_id: &str) -> SupervisorHealth {
+    query_supervisor_runtime(file, session_id).health
 }
 
 fn restart_via_supervisor_with_mode(file: &Path, session_id: &str, mode: &str) -> bool {
@@ -1547,6 +1601,150 @@ fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &str) -> Optio
     }
 }
 
+fn load_authoritative_actor_dispatch_target(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<Option<AuthoritativeActorDispatchTarget>> {
+    if tracked_codex_clear_requires_fresh_restart(
+        harness,
+        crate::codex_hook::load_latest_prompt_for_file(file)?.as_deref(),
+    ) {
+        return Ok(None);
+    }
+
+    let base_dir = registry_base_dir_for_dispatch(file_path);
+    let Some(record) = crate::session_actor::load_record_in(&base_dir, file_path)? else {
+        return Ok(None);
+    };
+    if record.session_id != session_id {
+        anyhow::bail!(
+            "authoritative actor record for {} is bound to session {}, not {}",
+            file.display(),
+            record.session_id,
+            session_id
+        );
+    }
+    if !record.harness.trim().is_empty()
+        && record.harness != "default"
+        && record.harness != harness.binary
+    {
+        anyhow::bail!(
+            "authoritative actor record for {} is bound to harness {}, not {}",
+            file.display(),
+            record.harness,
+            harness.binary
+        );
+    }
+    if !tmux.pane_alive(&record.pane_id) {
+        return Ok(None);
+    }
+
+    let runtime = query_supervisor_runtime(file, session_id);
+    if runtime.actor_state.is_none() {
+        return Ok(None);
+    }
+    if !matches!(runtime.health, SupervisorHealth::Healthy) {
+        return Ok(None);
+    }
+
+    Ok(Some(AuthoritativeActorDispatchTarget { record, runtime }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn route_via_authoritative_actor(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+    split_before: bool,
+    harness: &HarnessConfig,
+    baseline: Option<&crate::cycle_state::CycleState>,
+    prompt_bearing_marker: Option<&str>,
+    dispatch_only: bool,
+    actor: AuthoritativeActorDispatchTarget,
+) -> Result<String> {
+    let dispatch_pane = actor.record.pane_id.clone();
+    let actor_state = actor.actor_state();
+
+    if sessions::lookup(session_id)?.as_deref() != Some(dispatch_pane.as_str()) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_actor_projection_reregistered file={} session={} pane={} generation={}",
+                file.display(),
+                session_id,
+                dispatch_pane,
+                actor.record.generation
+            ),
+        );
+    }
+    rescue_from_stash(
+        tmux,
+        &dispatch_pane,
+        session_id,
+        file_path,
+        target_session,
+        split_before,
+    );
+    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+
+    if let Some(reason) = authoritative_actor_dispatch_blocker_reason(actor_state) {
+        if let Err(e) = tmux.select_pane(&dispatch_pane) {
+            eprintln!("[route] warning: failed to focus pane {}: {}", dispatch_pane, e);
+        }
+        if prompt_bearing_marker.is_none() {
+            eprintln!(
+                "[route] authoritative actor for {} remains in state {} on pane {} — focusing without injecting a duplicate reopen",
+                file.display(),
+                actor_state.as_str(),
+                dispatch_pane
+            );
+            return Ok(dispatch_pane);
+        }
+        anyhow::bail!(
+            "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {}",
+            actor.record.generation,
+            file.display(),
+            dispatch_pane,
+            reason
+        );
+    }
+
+    let dispatch_start =
+        dispatch_via_supervisor_ipc(tmux, file, &dispatch_pane, session_id, file_path, harness)?;
+    if dispatch_only {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_via_actor file={} pane={} harness={} generation={}",
+                file.display(),
+                dispatch_pane,
+                harness.binary,
+                actor.record.generation
+            ),
+        );
+        return Ok(dispatch_pane);
+    }
+
+    let ack_pane = require_routed_cycle_ack(
+        tmux,
+        file,
+        &dispatch_pane,
+        session_id,
+        file_path,
+        harness,
+        baseline,
+        prompt_bearing_marker,
+        true,
+        dispatch_start,
+    )?;
+    Ok(ack_pane.unwrap_or(dispatch_pane))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn resolve_or_create_pane_dispatch_only(
     tmux: &Tmux,
@@ -1563,6 +1761,25 @@ fn resolve_or_create_pane_dispatch_only(
     let cycle_baseline = crate::cycle_state::load(file)?;
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
+    if let Some(actor) =
+        load_authoritative_actor_dispatch_target(tmux, file, session_id, file_path, harness)?
+    {
+        return route_via_authoritative_actor(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            target_session,
+            is_first_column(file, col_args),
+            harness,
+            cycle_baseline.as_ref(),
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
+            true,
+            actor,
+        );
+    }
     let live_owner = if registered.is_some() {
         crate::sync::find_live_owner_pane(tmux, file, session_id)
     } else {
@@ -1807,6 +2024,25 @@ fn resolve_or_create_pane_with_auto_fix_retry(
     let cycle_baseline = crate::cycle_state::load(file)?;
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
+    if let Some(actor) =
+        load_authoritative_actor_dispatch_target(tmux, file, session_id, file_path, harness)?
+    {
+        return route_via_authoritative_actor(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            target_session,
+            is_first_column(file, col_args),
+            harness,
+            cycle_baseline.as_ref(),
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
+            false,
+            actor,
+        );
+    }
     let live_owner = if registered.is_some() {
         crate::sync::find_live_owner_pane(tmux, file, session_id)
     } else {
@@ -2886,6 +3122,120 @@ fn send_command_once_unchecked(
     }
     eprintln!("[route] Sent {} → pane {}", trigger, pane);
     Ok(trigger)
+}
+
+fn dispatch_via_supervisor_ipc(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    session_id: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<RoutedDispatchStartProof> {
+    let Some(sock) = supervisor_socket_path(file, session_id) else {
+        anyhow::bail!(
+            "authoritative actor for {} has no supervisor socket; run `agent-doc start {}` to recover",
+            file.display(),
+            file.display()
+        );
+    };
+    let short_name = std::path::Path::new(file_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.to_string());
+    let trigger = harness.trigger_command(file_path);
+    let payload = routed_trigger_payload(&trigger);
+    validate_routed_trigger_payload(harness, &trigger, &payload)?;
+    let flash_msg = format!("⏳ {}", harness.trigger_command(&short_name));
+    if let Err(e) = tmux
+        .cmd()
+        .args(["display-message", "-t", pane, "-d", "2000", &flash_msg])
+        .status()
+    {
+        eprintln!("[route] warning: display-message failed: {}", e);
+    }
+
+    let tracker = build_routed_dispatch_start_tracker(file, file_path, harness)?;
+    let method = IpcMethod::Inject {
+        bytes: format!("{payload}\n"),
+    };
+    let response =
+        crate::supervisor::ipc::send_command(&sock, &method).with_context(|| {
+            format!(
+                "failed to dispatch authoritative actor trigger for {} via supervisor IPC",
+                file.display()
+            )
+        })?;
+    if !response.ok {
+        let message = response
+            .error
+            .unwrap_or_else(|| "unknown supervisor error".to_string());
+        anyhow::bail!(
+            "authoritative actor for {} rejected routed trigger in pane {}: {}",
+            file.display(),
+            pane,
+            message
+        );
+    }
+
+    if let Err(e) = tmux.select_pane(pane) {
+        eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
+    }
+    eprintln!("[route] Dispatched {} via supervisor IPC → pane {}", trigger, pane);
+
+    let Some(tracker) = tracker else {
+        return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
+    };
+
+    let timeout = routed_dispatch_start_timeout();
+    if let Some(proof) = wait_for_routed_dispatch_start(file, &tracker, timeout)? {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_actor_dispatch_start_proven file={} pane={} harness={} proof={} timeout_secs={}",
+                file.display(),
+                pane,
+                harness.binary,
+                proof.dispatch_stage_label(),
+                timeout.as_secs()
+            ),
+        );
+        return Ok(proof);
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_actor_dispatch_start_unproven_but_accepted file={} pane={} harness={} timeout_secs={}",
+            file.display(),
+            pane,
+            harness.binary,
+            timeout.as_secs()
+        ),
+    );
+    eprintln!(
+        "[route] authoritative actor accepted the {} reopen for {} in pane {}, but no routed submission proof appeared after {}s — keeping the dispatch optimistic",
+        harness.binary,
+        file.display(),
+        pane,
+        timeout.as_secs()
+    );
+    Ok(RoutedDispatchStartProof::CommandAcceptedOnly)
+}
+
+fn authoritative_actor_dispatch_blocker_reason(
+    state: crate::session_actor::ActorState,
+) -> Option<&'static str> {
+    match state {
+        crate::session_actor::ActorState::Ready => None,
+        crate::session_actor::ActorState::Starting => Some("the authoritative actor is still starting"),
+        crate::session_actor::ActorState::Busy => Some("the authoritative actor is busy"),
+        crate::session_actor::ActorState::WaitingInput => {
+            Some("the authoritative actor is waiting for user input")
+        }
+        crate::session_actor::ActorState::Closed => Some("the authoritative actor is closed"),
+        crate::session_actor::ActorState::Blocked => Some("the authoritative actor is blocked"),
+    }
 }
 
 fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {
@@ -8818,6 +9168,219 @@ Body\n\
             !stale_content.contains("STALE:agent-doc "),
             "route should not dispatch to the stale registered pane: {stale_content}"
         );
+    }
+
+    #[test]
+    fn resolve_or_create_pane_prefers_authoritative_actor_dispatch_target() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-authoritative-actor-dispatch");
+        let session = "codex";
+        let cwd = test_cwd();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &stale_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("session.md");
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-authoritative-actor-dispatch";
+        sessions::register(session_id, &stale_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "ready",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let doc_for_thread = doc.clone();
+        let snapshot_for_thread = snapshot.to_string();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::cycle_state::start_preflight(
+                &doc_for_thread,
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+            crate::cycle_state::mark_committed(
+                &doc_for_thread,
+                "commit_success",
+                Some(&snapshot_for_thread),
+                Some(&current_for_thread),
+            )
+            .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("route should dispatch through the authoritative actor pane");
+        assert_eq!(resolved, actor_pane);
+
+        let trigger = format!("{}\n", HarnessConfig::codex().trigger_command(&file_path));
+        assert_eq!(*injects.lock().unwrap(), vec![trigger]);
+        assert_eq!(sessions::lookup(session_id).unwrap().as_deref(), Some(actor_pane.as_str()));
+
+        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        assert!(
+            !stale_content.contains("STALE:agent-doc "),
+            "route should not dispatch into the stale registered pane when actor authority points elsewhere: {stale_content}"
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn resolve_or_create_pane_dispatch_only_prefers_authoritative_actor_dispatch_target() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-authoritative-actor-dispatch-only");
+        let session = "codex";
+        let cwd = test_cwd();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &stale_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("dispatch-only.md");
+        let content =
+            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n";
+        std::fs::write(&doc, content).unwrap();
+        crate::snapshot::save(
+            &doc,
+            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        crate::cycle_state::start_preflight(
+            &doc,
+            Some("<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n"),
+            Some("<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n"),
+        )
+        .unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some("<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n"),
+            Some("<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n"),
+        )
+        .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-authoritative-actor-dispatch-only";
+        sessions::register(session_id, &stale_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "ready",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let resolved = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("dispatch-only reroute should dispatch through the authoritative actor pane");
+        assert_eq!(resolved, actor_pane);
+
+        let trigger = format!("{}\n", HarnessConfig::codex().trigger_command(&file_path));
+        assert_eq!(*injects.lock().unwrap(), vec![trigger]);
+        assert_eq!(sessions::lookup(session_id).unwrap().as_deref(), Some(actor_pane.as_str()));
+
+        let stale_content = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        assert!(
+            !stale_content.contains("STALE:agent-doc "),
+            "dispatch-only reroute should not inject into the stale registered pane when actor authority points elsewhere: {stale_content}"
+        );
+
+        ipc.stop();
     }
 
     #[test]

@@ -20,7 +20,9 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 `agent-doc route <FILE> [--pane P] [--debounce MS]`
 
 - Routes a harness-native reopen command into the authoritative pane for the document.
+- When `.agent-doc/session-actors.json` has a healthy authoritative record for the document, route must treat that actor generation as the owner-of-record and dispatch through supervisor IPC instead of re-electing a pane from tmux/process heuristics.
 - Ownership proof preference is: canonical path provenance from `sessions.json`, then tmux process-tree file-path proof, then supervisor-PID recovery.
+- Actor-backed reroutes may refresh `sessions.json` as a projection of the actor pane, but they must not opportunistically steal another same-file pane or re-register to a heuristic winner while the authoritative actor is healthy.
 - Route must fail closed on ambiguity and list concrete follow-up commands instead of guessing.
 - Routed dispatch must target an actually idle composer. Drafted user input, queue-only Codex composer states, reverse-i-search, permission prompts, or similar blockers are not safe.
 - Codex reroutes always send the bare `agent-doc <FILE>` reopen. Multiline payloads or content-edited payloads are invalid.

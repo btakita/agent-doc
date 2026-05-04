@@ -2,7 +2,18 @@
 agent_doc_session: a94c7d23-e171-482f-93f4-530b7f2c436f
 agent_doc_format: template
 agent_doc_write: crdt
+agent: codex
 claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
+claude_model: claude-opus-4-6
+prompt_presets:
+   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. #follow-up-backlog
+   '#commit-push': commit + push all uncommitted files
+   '#follow-up-backlog': Any follow-up items to place in the backlog?
+   '#next-steps': #follow-up-backlog Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+   "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
+   "#spec-test-commit-push": update spec + tests. commit + push
 ---
 
 ## Status
@@ -654,7 +665,7 @@ Add dev dependencies:
 **CI re-running:** https://github.com/btakita/chromium-bridge/actions
 run:
 - Monitor CI v0.1.1 re-run (rustls fix for aarch64-linux)
-- Create btakita/homebrew-tap (deferred — low priority)
+❯ - Create btakita/homebrew-tap (deferred — low priority)
 - Flesh out sift integration (scrape → index workflow)
 - Flesh out ragie integration (scrape → ingest workflow)
 - Add `--tab` selection by URL pattern (not just index)
@@ -788,7 +799,6 @@ This bob-remeika task item is complete — no further implementation needed.
 Implement:
 - [ ] Browser skill (`/browser`) documentation and workflow refinement
 
-
 ### Browser skill refinement — completed
 
 Updated `.claude/skills/browser/SKILL.md` with:
@@ -816,133 +826,36 @@ chromium-bridge type '#message-entry' 'Hello!' --tab pulsesms
 
 **Fix:** Check the `type` command's text preprocessing for unnecessary escape handling.
 
-     dist/app.js
-       #12561  10:56 AM  🟣  Ragie sources panel deployed to production Cloudflare Pages
+❯ Does playwright-cli https://github.com/microsoft/playwright-cli super-cede chromium-bridge?
+### Re: Frontmatter + presets — gpt-5
 
-     src/agent-doc-js/index.html
-       #12562  10:59 AM  ✅  Committed Ragie sources panel feature to version control
+Noted the frontmatter edits. `agent: codex` and `codex_args: -s danger-full-access` fit this harness; `claude_model` is inert metadata in a Codex session, so it does not change the active model here. I am also treating the `prompt_presets` block as registered shorthand for later turns rather than instructions to execute immediately in this cycle.
 
-     src/agent-doc-js
-       #12563            ✅  Pushed sources panel to GitHub and updated parent repository submodule reference
+### Re: Homebrew tap — gpt-5
 
-     #S3637 Prepare pre-call materials and outreach strategy for Bob Remeika (Ragie) partnership discussion (Apr 2, 11:11 AM)
+I captured `btakita/homebrew-tap` as a deferred backlog item. I would keep it behind current `chromium-bridge` workflow work because `cargo install` and the release `install.sh` path already cover distribution.
 
-     src/agent-doc-js/src/app.js
-       #12564  11:11 AM  🔵  Diff gutter implementation uses CodeMirror StateField and GutterMarker
-       #12565            🟣  Added processing marker type and markProcessing function for diff gutter
-       #12566            🟣  Integrated processing markers into handleSubmit workflow
+### Re: Playwright CLI vs chromium-bridge — gpt-5
 
-     src/agent-doc-js/style.css
-       #12567  11:12 AM  🟣  Added pulsing animation CSS for processing diff markers
+No. Based on the current Microsoft docs, `playwright-cli` and Playwright MCP are parallel Playwright surfaces, not a statement that existing Chromium/CDP tools should be replaced. Microsoft currently frames the CLI as the better fit for coding agents and MCP as better for persistent, introspection-heavy loops:
 
-     General
-       #12568            ✅  Deployed processing spinner feature to Cloudflare Pages
+- `playwright-cli` is the stronger general automation layer if you want cross-browser coverage, snapshots, tracing, storage-state management, and test-generation workflows.
+- `chromium-bridge` still has a valid niche if the goal is lightweight Chromium-family attachment, raw CDP-style scripting against your real Brave/Chrome session, page-to-markdown extraction, and tight corky/sift/ragie pipeline integration.
+- The practical read is "complementary, with some overlap," not "superseded."
 
-     src/agent-doc-js/index.html
-       #12569            ✅  Committed pulsing gutter spinner feature to git repository
+If you want one browser automation stack for agent-driven product testing, Playwright CLI is a serious candidate. If you want a small repo-native CLI optimized for your current Chromium-only ingestion and messaging workflows, `chromium-bridge` still earns its keep.
 
-     tasks/professional/bob-remeika.md
-       #12570            ⚖️  Pre-call outreach strategy for Ragie partnership discussion
-       #12571            ⚖️  Client use case disclosure strategy deferred to call
-
-     #S3638 Generate call structure document for Bob Remeika meeting from task file (Apr 2, 11:12 AM)
-
-     tmp/bob-remeika-call-structure.md
-       #12572  11:13 AM  ✅  Call structure document created for Ragie CEO meeting
-
-     tmp/bob-remeika-call-structure.html
-       #12573            ✅  PDF call structure generated for Bob Remeika meeting
-
-     tasks/professional/bob-remeika.md
-       #12574  11:24 AM  ✅  Added one-page summary constraint to Bob Remeika call structure document
-
-     tmp/bob-remeika-call-structure.md
-       #12575            🔄  Condensed Bob Remeika call structure into one-page table format
-
-     tasks/professional/bob-remeika.md
-       #12576  11:26 AM  🟣  Generated call structure PDF for Bob Remeika meeting
-
-     #S3639 Generate call preparation PDF for Bob Remeika meeting with structured agenda blocks (Apr 2, 11:26 AM)
-
-     tmp/bob-remeika-call-structure.md
-       #12577  11:26 AM  🔄  Restructured call document from table to hierarchical format with compact CSS
-
-
-     Access 237k tokens of past research & decisions for just 17,953t. Use the claude-mem skill to access memories by ID.
-
-     View Observations Live @ http://localhost:37777
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
-
-     dist/app.js
-       #12561  10:56 AM  🟣  Ragie sources panel deployed to production Cloudflare Pages
-
-     src/agent-doc-js/index.html
-       #12562  10:59 AM  ✅  Committed Ragie sources panel feature to version control
-
-     src/agent-doc-js
-       #12563            ✅  Pushed sources panel to GitHub and updated parent repository submodule reference
-
-     #S3637 Prepare pre-call materials and outreach strategy for Bob Remeika (Ragie) partnership discussion (Apr 2, 11:11 AM)
-
-     src/agent-doc-js/src/app.js
-       #12564  11:11 AM  🔵  Diff gutter implementation uses CodeMirror StateField and GutterMarker
-       #12565            🟣  Added processing marker type and markProcessing function for diff gutter
-       #12566            🟣  Integrated processing markers into handleSubmit workflow
-
-     src/agent-doc-js/style.css
-       #12567  11:12 AM  🟣  Added pulsing animation CSS for processing diff markers
-
-     General
-       #12568            ✅  Deployed processing spinner feature to Cloudflare Pages
-
-     src/agent-doc-js/index.html
-       #12569            ✅  Committed pulsing gutter spinner feature to git repository
-
-     tasks/professional/bob-remeika.md
-       #12570            ⚖️  Pre-call outreach strategy for Ragie partnership discussion
-       #12571            ⚖️  Client use case disclosure strategy deferred to call
-
-     #S3638 Generate call structure document for Bob Remeika meeting from task file (Apr 2, 11:12 AM)
-
-     tmp/bob-remeika-call-structure.md
-       #12572  11:13 AM  ✅  Call structure document created for Ragie CEO meeting
-
-     tmp/bob-remeika-call-structure.html
-       #12573            ✅  PDF call structure generated for Bob Remeika meeting
-
-     tasks/professional/bob-remeika.md
-       #12574  11:24 AM  ✅  Added one-page summary constraint to Bob Remeika call structure document
-
-     tmp/bob-remeika-call-structure.md
-       #12575            🔄  Condensed Bob Remeika call structure into one-page table format
-
-     tasks/professional/bob-remeika.md
-       #12576  11:26 AM  🟣  Generated call structure PDF for Bob Remeika meeting
-
-     #S3639 Generate call preparation PDF for Bob Remeika meeting with structured agenda blocks (Apr 2, 11:26 AM)
-
-     tmp/bob-remeika-call-structure.md
-       #12577  11:26 AM  🔄  Restructured call document from table to hierarchical format with compact CSS
-
-
-     Access 237k tokens of past research & decisions for just 17,953t. Use the claude-mem skill to access memories by ID.
-
-     View Observations Live @ http://localhost:37777
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ bypass permissions on (shift+tab to cycle)
-<!-- agent:boundary:bbfc8df2 -->
+Sources:
+- [playwright-cli README](https://github.com/microsoft/playwright-cli/blob/main/README.md)
+- [Playwright MCP README](https://github.com/microsoft/playwright-mcp)
+- [Playwright CLI capabilities](https://playwright.dev/agent-cli/capabilities)
+<!-- agent:boundary:0e23ebbe -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
+- [ ] [#brewtap] Create btakita/homebrew-tap for brew formula distribution (deferred — low priority)
 - [ ] [#3jmq] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)
 - [ ] [#fp48] Explore sift corpus configuration for multi-project search
 <!-- /agent:pending -->

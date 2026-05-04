@@ -919,8 +919,30 @@ Lower-signal but still unchanged business terms to be aware of:
 
 Bottom line: I would not reject v2 outright. It is substantially safer than v1. But I would ask for one more cleanup pass on the remaining payment qualifier, the Section 10.1 overlap, the 40-hours wording, and the formatting artifacts before signing.
 
-If you want, I can draft the shortest possible follow-up note asking for just those remaining v2 fixes.
-<!-- agent:boundary:8dc148e1 -->
+❯ If you want, I can draft the shortest possible follow-up note asking for just those remaining v2 fixes.
+❯ Yes. Please draft the shortest possible follow-up note.
+### Re: shortest v2 follow-up note — gpt-5
+
+Yes. I would send this:
+
+> Hi Anya,
+>
+> Thanks for the revised draft. I think we are very close.
+>
+> Before I sign, could you please make four final cleanup edits:
+>
+> 1. In Section 4.2, please remove the condition that post-termination payment is due only if I have not materially breached the agreement, or align that language to Section 2.2.
+> 2. In Section 10.1, please reconcile the third-party rights / indemnity language with the narrower indemnity and liability-cap structure added elsewhere in the agreement.
+> 3. In Exhibit A, please clarify the hours wording so it reads as anticipated at up to 40 hrs/week, rather than `@ 40hrs week`.
+> 4. Please send a clean final copy with the formatting artifacts removed.
+>
+> Once those are cleaned up, I should be in good shape to sign.
+>
+> Thanks,
+> Brian
+
+If you want, I can also compress this one more step into a more casual two-paragraph version.
+<!-- agent:boundary:2f4717d2 -->
 <!-- /agent:exchange -->
 
 ## Queue

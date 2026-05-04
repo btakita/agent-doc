@@ -137,8 +137,14 @@ Yes, but in a bounded role.
 
 It would not replace `sift` for general retrieval. `sift` is still the broad file-content/BM25 engine, and the new `--exact` path covers literal text lookup. `tagpath` has no document corpus or general ranking model for arbitrary prose or file contents, so by itself it will not make lexical retrieval fast or solve timeout cases.
 
-The useful next integration point is alongside `sift`, not instead of it: parse the query into canonical tags, expand aliases, search the symbol index by tags first, then use those symbol/tag hits to boost or filter the `sift` results. So the architecture I would keep is: `rg -F` for exact text, `sift` for lexical or hybrid retrieval, and `tagpath` for identifier semantics and reranking. If we want better retrieval from here, the high-value step is tag-aware reranking inside `tsift search`, not replacing `sift` with `tagpath`.
-<!-- agent:boundary:a4ce3477 -->
+❯ The useful next integration point is alongside `sift`, not instead of it: parse the query into canonical tags, expand aliases, search the symbol index by tags first, then use those symbol/tag hits to boost or filter the `sift` results. So the architecture I would keep is: `rg -F` for exact text, `sift` for lexical or hybrid retrieval, and `tagpath` for identifier semantics and reranking. If we want better retrieval from here, the high-value step is tag-aware reranking inside `tsift search`, not replacing `sift` with `tagpath`.
+❯ do [#fpt7]. spec-test-build-install-commit-push
+### Re: #fpt7 spec-test-build-install-commit-push — gpt-5
+
+Closed `#fpt7` by deciding against a native content/FTS table and fixing the real gap instead: plain `tsift search <query>` now auto-routes single-token identifier/path-like queries such as `claudescore-3`, `alpha_helper`, `src/main.rs`, and `crate::module` to the exact `rg -F` backend. That keeps broad prose retrieval on sift/BM25, but makes the literal lookup cases that motivated this backlog item fast without requiring `--exact`.
+
+Updated the search-strategy resolver, added unit and CLI regression coverage, and documented the decision in `SPEC.md` and `VERSIONS.md`. Verification in `src/tsift` passed with `make check`, `cargo build --release`, and `cargo install --path . --force`; the installed binary is now `tsift 0.1.24`. Committed and pushed in `src/tsift` as `9013e17` (`feat: auto-route identifier queries to exact search`).
+<!-- agent:boundary:3bfd2bbd -->
 <!-- /agent:exchange -->
 
 <!--
@@ -148,7 +154,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#fpt7] contentfts=Evaluate whether tsift needs a native content/FTS index after cache + exact-search land; only build it if rg-backed exact lookup still leaves important gaps.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

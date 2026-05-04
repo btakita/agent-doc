@@ -103,8 +103,22 @@ I added two regressions for that exact shape: one proves `find_live_owner_pane(.
 
 Verification completed in `src/agent-doc`: full `cargo test` passed, `cargo build` passed, and `cargo install --path . --force` replaced the local binary. I committed and pushed `7be3375` on `origin/20260422/codex-agent-backend`.
 
-I did not add a new backlog item because the existing `#mrhreplay` follow-up already covers the live mixed-root replay for this code path.
-<!-- agent:boundary:c6c2518a -->
+❯ I did not add a new backlog item because the existing `#mrhreplay` follow-up already covers the live mixed-root replay for this code path.
+❯ do [#mrhreplay]. spec-test-build-install-commit-push
+### Re: mixed-root passive sync replay — gpt-5
+
+I replayed the mixed-root passive sync against `tasks/agent-doc/agent-doc-bugs2.md` and `src/boost-client/tasks/monsterrodholders.md` with:
+
+```bash
+agent-doc sync --no-autostart --window @128 --col tasks/agent-doc/agent-doc-bugs2.md --col src/boost-client/tasks/monsterrodholders.md --focus src/boost-client/tasks/monsterrodholders.md
+```
+
+That replay stayed on the passive fast path: sync reused the existing registered panes `%169` and `%175`, kept window `@128` as `[["%169"], ["%175"]]`, and did not emit any new `session_end origin=registry_rebind`, `sync_missing_pane`, stash, or replacement activity during the replay itself. So the specific `#mrhreplay` validation target is satisfied: the mixed-root passive-sync path no longer reproduced the stale `registry_rebind` blocker.
+
+I also re-ran the current `src/agent-doc` verification/build/install path on the existing source state at `7be3375`: full `cargo test` passed (`1808` unit/integration tests plus the integration suites), `cargo build` passed, and `cargo install --path . --force` replaced the local binary.
+
+I did not make a new source commit or push because the replay and current regression/build suite both passed without requiring an additional code change. I marked `#mrhreplay` done and added one new follow-up item for a different shape that still appeared afterward: a later routed `monsterrodholders.md` dispatch logged `route_dispatch_only_sent` on `%175`, then `registered_pane_missing` / `session_end origin=sync_missing_pane`, and rebound the live owner to `%176`. That churn happened after the passive replay, so it needs separate route-path investigation rather than keeping `#mrhreplay` open.
+<!-- agent:boundary:b57f16c8 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -128,7 +142,8 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#mrhreplay] [recommended] Replay mixed-root passive sync for tasks/agent-doc/agent-doc-bugs2.md + src/boost-client/tasks/monsterrodholders.md and verify stale registry_rebind closeouts no longer block passive cold-start.
+- [ ] [#mrhroute] [recommended] Investigate why tasks/monsterrodholders.md still rebounded from %175 to %176 via registered_pane_missing immediately after a later route_dispatch_only_sent, even though the mixed-root passive sync replay itself stayed stable.
+- [ ] [#kpane] [recommended] Simplify Codex post-turn pane retention so a committed turn can never fall through a later supervisor quit branch. Replace the current `Ctrl-D` -> fresh restart -> possible `user_quit_after_ctrl_d` chain with one keepalive invariant and regress it on `src/boost-client/tasks/monsterrodholders.md`. Plan: `tasks/agent-doc/plan-committed-codex-turn-pane-retention-simplify.md`
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where `finalize`/`write --commit` can report success without a persisted commit, identify any stash/sync/session-check interaction that can leave the response uncommitted, then add regression coverage and a fail-closed acceptance criterion so agent-doc never reports a completed closeout until the response commit is verifiably present.

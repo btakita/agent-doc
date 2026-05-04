@@ -138,7 +138,22 @@ Implemented phase-5 sync/focus projection reconciliation around the authoritativ
 - Left pre-existing unrelated dirty changes in `src/agent-doc/src/plugin.rs` untouched.
 
 `#sgown5` is complete. The umbrella tracker `#sgown` remains open for `#sgown6`-`#sgown9`.
-<!-- agent:boundary:f1cae1fb -->
+❯ Neither Ctrl+C nor Ctrl+D surface the "q" to quit menu on Codex. Please identify the root cause and fix. spec-test-build-install-commit-push
+### Re: Ctrl+C / Ctrl+D quit menu on Codex — gpt-5
+
+Root cause was in `src/agent-doc/src/start.rs`: the supervisor only tracked stdin-forwarded `Ctrl+D`, so a live-pane `Ctrl+C` arrived as `exit_kind=signal exit_signal="Interrupt"` and fell through `CrashPolicy` as a transient restart. `Ctrl+D` already had the clean-exit prompt path, but `Ctrl+C` never reached it.
+
+Implemented the fix:
+- `start.rs` now tracks stdin-forwarded `Ctrl+C` separately from route/plugin-injected interrupts and only treats it as a quit-menu event when that forwarded byte actually terminated the Codex child.
+- Added the new Codex supervisor prompt branch plus regression coverage for the forwarded-`Ctrl+C` classifier and restart strategy.
+- Updated `README.md`, `VERSIONS.md`, `specs/codex-support.md`, and `specs/supervisor.md` so the documented Codex keepalive contract matches the implementation.
+
+Verification completed in `src/agent-doc`: `cargo check`, `cargo test`, `cargo build`, `cargo install --path . --force`.
+Repo closeout in `src/agent-doc`: committed as `294896f` (`fix: restore codex ctrl-c quit menu`) and pushed to `origin/20260422/codex-agent-backend`.
+Left the pre-existing unrelated dirty change in `src/agent-doc/src/plugin.rs` untouched.
+
+`Ctrl+D`'s existing quit-menu path remains in place; this cycle fixed the missing equivalent path for actual stdin-forwarded `Ctrl+C`.
+<!-- agent:boundary:1e9ede29 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicLong
  * a selected pane can be rescued back out of stash into the agent-doc window.
  *
  * Guards against rapid-fire events:
- * - 500ms debounce so only the final state is acted upon
+ * - 100ms debounce so only the final burst state is acted upon
  * - Concurrency guard: skips if a layout command is already running
  *
  * Registered in plugin.xml as a projectListener on FileEditorManagerListener.
@@ -27,15 +27,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
     @Volatile
     private var lastFocusedFile: String? = null
 
-    @Volatile
-    private var lastCommandCompletedAt: Long = 0
-
-    @Volatile
-    private var focusedFileBeforeLastCommand: String? = null
-
     companion object {
-        private const val DEBOUNCE_MS = 500L
-        private const val SETTLE_MS = 1500L
+        private const val DEBOUNCE_MS = 100L
         private val fallbackGeneration = AtomicLong(0)
         private val fallbackRunning = AtomicBoolean(false)
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
@@ -44,7 +37,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
     internal enum class AutomaticCommandKind {
         Focus,
         Sync,
-        BounceBack,
     }
 
     internal data class AutomaticCommandPlan(
@@ -61,23 +53,12 @@ class EditorTabSyncListener : FileEditorManagerListener {
             focusedFile: String,
             previousVisibleSignature: String?,
             previousFocusedFile: String?,
-            lastCommandCompletedAt: Long = 0,
-            focusedFileBeforeLastCommand: String? = null,
         ): AutomaticCommandPlan? {
             if (visibleMdFiles.isEmpty()) return null
 
             val visibleSignature = visibleSignature(visibleMdFiles)
             if (visibleSignature == previousVisibleSignature && focusedFile == previousFocusedFile) {
                 return null
-            }
-
-            if (
-                visibleSignature == previousVisibleSignature &&
-                System.currentTimeMillis() - lastCommandCompletedAt < SETTLE_MS &&
-                focusedFileBeforeLastCommand != null &&
-                focusedFile == focusedFileBeforeLastCommand
-            ) {
-                return AutomaticCommandPlan(AutomaticCommandKind.BounceBack, visibleSignature)
             }
 
             val kind = if (
@@ -143,15 +124,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
                         focusedFile = activeFile,
                         previousVisibleSignature = lastVisibleSignature,
                         previousFocusedFile = lastFocusedFile,
-                        lastCommandCompletedAt = lastCommandCompletedAt,
-                        focusedFileBeforeLastCommand = focusedFileBeforeLastCommand,
                     )
                     if (plan == null) {
                         log("dedup: selection state already synchronized")
-                        return@Thread
-                    }
-                    if (plan.kind == AutomaticCommandKind.BounceBack) {
-                        log("bounce-back: suppressed re-focus of ${activeFile.substringAfterLast('/')}")
                         return@Thread
                     }
 
@@ -186,9 +161,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
                                 noAutostart = true,
                             )
                         }
-                        AutomaticCommandKind.BounceBack -> {
-                            return@Thread
-                        }
                     }
                     log("exec: ${cmd.joinToString(" ")}")
                     val summary = TerminalUtil.formatLayoutSummary(cmd)
@@ -201,10 +173,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     val exitCode = process.waitFor()
                     log("result: exit=$exitCode output=${output.trim()}")
                     if (exitCode == 0) {
-                        focusedFileBeforeLastCommand = lastFocusedFile
                         lastVisibleSignature = plan.visibleSignature
                         lastFocusedFile = activeFile
-                        lastCommandCompletedAt = System.currentTimeMillis()
                     }
                 } finally {
                     lib?.agent_doc_sync_unlock() ?: fallbackRunning.set(false)

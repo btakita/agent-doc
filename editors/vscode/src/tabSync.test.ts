@@ -143,7 +143,7 @@ describe('buildTabChangeCommand', () => {
         assert.strictEqual(result, null);
     });
 
-    it('suppresses bounce-back within settle window', () => {
+    it('keeps opposite-pane selections on sync when the split is unchanged', () => {
         const planned = buildTabChangeCommand({
             activeFile: 'tasks/agent-doc/agent-doc-bugs2.md',
             visibleMd: [
@@ -160,40 +160,13 @@ describe('buildTabChangeCommand', () => {
                     ['tasks/agent-doc/agent-doc-bugs2.md'],
                     ['src/boost-client/tasks/monsterrodholders.md'],
                 ]),
-                lastCommandCompletedAt: Date.now() - 500,
-                focusedFileBeforeLastCommand: 'tasks/agent-doc/agent-doc-bugs2.md',
-            },
-        });
-
-        assert.deepStrictEqual(planned?.command, { kind: 'bounce-back' });
-    });
-
-    it('does not suppress bounce-back after settle window expires', () => {
-        const planned = buildTabChangeCommand({
-            activeFile: 'tasks/agent-doc/agent-doc-bugs2.md',
-            visibleMd: [
-                'tasks/agent-doc/agent-doc-bugs2.md',
-                'src/boost-client/tasks/monsterrodholders.md',
-            ],
-            visibleColumns: [
-                ['tasks/agent-doc/agent-doc-bugs2.md'],
-                ['src/boost-client/tasks/monsterrodholders.md'],
-            ],
-            previous: {
-                activeFile: 'src/boost-client/tasks/monsterrodholders.md',
-                visibleSignature: visibleSignatureFromColumns([
-                    ['tasks/agent-doc/agent-doc-bugs2.md'],
-                    ['src/boost-client/tasks/monsterrodholders.md'],
-                ]),
-                lastCommandCompletedAt: Date.now() - 2000,
-                focusedFileBeforeLastCommand: 'tasks/agent-doc/agent-doc-bugs2.md',
             },
         });
 
         assert.deepStrictEqual(planned?.command.kind, 'sync');
     });
 
-    it('does not suppress when visible set changes even within settle window', () => {
+    it('keeps visible-set changes on sync', () => {
         const planned = buildTabChangeCommand({
             activeFile: 'tasks/agent-doc/agent-doc-bugs2.md',
             visibleMd: [
@@ -209,8 +182,6 @@ describe('buildTabChangeCommand', () => {
                 visibleSignature: visibleSignatureFromColumns([
                     ['tasks/agent-doc/agent-doc-bugs2.md'],
                 ]),
-                lastCommandCompletedAt: Date.now() - 500,
-                focusedFileBeforeLastCommand: 'tasks/agent-doc/agent-doc-bugs2.md',
             },
         });
 

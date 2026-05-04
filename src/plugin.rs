@@ -339,9 +339,8 @@ fn install_jetbrains_local() -> Result<()> {
     let project_root = find_local_build_dir()?;
     let dist_dir = project_root.join("editors/jetbrains/build/distributions");
 
-    // Find the latest signed zip, fall back to unsigned
-    let zip_path = find_local_zip(&dist_dir, true)
-        .or_else(|| find_local_zip(&dist_dir, false))
+    // Pick the newest built version overall; prefer signed only within the same version.
+    let zip_path = find_best_local_zip(&dist_dir)
         .with_context(|| {
             format!(
                 "No agent-doc-jetbrains*.zip found in {}",
@@ -420,26 +419,61 @@ fn install_vscode_local() -> Result<()> {
     Ok(())
 }
 
-fn find_local_zip(dist_dir: &std::path::Path, signed: bool) -> Option<PathBuf> {
-    let entries = fs::read_dir(dist_dir).ok()?;
-    let suffix = if signed { "-signed.zip" } else { ".zip" };
+fn parse_local_jetbrains_zip_version(name: &str) -> Option<Vec<u32>> {
+    let base = name.strip_prefix("agent-doc-jetbrains-")?;
+    let version = base
+        .strip_suffix("-signed.zip")
+        .or_else(|| base.strip_suffix(".zip"))?;
+    version
+        .split('.')
+        .map(|part| part.parse::<u32>().ok())
+        .collect()
+}
 
-    entries
+fn find_best_local_zip(dist_dir: &std::path::Path) -> Option<PathBuf> {
+    fs::read_dir(dist_dir)
+        .ok()?
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            if name.starts_with("agent-doc-jetbrains") && name.ends_with(suffix) {
-                // If looking for unsigned, exclude signed
-                if !signed && name.ends_with("-signed.zip") {
-                    return None;
-                }
-                Some(e.path())
-            } else {
-                None
+            if !name.starts_with("agent-doc-jetbrains-") || !name.ends_with(".zip") {
+                return None;
             }
+            let version = parse_local_jetbrains_zip_version(&name)?;
+            let is_signed = name.ends_with("-signed.zip");
+            let modified = e.metadata().ok().and_then(|m| m.modified().ok());
+            Some((version, is_signed, modified, e.path()))
         })
-        // Pick the most recently modified
-        .max_by_key(|p| p.metadata().ok().and_then(|m| m.modified().ok()))
+        .max_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+                .then_with(|| left.2.cmp(&right.2))
+        })
+        .map(|(_, _, _, path)| path)
+}
+
+#[cfg(test)]
+fn find_local_zip(dist_dir: &std::path::Path, signed: bool) -> Option<PathBuf> {
+    fs::read_dir(dist_dir)
+        .ok()?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let is_signed = name.ends_with("-signed.zip");
+            if !name.starts_with("agent-doc-jetbrains-") || !name.ends_with(".zip") {
+                return None;
+            }
+            if signed != is_signed {
+                return None;
+            }
+            let version = parse_local_jetbrains_zip_version(&name)?;
+            let modified = e.metadata().ok().and_then(|m| m.modified().ok());
+            Some((version, modified, e.path()))
+        })
+        // Prefer the highest plugin version; only fall back to mtime within the same version.
+        .max_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)))
+        .map(|(_, _, path)| path)
 }
 
 pub fn update(editor: &str) -> Result<()> {
@@ -475,8 +509,10 @@ pub fn update(editor: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_asset, has_asset, release_version};
+    use super::{find_asset, find_best_local_zip, find_local_zip, has_asset, release_version};
     use serde_json::json;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn find_asset_prefers_signed_variant() {
@@ -515,6 +551,60 @@ mod tests {
         });
 
         assert!(has_asset(&release, "agent-doc", "vsix"));
+    }
+
+    #[test]
+    fn find_local_zip_prefers_newest_version_even_if_only_older_build_is_signed() {
+        let tmp = TempDir::new().unwrap();
+        let dist = tmp.path();
+        fs::write(dist.join("agent-doc-jetbrains-0.2.80-signed.zip"), b"signed-old").unwrap();
+        fs::write(dist.join("agent-doc-jetbrains-0.2.91.zip"), b"unsigned-new").unwrap();
+
+        let signed = find_local_zip(dist, true).unwrap();
+        let unsigned = find_local_zip(dist, false).unwrap();
+
+        assert!(
+            signed.ends_with("agent-doc-jetbrains-0.2.80-signed.zip"),
+            "signed selection should still see the available signed artifact"
+        );
+        assert!(
+            unsigned.ends_with("agent-doc-jetbrains-0.2.91.zip"),
+            "unsigned selection should pick the newest unsigned artifact"
+        );
+    }
+
+    #[test]
+    fn find_best_local_zip_prefers_newest_version_over_older_signed_artifact() {
+        let tmp = TempDir::new().unwrap();
+        let dist = tmp.path();
+        fs::write(dist.join("agent-doc-jetbrains-0.2.80-signed.zip"), b"signed-old").unwrap();
+        fs::write(dist.join("agent-doc-jetbrains-0.2.91.zip"), b"unsigned-new").unwrap();
+
+        let chosen = find_best_local_zip(dist).unwrap();
+
+        assert!(
+            chosen.ends_with("agent-doc-jetbrains-0.2.91.zip"),
+            "install path should pick the newest version even when only the older build is signed"
+        );
+    }
+
+    #[test]
+    fn find_best_local_zip_prefers_signed_artifact_when_versions_match() {
+        let tmp = TempDir::new().unwrap();
+        let dist = tmp.path();
+        fs::write(dist.join("agent-doc-jetbrains-0.2.91.zip"), b"unsigned").unwrap();
+        fs::write(
+            dist.join("agent-doc-jetbrains-0.2.91-signed.zip"),
+            b"signed",
+        )
+        .unwrap();
+
+        let chosen = find_best_local_zip(dist).unwrap();
+
+        assert!(
+            chosen.ends_with("agent-doc-jetbrains-0.2.91-signed.zip"),
+            "signed artifact should win when both builds have the same version"
+        );
     }
 }
 

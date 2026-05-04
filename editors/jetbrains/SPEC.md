@@ -33,6 +33,7 @@ Two strategies for detecting the file's position in the editor split:
 - Split-layout tab-selection changes stay on `agent-doc sync --no-autostart ...` so a selected visible document can be rescued back out of stash into the `agent-doc` window without replacing a live owner. That passive path should hand off quickly by preferring the matching pane first, then an alive exclusive registered pane, and only cold-starting when neither exists.
 - Visible markdown set changes call `agent-doc sync --no-autostart ...`, reusing the workspace-root chooser for cross-root layouts.
 - Dedup state tracks the visible markdown signature plus the active file so repeated selection churn does not rerun the same command.
+- Automatic tab sync may coalesce a short burst of selection events, but it must not suppress the first deliberate left/right split selection after a prior sync.
 
 ### Auto-Save Before Poll
 

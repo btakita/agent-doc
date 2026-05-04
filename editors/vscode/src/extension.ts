@@ -620,6 +620,7 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
 let tabSyncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 let tabSyncRunning = false;
 let lastTabSyncState: TabSyncState | undefined;
+const TAB_SYNC_DEBOUNCE_MS = 100;
 
 function onTabChanged(): void {
     const editor = vscode.window.activeTextEditor;
@@ -640,7 +641,7 @@ function onTabChanged(): void {
     });
     if (planned === null) return;
 
-    // Debounce: 500ms
+    // Coalesce rapid selection churn without delaying the first real split switch.
     if (tabSyncDebounceTimer) clearTimeout(tabSyncDebounceTimer);
     tabSyncDebounceTimer = setTimeout(async () => {
         if (tabSyncRunning) return; // concurrency guard
@@ -654,26 +655,20 @@ function onTabChanged(): void {
                 previous: lastTabSyncState,
             });
             if (next === null) return;
-            if (next.command.kind === 'bounce-back') return;
 
-            const previousActiveFile = lastTabSyncState?.activeFile;
             if (next.command.kind === 'focus') {
                 const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
                 await runCli(['focus', rel], cwd);
             } else {
                 await runCli(next.command.args, root);
             }
-            lastTabSyncState = {
-                ...next.nextState,
-                lastCommandCompletedAt: Date.now(),
-                focusedFileBeforeLastCommand: previousActiveFile,
-            };
+            lastTabSyncState = next.nextState;
         } catch {
             // Silently ignore tab sync errors
         } finally {
             tabSyncRunning = false;
         }
-    }, 500);
+    }, TAB_SYNC_DEBOUNCE_MS);
 }
 
 // ---------------------------------------------------------------------------

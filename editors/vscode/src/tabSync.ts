@@ -1,10 +1,6 @@
-const SETTLE_MS = 1500;
-
 export interface TabSyncState {
     activeFile: string;
     visibleSignature: string;
-    lastCommandCompletedAt?: number;
-    focusedFileBeforeLastCommand?: string;
 }
 
 export interface TabChangeInput {
@@ -16,8 +12,7 @@ export interface TabChangeInput {
 
 export type TabChangeCommand =
     | { kind: 'focus'; args: ['focus', string] }
-    | { kind: 'sync'; args: string[] }
-    | { kind: 'bounce-back' };
+    | { kind: 'sync'; args: string[] };
 
 export interface PlannedTabChange {
     command: TabChangeCommand;
@@ -80,20 +75,6 @@ export function buildTabChangeCommand(input: TabChangeInput): PlannedTabChange |
         previous.visibleSignature === nextState.visibleSignature
     ) {
         return null;
-    }
-
-    if (
-        previous &&
-        previous.visibleSignature === nextState.visibleSignature &&
-        previous.lastCommandCompletedAt &&
-        Date.now() - previous.lastCommandCompletedAt < SETTLE_MS &&
-        previous.focusedFileBeforeLastCommand &&
-        input.activeFile === previous.focusedFileBeforeLastCommand
-    ) {
-        return {
-            command: { kind: 'bounce-back' },
-            nextState: previous,
-        };
     }
 
     if (

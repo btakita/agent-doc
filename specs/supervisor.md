@@ -173,16 +173,11 @@ on claude exit with code c:
                          AND only stdin-forwarded Ctrl+C counts for that path;
                          route/plugin-injected interrupts that bypass the
                          stdin writer stay on the automatic recovery path
-                         EXCEPT when that same fresh/fresh-restart Codex child
-                         exits before it ever surfaces an idle prompt: treat
-                         the forwarded `Ctrl-D`/stdin EOF as failed startup
-                         provenance, restart fresh automatically, and suppress
-                         only the stale inherited pre-prompt `Ctrl-D` bytes on
-                         the successor run until a fresh idle prompt appears
-                         EXCEPT when that same child run already recorded a
-                         committed `document_cycle`: in that case restart fresh
-                         instead of prompting so a successful routed/editor-owned
-                         turn cannot immediately tear down the claimed tmux pane
+                         EXCEPT when a fresh/fresh-restart Codex child exits
+                         before it ever surfaces an idle prompt and no
+                         forwarded operator quit key was observed: treat that
+                         clean exit as failed startup provenance and restart
+                         fresh automatically instead of prompting
                          AND the supervisor must log the prompt outcome
                          (`user_quit*`, `user_restart_fresh`, invalid input) so
                          later `session_start` / `session_end` transitions keep
@@ -318,8 +313,6 @@ At minimum, harness exit lines must preserve:
 The final supervisor-owned closeout must append `supervisor_exit reason=...` before `session_end` so later crash analysis can distinguish deliberate quits, IPC stops, and flapping halts from missing-pane recovery written by other components.
 
 Session-log consumers must treat any event whose first token is `session_end` as a closeout boundary, even when origin metadata follows on the same line (for example `session_end origin=registry_rebind ...` or `session_end origin=sync_missing_pane`). Provenance analysis must not require the whole line to equal the bare literal `session_end`.
-
-When the operator chooses a fresh restart after a forwarded `Ctrl-D`/stdin EOF prompt, the successor run must not inherit that earlier run's pre-prompt `Ctrl-D` byte. The supervisor may suppress only stale pre-prompt `Ctrl-D` bytes for that keepalive successor, and only until the successor surfaces a fresh idle prompt; after that prompt appears, new `Ctrl-D` input must flow normally again.
 
 When pane-loss recovery discovers that the current cycle is already `response_captured` or `write_applied`, the same session log must also record the recovery attempt before the synthetic `session_end origin=sync_missing_pane` closeout. The minimum provenance is:
 - `sync_missing_pane_closeout_recovery_start ... phase=response_captured|write_applied durable_capture=<bool>`

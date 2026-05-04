@@ -33,13 +33,13 @@
 //!   Exception: if a fresh/fresh-restart Codex child exits cleanly before it ever
 //!   surfaces an idle prompt, treat that as failed startup provenance and restart
 //!   fresh instead of chaining `--continue`.
-//!   If stdin EOF/Ctrl-D was forwarded after a normal prompted run, Codex
-//!   returns to the restart-or-quit prompt so the operator can intentionally
-//!   restart fresh or exit the supervisor cleanly. A stdin-forwarded Ctrl+C
-//!   that terminates the child now uses that same quit prompt instead of being
-//!   misclassified as a transient crash. Child runs that already committed a
-//!   document cycle still restart fresh after Ctrl+D instead, and promptless
-//!   fresh/fresh-restart exits still count as failed startup provenance.
+//!   If stdin EOF/Ctrl-D was forwarded, Codex returns to the restart-or-quit
+//!   prompt so the operator can intentionally restart fresh or exit the
+//!   supervisor cleanly even when the previous run already committed. A
+//!   stdin-forwarded Ctrl+C that terminates the child now uses that same quit
+//!   prompt instead of being misclassified as a transient crash. Only
+//!   promptless fresh/fresh-restart exits without a forwarded operator quit
+//!   key still count as failed startup provenance.
 //!   Prompt decisions are still logged explicitly, and the supervisor forces a
 //!   canonical prompt tty mode for those `Enter`/`q` prompts instead of
 //!   trusting the inherited parent harness stdin settings. Prompt-time stdin EOF on
@@ -180,8 +180,6 @@ const AUTO_TRIGGER_OUTPUT_BYTES_MAX: usize = 64 * 1024;
 const SHARED_WRITER_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SHARED_WRITER_WRITE_POLL_INTERVAL_MS: i32 = 50;
 const SHARED_WRITER_CHUNK_MAX: usize = 1024;
-const COMMITTED_CYCLE_SETTLE_TIMEOUT: Duration = Duration::from_millis(1500);
-const COMMITTED_CYCLE_SETTLE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 enum AutoTriggerOutcome {
@@ -505,49 +503,6 @@ fn policy_exit_code_for_supervisor(exit_code: i32, ctrl_c_forwarded_interrupt: b
         0
     } else {
         exit_code
-    }
-}
-
-fn committed_cycle_after_latest_run_from_status(
-    status: Option<&crate::startup_miss::SessionLogStatus>,
-    file: &Path,
-) -> bool {
-    if status.is_some_and(|status| status.saw_committed_cycle_after_latest_run) {
-        return true;
-    }
-
-    let Some(state) = crate::cycle_state::load(file).ok().flatten() else {
-        return false;
-    };
-    if state.phase != crate::cycle_state::CyclePhase::Committed {
-        return false;
-    }
-
-    let anchor_timestamp = status.and_then(|status| {
-        status
-            .latest_run_timestamp
-            .or(status.latest_start_timestamp)
-    });
-    anchor_timestamp.is_none_or(|anchor| state.updated_at >= anchor)
-}
-
-fn committed_cycle_after_latest_run(
-    file: &Path,
-    session_id: &str,
-    settle_timeout: Duration,
-) -> bool {
-    let deadline = Instant::now() + settle_timeout;
-    loop {
-        let status = crate::startup_miss::session_log_status(file, session_id)
-            .ok()
-            .flatten();
-        if committed_cycle_after_latest_run_from_status(status.as_ref(), file) {
-            return true;
-        }
-        if Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(COMMITTED_CYCLE_SETTLE_POLL_INTERVAL);
     }
 }
 
@@ -2195,15 +2150,6 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             resume_handoff_failed(auto_trigger, ctrl_d_forwarded, auto_trigger_outcome);
         let clean_exit_before_prompt =
             clean_exit_before_prompt_seen(auto_trigger, prompt_visible_once);
-        let committed_cycle_after_latest_run = committed_cycle_after_latest_run(
-            file,
-            &session_id,
-            if ctrl_d_forwarded {
-                COMMITTED_CYCLE_SETTLE_TIMEOUT
-            } else {
-                Duration::ZERO
-            },
-        );
         if matches!(
             auto_trigger_outcome,
             AutoTriggerOutcome::Sent | AutoTriggerOutcome::NotNeeded
@@ -2225,14 +2171,13 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         log_event(
             &mut session_log,
             &format!(
-                "restart_eval pane={} harness={} exit_code={} {} auto_trigger_outcome={} ctrl_d={} committed_cycle={} state={} action={}",
+                "restart_eval pane={} harness={} exit_code={} {} auto_trigger_outcome={} ctrl_d={} state={} action={}",
                 pane_id,
                 harness.binary,
                 code,
                 exit_provenance,
                 auto_trigger_outcome.as_str(),
                 ctrl_d_forwarded,
-                committed_cycle_after_latest_run,
                 policy.state.as_str(),
                 action_name
             ),
@@ -2389,44 +2334,8 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
                                 }
                             }
                             RestartContinueExitStrategy::RestartFresh => {
-                                suppress_stale_ctrl_d_until_prompt = ctrl_d_forwarded;
-                                if ctrl_d_forwarded && committed_cycle_after_latest_run {
-                                    eprintln!(
-                                        "\n{} exited after stdin EOF/Ctrl-D, but this run already committed a document cycle. Restarting fresh to keep the pane attached...",
-                                        harness.binary
-                                    );
-                                    log_event(
-                                        &mut session_log,
-                                        &format!(
-                                            "ctrl_d_committed_cycle_restart_fresh restart_count={}",
-                                            restart_count + 1
-                                        ),
-                                    );
-                                } else if ctrl_d_forwarded && clean_exit_before_prompt {
-                                    eprintln!(
-                                        "\n{} exited after stdin EOF/Ctrl-D before ever surfacing a prompt. Restarting fresh instead of prompting so the claimed pane can recover...",
-                                        harness.binary
-                                    );
-                                    log_event(
-                                        &mut session_log,
-                                        &format!(
-                                            "ctrl_d_before_prompt_restart_fresh restart_count={}",
-                                            restart_count + 1
-                                        ),
-                                    );
-                                } else if ctrl_d_forwarded {
-                                    eprintln!(
-                                        "\n{} exited after stdin EOF/Ctrl-D. Restarting fresh instead of offering a quit prompt so the tmux pane stays attached...",
-                                        harness.binary
-                                    );
-                                    log_event(
-                                        &mut session_log,
-                                        &format!(
-                                            "ctrl_d_restart_fresh restart_count={}",
-                                            restart_count + 1
-                                        ),
-                                    );
-                                } else if clean_exit_before_prompt {
+                                suppress_stale_ctrl_d_until_prompt = false;
+                                if clean_exit_before_prompt {
                                     eprintln!(
                                         "\n{} exited cleanly before ever surfacing a prompt. Restarting fresh instead of resuming...",
                                         harness.binary
@@ -2672,37 +2581,6 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::env::set_current_dir(&self.prev_cwd);
         }
-    }
-
-    fn write_committed_cycle_state_for_test(doc: &Path, cycle_id: &str, updated_at: u64) {
-        let canonical = doc.canonicalize().unwrap();
-        let root = crate::snapshot::find_project_root(&canonical).unwrap();
-        let hash = crate::snapshot::doc_hash(&canonical).unwrap();
-        let path = root
-            .join(".agent-doc/state/cycles")
-            .join(format!("{hash}.json"));
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let state = crate::cycle_state::CycleState {
-            cycle_id: cycle_id.to_string(),
-            file: canonical.display().to_string(),
-            phase: crate::cycle_state::CyclePhase::Committed,
-            last_event: "commit_success".to_string(),
-            started_at: updated_at,
-            updated_at,
-            snapshot_hash: None,
-            file_hash: None,
-            normalized_snapshot_hash: None,
-            normalized_file_hash: None,
-            capture_id: Some(cycle_id.to_string()),
-            response_sha256: None,
-            had_pending_mutations: false,
-            requires_backlog_capture: false,
-            required_backlog_targets: Vec::new(),
-            required_explicit_backlog_item_count: 0,
-            required_plan_reference_count: 0,
-            pending_done_ids: Vec::new(),
-        };
-        std::fs::write(path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
     }
 
     #[test]
@@ -3371,60 +3249,6 @@ mod tests {
             strip_stale_ctrl_d_before_prompt(b"\x04", false, false).is_none(),
             "non-keepalive runs should not rewrite forwarded Ctrl+D"
         );
-    }
-
-    #[test]
-    fn committed_cycle_after_latest_run_falls_back_to_cycle_state() {
-        let tmp = TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
-        let doc = tmp.path().join("doc.md");
-        std::fs::write(
-            &doc,
-            "---\nagent_doc_session: session-123\nagent: codex\n---\n\nbody\n",
-        )
-        .unwrap();
-        std::fs::write(
-            tmp.path().join(".agent-doc/logs/session-123.log"),
-            "[10] session_start file=doc.md pane=%41 session=session-123\n[11] codex_start mode=fresh restart_count=0\n",
-        )
-        .unwrap();
-        write_committed_cycle_state_for_test(&doc, "cycle-1", 11);
-
-        assert!(committed_cycle_after_latest_run(
-            &doc,
-            "session-123",
-            Duration::ZERO
-        ));
-    }
-
-    #[test]
-    fn committed_cycle_after_latest_run_waits_for_closeout_settle() {
-        let tmp = TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
-        let doc = tmp.path().join("doc.md");
-        std::fs::write(
-            &doc,
-            "---\nagent_doc_session: session-456\nagent: codex\n---\n\nbody\n",
-        )
-        .unwrap();
-        std::fs::write(
-            tmp.path().join(".agent-doc/logs/session-456.log"),
-            "[20] session_start file=doc.md pane=%52 session=session-456\n[21] codex_start mode=fresh restart_count=0\n",
-        )
-        .unwrap();
-
-        let doc_for_thread = doc.clone();
-        let handle = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(100));
-            write_committed_cycle_state_for_test(&doc_for_thread, "cycle-2", 21);
-        });
-
-        assert!(committed_cycle_after_latest_run(
-            &doc,
-            "session-456",
-            Duration::from_millis(400)
-        ));
-        handle.join().unwrap();
     }
 
     #[test]

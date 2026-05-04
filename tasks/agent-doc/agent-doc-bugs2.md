@@ -312,8 +312,27 @@ If you want the strongest version, remove passive ownership discovery entirely:
 
 That is the only serious path to "no drift". The tradeoff is also clear: less opportunistic recovery, more fail-closed behavior, and more explicit restart/reattach operations. But that is exactly how you buy determinism.
 
-So the short answer is: the current design drifts because multiple subsystems are allowed to infer ownership. The replacement is to stop inferring ownership at all.
-<!-- agent:boundary:72e24cf7 -->
+❯ So the short answer is: the current design drifts because multiple subsystems are allowed to infer ownership. The replacement is to stop inferring ownership at all.
+❯ Yes...I agree. Please provide a plan to transition to this model. Include developer ergonomics to operate this model with confidence. Please provide any Plugin UI + agent-doc commands that consider all of the touch points to properly operate this model.
+### Re: transition plan for no-drift session ownership — gpt-5
+
+Plan created: `tasks/agent-doc/plan-single-owner-session-actor-transition.md`.
+
+The plan turns the earlier "single authoritative owner" direction into a staged migration:
+- Phase 1 freezes the contract and instruments ownership transitions.
+- Phase 2 introduces a durable actor record keyed by canonical document path, with `sessions.json` demoted to a projection.
+- Phases 3-5 move supervisor, route, and sync onto actor-owned generation semantics so normal-path routing no longer elects owners from tmux/process/session heuristics.
+- Phases 6-7 shrink destructive recovery into explicit repair commands and remove the remaining legacy ownership inference from normal turn paths.
+
+I also included the operator-facing ergonomics you asked for:
+- proposed CLI surfaces such as `agent-doc session status`, `session history`, `session attach`, `session restart`, `session clear`, and `session doctor`
+- plugin actions for JB + VS Code such as `Show Session Status`, `Restart Session`, `Clear Session Context`, and `Copy Session Diagnostics`
+- stage-specific dispatch feedback so the editor reports authoritative-owner / busy / stale-generation / waiting-input failures directly instead of surfacing a generic route error
+
+I added backlog item `#sgown` and linked it to the plan file so the transition is tracked as implementation work instead of staying only in exchange prose.
+
+No tests/build/install ran in this cycle because the requested work here was plan creation, not code implementation.
+<!-- agent:boundary:9012cb79 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -337,6 +356,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sgown] Transition document ownership to a single-owner session actor with generation-based dispatch, projection-only sync, and operator-visible plugin/CLI session controls. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.
 - [ ] [#devmdcmt] [recommended] Response was written into `src/session-share/tasks/buildparty-investor-demo/dev.md` but the closeout was not committed. Create a fix plan only: reproduce the exact `agent-doc` write/finalize path for this template/CRDT doc, compare it with `#rspcmt`, trace where append/write can persist content without the expected commit/finalize step, identify any session-doc-specific boundary or backlog rewrite interaction that leaves the file dirty, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports completion until the target document's closeout is verifiably committed.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.

@@ -558,12 +558,59 @@ No actionable follow-up items remain from this fix, so I did not add a backlog e
 ### Re: closeout recovery — gpt-5
 
 No new prompt-bearing document changes were present after the committed closeout. I left the later local note edits untouched and reopened/closed the binary-owned closeout path so this Codex session could finish cleanly.
-<!-- agent:boundary:da02667e -->
+❯ do [#ssheperm]. spec-test-build-install-commit-push
+### Re: ssheperm bare SSH socket drift — gpt-5
+
+Plan executed: `tasks/agent-doc/plan-codex-required-ssh-socket-eperm-drift.md`
+
+`#ssheperm` is complete.
+
+Root cause was in `src/agent/codex.rs`: required-SSH resume recovery only matched transcript lines that already contained the required alias/host text, so a JSON `command_execution` event like `command: "ssh monsterrodholders-server true"` with `aggregated_output: "socket: Operation not permitted"` bypassed capability-drift classification and leaked through as a raw task failure.
+
+I fixed that by parsing Codex `command_execution` events and combining command context with aggregated output:
+- direct target-bearing SSH failures still match as before
+- bare `socket: Operation not permitted` now counts when the same event proves an `ssh` command against a declared `required_ssh_targets` entry
+- localhost/CDP `Operation not permitted` stays on the separate browser-capability retry path
+
+Updated:
+- `src/agent/codex.rs`
+- `specs/05-agent-backend.md`
+- `VERSIONS.md`
+- `README.md`
+- `SPEC.md`
+- `CLAUDE.md`
+- `.claude/skills/agent-doc/SKILL.md`
+
+Regression coverage added for:
+- direct detector coverage for bare socket EPERM with SSH command context
+- blocking resumed-send retry on bare socket required-SSH drift
+- streaming resumed-send retry on the same drift
+- negative coverage so non-SSH bare socket EPERM does not get misclassified
+
+Verification / build / install:
+- `cargo test` (`1799 passed; 0 failed`)
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Git:
+- `src/agent-doc`: `90bcd5e` `fix: detect bare ssh socket capability drift`
+- pushed to `origin/20260422/codex-agent-backend`
+
+No follow-up backlog item remains from this fix.
+<!-- agent:boundary:e8db2d1c -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
 There is a significant delay between changing the selected editor document and the tmux pane changing. 
+---
+I saw this error. Id the root cause and fix. spec-test-build-install-commit-push
+```
+• The binary rejected --pending-done '#ssheperm' because backlog IDs on the write path are resolved without the leading
+  #. I’m retrying the same finalize closeout with --pending-done ssheperm so the response and backlog completion still
+  land in one binary-owned commit.
+```
 ---
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---

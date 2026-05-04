@@ -18,13 +18,13 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 3. Sync Tmux Layout
 
 - **Trigger:** `Ctrl+Shift+Alt+L` (configurable)
-- **Behavior:** Collect all visible `.md` files, detect split orientation, and reconcile the existing tmux layout without replacing live or ambiguous owners. Automatic editor sync paths should use `agent-doc sync --no-autostart ...`; explicit focus-only moves can still use `agent-doc focus <file>`. The `--no-autostart` contract is non-destructive, not "never start anything": it may cold-start a pane after the CLI proves no live owner remains.
+- **Behavior:** Collect all visible `.md` files, detect split orientation, and reconcile the existing tmux layout without replacing live or ambiguous owners. Automatic editor sync paths should use `agent-doc sync --no-autostart ...`; explicit focus-only moves can still use `agent-doc focus <file>`. The `--no-autostart` contract is non-destructive, not "never start anything": on the fast happy path it should reuse the latest matching pane immediately, otherwise fall back to an alive exclusive registered pane, and only then cold-start a new pane when no owner remains.
 - **Feedback:** Inline hint near cursor.
 
 ## 4. Tab-to-Pane Sync (Automatic)
 
 - **Trigger:** Editor tab selection changes.
-- **Behavior:** When the active `.md` file changes and only one markdown document is visible, call `agent-doc focus <file>`. When multiple markdown documents are visible, or when the visible file set changes, call `agent-doc sync --no-autostart ...` so stash rescue/layout reconciliation can bring the selected pane back into the `agent-doc` window without replacing a live owner. If the prior session already ended cleanly and no live owner remains, the CLI may cold-start the pane from this passive sync path.
+- **Behavior:** When the active `.md` file changes and only one markdown document is visible, call `agent-doc focus <file>`. When multiple markdown documents are visible, or when the visible file set changes, call `agent-doc sync --no-autostart ...` so stash rescue/layout reconciliation can bring the selected pane back into the `agent-doc` window without replacing a live owner. That passive path should optimize for fast pane handoff: matching pane first, alive registered pane second, cold-start only when neither exists.
 - **Debounce:** 500ms. Skip if file set unchanged. Concurrency guard (one command at a time).
 
 ## 5. Prompt Polling

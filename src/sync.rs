@@ -1122,6 +1122,14 @@ impl AutoStartMode {
     }
 }
 
+fn registered_pane_matches_document_root(tmux: &Tmux, file: &Path, pane_id: &str) -> bool {
+    registry_location_for_file(file)
+        .map(|(_, project_root, _)| {
+            pane_assignment_matches_document_root(tmux, pane_id, &project_root)
+        })
+        .unwrap_or(false)
+}
+
 fn passive_autostart_skip_reason(
     file: &Path,
     session_id: &str,
@@ -2235,6 +2243,63 @@ fn run_with_options(
                     file_path.display()
                 ));
             }
+            if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+                if let Some(pane_id) =
+                    find_alive_pane_via_open_session_log(tmux, file_path, &session_id, None, false)
+                {
+                    if let Some(owner) =
+                        claimed_sync_pane_owner(&claimed_sync_panes, &pane_id, file_path)
+                    {
+                        eprintln!(
+                            "[sync] safe passive sync found latest session-log owner {} for {} but it is already reserved for {} in this sync run",
+                            pane_id,
+                            file_path.display(),
+                            owner.display()
+                        );
+                        sync_log(&format!(
+                            "safe_passive_session_log_owner_reserved file={} pane={} owner={}",
+                            file_path.display(),
+                            pane_id,
+                            owner.display()
+                        ));
+                    } else {
+                        eprintln!(
+                            "[sync] safe passive sync reusing latest session-log owner {} for {}",
+                            pane_id,
+                            file_path.display()
+                        );
+                        sync_log(&format!(
+                            "safe_passive_reuse_session_log_owner file={} pane={}",
+                            file_path.display(),
+                            pane_id
+                        ));
+                        reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
+                        if registered_pane.as_deref() != Some(pane_id.as_str()) {
+                            let _ =
+                                reregister_recovered_owner(tmux, file_path, &session_id, &pane_id);
+                        }
+                        continue;
+                    }
+                }
+                if let Some(pane_id) = registered_pane.as_ref()
+                    && claimed_owner.is_none()
+                    && tmux.pane_alive(pane_id)
+                    && registered_pane_matches_document_root(tmux, file_path, pane_id)
+                {
+                    eprintln!(
+                        "[sync] safe passive sync reusing alive registered pane {} for {} without waiting on full live-owner proof",
+                        pane_id,
+                        file_path.display()
+                    );
+                    sync_log(&format!(
+                        "safe_passive_reuse_registered_pane file={} pane={}",
+                        file_path.display(),
+                        pane_id
+                    ));
+                    reserve_sync_pane(&claimed_sync_panes, pane_id, file_path);
+                    continue;
+                }
+            }
             let registered_live_owner = registered_pane.as_ref().is_some_and(|pane| {
                 registered_pane_proves_live_owner(tmux, file_path, &session_id, pane)
             });
@@ -2433,6 +2498,96 @@ fn run_with_options(
                 blocked_unresolved_files
                     .borrow_mut()
                     .insert(file_path.to_path_buf());
+                continue;
+            }
+
+            if matches!(auto_start_mode, AutoStartMode::SafePassive) && registered_pane.is_none() {
+                if has_rename_debounce(file_path) {
+                    eprintln!(
+                        "[sync] skipping auto-start for {} (rename debounce active)",
+                        file_path.display()
+                    );
+                    sync_log(&format!(
+                        "rename-debounce: skipped auto-start for {}",
+                        file_path.display()
+                    ));
+                    blocked_unresolved_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
+                    continue;
+                }
+
+                if skip_auto_start_for_recent_session_loss(file_path, &session_id)? {
+                    blocked_unresolved_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
+                    continue;
+                }
+
+                if let Some(reason) = passive_autostart_skip_reason(
+                    file_path,
+                    &session_id,
+                    unresolved_startup_miss.as_ref(),
+                )? {
+                    eprintln!(
+                        "[sync] safe passive sync is not auto-starting {} ({})",
+                        file_path.display(),
+                        reason
+                    );
+                    sync_log(&format!(
+                        "safe_passive_autostart_skipped file={} reason={}",
+                        file_path.display(),
+                        reason
+                    ));
+                    blocked_unresolved_files
+                        .borrow_mut()
+                        .insert(file_path.to_path_buf());
+                    continue;
+                }
+
+                sync_log(&format!(
+                    "safe_passive_fast_autostart file={} mode={}",
+                    file_path.display(),
+                    auto_start_mode.log_label()
+                ));
+                eprintln!(
+                    "[sync] safe passive sync is cold-starting {} after no matching pane or registered owner was found",
+                    file_path.display()
+                );
+                let file_str = file_path.to_string_lossy().to_string();
+                match route::provision_pane(
+                    tmux,
+                    file_path,
+                    &session_id,
+                    &file_str,
+                    context_session.as_deref(),
+                    col_args,
+                ) {
+                    Ok(pane_id) => {
+                        eprintln!(
+                            "[sync] auto-started {} for {}",
+                            pane_id,
+                            file_path.display()
+                        );
+                        sync_log(&format!(
+                            "auto-started {} for {}",
+                            pane_id,
+                            file_path.display()
+                        ));
+                        reserve_sync_pane(&claimed_sync_panes, &pane_id, file_path);
+                        auto_started_panes.push((pane_id, file_str.clone()));
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[sync] warning: auto-start failed for {}: {}",
+                            file_path.display(),
+                            e
+                        );
+                        blocked_unresolved_files
+                            .borrow_mut()
+                            .insert(file_path.to_path_buf());
+                    }
+                }
                 continue;
             }
 
@@ -7494,6 +7649,58 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         assert!(
             iso.pane_alive(&dev_pane),
             "the resolved sibling pane must also remain visible"
+        );
+    }
+
+    #[test]
+    fn safe_passive_sync_reuses_alive_registered_pane_before_full_live_owner_proof() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let doc = root.join("tasks/passive-fast-path.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: passive-fast-path\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-safe-passive-registered-fast-path");
+        let pane = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let window_id = iso.pane_window(&pane).unwrap();
+
+        sessions::register_full_with_cwd(
+            "passive-fast-path",
+            &pane,
+            &doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &pane).unwrap(),
+            &window_id,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+
+        run_with_options(
+            &[doc.to_string_lossy().to_string()],
+            None,
+            Some(doc.to_string_lossy().as_ref()),
+            AutoStartMode::SafePassive,
+            &iso,
+        )
+        .unwrap();
+
+        let ordered = iso.list_panes_ordered(&window_id).unwrap();
+        assert_eq!(
+            ordered,
+            vec![pane.clone()],
+            "safe passive sync should immediately reuse the alive registered pane instead of provisioning a replacement"
         );
     }
 }

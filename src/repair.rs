@@ -898,8 +898,8 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         if recover_missing_commit_boundary(file, "repair_commit_boundary_recovered")?.is_some() {
             return Ok(RepairOutcome::CommitBoundaryRecovered);
         }
-        let has_live_prompt = crate::session_check::first_unstarted_prompt_bearing_change(file)?
-            .is_some();
+        let has_live_prompt =
+            crate::session_check::first_unstarted_prompt_bearing_change(file)?.is_some();
         if !has_live_prompt {
             let repaired_doc = repair_template_doc_if_needed(file, &doc_content)?;
             if repaired_doc != doc_content {

@@ -223,10 +223,9 @@ pub fn load(file: &Path) -> Result<Option<StartupMiss>> {
     let Some(path) = state_path(file)? else {
         return Ok(None);
     };
-    if !path.exists() {
+    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
         return Ok(None);
-    }
-    let content = std::fs::read_to_string(&path)?;
+    };
     let marker: StartupMiss = serde_json::from_str(&content)?;
     Ok(Some(marker))
 }
@@ -281,11 +280,9 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
     let Some(path) = log_path(file, session_id)? else {
         return Ok(None);
     };
-    if !path.exists() {
+    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
         return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(&path)?;
+    };
     let mut saw_start = false;
     let mut latest_start_pane = None;
     let mut latest_start_timestamp = None;
@@ -514,11 +511,9 @@ fn recent_session_loss_window_at(
     let Some(path) = log_path(file, session_id)? else {
         return Ok(None);
     };
-    if !path.exists() {
+    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
         return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(&path)?;
+    };
     let cutoff = now_epoch_secs.saturating_sub(RECENT_SESSION_LOSS_WINDOW_SECS);
     let mut count = 0usize;
     let mut first_timestamp = None;

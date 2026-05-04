@@ -100,10 +100,9 @@ pub fn load(file: &Path) -> Result<Option<CycleState>> {
     let Some(path) = state_path(file)? else {
         return Ok(None);
     };
-    if !path.exists() {
+    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
         return Ok(None);
-    }
-    let content = std::fs::read_to_string(&path)?;
+    };
     let state: CycleState = serde_json::from_str(&content)?;
     Ok(Some(state))
 }

@@ -632,10 +632,7 @@ pub fn save_pre_response(doc: &Path, content: &str) -> Result<()> {
 /// Load the pre-response snapshot for a document.
 pub fn load_pre_response(doc: &Path) -> Result<Option<String>> {
     let path = pre_response_path_for(doc)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-    Ok(Some(std::fs::read_to_string(&path)?))
+    crate::fs_util::read_optional_text(&path)
 }
 
 /// Delete the pre-response snapshot for a document.
@@ -666,13 +663,9 @@ pub fn crdt_path_for(doc: &Path) -> Result<PathBuf> {
 /// Load CRDT state bytes for a document (if any).
 pub fn load_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
     let path = crdt_path_for(doc)?;
-    if !path.exists() {
-        return Ok(None);
-    }
     let _lock = acquire_crdt_lock(doc)?;
-    let bytes = std::fs::read(&path)
-        .with_context(|| format!("failed to read CRDT state {}", path.display()))?;
-    Ok(Some(bytes))
+    crate::fs_util::read_optional_bytes(&path)
+        .with_context(|| format!("failed to read CRDT state {}", path.display()))
 }
 
 /// Save CRDT state bytes for a document.

@@ -8380,10 +8380,7 @@ Body\n\
             "route should keep dispatching into the fresh pane after a competing registry rebind: {new_pane_after}"
         );
 
-        let lookup = sessions::lookup(
-            "route-fresh-start-handoff",
-        )
-        .unwrap();
+        let lookup = sessions::lookup("route-fresh-start-handoff").unwrap();
         assert_eq!(
             lookup.as_deref(),
             Some(new_pane.as_str()),

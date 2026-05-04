@@ -4305,8 +4305,11 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         let doc = tmp.path().join("tasks").join("owned.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "---\nagent_doc_session: session-log-beats-process-tree\n---\n")
-            .unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-log-beats-process-tree\n---\n",
+        )
+        .unwrap();
 
         let iso = IsolatedTmux::new("sync-session-log-beats-process-tree");
         let stale_pane = iso.new_session("test", tmp.path()).unwrap();
@@ -4315,11 +4318,7 @@ mod tests {
         let fake_bin_dir = tmp.path().join("bin");
         std::fs::create_dir_all(&fake_bin_dir).unwrap();
         let fake_codex = fake_bin_dir.join("codex");
-        std::fs::write(
-            &fake_codex,
-            "#!/bin/sh\nsleep 60\n",
-        )
-        .unwrap();
+        std::fs::write(&fake_codex, "#!/bin/sh\nsleep 60\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -7423,23 +7422,24 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         let agent_doc_window = iso.pane_window(&bugs_pane).unwrap();
         let dev_pane_pid = pane_pid_from_tmux(&iso, &dev_pane).unwrap();
 
-        let _ipc = crate::supervisor::ipc::SupervisorIpc::start(subroot.as_path(), "dev-session", {
-            move |method| match method {
-                crate::supervisor::ipc::IpcMethod::Pid => {
-                    crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                        "pid": dev_pane_pid
-                    }))
+        let _ipc =
+            crate::supervisor::ipc::SupervisorIpc::start(subroot.as_path(), "dev-session", {
+                move |method| match method {
+                    crate::supervisor::ipc::IpcMethod::Pid => {
+                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                            "pid": dev_pane_pid
+                        }))
+                    }
+                    crate::supervisor::ipc::IpcMethod::State => {
+                        crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                            "supervisor_pid": dev_pane_pid,
+                            "supervisor_instance_id": "dev-instance",
+                        }))
+                    }
+                    _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
                 }
-                crate::supervisor::ipc::IpcMethod::State => {
-                    crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
-                        "supervisor_pid": dev_pane_pid,
-                        "supervisor_instance_id": "dev-instance",
-                    }))
-                }
-                _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
-            }
-        })
-        .unwrap();
+            })
+            .unwrap();
 
         sessions::register_full_with_cwd(
             "bugs-session",

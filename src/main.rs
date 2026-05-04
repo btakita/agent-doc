@@ -60,6 +60,7 @@ mod diff;
 mod env;
 mod extract;
 mod focus;
+mod fs_util;
 mod gc;
 mod git;
 mod harness;

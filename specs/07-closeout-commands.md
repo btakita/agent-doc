@@ -91,5 +91,6 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Fails on open cycle states, uncommitted visible `### Re:` / `## Assistant` patchbacks, or hidden `snapshot != HEAD` closeout drift.
 - May self-heal only narrow exchange-only already-committed historical drift proven by `HEAD`.
 - Must fail closed when the repaired tail would still include a bare prompt target or typed-component drift.
+- Optional closeout sidecars such as cycle-state, capture, startup-miss, and ops-log files are advisory; if one disappears between discovery and read, session-check treats it as absent state instead of surfacing a transient `ENOENT`.
 - Runs the pending-capture, pending-done, backlog-shadow, backlog-replay, completed-item reap, and snapshot-vs-HEAD closeout guards after a committed cycle.
 - The Codex/direct-exec harness path is expected to run this immediately after `finalize` or strict `write --commit`, and must fail closed if the check reports an open or bypassed cycle.

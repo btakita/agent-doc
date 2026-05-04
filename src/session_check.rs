@@ -1110,10 +1110,9 @@ pub fn last_ops_event(file: &Path) -> Result<Option<String>> {
         return Ok(None);
     };
     let log_path = project_root.join(".agent-doc/logs/ops.log");
-    if !log_path.exists() {
+    let Some(content) = crate::fs_util::read_optional_text(&log_path)? else {
         return Ok(None);
-    }
-    let content = std::fs::read_to_string(&log_path)?;
+    };
     let canonical_display = canonical.display().to_string();
     let requested_display = file.display().to_string();
     let last = content

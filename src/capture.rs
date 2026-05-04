@@ -142,11 +142,11 @@ pub fn load_active(file: &Path) -> Result<Option<CaptureRecord>> {
 
 pub fn load_by_id(file: &Path, capture_id: &str) -> Result<Option<CaptureRecord>> {
     let path = capture_path_for(file, capture_id)?;
-    if !path.exists() {
+    let Some(content) = crate::fs_util::read_optional_text(&path)
+        .with_context(|| format!("failed to read capture {}", path.display()))?
+    else {
         return Ok(None);
-    }
-    let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read capture {}", path.display()))?;
+    };
     let record: CaptureRecord = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse capture {}", path.display()))?;
     Ok(Some(record))

@@ -1067,6 +1067,276 @@ fn dispatch_only_send_reopen(
     Ok(pane.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn dispatch_only_reopen_existing_pane(
+    tmux: &Tmux,
+    file: &Path,
+    pane: Option<&str>,
+    col_args: &[String],
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+    harness: &HarnessConfig,
+    created_panes: &mut Vec<String>,
+    prompt_bearing_marker: Option<&str>,
+    allow_auto_fix_retry: bool,
+    allow_busy_interrupt_retry: bool,
+    auto_fix_attempted: bool,
+    pane_id: &str,
+) -> Result<String> {
+    let dispatch_pane = reapply_codex_launch_contract_after_clear(
+        tmux, file, pane_id, session_id, file_path, harness,
+    )?;
+    let log_status = crate::startup_miss::session_log_status(file, session_id)
+        .ok()
+        .flatten();
+    if dispatch_only_requires_ready_probe(log_status.as_ref(), &dispatch_pane, harness) {
+        return dispatch_only_send_reopen(
+            tmux,
+            file,
+            session_id,
+            &dispatch_pane,
+            file_path,
+            harness,
+        );
+    }
+    if harness.binary == "codex"
+        && crate::startup_miss::load(file)
+            .ok()
+            .flatten()
+            .is_some_and(|miss| miss.pane_id == dispatch_pane)
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_startup_miss_bypass file={} pane={} harness={}",
+                file.display(),
+                dispatch_pane,
+                harness.binary
+            ),
+        );
+        return dispatch_only_send_reopen(
+            tmux,
+            file,
+            session_id,
+            &dispatch_pane,
+            file_path,
+            harness,
+        );
+    }
+    register_dispatch_target(session_id, &dispatch_pane, file_path)?;
+    match ensure_existing_pane_ready_for_dispatch(
+        tmux,
+        file,
+        &dispatch_pane,
+        harness,
+        prompt_bearing_marker,
+    )? {
+        ExistingPaneDispatchReadiness::Ready => {
+            dispatch_only_send_reopen(
+                tmux,
+                file,
+                session_id,
+                &dispatch_pane,
+                file_path,
+                harness,
+            )
+        }
+        ExistingPaneDispatchReadiness::BusyAlreadyRunning => Ok(dispatch_pane),
+        ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
+            provenance,
+            blocker_reason,
+        } => retry_dispatch_only_after_busy_pane(
+            tmux,
+            file,
+            pane,
+            col_args,
+            session_id,
+            file_path,
+            target_session,
+            harness,
+            created_panes,
+            prompt_bearing_marker,
+            allow_auto_fix_retry,
+            allow_busy_interrupt_retry,
+            auto_fix_attempted,
+            &dispatch_pane,
+            &provenance,
+            blocker_reason.as_deref(),
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn retry_dispatch_only_after_busy_pane(
+    tmux: &Tmux,
+    file: &Path,
+    pane: Option<&str>,
+    col_args: &[String],
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+    harness: &HarnessConfig,
+    created_panes: &mut Vec<String>,
+    prompt_bearing_marker: Option<&str>,
+    allow_auto_fix_retry: bool,
+    allow_busy_interrupt_retry: bool,
+    auto_fix_attempted: bool,
+    busy_pane: &str,
+    provenance: &str,
+    blocker_reason: Option<&str>,
+) -> Result<String> {
+    let fallback_detail = blocker_reason.map(|reason| format!("still shows {reason}"));
+    if allow_auto_fix_retry {
+        match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {
+            BusyPaneAutoFixOutcome::RetryRoute => {
+                return dispatch_only_reopen_existing_pane(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    prompt_bearing_marker,
+                    false,
+                    allow_busy_interrupt_retry,
+                    true,
+                    busy_pane,
+                );
+            }
+            BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart => {
+                wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
+                return dispatch_only_reopen_existing_pane(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    prompt_bearing_marker,
+                    false,
+                    allow_busy_interrupt_retry,
+                    true,
+                    busy_pane,
+                );
+            }
+            BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_retry_after_fresh_restart file={} pane={} harness={}",
+                        file.display(),
+                        busy_pane,
+                        harness.binary
+                    ),
+                );
+                eprintln!(
+                    "[route] dispatch-only {} reopen for {} found busy authoritative pane {} after the scoped recovery path — restarting the live session fresh once before retrying",
+                    harness.binary,
+                    file.display(),
+                    busy_pane
+                );
+                if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
+                    emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
+                    anyhow::bail!(format_busy_existing_pane_error(
+                        file,
+                        busy_pane,
+                        harness,
+                        provenance,
+                        fallback_detail.as_deref(),
+                        true
+                    ));
+                }
+                wait_for_busy_restart_handoff(tmux, file, file_path, session_id, busy_pane);
+                return dispatch_only_reopen_existing_pane(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    prompt_bearing_marker,
+                    false,
+                    allow_busy_interrupt_retry,
+                    true,
+                    busy_pane,
+                );
+            }
+            BusyPaneAutoFixOutcome::FailClosed => {}
+        }
+    }
+    if allow_busy_interrupt_retry {
+        match attempt_busy_existing_pane_interrupt_recovery(
+            tmux,
+            file,
+            busy_pane,
+            harness,
+            blocker_reason,
+        )? {
+            BusyPaneInterruptRecoveryOutcome::Recovered => {
+                return dispatch_only_reopen_existing_pane(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    prompt_bearing_marker,
+                    false,
+                    false,
+                    true,
+                    busy_pane,
+                );
+            }
+            BusyPaneInterruptRecoveryOutcome::Blocked { reason } => {
+                emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
+                let detail = format!("bounded interrupt recovery still shows {reason}");
+                anyhow::bail!(format_busy_existing_pane_error(
+                    file,
+                    busy_pane,
+                    harness,
+                    provenance,
+                    Some(detail.as_str()),
+                    auto_fix_attempted || allow_auto_fix_retry
+                ));
+            }
+            BusyPaneInterruptRecoveryOutcome::TimedOut => {
+                emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
+                anyhow::bail!(format_busy_existing_pane_error(
+                    file,
+                    busy_pane,
+                    harness,
+                    provenance,
+                    Some("bounded interrupt recovery never restored a dispatch-ready prompt"),
+                    auto_fix_attempted || allow_auto_fix_retry
+                ));
+            }
+            BusyPaneInterruptRecoveryOutcome::Skipped => {}
+        }
+    }
+    emit_busy_route_diagnostic(tmux, busy_pane, file, harness);
+    anyhow::bail!(format_busy_existing_pane_error(
+        file,
+        busy_pane,
+        harness,
+        provenance,
+        fallback_detail.as_deref(),
+        auto_fix_attempted || allow_auto_fix_retry
+    ));
+}
+
 fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &str) -> Option<String> {
     if let Some(reason) = harness.dispatch_blocker_reason(content) {
         return Some(reason);
@@ -1101,6 +1371,9 @@ fn resolve_or_create_pane_dispatch_only(
     created_panes: &mut Vec<String>,
 ) -> Result<String> {
     let registered = sessions::lookup(session_id)?;
+    let cycle_baseline = crate::cycle_state::load(file)?;
+    let pending_prompt_context =
+        pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
     let live_owner = if registered.is_some() {
         crate::sync::find_live_owner_pane(tmux, file, session_id)
     } else {
@@ -1164,13 +1437,23 @@ fn resolve_or_create_pane_dispatch_only(
             );
         }
         rescue_target(dispatch_pane);
-        return dispatch_only_send_reopen(
+        return dispatch_only_reopen_existing_pane(
             tmux,
             file,
+            pane,
+            col_args,
             session_id,
-            dispatch_pane,
             file_path,
+            target_session,
             harness,
+            created_panes,
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
+            true,
+            true,
+            false,
+            dispatch_pane,
         );
     }
 
@@ -1202,7 +1485,24 @@ fn resolve_or_create_pane_dispatch_only(
         && let Some(existing) = existing_owner.as_deref()
     {
         rescue_target(existing);
-        return dispatch_only_send_reopen(tmux, file, session_id, existing, file_path, harness);
+        return dispatch_only_reopen_existing_pane(
+            tmux,
+            file,
+            pane,
+            col_args,
+            session_id,
+            file_path,
+            target_session,
+            harness,
+            created_panes,
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
+            true,
+            true,
+            false,
+            existing,
+        );
     }
 
     let claimed_panes: std::collections::HashSet<String> = sessions::load()
@@ -1216,7 +1516,24 @@ fn resolve_or_create_pane_dispatch_only(
         && is_agent_process(tmux, &new_pane, harness)
     {
         rescue_target(&new_pane);
-        return dispatch_only_send_reopen(tmux, file, session_id, &new_pane, file_path, harness);
+        return dispatch_only_reopen_existing_pane(
+            tmux,
+            file,
+            pane,
+            col_args,
+            session_id,
+            file_path,
+            target_session,
+            harness,
+            created_panes,
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
+            true,
+            true,
+            false,
+            &new_pane,
+        );
     }
 
     eprintln!("[route] No active pane found, auto-starting...");
@@ -6579,7 +6896,7 @@ Body\n\
     }
 
     #[test]
-    fn resolve_or_create_pane_dispatch_only_sends_into_busy_registered_pane() {
+    fn resolve_or_create_pane_dispatch_only_fails_closed_on_busy_registered_pane() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -6612,7 +6929,7 @@ Body\n\
         let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
         sessions::register("route-dispatch-only-busy-pane", &pane, &file_path).unwrap();
 
-        let reused = resolve_or_create_pane_dispatch_only(
+        let err = resolve_or_create_pane_dispatch_only(
             &iso,
             &doc,
             None,
@@ -6623,20 +6940,22 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect(
-            "dispatch-only route should still send the bare reopen into the authoritative pane",
-        );
-        assert_eq!(reused, pane);
+        .expect_err("dispatch-only route should now fail closed instead of injecting into a busy live pane");
 
         let after = wait_for_pane_contains(
             &iso,
             &pane,
-            "EARLY:agent-doc ",
-            std::time::Duration::from_secs(5),
+            "Working...",
+            std::time::Duration::from_secs(1),
         );
         assert!(
-            after.contains("EARLY:agent-doc "),
-            "dispatch-only route should send the bare reopen even while the pane is busy: {after}"
+            !after.contains("EARLY:agent-doc "),
+            "dispatch-only route must not inject a reopen into the busy authoritative pane: {after}"
+        );
+        assert!(
+            err.to_string()
+                .contains("bounded interrupt recovery never restored a dispatch-ready prompt"),
+            "unexpected error: {err:#}"
         );
     }
 

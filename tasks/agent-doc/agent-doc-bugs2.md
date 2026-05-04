@@ -555,11 +555,16 @@ Git:
 - pushed to `origin/20260422/codex-agent-backend`
 
 No actionable follow-up items remain from this fix, so I did not add a backlog entry in this cycle.
-<!-- agent:boundary:eaa921b0 -->
+### Re: closeout recovery — gpt-5
+
+No new prompt-bearing document changes were present after the committed closeout. I left the later local note edits untouched and reopened/closed the binary-owned closeout path so this Codex session could finish cleanly.
+<!-- agent:boundary:da02667e -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
+There is a significant delay between changing the selected editor document and the tmux pane changing. 
+---
 When I call `Run Agent Doc` from the JB Plugin, there should be a cursor prompt...at the location of the cursor...to notify the user that `agent-doc ...` was sent.
 ---
 Please add a JB + VSCode command to call `/clear` in the binding Claude Code + Codex sessions. This `/clear` command should be visible in the `Agent Doc` contextual menu.

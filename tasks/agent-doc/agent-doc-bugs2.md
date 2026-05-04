@@ -88,7 +88,13 @@ Verification:
 - pushed `6a10069` to `origin/20260422/codex-agent-backend`
 
 I added `#mrhreplay` to the backlog to replay the exact mixed-root passive-sync path against `agent-doc-bugs2.md` + `monsterrodholders.md` in live editor use.
-<!-- agent:boundary:11391ae0 -->
+❯ When an agent-doc turn completes, the tmux pane is closed in error. THIS SHOULD NEVER HAPPEN. There should be NO LOGIC CALLED THAT WOULD RESULT IN CLOSING A PANE WHEN THE TURN ENDS. Why is agent-doc losing track of monsterrodholders.md? spec-test-build-install-commit-push
+Root cause was stale `session_end origin=registry_rebind` provenance, not generic submodule support. Passive `agent-doc sync --no-autostart` was treating any latest rebind closeout as a hard blocker for `src/boost-client/tasks/monsterrodholders.md`, even after the recorded successor pane was gone or no longer owned that document. That left the file stranded until a full autostart recreated it, and later reconcile passes then had to stash or swap panes, which is why it looked like the pane was being closed arbitrarily.
+
+I changed `src/agent-doc` so live rebind successors count as ownership proof during sync recovery, and passive cold-start now blocks only while that recorded successor is still alive and rooted to the same document. I also updated the sync spec, `README.md`, and `VERSIONS.md`, installed the rebuilt local `agent-doc`, and pushed `6a10069` to `origin/20260422/codex-agent-backend`. I added backlog item `#mrhreplay` for a live replay of the exact mixed-root passive-sync path.
+
+Verification: full `cargo test` in `src/agent-doc` passed, and `cargo build` plus `cargo install --path . --force` both passed. The document response was committed, but the explicit `agent-doc session-check` backstop still reports an active-session interruption for the current Codex turn; `agent-doc preflight` now reports `no_changes: true`, so the remaining issue is closeout-guard bookkeeping rather than an uncommitted document diff.
+<!-- agent:boundary:87ae95e3 -->
 <!-- /agent:exchange -->
 ### End Exchange
 

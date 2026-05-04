@@ -66,7 +66,7 @@ Verification/build/install:
 - `cargo build --release` in both `src/tmux-router` and `src/agent-doc`
 - `cargo install --path . --force` in `src/agent-doc`
 
-Git:
+❯ Git:
 
 - `tmux-router`: `acb72ba` pushed to `origin/main`
 - `agent-doc`: `ec86515` pushed to `origin/20260422/codex-agent-backend`
@@ -98,7 +98,7 @@ Verification:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Git:
+❯ Git:
 - `agent-doc`: `5c8fd99` pushed to `origin/20260422/codex-agent-backend`
 - parent repo: `df36c03f0` pushed to `origin/main`
 
@@ -140,7 +140,7 @@ Verification / build / install:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Git:
+❯ Git:
 
 - `agent-doc`: `4d02828` pushed to `origin/20260422/codex-agent-backend`
 
@@ -250,7 +250,7 @@ Full verification also passed:
 Plan executed: `tasks/agent-doc/plan-response-patchback-uncommitted-regression.md`
 
 ❯ No new `src/agent-doc` source diff was required in this cycle, so there was nothing new to commit or push there. The only committed mutation from this turn is the session-doc closeout itself plus marking `#patchregr` done.
-❯ do [#jbsubroot]. spec-test-build-install-commit-push
+do [#jbsubroot]. spec-test-build-install-commit-push
 ### Re: jbsubroot passive mixed-root replay + route validation — gpt-5
 
 I reproduced the remaining `#jbsubroot` gap in the live tmux stack. `sync --no-autostart` was correctly refusing to provision `src/boost-client/tasks/monsterrodholders.md`, but it still fell through into tmux-router reconcile and could collapse the shared `agent-doc` window down to the surviving `session-share` pane, which made a foreign pane authoritative anyway.
@@ -268,7 +268,7 @@ Live replay:
 - `agent-doc sync --no-autostart` with `boost-client` + `session-share/tasks/claudescore-3.md` now logs `safe passive sync preserved the current tmux layout...` and leaves session `4:0` unchanged with workspace pane `%127` still visible.
 - `agent-doc route --dispatch-only` from `src/boost-client` targeted tmux session `4`, not a child-root session, and recovered a fresh `monsterrodholders.md` start in pane `%158`.
 
-Git:
+❯ Git:
 - `agent-doc`: `2bd6a26` pushed to `origin/20260422/codex-agent-backend`
 
 ❯ Plan executed: `tasks/agent-doc/plan-jb-submodule-passive-autostart-window-resolution-validation.md`
@@ -287,7 +287,7 @@ Verification:
 -  ()
 ❯ - 
 
-Git:
+❯ Git:
 - no new  source diff in this cycle, so there was nothing to commit or push there
 
 ❯ Plan executed:
@@ -309,7 +309,7 @@ Verification:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Git:
+❯ Git:
 - no new `src/agent-doc` source diff in this cycle, so there was nothing to commit or push there
 
 ❯ Plan executed: `tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md`
@@ -340,7 +340,7 @@ Verification completed:
 ❯ do [#jbptrk]. spec-test-build-install-commit-push
 ### Re: jbptrk live replay closeout — gpt-5
 
-Plan executed: `tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md`
+❯ Plan executed: `tasks/agent-doc/plan-buildparty-jb-visible-pane-tracking-loss.md`
 
 `#jbptrk` is complete.
 
@@ -360,7 +360,7 @@ Verification:
 - `./gradlew test buildPlugin`
 - `cargo install --path . --force`
 
-Git:
+❯ Git:
 
 - no new `src/agent-doc` source diff was required in this cycle, so there was nothing new to commit or push there
 ❯ do [#jbctrlg]. spec-test-build-install-commit-push
@@ -383,7 +383,7 @@ Verification / build / install:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Git:
+❯ Git:
 - no new `src/agent-doc` source diff was required in this cycle, so there was nothing to commit or push there
 
 ❯ do [#mrreap]. spec-test-build-install-commit-push
@@ -401,7 +401,7 @@ Verification is complete:
 - `cargo install --path . --force`
 - `cargo run --quiet -- audit-docs`
 
-Committed and pushed in `src/agent-doc`:
+❯ Committed and pushed in `src/agent-doc`:
 - `3fa028a` `fix: prefer latest session-log owner during sync recovery`
 
 `#mrreap` is complete.
@@ -425,7 +425,7 @@ Verification:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Git:
+❯ Git:
 - no new `src/agent-doc` source diff was required in this cycle, so there was nothing to commit or push there
 
 `#mrbusy` remains open because this replay exercised the stale-registry / fresh-start recovery path, not the busy registered-pane reroute case.
@@ -550,9 +550,9 @@ Verification / build / install:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Git:
+❯ Git:
 - `src/agent-doc`: `3ca7f17` `fix: keep successful routed codex panes attached`
-- pushed to `origin/20260422/codex-agent-backend`
+❯ - pushed to `origin/20260422/codex-agent-backend`
 
 ❯ No actionable follow-up items remain from this fix, so I did not add a backlog entry in this cycle.
 ### Re: closeout recovery — gpt-5
@@ -593,13 +593,13 @@ Verification / build / install:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Git:
+❯ Git:
 - `src/agent-doc`: `90bcd5e` `fix: detect bare ssh socket capability drift`
-- pushed to `origin/20260422/codex-agent-backend`
+❯ - pushed to `origin/20260422/codex-agent-backend`
 
 ❯ No follow-up backlog item remains from this fix.
 ❯ commit + push all uncommitted files
-### Re: commit + push all uncommitted files — gpt-5
+### Re: commit + push all uncommitted files — gpt-5 (HEAD)
 
 Completed the requested repo closeout.
 
@@ -623,7 +623,7 @@ The only remaining local change before this closeout was this session document i
 <!--
 agent-doc running /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md with Codex is failing due to the sandbox. Please help me to DISABLE THE CODEX SANDBOX. I don't want agent-doc to bypass the sandbox by default but for my environment I want to bypass the sandbox. spec-test-build-install-commit-push
 ---
-There is a significant delay between changing the selected editor document and the tmux pane changing. 
+There is a significant delay between changing the selected editor document and the tmux pane changing. Please remove any checks that are slowing down the tmux pane responsiveness. I also don't want tmux panes being closed anymore. The tmux pane should always remain alive. Do not create duplicate tmux panes or an orphaned tmux pane. The guard should only apply before attempting to start a new tmux pane. spec-test-build-install-commit-push 
 ---
 I saw this error. Id the root cause and fix. spec-test-build-install-commit-push
 ```

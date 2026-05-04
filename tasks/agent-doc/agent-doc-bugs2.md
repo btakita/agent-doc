@@ -405,8 +405,37 @@ Verification completed in `src/agent-doc`:
 Repo closeout in `src/agent-doc`: committed as `8be606b` (`fix: restore ready state after routed dispatch`) and pushed to `origin/20260422/codex-agent-backend`.
 
 I did not run a live JetBrains-managed replay myself, so `#jbipcr` is gated pending that manual validation step.
+Still getting route errors. spec-test-build-install-commit-push
+```
+resync: stash pane %206 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+Error: authoritative actor record for tasks/buildparty-investor-demo/dev.md is bound to harness claude-code, not claude
+```
+### Re: JB Plugin `Run Agent Doc` Claude harness alias routing — gpt-5
 
-<!-- agent:boundary:6d29b471 -->
+I reproduced the exact mismatch behind this failure.
+
+Root cause:
+- `src/session-share/.agent-doc/session-actors.json` already had the authoritative actor for `src/session-share/tasks/buildparty-investor-demo/dev.md` recorded with `"harness": "claude-code"`.
+- That is the canonical stored identity: `src/session_actor.rs` normalizes `claude -> claude-code` before persisting actor records.
+- `src/route.rs` was still validating that stored actor record against `harness.binary`, which is the live supervisor binary name `claude`.
+- So the authoritative reroute path failed closed on an alias mismatch before it could reuse the healthy actor pane, producing the exact `bound to harness claude-code, not claude` error you pasted.
+
+Implemented:
+- Exported the canonical harness normalizer from `src/session_actor.rs` and reused it in `src/route.rs`, so authoritative actor dispatch now compares canonical harness ids instead of raw binary labels.
+- Added a route regression proving a Claude-owned authoritative actor stored as `claude-code` remains dispatchable through the normal authoritative route path.
+- Updated `specs/08-session-routing.md`, `specs/08a-session-actor-contract.md`, and `VERSIONS.md` so the canonical-harness identity rule is explicit.
+
+Verification completed in `src/agent-doc`:
+- `cargo check`
+- `cargo test` (parallel suite; passed)
+- `cargo build`
+- `cargo install --path . --force`
+
+Repo closeout in `src/agent-doc`: committed as `fcfba5f` (`fix: normalize authoritative actor harness aliases`) and pushed to `origin/20260422/codex-agent-backend`.
+
+I did not run a live JetBrains-managed replay after the patch, so I added a recommended follow-up replay item for that manual validation pass.
+<!-- agent:boundary:54d24d94 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -434,7 +463,8 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc against a healthy authoritative actor session and confirm rerouted submits no longer draft a literal newline before the reopen.
+- [ ] [#jbhalias] [recommended] Replay JetBrains Run Agent Doc against src/session-share/tasks/buildparty-investor-demo/dev.md after the canonical Claude harness alias fix and confirm authoritative reroutes no longer fail on claude-code/claude mismatch.
+- [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc after the canonical Claude harness alias fix and confirm Claude-owned authoritative actor sessions reroute cleanly without claude-code/claude mismatch errors.
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.
 - [ ] [#devmdcmt] [recommended] `agent-doc` left `src/session-share/tasks/buildparty-investor-demo/dev.md` in a synthetic `write_stream` cycle with `phase=write_applied` after the response had already landed, so `session-check` still failed until an explicit later `agent-doc commit` closed it. Create a fix plan only: reproduce the exact template/CRDT closeout path that writes the response, verify why no terminal commit/finalize step followed, compare the failure with `#rspcmt`, trace any boundary/backlog/session-check interaction that allows `write_applied` to survive as a nonterminal state, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports a completed turn until the document closeout is verifiably committed.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.

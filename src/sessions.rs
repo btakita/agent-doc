@@ -603,15 +603,37 @@ fn register_full_internal(
     }
 
     if let Some(previous) = registry.get(&registry_key).cloned() {
-        log_session_rebind(
+        if transition_caller != "start" {
+            let generations = crate::session_actor::project_binding_in(
+                base_dir,
+                file,
+                session_id,
+                pane_id,
+                window,
+                transition_caller,
+                transition_reason,
+            )?;
+            log_session_rebind(
+                base_dir,
+                session_id,
+                &previous,
+                pane_id,
+                window,
+                transition_caller,
+                transition_reason,
+                generations,
+            );
+        }
+    } else if transition_caller != "start" {
+        let _ = crate::session_actor::project_binding_in(
             base_dir,
+            file,
             session_id,
-            &previous,
             pane_id,
             window,
             transition_caller,
             transition_reason,
-        );
+        )?;
     }
 
     registry.insert(
@@ -638,18 +660,13 @@ fn log_session_rebind(
     new_window: &str,
     transition_caller: &str,
     transition_reason: &str,
+    generations: crate::session_actor::OwnershipGeneration,
 ) {
     if previous.pane == new_pane {
         return;
     }
 
     let log_file = resolve_log_file_path(base_dir, &previous.file);
-    let generations = crate::session_actor::next_generation(&log_file, session_id).unwrap_or(
-        crate::session_actor::OwnershipGeneration {
-            prior_generation: 0,
-            new_generation: 1,
-        },
-    );
     let old_window = if previous.window.is_empty() {
         "unknown"
     } else {

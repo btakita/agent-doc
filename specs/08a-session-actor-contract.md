@@ -66,8 +66,13 @@ Later phases may refine caller values without changing the field names.
 
 ## Current phase boundary
 
-- `sessions.json` remains a projection/binding helper, not the final actor
-  store.
+- `.agent-doc/session-actors.json` is the durable per-document actor record
+  store. It is keyed by canonical document path and carries the authoritative
+  generation, pane/window binding, harness, state, and last transition.
+- Store updates must be monotonic and fail closed on generation regressions; a
+  stale writer must not overwrite a newer generation.
+- `sessions.json` remains a projection/binding helper during migration, not the
+  final actor store.
 - Session logs are the source of transition provenance and generation history.
 - Startup-miss, route, sync, and closeout recovery may read those logs, but
   they must not infer authority from multiple competing mutable sources once a

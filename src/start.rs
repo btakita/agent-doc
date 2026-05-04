@@ -1629,6 +1629,13 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             start_generation
         ),
     );
+    crate::session_actor::record_session_start(
+        &canonical,
+        &session_id,
+        &pane_id,
+        pane_window.as_str(),
+        start_generation,
+    )?;
 
     // Fire document-level session_start hooks
     let harness_name = agent_doc::model_tier::detect_harness();

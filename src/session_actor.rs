@@ -1,8 +1,8 @@
 //! # Module: session_actor
 //!
 //! ## Spec
-//! - Freezes the phase-1 single-owner session-actor contract without introducing
-//!   the durable actor store from later phases.
+//! - Freezes the phase-1 single-owner session-actor contract while introducing
+//!   the phase-2 durable actor store.
 //! - Ownership generations are monotonic per document session and start at `1`.
 //! - A new authoritative generation is recorded whenever a new `agent-doc start`
 //!   session begins or an existing document session is rebound to a different pane.
@@ -11,10 +11,12 @@
 //! - Ownership-transition events render stable machine-readable fields:
 //!   `caller`, `reason`, `prior_generation`, `new_generation`, `old_pane`,
 //!   `new_pane`, `old_window`, `new_window`.
+//! - The durable actor store lives at `.agent-doc/session-actors.json`, keyed by
+//!   canonical document path, while `sessions.json` remains the read projection.
 //!
 //! ## Agentic Contracts
-//! - This module is read/write-log instrumentation only; it does not own
-//!   authoritative session state yet.
+//! - The actor store is authoritative for the latest generation once present.
+//! - Store updates must be monotonic and fail closed on generation regressions.
 //! - Log parsing must tolerate unrelated session-log events and malformed lines.
 //! - Legacy logs with at least one `session_start` but no explicit generation
 //!   markers infer the current generation from the number of starts.
@@ -23,9 +25,16 @@
 //! - `infer_latest_generation_counts_legacy_session_starts`
 //! - `infer_latest_generation_prefers_explicit_generation_markers`
 //! - `format_transition_event_uses_stable_placeholders`
+//! - `project_binding_stores_initial_generation`
+//! - `project_binding_advances_generation_on_new_pane`
+//! - `record_session_start_persists_authoritative_record`
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+const ACTOR_STORE_FILE: &str = ".agent-doc/session-actors.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OwnershipGeneration {
@@ -45,6 +54,53 @@ pub struct OwnershipTransitionEvent<'a> {
     pub new_window: Option<&'a str>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActorState {
+    Starting,
+    Ready,
+    Busy,
+    WaitingInput,
+    Closed,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActorLastTransition {
+    pub caller: String,
+    pub reason: String,
+    pub timestamp: u64,
+    pub prior_generation: u64,
+    pub new_generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActorRecord {
+    pub document_id: String,
+    pub session_id: String,
+    pub generation: u64,
+    pub pane_id: String,
+    pub window_id: String,
+    pub harness: String,
+    pub state: ActorState,
+    pub last_transition: ActorLastTransition,
+}
+
+type ActorStore = BTreeMap<String, ActorRecord>;
+
+#[derive(Debug, Clone)]
+struct ActorRecordUpdate<'a> {
+    session_id: &'a str,
+    pane_id: &'a str,
+    window_id: &'a str,
+    harness: &'a str,
+    state: ActorState,
+    caller: &'a str,
+    reason: &'a str,
+    generation: u64,
+    expected_prior_generation: Option<u64>,
+}
+
 fn log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
     let canonical = match file.canonicalize() {
         Ok(path) => path,
@@ -57,6 +113,17 @@ fn log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
         root.join(".agent-doc/logs")
             .join(format!("{session_id}.log")),
     ))
+}
+
+fn actor_store_path_in(base_dir: &Path) -> PathBuf {
+    base_dir.join(ACTOR_STORE_FILE)
+}
+
+fn timestamp_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn extract_event(raw_line: &str) -> &str {
@@ -76,6 +143,237 @@ fn parse_u64_field(event: &str, name: &str) -> Option<u64> {
 
 fn render_field<'a>(value: Option<&'a str>, fallback: &'a str) -> &'a str {
     value.filter(|value| !value.is_empty()).unwrap_or(fallback)
+}
+
+fn normalize_harness_name(raw: &str) -> String {
+    match raw.trim() {
+        "" => "default".to_string(),
+        "claude" => "claude-code".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn document_harness_from_content(content: &str) -> Option<String> {
+    crate::frontmatter::parse(content)
+        .ok()
+        .and_then(|(fm, _)| fm.agent)
+        .map(|value| normalize_harness_name(&value))
+}
+
+fn document_path_from_base_dir(base_dir: &Path, file: &str) -> PathBuf {
+    let path = Path::new(file);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base_dir.join(path)
+    }
+}
+
+fn canonical_document_id(file: &Path) -> Result<Option<String>> {
+    let canonical = match file.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(canonical.to_string_lossy().to_string()))
+}
+
+pub fn canonical_document_id_in(base_dir: &Path, file: &str) -> String {
+    canonical_document_id(&document_path_from_base_dir(base_dir, file))
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| crate::sessions::canonical_registry_key_in(base_dir, file))
+}
+
+fn load_store_in(base_dir: &Path) -> Result<ActorStore> {
+    let path = actor_store_path_in(base_dir);
+    if !path.exists() {
+        return Ok(ActorStore::new());
+    }
+    let content = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let store = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    Ok(store)
+}
+
+fn save_store_in(base_dir: &Path, store: &ActorStore) -> Result<()> {
+    let path = actor_store_path_in(base_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string_pretty(store)?;
+    std::fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn legacy_generation_for_document(file: &Path, session_id_hint: Option<&str>) -> Result<u64> {
+    let Some(canonical) = file.canonicalize().ok() else {
+        return Ok(0);
+    };
+    let Some(session_id) = session_id_hint
+        .map(ToOwned::to_owned)
+        .or_else(|| crate::frontmatter::read_session_id(&canonical))
+    else {
+        return Ok(0);
+    };
+    let Some(path) = log_path(&canonical, &session_id)? else {
+        return Ok(0);
+    };
+    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+        return Ok(0);
+    };
+    Ok(infer_latest_generation_from_content(&content))
+}
+
+fn current_generation_in(
+    base_dir: &Path,
+    file: &str,
+    session_id_hint: Option<&str>,
+) -> Result<u64> {
+    let document_id = canonical_document_id_in(base_dir, file);
+    let store = load_store_in(base_dir)?;
+    if let Some(record) = store.get(&document_id) {
+        return Ok(record.generation);
+    }
+    legacy_generation_for_document(
+        &document_path_from_base_dir(base_dir, file),
+        session_id_hint,
+    )
+}
+
+fn store_record_in(
+    base_dir: &Path,
+    file: &str,
+    update: ActorRecordUpdate<'_>,
+) -> Result<ActorRecord> {
+    let document_id = canonical_document_id_in(base_dir, file);
+    let mut store = load_store_in(base_dir)?;
+    let prior_generation = store
+        .get(&document_id)
+        .map(|record| record.generation)
+        .unwrap_or_else(|| {
+            current_generation_in(base_dir, file, Some(update.session_id)).unwrap_or(0)
+        });
+    if let Some(expected) = update.expected_prior_generation
+        && prior_generation != expected
+    {
+        anyhow::bail!(
+            "actor generation compare-and-swap failed for {}: expected {}, found {}",
+            document_id,
+            expected,
+            prior_generation
+        );
+    }
+    if update.generation < prior_generation {
+        anyhow::bail!(
+            "actor generation regression for {}: attempted {}, current {}",
+            document_id,
+            update.generation,
+            prior_generation
+        );
+    }
+
+    let record = ActorRecord {
+        document_id: document_id.clone(),
+        session_id: update.session_id.to_string(),
+        generation: update.generation,
+        pane_id: update.pane_id.to_string(),
+        window_id: update.window_id.to_string(),
+        harness: normalize_harness_name(update.harness),
+        state: update.state,
+        last_transition: ActorLastTransition {
+            caller: update.caller.to_string(),
+            reason: update.reason.to_string(),
+            timestamp: timestamp_secs(),
+            prior_generation,
+            new_generation: update.generation,
+        },
+    };
+    store.insert(document_id, record.clone());
+    save_store_in(base_dir, &store)?;
+    Ok(record)
+}
+
+pub fn detect_document_harness_in(base_dir: &Path, file: &str) -> String {
+    let document_path = document_path_from_base_dir(base_dir, file);
+    if let Ok(content) = std::fs::read_to_string(&document_path)
+        && let Some(harness) = document_harness_from_content(&content)
+    {
+        return harness;
+    }
+    normalize_harness_name(&agent_doc::model_tier::detect_harness())
+}
+
+pub fn load_record_in(base_dir: &Path, file: &str) -> Result<Option<ActorRecord>> {
+    let document_id = canonical_document_id_in(base_dir, file);
+    Ok(load_store_in(base_dir)?.get(&document_id).cloned())
+}
+
+pub fn project_binding_in(
+    base_dir: &Path,
+    file: &str,
+    session_id: &str,
+    pane_id: &str,
+    window_id: &str,
+    caller: &str,
+    reason: &str,
+) -> Result<OwnershipGeneration> {
+    let prior_generation = current_generation_in(base_dir, file, Some(session_id))?;
+    let generation = load_record_in(base_dir, file)?
+        .filter(|record| record.pane_id == pane_id)
+        .map(|record| record.generation)
+        .unwrap_or_else(|| prior_generation.saturating_add(1).max(1));
+    let harness = detect_document_harness_in(base_dir, file);
+    let _ = store_record_in(
+        base_dir,
+        file,
+        ActorRecordUpdate {
+            session_id,
+            pane_id,
+            window_id,
+            harness: &harness,
+            state: ActorState::Ready,
+            caller,
+            reason,
+            generation,
+            expected_prior_generation: Some(prior_generation),
+        },
+    )?;
+    Ok(OwnershipGeneration {
+        prior_generation,
+        new_generation: generation,
+    })
+}
+
+pub fn record_session_start(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    window_id: &str,
+    generation: u64,
+) -> Result<ActorRecord> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(base_dir) = crate::snapshot::find_project_root(&canonical) else {
+        anyhow::bail!(
+            "failed to locate project root for actor record {}",
+            canonical.display()
+        );
+    };
+    let harness = detect_document_harness_in(&base_dir, &canonical.to_string_lossy());
+    store_record_in(
+        &base_dir,
+        &canonical.to_string_lossy(),
+        ActorRecordUpdate {
+            session_id,
+            pane_id,
+            window_id,
+            harness: &harness,
+            state: ActorState::Starting,
+            caller: "start",
+            reason: "session_start",
+            generation,
+            expected_prior_generation: Some(generation.saturating_sub(1)),
+        },
+    )
 }
 
 pub fn infer_latest_generation_from_content(content: &str) -> u64 {
@@ -109,13 +407,25 @@ pub fn infer_latest_generation_from_content(content: &str) -> u64 {
 }
 
 pub fn infer_latest_generation(file: &Path, session_id: &str) -> Result<u64> {
+    let actor_generation = file
+        .canonicalize()
+        .ok()
+        .and_then(|canonical| {
+            crate::snapshot::find_project_root(&canonical).and_then(|root| {
+                load_record_in(&root, &canonical.to_string_lossy())
+                    .ok()
+                    .flatten()
+                    .map(|record| record.generation)
+            })
+        })
+        .unwrap_or(0);
     let Some(path) = log_path(file, session_id)? else {
-        return Ok(0);
+        return Ok(actor_generation);
     };
     let Some(content) = crate::fs_util::read_optional_text(&path)? else {
-        return Ok(0);
+        return Ok(actor_generation);
     };
-    Ok(infer_latest_generation_from_content(&content))
+    Ok(actor_generation.max(infer_latest_generation_from_content(&content)))
 }
 
 pub fn next_generation(file: &Path, session_id: &str) -> Result<OwnershipGeneration> {
@@ -143,6 +453,17 @@ pub fn format_transition_event(event: OwnershipTransitionEvent<'_>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    fn seed_project_file(dir: &tempfile::TempDir, rel: &str, content: &str) -> PathBuf {
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join(rel);
+        if let Some(parent) = file.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&file, content).unwrap();
+        file
+    }
 
     #[test]
     fn infer_latest_generation_counts_legacy_session_starts() {
@@ -183,5 +504,104 @@ mod tests {
             rendered,
             "ownership_transition caller=start reason=session_start prior_generation=0 new_generation=1 old_pane=none new_pane=%41 old_window=none new_window=@1"
         );
+    }
+
+    #[test]
+    fn project_binding_stores_initial_generation() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-1\nagent: codex\n---\nBody\n",
+        );
+
+        let generations = project_binding_in(
+            tmp.path(),
+            &file.to_string_lossy(),
+            "session-1",
+            "%41",
+            "@1",
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        assert_eq!(
+            generations,
+            OwnershipGeneration {
+                prior_generation: 0,
+                new_generation: 1
+            }
+        );
+        let record = load_record_in(tmp.path(), &file.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.generation, 1);
+        assert_eq!(record.pane_id, "%41");
+        assert_eq!(record.state, ActorState::Ready);
+        assert_eq!(record.harness, "codex");
+    }
+
+    #[test]
+    fn project_binding_advances_generation_on_new_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-2\nagent: codex\n---\nBody\n",
+        );
+
+        project_binding_in(
+            tmp.path(),
+            &file.to_string_lossy(),
+            "session-2",
+            "%41",
+            "@1",
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+        let generations = project_binding_in(
+            tmp.path(),
+            &file.to_string_lossy(),
+            "session-2",
+            "%52",
+            "@2",
+            "sync",
+            "recover_owner",
+        )
+        .unwrap();
+
+        assert_eq!(
+            generations,
+            OwnershipGeneration {
+                prior_generation: 1,
+                new_generation: 2
+            }
+        );
+        let record = load_record_in(tmp.path(), &file.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.generation, 2);
+        assert_eq!(record.pane_id, "%52");
+        assert_eq!(record.window_id, "@2");
+    }
+
+    #[test]
+    fn record_session_start_persists_authoritative_record() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-3\nagent: codex\n---\nBody\n",
+        );
+
+        let record = record_session_start(&file, "session-3", "%61", "@7", 1).unwrap();
+
+        assert_eq!(record.generation, 1);
+        assert_eq!(record.state, ActorState::Starting);
+        assert_eq!(record.last_transition.prior_generation, 0);
+        assert_eq!(record.last_transition.new_generation, 1);
+        assert_eq!(record.harness, "codex");
     }
 }

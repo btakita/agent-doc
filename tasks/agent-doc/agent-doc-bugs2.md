@@ -109,9 +109,22 @@ The new boundary is:
 
 The `Ctrl+D` report is real in the current local source state. `src/agent-doc/src/start.rs` still routes `ctrl_d_forwarded` through `RestartFresh`, and the in-flight `specs/supervisor.md` / `specs/codex-support.md` edits document that same restart-fresh behavior, so the quit-menu regression is not just stale bookkeeping. I reopened `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md` and captured it back in backlog as `#ctrldmenu`. Plan: `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`.
 
-Repo closeout: committed the two plan updates in the root repo as `07f1fe2d9` (`docs: tighten session actor execution boundaries`).
-Verification: no code changes this cycle, so I did not run the Rust suite.
-<!-- agent:boundary:deff7e4b -->
+❯ Repo closeout: committed the two plan updates in the root repo as `07f1fe2d9` (`docs: tighten session actor execution boundaries`).
+❯ Verification: no code changes this cycle, so I did not run the Rust suite.
+❯ do [#ctrldmenu] spec-test-build-install-commit-push
+### Re: #ctrldmenu — gpt-5
+
+Implemented the Codex `Ctrl+D` quit-menu fix. Plan: `tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md`.
+
+- `src/agent-doc/src/start.rs` now restores the cooked-mode `Enter` / `q` prompt for ordinary forwarded stdin EOF/Ctrl+D exits, while preserving the two fail-closed restart-fresh exceptions for committed document-cycle runs and fresh/promptless startup failures.
+- Split the keepalive strategy so Ctrl+D uses its own prompt path (`ctrl_d_prompt`) instead of falling through the resume-failure messaging, and added regression coverage for the restored prompt-vs-restart split.
+- Updated the Codex/supervisor docs plus `README.md` and `VERSIONS.md` so the documented contract matches the actual behavior again.
+- Verification completed in `src/agent-doc`: `cargo check`, `cargo test`, `cargo build`, `cargo install --path . --force`.
+- Repo closeout in `src/agent-doc`: committed as `8d6292a` (`fix: restore codex ctrl-d quit menu`) and pushed to `origin/20260422/codex-agent-backend`.
+- Left pre-existing unrelated dirty changes in `src/agent-doc/src/plugin.rs` untouched.
+
+I did not run a manual tmux-backed interactive Ctrl+D repro in this cycle; the verification here is automated coverage plus the repo build/install path.
+<!-- agent:boundary:4211240e -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -135,7 +148,6 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ctrldmenu] [recommended] Reopen the Codex Ctrl+C & Ctrl+D supervisor quit-menu regression: restore the q/Enter prompt instead of unconditional fresh restart. Plan: tasks/agent-doc/plan-ctrl-d-supervisor-quit-menu.md
 - [ ] [#sgown5] Convert sync/focus flows to projection-only reconciliation around actor-owned panes. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown6] Add operator-facing session CLI and plugin controls: status, history, attach, restart, clear, doctor, and session diagnostics UI. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown7] Move destructive or heuristic recovery behind explicit repair-only commands and remove it from normal turn paths. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md

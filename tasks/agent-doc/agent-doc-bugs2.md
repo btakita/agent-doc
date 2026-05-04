@@ -40,7 +40,7 @@ Icebox:
 - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement: `#jberr`.
 - 1 more active item(s)
-<!-- agent:boundary:f48dff71 -->
+<!-- agent:boundary:aff82f69 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -64,11 +64,10 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgownorch] [recommended] Define which single-owner transition steps may use bounded sidecar subagents versus single-owner execution only, after #sgown4 lands. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
-- [ ] [#sgown1] Freeze the actor-owned session contract, generation semantics, and ownership-transition instrumentation. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown2] Add the durable actor record store with atomic generation updates and keep sessions.json as a read projection during migration. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown3] Move supervisor ownership, prompt-readiness, and closeout state transitions onto actor commands. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown4] Convert route to actor-owned dispatch with bounded actor acknowledgement instead of heuristic owner election. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
+- [ ] [#sgownorch] [recommended] Define which single-owner transition steps may use bounded sidecar subagents versus single-owner execution only, after #sgown4 lands. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown5] Convert sync/focus flows to projection-only reconciliation around actor-owned panes. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown6] Add operator-facing session CLI and plugin controls: status, history, attach, restart, clear, doctor, and session diagnostics UI. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md
 - [ ] [#sgown7] Move destructive or heuristic recovery behind explicit repair-only commands and remove it from normal turn paths. Bookkeeping: update spec + tests. build + install for local testing. commit + push. Plan: tasks/agent-doc/plan-single-owner-session-actor-transition.md

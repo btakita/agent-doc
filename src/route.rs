@@ -4287,7 +4287,7 @@ fn wait_for_agent_ready_outcome(
                     "[route] Still waiting for {} ({:.0}s)... last line: {}",
                     harness.binary,
                     start.elapsed().as_secs_f64(),
-                    &last_line[..std::cmp::min(60, last_line.len())]
+                    truncate_log_line(&last_line, 60)
                 );
             }
         }
@@ -4303,6 +4303,10 @@ fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<Stri
     harness
         .last_prompt_candidate(content)
         .filter(|line| harness.is_dispatch_ready_prompt_line(line))
+}
+
+fn truncate_log_line(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
 }
 
 /// After a lazy claim, sync tmux layout for all files in the same window.
@@ -10559,5 +10563,19 @@ Body\n\
             err.to_string().contains("unexpected pane-loss events"),
             "unexpected error: {err:#}"
         );
+    }
+
+    #[test]
+    fn truncate_log_line_preserves_utf8_boundaries() {
+        let line = "  gpt-5.4 high · ~/work/btakita/agent-loop/src/boost-clien…";
+        let truncated = truncate_log_line(line, 60);
+        assert_eq!(truncated, line);
+        assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
+
+        let longer = format!("{line} with trailing content");
+        let truncated_longer = truncate_log_line(&longer, 60);
+        assert!(std::str::from_utf8(truncated_longer.as_bytes()).is_ok());
+        assert_eq!(truncated_longer.chars().count(), 60);
+        assert!(longer.starts_with(&truncated_longer));
     }
 }

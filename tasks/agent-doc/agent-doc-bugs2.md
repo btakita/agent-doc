@@ -185,14 +185,31 @@ Verification completed: `cargo test --manifest-path src/agent-doc/Cargo.toml`, `
 ### Re: out-of-exchange note after closeout — gpt-5
 I saw the new note that was added after `### End Exchange`. It is outside the live `agent:exchange` block, so I preserved it as-is but did not execute it as part of the `#jbpdrop` cycle.
 
-If you want that note acted on as the next task, move it into the live exchange or backlog and I’ll take it as the next executable prompt.
-<!-- agent:boundary:ff5e1abc -->
+❯ If you want that note acted on as the next task, move it into the live exchange or backlog and I’ll take it as the next executable prompt.
+❯ agent-doc **must** have a strict **never** kill a tmux pane policy for `agent-doc <file>`, `agent-doc sync ...`, `agent-doc preflight ...`, `agent-doc finalize ...`, or any other agent-doc command related to a normal turn or sync. Only `agent-doc fix` or other specific repair commands may kill a tmux pane. A normal agent-doc turn should not call any command that can kill a tmux pane...strictly forbidden. The user will handle killing tmux panes. agent-doc must **never** create a duplicate tmux pane for any command. If `agent-doc start ...` is called when a tmux pane is already bound to a document, agent-doc must error and print the shell commands for the user to kill the other tmux panes. Simplify the logic. Remove irrelevant defensive code. We have hit an architectural/strategic dead end and now must now repair the codebase. spec-test-build-install-commit-push
+### Re: strict never-kill tmux pane policy — gpt-5
+
+Implemented in `src/agent-doc` and pushed `3a5377b` (`fix: fail closed on normal tmux pane churn`).
+
+Changes:
+- `agent-doc start` now fails closed when another alive pane is already bound to the document. It no longer auto-focuses, restarts, or supersedes that pane on the normal path. The error now prints concrete `tmux list-panes`, `tmux capture-pane`, and `tmux kill-pane` commands for manual resolution.
+- `route` no longer creates hidden fallback panes when `split-window` fails or when an `agent-doc` window already exists without a safe registered anchor. Those cases now fail closed with tmux cleanup commands instead of creating + stashing a duplicate pane.
+- Normal sync/preflight/finalize recovery no longer kills dead panes during missing-pane repair. Sync records diagnostics and leaves the dead pane retained; destructive cleanup stays on explicit repair surfaces only.
+- Updated `SPEC.md`, `specs/07-session-tmux-commands.md`, `specs/08-session-routing.md`, and `VERSIONS.md` to make the no-kill / no-duplicate contract explicit.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Pushed to `origin/20260422/codex-agent-backend`.
+
+I did not add a new backlog item because this cycle implemented the requested policy directly and the verification/build/install path is green.
+<!-- agent:boundary:098503ea -->
 <!-- /agent:exchange -->
 ### End Exchange
 
 <!--
-agent-doc **must** have a strict **never** kill a tmux pane policy for `agent-doc <file>`, `agent-doc sync ...`, `agent-doc preflight ...`, `agent-doc finalize ...`, or any other agent-doc command related to a normal turn or sync. Only `agent-doc fix` or other specific repair commands may kill a tmux pane. A normal agent-doc turn should not call any command that can kill a tmux pane...strictly forbidden. The user will handle killing tmux panes. agent-doc must **never** create a duplicate tmux pane for any command. If `agent-doc start ...` is called when a tmux pane is already bound to a document, agent-doc must error and print the shell commands for the user to kill the other tmux panes. Simplify the logic. Remove irrelevant defensive code. We have hit an architectural/strategic dead end and now must now repair the codebase. spec-test-build-install-commit-push
----
 agent-doc running /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md with Codex is failing due to the sandbox. Please help me to DISABLE THE CODEX SANDBOX. I don't want agent-doc to bypass the sandbox by default but for my environment I want to bypass the sandbox. spec-test-build-install-commit-push
 ---
 I saw this error. Id the root cause and fix. spec-test-build-install-commit-push

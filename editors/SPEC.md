@@ -37,7 +37,14 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 6. Popup Menu
 
 - **Trigger:** `Alt+Enter` on a `.md` file.
-- **Behavior:** Show numbered popup with Run, Claim, Sync Layout actions.
+- **Behavior:** Show numbered popup with Run, Claim, Sync Layout, Show Session Status, Restart Session, Clear Session Context, and Copy Session Diagnostics actions.
+
+## 6a. Session Operator Actions
+
+- **Show Session Status:** Run `agent-doc session status <relative-path>` and surface the full output in an IDE-owned diagnostics surface.
+- **Restart Session:** Run `agent-doc session restart <relative-path>` and show an inline success hint once the restart request is accepted.
+- **Clear Session Context:** Run `agent-doc session clear <relative-path>` so the authoritative session receives the harness-native clear command instead of the plugin pasting `/clear` directly into tmux.
+- **Copy Session Diagnostics:** Run `agent-doc session doctor <relative-path>`, show the output in an IDE-owned diagnostics surface, and offer a one-click copy path for the exact text.
 
 ## 7. Notifications
 

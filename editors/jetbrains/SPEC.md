@@ -48,6 +48,13 @@ Two strategies for detecting the file's position in the editor split:
 - A failed route persists the exact `agent-doc route` output under `.agent-doc/state/editor-route-errors/` and the notification exposes copy/open actions so startup-miss and pending-drift diagnostics remain inspectable after the toast moment.
 - Route session targeting follows the same root-aware chooser as sync: a nested document reroute uses that file's nearest `.agent-doc` root, while a mixed-root visible layout stays pinned to the shared workspace root instead of the focused child repo.
 
+### Session Operator Actions
+
+- `Show Session Status` runs `agent-doc session status <relative-path>` and surfaces the exact output in an IDE notification instead of re-deriving status inside the plugin.
+- `Restart Session` runs `agent-doc session restart <relative-path>` and keeps restart ownership in the binary/supervisor path.
+- `Clear Session Context` runs `agent-doc session clear <relative-path>` so Codex/Claude clear semantics stay aligned with the binary-owned launch contract tracking.
+- `Copy Session Diagnostics` runs `agent-doc session doctor <relative-path>`, copies the exact output, and keeps the binary-owned diagnostics text available for bug reports.
+
 ### Safe Sync Surface
 
 - JetBrains startup uses report-only `agent-doc resync`; it does not auto-run `resync --fix`.
@@ -85,7 +92,7 @@ Two strategies for detecting the file's position in the editor split:
 
 ## Context Menu
 
-Run, Fix Document, Claim, and Sync Layout are available in:
+Run, Fix Document, Claim, Sync Layout, Show Session Status, Restart Session, Clear Session Context, and Copy Session Diagnostics are available in:
 - Tools menu
 - Editor right-click context menu
-- Project view right-click context menu (Run, Fix Document, and Claim)
+- Project view right-click context menu (Run, Fix Document, Claim, and session operator actions)

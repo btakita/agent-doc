@@ -84,6 +84,38 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.ShowSessionStatus"
+                class="com.github.btakita.agentdoc.ShowSessionStatusAction"
+                text="Show Session Status"
+                description="Show the authoritative agent-doc session status for this document">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+        <action id="AgentDoc.RestartSession"
+                class="com.github.btakita.agentdoc.RestartSessionAction"
+                text="Restart Session"
+                description="Restart the bound agent-doc session for this document">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+        <action id="AgentDoc.ClearSessionContext"
+                class="com.github.btakita.agentdoc.ClearSessionContextAction"
+                text="Clear Session Context"
+                description="Send /clear to the bound agent-doc session for this document">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+        <action id="AgentDoc.CopySessionDiagnostics"
+                class="com.github.btakita.agentdoc.CopySessionDiagnosticsAction"
+                text="Copy Session Diagnostics"
+                description="Copy the current agent-doc session diagnostics for this document">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.RefreshEnvironment"
                 class="com.github.btakita.agentdoc.RefreshEnvironmentAction"
                 text="Refresh Agent Doc Environment"

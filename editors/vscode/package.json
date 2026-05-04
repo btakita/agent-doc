@@ -2,7 +2,7 @@
   "name": "agent-doc",
   "displayName": "Agent Doc",
   "description": "Submit markdown documents to AI agents via agent-doc",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "publisher": "btakita",
   "icon": "icon.png",
   "license": "MIT",
@@ -33,6 +33,22 @@
       {
         "command": "agentDoc.syncLayout",
         "title": "Agent Doc: Sync Layout"
+      },
+      {
+        "command": "agentDoc.showSessionStatus",
+        "title": "Agent Doc: Show Session Status"
+      },
+      {
+        "command": "agentDoc.restartSession",
+        "title": "Agent Doc: Restart Session"
+      },
+      {
+        "command": "agentDoc.clearSessionContext",
+        "title": "Agent Doc: Clear Session Context"
+      },
+      {
+        "command": "agentDoc.copySessionDiagnostics",
+        "title": "Agent Doc: Copy Session Diagnostics"
       },
       {
         "command": "agentDoc.popupMenu",

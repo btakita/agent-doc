@@ -127,7 +127,14 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 ### 2.7 Popup Menu
 
 - **Trigger:** `Alt+Enter` on a `.md` file.
-- **Behavior:** Show a numbered action list including Submit, Claim, Sync Layout (and editor-specific extras like "Run with Junie" for JetBrains).
+- **Behavior:** Show a numbered action list including Submit, Claim, Sync Layout, Show Session Status, Restart Session, Clear Session Context, and Copy Session Diagnostics (plus editor-specific extras like "Run with Junie" for JetBrains).
+
+### 2.8 Session Operator Actions
+
+- **Show Session Status:** Run `agent-doc session status <relative-path>`. Plugins must display the exact CLI output instead of paraphrasing actor/registry/supervisor state themselves.
+- **Restart Session:** Run `agent-doc session restart <relative-path>`. Plugins must not send raw tmux control keys as a substitute for the actor-owned restart path.
+- **Clear Session Context:** Run `agent-doc session clear <relative-path>` so Codex/Claude clear behavior stays aligned with the binary-owned launch-contract tracking.
+- **Copy Session Diagnostics:** Run `agent-doc session doctor <relative-path>`, preserve the exact text in an IDE diagnostics surface, and provide a one-click copy path.
 
 ### 2.8 Slash Command Autocomplete
 

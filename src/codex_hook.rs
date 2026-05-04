@@ -502,6 +502,25 @@ pub(crate) fn prompt_requests_clear(prompt: &str) -> bool {
     prompt.trim() == "/clear"
 }
 
+pub(crate) fn record_external_prompt_for_file(
+    file: &Path,
+    session_id: &str,
+    prompt: &str,
+) -> Result<()> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let state = SessionState {
+        session_id: session_id.to_string(),
+        doc_path: canonical.display().to_string(),
+        last_turn_id: String::new(),
+        last_prompt: prompt.to_string(),
+        updated_at: now_secs(),
+    };
+    for root in project_roots_for(&canonical) {
+        save_state(&root, &state)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn load_active_session_for_current_file(
     file: &Path,
 ) -> Result<Option<ActiveSessionState>> {

@@ -131,6 +131,33 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 `agent-doc session set <name>` updates config and migrates the `agent-doc` and `stash` windows when possible.
 
+`agent-doc session clear` with no file still clears the configured tmux-session
+pin and returns the project to auto-detect mode.
+
+### Actor session operator commands
+
+The same `session` namespace now also exposes the operator-facing
+single-owner actor controls:
+
+- `agent-doc session status <FILE>` prints the authoritative actor record,
+  registry projection, supervisor runtime state, startup-miss marker, and
+  latest session-log summary for the document.
+- `agent-doc session history <FILE>` prints the actor/session transition
+  history from `.agent-doc/logs/<session>.log`, filtered to ownership and
+  lifecycle boundary events.
+- `agent-doc session attach <FILE> --pane %123` performs an explicit
+  authoritative handoff onto the requested pane, creating a new generation and
+  refreshing the registry projection from that result.
+- `agent-doc session restart <FILE> [--fresh]` requests an actor-owned
+  supervisor restart through IPC instead of relying on route-side restart
+  heuristics.
+- `agent-doc session clear <FILE>` injects the harness-native `/clear`
+  equivalent into the authoritative session and, for Codex, records the clear
+  prompt state so the next reroute can reapply the original launch contract.
+- `agent-doc session doctor <FILE> [--repair]` reports actor/registry/supervisor
+  drift in one read-only summary, with `--repair` explicitly escalating into the
+  destructive repair path before re-checking status.
+
 ### Shared session resolution
 
 The session-targeting precedence is shared across start/route/sync/session-aware helpers:

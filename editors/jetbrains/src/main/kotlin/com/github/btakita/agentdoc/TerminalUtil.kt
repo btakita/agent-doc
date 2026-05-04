@@ -297,6 +297,102 @@ object TerminalUtil {
         }
     }
 
+    fun showSessionStatus(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        runSessionCommand(
+            project = project,
+            file = file,
+            args = listOf("status"),
+            startedMessage = "Loading session status for ${file.name}",
+            onSuccess = { relativePath, output ->
+                notifyInfo(project, output.ifBlank { "Loaded session status for $relativePath" })
+            },
+            onComplete = onComplete,
+        )
+    }
+
+    fun restartSession(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        runSessionCommand(
+            project = project,
+            file = file,
+            args = listOf("restart"),
+            startedMessage = "Restarting session for ${file.name}",
+            onSuccess = { relativePath, output ->
+                showHint(project, output.ifBlank { "Restart requested for $relativePath" })
+            },
+            onComplete = onComplete,
+        )
+    }
+
+    fun clearSessionContext(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        runSessionCommand(
+            project = project,
+            file = file,
+            args = listOf("clear"),
+            startedMessage = "Clearing session context for ${file.name}",
+            onSuccess = { relativePath, output ->
+                showHint(project, output.ifBlank { "Cleared session context for $relativePath" })
+            },
+            onComplete = onComplete,
+        )
+    }
+
+    fun copySessionDiagnostics(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        runSessionCommand(
+            project = project,
+            file = file,
+            args = listOf("doctor"),
+            startedMessage = "Collecting session diagnostics for ${file.name}",
+            onSuccess = { relativePath, output ->
+                CopyPasteManager.getInstance().setContents(StringSelection(output))
+                showHint(project, "Copied session diagnostics for $relativePath")
+            },
+            onComplete = onComplete,
+        )
+    }
+
+    private fun runSessionCommand(
+        project: Project,
+        file: VirtualFile,
+        args: List<String>,
+        startedMessage: String,
+        onSuccess: (String, String) -> Unit,
+        onComplete: (() -> Unit)? = null,
+    ) {
+        val (cwd, relativePath) = resolveProject(project, file)
+        val agentDoc = resolveAgentDoc(cwd)
+        val cmd = mutableListOf(agentDoc, "session")
+        cmd.addAll(args)
+        cmd.add(relativePath)
+        try {
+            val process = ProcessBuilder(cmd)
+                .directory(java.io.File(cwd))
+                .redirectErrorStream(true)
+                .start()
+
+            showHint(project, startedMessage)
+
+            Thread {
+                try {
+                    val output = process.inputStream.bufferedReader().readText().trim()
+                    val exitCode = process.waitFor()
+                    if (exitCode != 0) {
+                        notifyError(
+                            project,
+                            "agent-doc session ${args.firstOrNull().orEmpty()} failed (exit $exitCode):\n$output",
+                        )
+                    } else {
+                        onSuccess(relativePath, output)
+                    }
+                } finally {
+                    onComplete?.invoke()
+                }
+            }.start()
+        } catch (e: Exception) {
+            onComplete?.invoke()
+            notifyError(project, "Failed to run agent-doc session command: ${e.message}\nLooked for: $agentDoc")
+        }
+    }
+
     fun resolveAgentDoc(basePath: String? = null): String {
         val candidates = listOfNotNull(
             basePath?.let { "$it/.bin/agent-doc" },

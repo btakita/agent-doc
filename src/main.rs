@@ -101,6 +101,7 @@ mod route;
 mod run;
 mod security;
 mod session_actor;
+mod session_actor_cmd;
 mod session_check;
 mod session_cmd;
 mod sessions;
@@ -1076,8 +1077,45 @@ enum SessionAction {
         /// Target tmux session name (e.g., "5")
         name: String,
     },
-    /// Clear the configured session, returning to auto-detect mode
-    Clear,
+    /// Show the authoritative actor/session status for a document
+    Status {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Show the actor/session transition history for a document
+    History {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Explicitly attach a document session to a tmux pane, creating a new generation
+    Attach {
+        /// Path to the session document
+        file: PathBuf,
+        /// Explicit tmux pane ID (defaults to the current pane when inside tmux)
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Restart the live session supervisor for a document
+    Restart {
+        /// Path to the session document
+        file: PathBuf,
+        /// Request a fresh restart instead of the default continue-mode restart
+        #[arg(long)]
+        fresh: bool,
+    },
+    /// Clear the configured tmux session when no file is provided, or clear the bound harness session when FILE is provided
+    Clear {
+        /// Optional path to the session document
+        file: Option<PathBuf>,
+    },
+    /// Diagnose actor/registry/supervisor drift for a document
+    Doctor {
+        /// Path to the session document
+        file: PathBuf,
+        /// Escalate into the explicit repair path before re-checking status
+        #[arg(long)]
+        repair: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1687,7 +1725,24 @@ fn main() -> anyhow::Result<()> {
         Commands::ListCommands => commands::run(),
         Commands::Session { action } => match action {
             Some(SessionAction::Set { name }) => session_cmd::set(&name),
-            Some(SessionAction::Clear) => session_cmd::clear(),
+            Some(SessionAction::Status { file }) => session_actor_cmd::status(&file),
+            Some(SessionAction::History { file }) => session_actor_cmd::history(&file),
+            Some(SessionAction::Attach { file, pane }) => {
+                session_actor_cmd::attach(&file, pane.as_deref())
+            }
+            Some(SessionAction::Restart { file, fresh }) => session_actor_cmd::restart(
+                &file,
+                if fresh {
+                    session_actor_cmd::RestartMode::Fresh
+                } else {
+                    session_actor_cmd::RestartMode::Continue
+                },
+            ),
+            Some(SessionAction::Clear { file: Some(file) }) => session_actor_cmd::clear(&file),
+            Some(SessionAction::Clear { file: None }) => session_cmd::clear(),
+            Some(SessionAction::Doctor { file, repair }) => {
+                session_actor_cmd::doctor(&file, repair)
+            }
             None => session_cmd::show(),
         },
         Commands::Hook { action } => match action {

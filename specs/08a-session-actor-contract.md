@@ -88,6 +88,10 @@ Later phases may refine caller values without changing the field names.
   directly when the actor pane is still alive: sync rescues/reconciles layout
   around the actor-owned pane and focus selects it without re-electing
   ownership from a stale `sessions.json` projection.
+- The phase-6 operator surface is actor-backed as well: `session status`,
+  `history`, `attach`, `restart`, `clear`, and `doctor` read or mutate the same
+  authoritative record and supervisor IPC path instead of inventing separate
+  tmux-only heuristics in the CLI or plugins.
 - `sessions.json` remains a projection/binding helper during migration, not the
   final actor store.
 - Session logs are the source of transition provenance and generation history.

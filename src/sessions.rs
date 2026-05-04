@@ -334,6 +334,32 @@ pub fn register_with_pid_and_cwd(
     )
 }
 
+pub fn attach_with_pid_and_cwd_in(
+    base_dir: &Path,
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    window: &str,
+    cwd: &str,
+) -> Result<()> {
+    let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
+    let mut registry = load_in(base_dir)?;
+    register_full_internal(
+        base_dir,
+        &mut registry,
+        session_id,
+        pane_id,
+        file,
+        pid,
+        window,
+        cwd,
+        None,
+        "session",
+        "manual_attach",
+    )
+}
+
 pub fn register_supervisor(
     session_id: &str,
     pane_id: &str,

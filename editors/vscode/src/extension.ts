@@ -165,6 +165,7 @@ class SlashCommandCompletionProvider implements vscode.CompletionItemProvider {
 
 const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
 let statusBarTimeout: ReturnType<typeof setTimeout> | undefined;
+const sessionOutputChannel = vscode.window.createOutputChannel('Agent Doc Session');
 
 function showHint(message: string): void {
     statusBarItem.text = `$(check) ${message}`;
@@ -517,6 +518,84 @@ async function submitAction(): Promise<void> {
     }
 }
 
+async function runSessionCommandForActiveFile(
+    args: string[],
+    onSuccess: (output: string, relativePath: string) => void,
+    onErrorLabel: string,
+): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+
+    try {
+        await editor.document.save();
+        const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+        const output = await runCli(['session', ...args, rel], cwd);
+        onSuccess(output, rel);
+    } catch (err: any) {
+        showError(`${onErrorLabel}: ${err.message}`);
+    }
+}
+
+function showSessionOutput(title: string, output: string): void {
+    sessionOutputChannel.clear();
+    sessionOutputChannel.appendLine(title);
+    if (output.trim()) {
+        sessionOutputChannel.appendLine(output.trim());
+    } else {
+        sessionOutputChannel.appendLine('(no output)');
+    }
+    sessionOutputChannel.show(true);
+}
+
+async function showSessionStatusAction(): Promise<void> {
+    await runSessionCommandForActiveFile(
+        ['status'],
+        (output, rel) => {
+            showSessionOutput(`Session status: ${rel}`, output);
+            showHint(`Session status: ${rel}`);
+        },
+        'session status failed',
+    );
+}
+
+async function restartSessionAction(): Promise<void> {
+    await runSessionCommandForActiveFile(
+        ['restart'],
+        (output, rel) => {
+            showHint(output || `Restart requested for ${rel}`);
+        },
+        'session restart failed',
+    );
+}
+
+async function clearSessionContextAction(): Promise<void> {
+    await runSessionCommandForActiveFile(
+        ['clear'],
+        (output, rel) => {
+            showHint(output || `Cleared session context for ${rel}`);
+        },
+        'session clear failed',
+    );
+}
+
+async function copySessionDiagnosticsAction(): Promise<void> {
+    await runSessionCommandForActiveFile(
+        ['doctor'],
+        async (output, rel) => {
+            await vscode.env.clipboard.writeText(output);
+            showSessionOutput(`Session diagnostics: ${rel}`, output);
+            showHint(`Copied session diagnostics for ${rel}`);
+        },
+        'session diagnostics failed',
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Feature 2: Claim
 // ---------------------------------------------------------------------------
@@ -830,6 +909,10 @@ async function popupMenuAction(): Promise<void> {
         { label: '$(play) Run (Submit)', id: 'submit' },
         { label: '$(link) Claim', id: 'claim' },
         { label: '$(layout) Sync Layout', id: 'syncLayout' },
+        { label: '$(pulse) Show Session Status', id: 'status' },
+        { label: '$(debug-restart) Restart Session', id: 'restart' },
+        { label: '$(clear-all) Clear Session Context', id: 'clear' },
+        { label: '$(copy) Copy Session Diagnostics', id: 'doctor' },
     ];
 
     const selected = await vscode.window.showQuickPick(items, {
@@ -848,6 +931,18 @@ async function popupMenuAction(): Promise<void> {
             break;
         case 'syncLayout':
             await syncLayoutAction();
+            break;
+        case 'status':
+            await showSessionStatusAction();
+            break;
+        case 'restart':
+            await restartSessionAction();
+            break;
+        case 'clear':
+            await clearSessionContextAction();
+            break;
+        case 'doctor':
+            await copySessionDiagnosticsAction();
             break;
     }
 }
@@ -1419,6 +1514,22 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('agentDoc.syncLayout', syncLayoutAction)
     );
 
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.showSessionStatus', showSessionStatusAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.restartSession', restartSessionAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.clearSessionContext', clearSessionContextAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.copySessionDiagnostics', copySessionDiagnosticsAction)
+    );
+
     // Feature 6: Popup Menu
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.popupMenu', popupMenuAction)
@@ -1469,6 +1580,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Status bar item cleanup
     context.subscriptions.push(statusBarItem);
+    context.subscriptions.push(sessionOutputChannel);
 }
 
 export function deactivate(): void {

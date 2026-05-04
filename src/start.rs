@@ -40,7 +40,9 @@
 //!   misclassified as a transient crash. Child runs that already committed a
 //!   document cycle still restart fresh after Ctrl+D instead, and promptless
 //!   fresh/fresh-restart exits still count as failed startup provenance.
-//!   Prompt decisions are still logged explicitly. Prompt-time stdin EOF on
+//!   Prompt decisions are still logged explicitly, and the supervisor forces a
+//!   canonical prompt tty mode for those `Enter`/`q` prompts instead of
+//!   trusting the inherited parent harness stdin settings. Prompt-time stdin EOF on
 //!   the remaining resume-failure prompt path restarts fresh instead of
 //!   silently quitting, so routed or detached Codex sessions do not lose the
 //!   claimed tmux pane just because the supervisor prompt had no readable
@@ -1007,6 +1009,18 @@ If you want to replace the existing owner, kill it yourself first and then rerun
 /// input bytes (ICRNL converts \r → \n, breaking Enter for Claude Code's TUI).
 /// Restores original termios on drop.
 #[cfg(unix)]
+fn prompt_termios_from_original(original: &libc::termios) -> libc::termios {
+    let mut prompt = *original;
+    prompt.c_iflag |= libc::ICRNL;
+    prompt.c_iflag &= !(libc::IGNCR | libc::INLCR);
+    prompt.c_oflag |= libc::OPOST | libc::ONLCR;
+    prompt.c_lflag |= libc::ICANON | libc::ECHO | libc::ISIG | libc::IEXTEN;
+    prompt.c_cc[libc::VMIN] = 1;
+    prompt.c_cc[libc::VTIME] = 0;
+    prompt
+}
+
+#[cfg(unix)]
 struct RawMode {
     original: libc::termios,
 }
@@ -1024,10 +1038,12 @@ impl RawMode {
         }
     }
 
-    /// Temporarily restore cooked mode (for read_line prompts).
+    /// Temporarily restore a canonical prompt mode so `read_line()` works even
+    /// when the parent harness left stdin in a raw-ish state.
     fn suspend(&self) {
         unsafe {
-            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &self.original);
+            let prompt = prompt_termios_from_original(&self.original);
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &prompt);
         }
     }
 
@@ -3583,6 +3599,33 @@ mod tests {
             classify_prompt_decision(4, "yes\n"),
             PromptDecision::Invalid
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prompt_termios_forces_canonical_enter_friendly_prompt_mode() {
+        let mut original: libc::termios = unsafe { std::mem::zeroed() };
+        original.c_iflag = libc::IGNCR;
+        original.c_oflag = 0;
+        original.c_lflag = 0;
+        original.c_cflag = 0x1234;
+        original.c_cc[libc::VMIN] = 0;
+        original.c_cc[libc::VTIME] = 9;
+
+        let prompt = prompt_termios_from_original(&original);
+
+        assert_ne!(prompt.c_iflag & libc::ICRNL, 0);
+        assert_eq!(prompt.c_iflag & libc::IGNCR, 0);
+        assert_eq!(prompt.c_iflag & libc::INLCR, 0);
+        assert_ne!(prompt.c_oflag & libc::OPOST, 0);
+        assert_ne!(prompt.c_oflag & libc::ONLCR, 0);
+        assert_ne!(prompt.c_lflag & libc::ICANON, 0);
+        assert_ne!(prompt.c_lflag & libc::ECHO, 0);
+        assert_ne!(prompt.c_lflag & libc::ISIG, 0);
+        assert_ne!(prompt.c_lflag & libc::IEXTEN, 0);
+        assert_eq!(prompt.c_cflag, original.c_cflag);
+        assert_eq!(prompt.c_cc[libc::VMIN], 1);
+        assert_eq!(prompt.c_cc[libc::VTIME], 0);
     }
 
     #[test]

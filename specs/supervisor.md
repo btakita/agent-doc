@@ -187,6 +187,10 @@ on claude exit with code c:
                          (`user_quit*`, `user_restart_fresh`, invalid input) so
                          later `session_start` / `session_end` transitions keep
                          user-input provenance in the session log
+                         AND those supervisor prompts must switch stdin into a
+                         canonical local prompt mode instead of trusting the
+                         inherited parent harness tty flags, so Enter keeps
+                         working even when the outer binding session is raw-ish
                          AND stdin EOF at the restored Ctrl+D prompt counts as
                          quit, because that prompt now only appears after a
                          real visible child prompt and reflects an intentional

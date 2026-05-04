@@ -174,8 +174,15 @@ Verification in `src/agent-doc` passed:
 - `cargo build`
 - `cargo install --path . --force`
 
-I did not add a new backlog item. The remaining follow-up is still the existing `#edispatch` live JetBrains + VS Code replay; I changed the startup path that replay depends on, but I did not rerun the editor replay itself in this cycle.
-<!-- agent:boundary:c206d441 -->
+❯ I did not add a new backlog item. The remaining follow-up is still the existing `#edispatch` live JetBrains + VS Code replay; I changed the startup path that replay depends on, but I did not rerun the editor replay itself in this cycle.
+❯ do [#jbpdrop]. spec-test-build-install-commit-push
+### Re: #jbpdrop — gpt-5
+Closed. The route-side bug was a transient cross-file `registry_rebind` during dispatch-only reroute: `route.rs` could re-register a candidate pane before it had proved that pane safely belonged to the requested file. In the live repro that let `tasks/software/tsift.md` briefly supersede `%169`, even though `%169` was still the authoritative `tasks/agent-doc/agent-doc-bugs2.md` pane.
+
+The fix now canonicalizes the requested file before dispatch registration and fails closed if the candidate pane is still the live registered owner for another document. I added a tmux-backed regression proving the original file keeps its pane, and I updated the session tmux spec, README, and version notes to document the new invariant.
+
+Verification completed: `cargo test --manifest-path src/agent-doc/Cargo.toml`, `cargo build --manifest-path src/agent-doc/Cargo.toml`, and `cargo install --path src/agent-doc --force`. Committed and pushed in `src/agent-doc` as `1da5c85` (`fix: fail closed on cross-file dispatch rebind`).
+<!-- agent:boundary:9bc04781 -->
 <!-- /agent:exchange -->
 ### End Exchange
 
@@ -199,7 +206,7 @@ Add a Plugin Editor command to clear the context
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbpdrop] [recommended] Completed runs must not stash or remove the authoritative tmux pane from the `agent-doc` window without explicit user action. Freeze the current `agent-doc-bugs2.md` Codex repro (`session_start ... pane=%169`, repeated `commit_success` / `route_dispatch_only_sent`, no later `session_end` for `%169`, pane later recoverable via `agent-doc sync`), identify the reconcile/sync/layout path that still moved the pane, then harden post-success tmux handling and add regression coverage. Plan: `tasks/agent-doc/plan-jb-completed-run-pane-retention.md`
+- [ ] [#rnpane] [recommended] agent-doc closed the running tmux pane. Create a fix plan only: freeze a concrete repro, identify whether the pane is being lost in supervisor exit handling, route/rebind, sync/reconcile, or tmux-router DETACH, define an explicit allowlist for destructive pane actions, and add tmux-backed regression targets so running or just-completed panes cannot disappear implicitly. Plan: `tasks/agent-doc/plan-running-tmux-pane-closure.md`
 - [ ] [#tailpatch] [recommended] Last response was written outside the live `agent:exchange` block instead of being appended inside it. Fix plan only: refresh `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across `write`, `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between `<!-- agent:exchange ... -->` and `<!-- /agent:exchange -->`.
 - [ ] [#devmdcmt] [recommended] Response was written into `src/session-share/tasks/buildparty-investor-demo/dev.md` but the closeout was not committed. Create a fix plan only: reproduce the exact `agent-doc` write/finalize path for this template/CRDT doc, compare it with `#rspcmt`, trace where append/write can persist content without the expected commit/finalize step, identify any session-doc-specific boundary or backlog rewrite interaction that leaves the file dirty, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports completion until the target document's closeout is verifiably committed.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.

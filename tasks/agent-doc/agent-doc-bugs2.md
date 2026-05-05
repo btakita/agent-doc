@@ -188,8 +188,38 @@ If we want to prove the root cause next, the first place to instrument is `src/t
 - Compare the current ASCII `send-keys -H ... 0d` path against a forced symbolic `Enter` path in a live Codex pane.
 - Specifically test whether `agent-doc <file>` + symbolic `Enter` succeeds while the current byte-stream `0d` path still drafts a visible `\n`.
 
-No code changes in this cycle. This was a control-flow trace so we can target the next fix at the real convergence point instead of changing another route-specific caller.
-<!-- agent:boundary:45ce416e -->
+❯ No code changes in this cycle. This was a control-flow trace so we can target the next fix at the real convergence point instead of changing another route-specific caller.
+❯ In addition to the Codex regressions.
+❯ `Clear Session Context` works for Claude Code. `Run Agent Doc` results in no send keys on Claude Code.
+❯ Can we have the `Clear Session Context` for Claude Code be the working example and make the common CR function use the same procedures as `Clear Session Context` for Claude Code?
+### Re: Claude Run Agent Doc vs Clear Session Context path — gpt-5
+
+Yes for the submit layer, but not as a full route replacement.
+
+What the code says now:
+- `Clear Session Context` for a live authoritative pane goes through `src/agent-doc/src/session_actor_cmd.rs` -> `send_clear_to_pane()` -> `tmux.send_keys(pane, "/clear")`.
+- `Run Agent Doc` on the ready authoritative-actor `dispatch-only` path already uses the same direct-pane submit primitive: `src/agent-doc/src/route.rs` -> `route_via_authoritative_actor(..., dispatch_only=true, ...)` -> `send_command_once_unchecked()` -> `tmux.send_keys(pane, payload)`.
+- So when Claude `Run Agent Doc` results in no send keys at all, that is probably not a CR-vs-Enter formatting issue by itself, because the ready direct-pane route already matches the same `tmux.send_keys(...)` procedure that Claude `session clear` uses.
+
+Where they still diverge before submit:
+- `session clear` is simple: if the authoritative pane is alive, send `/clear` directly; otherwise fall back to supervisor IPC inject.
+- `route --dispatch-only` has much more gating before it is allowed to submit anything: authoritative-actor lookup, harness normalization, supervisor health, actor state, pending prompt-bearing drift, startup-miss handling, live-owner re-registration, and busy/starting policy.
+- If Claude shows "no send keys", the likely failure surface is one of those routing gates, not the final carriage-return helper.
+
+The most important branches to look at are:
+- `load_authoritative_actor_dispatch_target()` in [src/agent-doc/src/route.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/route.rs) because route will not use the authoritative path unless the actor record, harness identity, pane liveness, and supervisor runtime all line up.
+- `route_via_authoritative_actor()` in the same file because a non-ready actor can intentionally focus, queue through supervisor IPC, or fail closed instead of direct-pane typing.
+- `resolve_or_create_pane_dispatch_only()` because if route does not reach the authoritative direct-pane branch, it can go through other ownership/recovery paths first.
+
+One useful detail: there is already explicit coverage proving normalized Claude harness identity should not block the authoritative path. The test `load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_identity()` exercises stored `claude-code` actor metadata while route asks for `HarnessConfig::claude()`. So a plain `claude` vs `claude-code` alias mismatch is less likely to be the root cause here.
+
+So the answer is:
+- Yes, we should share the final direct-pane submit helper between Claude `session clear` and any direct `Run Agent Doc` path.
+- No, that alone will not fix a Claude repro where route emits no keys, because the ready direct route already behaves that way.
+- The next useful investigation is to instrument which route branch Claude is actually taking before submit, and why it is not reaching the ready authoritative direct-pane path.
+
+No code changes in this cycle. This is a narrower branch diagnosis so the next fix can target route selection instead of CR formatting again.
+<!-- agent:boundary:ab7eabda -->
 <!-- /agent:exchange -->
 ###
 

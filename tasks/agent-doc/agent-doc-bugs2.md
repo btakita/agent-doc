@@ -151,14 +151,47 @@ Repo commits:
 ### Re: repo push closeout recovery — gpt-5
 
 No additional repo changes were required. This recovery closeout re-opened the binary-owned commit path for the current Codex turn so the repo push can proceed from a committed document state.
-<!-- agent:boundary:baa69851 -->
+❯ do [#pfxstrip]. It seems there have been various repeat issues with the sidecar/IPC. Are we running into race conditions caused by architecture? Should we use an Actor that runs in the editor plugins instead of the file based IPC?
+❯ spec-test-build-install-commit-push
+### Re: #pfxstrip — gpt-5
+
+Implemented the `#pfxstrip` fix. Plan: `tasks/agent-doc/plan-skill-finalize-prompt-prefix-strip.md`
+
+Root cause:
+- `write.rs` treated prompt-prefix normalization targets as a set keyed only by line text.
+- Repeated preset lines such as `spec-test-build-install-commit-push` could therefore false-pass sidecar verification or post-commit repair when an earlier identical `❯ ...` line existed elsewhere in the exchange.
+- The fix now preserves duplicate prompt-target occurrences by count across normalization target extraction, sidecar verification, IPC patch content normalization, and post-commit working-tree repair.
+
+Architecture:
+- This repro was a binary-side correctness bug, not proof that the file/sidecar IPC architecture is fundamentally racing in a way only an editor-resident actor can solve.
+- An editor actor could simplify some ownership edges, but it would not remove the need for occurrence-aware transcript reconciliation, and it would increase cross-editor state complexity.
+- I would keep the current architecture and continue hardening the binary/plugin contract around deterministic normalization and verification.
+
+Changes:
+- `src/write.rs` now counts duplicate prompt-prefix targets instead of deduplicating them by text, and it verifies the exchange user region by required occurrence count rather than by any-match presence.
+- Added regressions covering duplicate-line target extraction, duplicate target patch normalization, duplicate-aware sidecar verification, duplicate-aware post-commit repair target extraction, and late duplicate repair in the working tree.
+- Updated `specs/07-closeout-commands.md` so the closeout contract explicitly requires duplicate prompt-target preservation by count.
+
+Verification:
+- `cargo test -p agent-doc extract_normalization_targets_preserves_duplicate_lines`
+- `cargo test -p agent-doc normalize_patch_content_counts_duplicate_targets`
+- `cargo test -p agent-doc verify_sidecar_normalization_requires_duplicate_occurrences`
+- `cargo test -p agent-doc extract_post_commit_normalization_targets_preserves_duplicate_missing_lines`
+- `cargo test -p agent-doc normalize_exchange_prefixes_for_targets_repairs_late_duplicate_occurrence`
+- `make check`
+- `cargo install --path .`
+- `cargo build --release`
+
+Repo commits:
+- `src/agent-doc`: `84b5127` (`fix: preserve duplicate prompt-prefix repairs`)
+- `agent-loop`: `adee04362` (`chore: bump agent-doc for prompt-prefix duplicate repair`)
+
+Repo push follows after this closeout commit.
+<!-- agent:boundary:68c62a62 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-do [#pfxstrip]. It seems there have been various repeat issues with the IPC. Are we running into race conditions caused by architecture? Should we use an Actor that runs in the editor plugins instead of the file based IPC?
-spec-test-build-install-commit-push
----
 "Press Enter to restart, or 'q' to exit."
 -->
 
@@ -166,7 +199,6 @@ spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#mlreap] Manual `[x]` on a multi-line backlog item can reap only the first tracked parent line and leave orphan continuation text behind. Reproduce the `tasks/software/tsift.md` `#9aep` / `#a7e3` shape, trace `pending.rs` continuation parsing vs reap, decide whether malformed flush-left continuation blocks should be reaped atomically or fail closed, and add regressions plus a no-partial-reap invariant. Plan: `tasks/agent-doc/plan-multiline-backlog-partial-reap.md`
-- [ ] [#pfxstrip] Skill finalize strips ❯ prefix on inline prompt-preset lines (spec-test-news-commit-push in dev.md). content_ours sidecar fallback or IPC post-commit path drops canonicalization. Plan: tasks/agent-doc/plan-skill-finalize-prompt-prefix-strip.md
 - [ ] [#rspcmt] [recommended] Previous response was written to
   `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where
   `finalize`/

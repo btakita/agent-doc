@@ -165,8 +165,24 @@ I would split the work three ways.
 2. `#testdigest`: add a test-output digest command for common runners (`cargo test`, `pytest`, maybe `npm test`) that strips passing noise, groups duplicate failures, preserves the failing assertion plus file/line, and then optionally enriches those files or symbols with `tsift explain` / cached summaries. This is implementable, but it is transcript parsing rather than search.
 3. `#logdigest`: add a general log compactor for verbose stdout/stderr. Here tsift should not pretend to understand every log format semantically; the value is repeated-line collapsing, path/symbol extraction, stack-frame grouping, and then code-aware enrichment for referenced files.
 
-RTK is still useful here, but only as the transport guardrail: cap lines before they enter context, then let tsift provide the repo-aware digest. I would implement in exactly that order: diff first, test output second, generic logs third. I added those as recommended backlog items.
-<!-- agent:boundary:cd62ac30 -->
+❯ RTK is still useful here, but only as the transport guardrail: cap lines before they enter context, then let tsift provide the repo-aware digest. I would implement in exactly that order: diff first, test output second, generic logs third. I added those as recommended backlog items.
+❯ do [#diffdigest]. spec-test-build-install-commit-push
+### Re: #diffdigest spec-test-build-install-commit-push — gpt-5
+
+Implemented `tsift diff-digest` as a bounded diff-adjacent digest for the current git working tree. It now reports changed files, touched symbols, up to two current cached summary snippets when `summaries.db` matches the file content, and added/removed call edges by comparing `HEAD` to the working tree plus untracked files. It parses changed snapshots directly instead of requiring a fresh `index.db`, and it ignores internal `.tsift/` cache artifacts so the digest stays focused on repo changes.
+
+Updated the CLI surface, direct/unit coverage, the compiled CLI coverage, and the version/spec/docs surfaces for `tsift v0.1.25`.
+
+Verification in `src/tsift` passed:
+- `make check`
+- `cargo build --release`
+- `cargo install --path . --force`
+- `tsift --version` → `tsift 0.1.25`
+
+Committed and pushed in `src/tsift` as `2979e59` (`feat: add diff digest command`).
+
+Top remaining backlog item: `#testdigest`.
+<!-- agent:boundary:86a8753f -->
 <!-- /agent:exchange -->
 
 <!--
@@ -176,7 +192,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#diffdigest] [recommended] Add a tsift diff-digest surface for git changes: changed files, touched symbols, cached summaries, and token-budgeted output instead of raw hunks
 - [ ] [#testdigest] [recommended] Add a tsift test-output digest for common runners that collapses passing noise, groups failures, and extracts file/symbol anchors from stderr/stdout
 - [ ] [#logdigest] [recommended] Add a tsift transcript compactor for verbose logs via stdin/file input with repeated-line collapsing, path/symbol extraction, and optional tsift summary enrichment
 <!-- /agent:backlog -->

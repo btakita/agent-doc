@@ -51,14 +51,14 @@
 //!   files. This places the new pane adjacent to its column neighbors instead of always splitting
 //!   beside an arbitrary registered pane.
 //! - **`send_command(tmux, pane, file_path, harness)`**: Used only for direct tmux/shell
-//!   launch paths. Existing managed sessions reroute through supervisor IPC instead of typing
-//!   directly into the pane. Codex reroutes intentionally keep the payload to the bare
-//!   `agent-doc <FILE>` reopen so the harness re-enters the binary-owned document flow instead of
-//!   treating a multiline pasted prompt as ordinary chat text.
+//!   launch paths plus existing dispatch-only live-pane reroutes. Managed reroutes keep using
+//!   supervisor IPC when route needs queueing/ack semantics, but a dispatch-only reopen types the
+//!   bare harness trigger directly through the resolved live pane so it shares the same terminal
+//!   submit boundary as `session clear`.
 //! - **Dispatch-only editor reroutes** still bypass the managed acceptance/cycle-ack loop on
-//!   purpose, but for existing managed sessions they now send the same bare reopen through one
-//!   supervisor IPC inject instead of direct pane keystrokes. They fail closed up front when the
-//!   pane is visibly stuck in an interactive shell blocker such as `reverse-i-search`.
+//!   purpose, and for existing managed sessions they now send the same bare reopen through direct
+//!   live-pane submit instead of a one-shot supervisor IPC inject. They fail closed up front when
+//!   the pane is visibly stuck in an interactive shell blocker such as `reverse-i-search`.
 //! - **`await_idle(file, debounce)`**: Polls file mtime every 100ms until `debounce` has
 //!   elapsed since last modification, or until `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
@@ -2135,7 +2135,7 @@ fn resolve_or_create_pane_dispatch_only(
             true,
             false,
             dispatch_pane,
-            DispatchOnlyReopenDelivery::SupervisorIpcOnce,
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
         );
     }
 
@@ -2201,7 +2201,7 @@ fn resolve_or_create_pane_dispatch_only(
             true,
             false,
             &new_pane,
-            DispatchOnlyReopenDelivery::SupervisorIpcOnce,
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
         );
     }
 
@@ -8026,7 +8026,7 @@ Body\n\
     }
 
     #[test]
-    fn dispatch_only_send_reopen_skips_acceptance_polling_enter_retries() {
+    fn dispatch_only_send_reopen_direct_pane_submit_avoids_extra_enter_retries() {
         use std::sync::{Arc, Mutex};
 
         let dir = tempfile::tempdir().unwrap();
@@ -8091,12 +8091,26 @@ Body\n\
             &pane,
             &file_path,
             &HarnessConfig::codex(),
-            DispatchOnlyReopenDelivery::SupervisorIpcOnce,
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
         )
         .expect("dispatch-only reopen should still send once when no explicit blocker is visible");
         assert!(
-            *injects.lock().unwrap() == vec![routed_trigger_submit_bytes(&trigger)],
-            "dispatch-only reopen must use exactly one supervisor inject without extra Enter retries"
+            injects.lock().unwrap().is_empty(),
+            "dispatch-only direct pane submit should not fall back to supervisor inject"
+        );
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            &format!("GOT:{trigger}"),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            after.contains(&format!("GOT:{trigger}")),
+            "dispatch-only reopen should submit the trigger through the live pane input path: {after}"
+        );
+        assert!(
+            !after.contains("EXTRA:"),
+            "dispatch-only reopen should not send an extra newline or second Enter: {after}"
         );
         ipc.stop();
     }

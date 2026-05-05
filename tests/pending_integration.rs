@@ -227,6 +227,27 @@ fn pending_reap_removes_checked_items() {
 }
 
 #[test]
+fn pending_reap_removes_malformed_flush_left_spill_with_done_parent() {
+    let (_tmp, doc) = setup_doc(concat!(
+        "- [x] [#bbbb] drop\n",
+        "Commands:\n",
+        "  cargo test -p agent-doc pending::\n",
+        "Diff:\n",
+        "@@ -1 +1 @@\n",
+        "- [ ] [#cccc] keep2\n"
+    ));
+    agent_doc()
+        .args(["backlog", doc.to_str().unwrap(), "reap"])
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(!content.contains("[#bbbb]"));
+    assert!(!content.contains("Commands:"));
+    assert!(!content.contains("@@ -1 +1 @@"));
+    assert!(content.contains("- [ ] [#cccc] keep2"));
+}
+
+#[test]
 fn pending_reap_backfills_legacy_done_ids_before_removing_items() {
     let (_tmp, doc) = setup_doc("- [ ] keep\n- [x] legacy drop\n");
     agent_doc()

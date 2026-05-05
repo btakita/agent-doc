@@ -3216,6 +3216,93 @@ mod tests {
     }
 
     #[test]
+    fn preflight_reaps_flush_left_spill_with_completed_backlog_item() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: do #scopeid — gpt-5\n",
+            "Implemented.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#scopeid] completed item\n",
+            "Commands:\n",
+            "  cargo test -p agent-doc pending::\n",
+            "Diff:\n",
+            "@@ -1 +1 @@\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: do #scopeid — gpt-5\n",
+            "Implemented.\n",
+            "do #statusws. spec-test-build-install-commit-push\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#scopeid] completed item\n",
+            "Commands:\n",
+            "  cargo test -p agent-doc pending::\n",
+            "Diff:\n",
+            "@@ -1 +1 @@\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        let backlog_after = crate::component::parse(&file_after)
+            .unwrap();
+        let backlog_after = backlog_after
+            .iter()
+            .find(|component| crate::component::is_backlog_component(&component.name))
+            .map(|component| component.content(&file_after))
+            .unwrap();
+        assert!(file_after.contains("do #statusws. spec-test-build-install-commit-push"));
+        assert!(!backlog_after.contains("- [x] [#scopeid] completed item"));
+        assert!(!backlog_after.contains("Commands:"));
+        assert!(!backlog_after.contains("@@ -1 +1 @@"));
+
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        let snapshot_backlog = crate::component::parse(&snapshot_after)
+            .unwrap();
+        let snapshot_backlog = snapshot_backlog
+            .iter()
+            .find(|component| crate::component::is_backlog_component(&component.name))
+            .map(|component| component.content(&snapshot_after))
+            .unwrap();
+        assert!(!snapshot_backlog.contains("- [x] [#scopeid] completed item"));
+        assert!(!snapshot_backlog.contains("Commands:"));
+        assert!(!snapshot_backlog.contains("@@ -1 +1 @@"));
+        assert!(
+            !snapshot_after.contains("do #statusws. spec-test-build-install-commit-push"),
+            "snapshot must not absorb the live prompt during backlog reap"
+        );
+    }
+
+    #[test]
     fn preflight_status_prompt_preset_addition_does_not_swallow_diff() {
         let dir = setup_project();
         let root = dir.path();

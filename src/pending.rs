@@ -523,6 +523,52 @@ fn is_indented_continuation_line(line: &str) -> bool {
     line.starts_with(' ') || line.starts_with('\t')
 }
 
+fn is_structural_inter_item_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('#')
+        || trimmed.starts_with("<!--")
+        || matches!(trimmed, "---" | "***" | "___")
+}
+
+fn split_reapable_trailing_text_segment(raw: &str) -> Option<(String, String)> {
+    if raw.is_empty() {
+        return None;
+    }
+
+    let mut reap = String::new();
+    let mut keep = String::new();
+    let mut pending_blank = String::new();
+    let mut reaping = true;
+
+    for segment in raw.split_inclusive('\n') {
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        if !reaping {
+            keep.push_str(segment);
+            continue;
+        }
+        if line.trim().is_empty() {
+            pending_blank.push_str(segment);
+            continue;
+        }
+        if is_structural_inter_item_line(line) {
+            keep.push_str(&pending_blank);
+            pending_blank.clear();
+            keep.push_str(segment);
+            reaping = false;
+            continue;
+        }
+        reap.push_str(&pending_blank);
+        pending_blank.clear();
+        reap.push_str(segment);
+    }
+
+    if reap.is_empty() {
+        return None;
+    }
+    reap.push_str(&pending_blank);
+    Some((reap, keep))
+}
+
 pub(crate) fn is_valid_pending_id(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
@@ -1269,16 +1315,49 @@ pub fn reap_with_items(body: &str) -> Result<(String, Vec<PendingItem>)> {
         );
     }
     let mut removed = Vec::new();
-    let new_layout = layout.replace_items(|item| {
-        if item.is_done() {
-            if !item.id.is_empty() {
-                removed.push(item.clone());
+    let mut segments = Vec::with_capacity(layout.segments.len());
+    let mut index = 0usize;
+    while index < layout.segments.len() {
+        match &layout.segments[index] {
+            PendingSegment::Text(raw) => {
+                segments.push(PendingSegment::Text(raw.clone()));
+                index += 1;
             }
-            None
-        } else {
-            Some(item.clone())
+            PendingSegment::Item { item, has_newline } => {
+                if !item.is_done() {
+                    segments.push(PendingSegment::Item {
+                        item: item.clone(),
+                        has_newline: *has_newline,
+                    });
+                    index += 1;
+                    continue;
+                }
+
+                let mut removed_item = item.clone();
+                let mut next_index = index + 1;
+                while let Some(PendingSegment::Text(raw)) = layout.segments.get(next_index) {
+                    if let Some((reap_text, keep_text)) = split_reapable_trailing_text_segment(raw)
+                    {
+                        removed_item.continuation.push_str(&reap_text);
+                        next_index += 1;
+                        if !keep_text.is_empty() {
+                            segments.push(PendingSegment::Text(keep_text));
+                            break;
+                        }
+                    } else {
+                        segments.push(PendingSegment::Text(raw.clone()));
+                        next_index += 1;
+                        break;
+                    }
+                }
+                if !removed_item.id.is_empty() {
+                    removed.push(removed_item);
+                }
+                index = next_index;
+            }
         }
-    });
+    }
+    let new_layout = PendingLayout { segments };
     if removed.is_empty() {
         return Ok((body.to_string(), removed));
     }
@@ -1942,6 +2021,39 @@ mod tests {
         assert!(new_body.contains("a3f2"));
         assert!(!new_body.contains("b1c4"));
         assert!(new_body.contains("c5d6"));
+    }
+
+    #[test]
+    fn reap_removes_flush_left_spill_with_completed_parent() {
+        let body = concat!(
+            "- [x] [#b1c4] drop\n",
+            "Commands:\n",
+            "  cargo test -p agent-doc pending::\n",
+            "Diff:\n",
+            "@@ -1 +1 @@\n",
+            "- [ ] [#c5d6] keep\n"
+        );
+        let (new_body, removed) = reap(body).unwrap();
+        assert_eq!(removed, vec!["b1c4"]);
+        assert!(!new_body.contains("[#b1c4]"));
+        assert!(!new_body.contains("Commands:"));
+        assert!(!new_body.contains("@@ -1 +1 @@"));
+        assert!(new_body.contains("- [ ] [#c5d6] keep"));
+    }
+
+    #[test]
+    fn reap_preserves_following_heading_text() {
+        let body = concat!(
+            "- [x] [#b1c4] drop\n",
+            "\n",
+            "## Next Group\n",
+            "- [ ] [#c5d6] keep\n"
+        );
+        let (new_body, removed) = reap(body).unwrap();
+        assert_eq!(removed, vec!["b1c4"]);
+        assert!(!new_body.contains("[#b1c4]"));
+        assert!(new_body.contains("## Next Group"));
+        assert!(new_body.contains("- [ ] [#c5d6] keep"));
     }
 
     #[test]

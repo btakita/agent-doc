@@ -40,7 +40,29 @@ Icebox:
 - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement:
 - 1 more active item(s)
-<!-- agent:boundary:57cf2fe9 -->
+❯ do [#gitstage]. spec-test-build-install-commit-push
+### Re: #gitstage — gpt-5
+
+Implemented the `#gitstage` fix as an instruction-surface contract. Plan: `tasks/agent-doc/plan-gitstage-path-scoped-commit-fail-closed.md`
+
+Changes:
+- Added a fail-closed rule for path-scoped manual repo commits to the bundled `SKILL.md`, `commit.md`, `harness-invocation.md`, `compound-task-steering.md`, `SPEC.md`, `README.md`, `CLAUDE.md`, and `specs/09-git-integration.md`.
+- Added `skill.rs` regression coverage so installed Claude/Codex mirrors must keep the new path-set validation language.
+- Reinstalled the local binary and refreshed the managed `.claude`, `.codex`, and root `AGENTS.md` mirrors from the new build.
+
+Verification:
+- `make check`
+- `cargo install --path .`
+- `cargo build --release`
+- `agent-doc skill install --harness claude`
+- `agent-doc skill install --harness codex`
+
+Repo commits:
+- `src/agent-doc`: `8e7b027` (`docs: fail closed path-scoped repo commits`)
+- `agent-loop`: `306b6895e` (`chore: refresh agent-doc skill mirrors`)
+
+Per the session-document commit boundary, this closeout commit resolves `#gitstage`; repo push follows after closeout.
+<!-- agent:boundary:bbd56992 -->
 <!-- /agent:exchange -->
 ###
 
@@ -51,7 +73,6 @@ Icebox:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#gitstage] [recommended] In the previous boost-client turn, the intended root superproject submodule-pointer bump was blocked by `fatal: Unable to create .../.git/modules/src/boost-client/index.lock: File exists` during `git add src/monsterrodholders-dev`, but a later root `git commit` still succeeded against pre-existing staged paths while leaving the intended submodule pointer unstaged. Fix plan only: reproduce the nested-submodule lock + dirty-index path, trace where the agent-doc closeout/commit workflow keeps going after a failed stage step, compare the requested path set with the actual staged diff before commit, and define a fail-closed rule so path-scoped closeout either (a) stages exactly the expected paths and commits only that set or (b) stops with actionable guidance instead of consuming unrelated staged changes. Plan: `tasks/agent-doc/plan-gitstage-path-scoped-commit-fail-closed.md`
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to

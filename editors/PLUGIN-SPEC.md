@@ -107,6 +107,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Trigger:** Editor tab selection or visible editor set changes.
 - **Debounce:** 500ms. Skip if the visible file set + active file signature is unchanged.
 - **Concurrency guard:** One automatic command at a time. When a newer selection/layout request arrives while a command is still running, queue only the latest request and replay it immediately after the running command finishes.
+- **Snapshot contract:** Capture the exact focus/layout snapshot from the triggering editor event and replay that latest captured snapshot after any in-flight command. Do not resample the live editor state later and risk landing on an earlier splitter hop.
 - **Behavior:** Same as Section 2.4, but runs silently (no user notification). Errors are silently ignored.
 - **Safety:** Startup audits must be report-only (`agent-doc resync`), not `resync --fix`, unless the user explicitly invoked a repair action.
 

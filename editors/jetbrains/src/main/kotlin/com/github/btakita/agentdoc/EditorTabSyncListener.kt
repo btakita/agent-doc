@@ -27,6 +27,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
     @Volatile
     private var lastFocusedFile: String? = null
 
+    private val latestSnapshot = java.util.concurrent.atomic.AtomicReference<AutomaticStateSnapshot?>(null)
+
     companion object {
         private const val DEBOUNCE_MS = 100L
         private val fallbackGeneration = AtomicLong(0)
@@ -51,19 +53,41 @@ class EditorTabSyncListener : FileEditorManagerListener {
         val activeFile: String,
     )
 
+    internal data class AutomaticStateSnapshot(
+        val activeFile: String,
+        val focusedRelativePath: String,
+        val focusedProjectRoot: String,
+        val syncProjectRoot: String,
+        val visibleMdFiles: List<String>,
+        val editorLayout: EditorLayout?,
+        val visibleSignature: String,
+    )
+
     internal object AutomaticCommandPlanner {
-        fun visibleSignature(visibleMdFiles: List<String>): String =
-            visibleMdFiles.distinct().sorted().joinToString("\u0000")
+        fun visibleSignature(
+            visibleMdFiles: List<String>,
+            editorLayout: EditorLayout? = null,
+        ): String {
+            if (editorLayout != null) {
+                return editorLayout.columns.joinToString("\u0000") { column ->
+                    column.files
+                        .filter { it.isNotEmpty() }
+                        .distinct()
+                        .joinToString("\u0001")
+                }
+            }
+            return visibleMdFiles.distinct().sorted().joinToString("\u0000")
+        }
 
         fun plan(
             visibleMdFiles: List<String>,
+            visibleSignature: String,
             focusedFile: String,
             previousVisibleSignature: String?,
             previousFocusedFile: String?,
         ): AutomaticCommandPlan? {
             if (visibleMdFiles.isEmpty()) return null
 
-            val visibleSignature = visibleSignature(visibleMdFiles)
             if (visibleSignature == previousVisibleSignature && focusedFile == previousFocusedFile) {
                 return null
             }
@@ -95,20 +119,23 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
     private fun requestAutomaticSync(
         project: com.intellij.openapi.project.Project,
+        snapshot: AutomaticStateSnapshot,
         delayMs: Long = DEBOUNCE_MS,
+        requestedGeneration: Long? = null,
     ) {
+        latestSnapshot.set(snapshot)
         val lib = AgentDocLib.get()
-        val requestedGeneration = nextGeneration(lib)
+        val generation = requestedGeneration ?: nextGeneration(lib)
         Thread {
             try {
                 if (delayMs > 0) {
                     Thread.sleep(delayMs)
                 }
-                if (!isCurrentGeneration(lib, requestedGeneration)) {
-                    log("debounce: superseded gen=$requestedGeneration")
+                if (!isCurrentGeneration(lib, generation)) {
+                    log("debounce: superseded gen=$generation")
                     return@Thread
                 }
-                drainAutomaticSync(project, requestedGeneration)
+                drainAutomaticSync(project, generation)
             } catch (e: Exception) {
                 log("error: ${e.message}")
             }
@@ -118,7 +145,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         }
     }
 
-    private fun buildExecutionPlan(project: com.intellij.openapi.project.Project): AutomaticExecutionPlan? {
+    private fun captureSnapshot(project: com.intellij.openapi.project.Project): AutomaticStateSnapshot? {
         val manager = FileEditorManager.getInstance(project)
         val file = manager.selectedTextEditor?.virtualFile
             ?.takeIf { it.name.endsWith(".md") }
@@ -130,42 +157,58 @@ class EditorTabSyncListener : FileEditorManagerListener {
         val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
         if (visibleMdFiles.isEmpty()) return null
 
-        val plan = AutomaticCommandPlanner.plan(
+        val detectedEditorLayout = LayoutDetector.detectEditorLayout(project)
+        val syncProjectRoot = SyncLayoutAction.chooseSyncProjectRoot(
+            project.basePath,
+            focusedProjectRoot,
+            visibleMdFiles,
+        )
+        val absoluteEditorLayout = SyncLayoutAction.absolutizeEditorLayout(
+            syncProjectRoot,
+            SyncLayoutAction.normalizeEditorLayout(
+                project.basePath,
+                syncProjectRoot,
+                detectedEditorLayout,
+            ),
+        )
+        return AutomaticStateSnapshot(
+            activeFile = activeFile,
+            focusedRelativePath = focusedRelativePath,
+            focusedProjectRoot = focusedProjectRoot,
+            syncProjectRoot = syncProjectRoot,
             visibleMdFiles = visibleMdFiles,
-            focusedFile = activeFile,
+            editorLayout = absoluteEditorLayout,
+            visibleSignature = AutomaticCommandPlanner.visibleSignature(
+                visibleMdFiles,
+                absoluteEditorLayout,
+            ),
+        )
+    }
+
+    private fun buildExecutionPlan(snapshot: AutomaticStateSnapshot): AutomaticExecutionPlan? {
+        val plan = AutomaticCommandPlanner.plan(
+            visibleMdFiles = snapshot.visibleMdFiles,
+            visibleSignature = snapshot.visibleSignature,
+            focusedFile = snapshot.activeFile,
             previousVisibleSignature = lastVisibleSignature,
             previousFocusedFile = lastFocusedFile,
         ) ?: return null
 
-        val detectedEditorLayout = LayoutDetector.detectEditorLayout(project)
         val (projectRoot, cmd) = when (plan.kind) {
             AutomaticCommandKind.Focus -> {
-                val agentDoc = TerminalUtil.resolveAgentDoc(focusedProjectRoot)
-                focusedProjectRoot to SyncLayoutAction.buildFocusCommand(
+                val agentDoc = TerminalUtil.resolveAgentDoc(snapshot.focusedProjectRoot)
+                snapshot.focusedProjectRoot to SyncLayoutAction.buildFocusCommand(
                     agentDoc = agentDoc,
-                    focusedFile = focusedRelativePath,
+                    focusedFile = snapshot.focusedRelativePath,
                 )
             }
             AutomaticCommandKind.Sync -> {
-                val syncProjectRoot = SyncLayoutAction.chooseSyncProjectRoot(
-                    project.basePath,
-                    focusedProjectRoot,
-                    visibleMdFiles,
-                )
-                val agentDoc = TerminalUtil.resolveAgentDoc(syncProjectRoot)
-                val absoluteEditorLayout = SyncLayoutAction.absolutizeEditorLayout(
-                    syncProjectRoot,
-                    SyncLayoutAction.normalizeEditorLayout(
-                        project.basePath,
-                        syncProjectRoot,
-                        detectedEditorLayout,
-                    ),
-                )
-                syncProjectRoot to SyncLayoutAction.buildSyncCommand(
+                val agentDoc = TerminalUtil.resolveAgentDoc(snapshot.syncProjectRoot)
+                snapshot.syncProjectRoot to SyncLayoutAction.buildSyncCommand(
                     agentDoc = agentDoc,
-                    visibleMdFiles = visibleMdFiles,
-                    editorLayout = absoluteEditorLayout,
-                    focusedFile = activeFile,
+                    visibleMdFiles = snapshot.visibleMdFiles,
+                    editorLayout = snapshot.editorLayout,
+                    focusedFile = snapshot.activeFile,
                     noAutostart = true,
                 )
             }
@@ -175,7 +218,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
             plan = plan,
             projectRoot = projectRoot,
             command = cmd,
-            activeFile = activeFile,
+            activeFile = snapshot.activeFile,
         )
     }
 
@@ -193,7 +236,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
         var startedGeneration = requestedGeneration
         try {
-            val execution = buildExecutionPlan(project)
+            val snapshot = latestSnapshot.get()
+            val execution = snapshot?.let { buildExecutionPlan(it) }
             if (execution == null) {
                 log("dedup: selection state already synchronized")
             } else {
@@ -216,7 +260,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
             lib?.agent_doc_sync_unlock() ?: fallbackRunning.set(false)
             if (!isCurrentGeneration(lib, startedGeneration)) {
                 log("queue: replaying latest automatic sync request")
-                requestAutomaticSync(project, 0)
+                latestSnapshot.get()?.let { requestAutomaticSync(project, it, 0) }
             }
         }
     }
@@ -230,6 +274,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         log("selectionChanged: newFile=${file.name} mdFiles=$visibleMdFiles")
         if (visibleMdFiles.isEmpty()) return
 
-        requestAutomaticSync(event.manager.project)
+        val snapshot = captureSnapshot(event.manager.project) ?: return
+        requestAutomaticSync(event.manager.project, snapshot)
     }
 }

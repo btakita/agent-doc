@@ -274,7 +274,13 @@ I updated the backlog text for `#benchdigest` to reflect that broader scope whil
 Implemented the generalized metric-run digest instead of a session-share-specific benchmark parser. `tsift metric-digest` now reads JSON/NDJSON run history from stdin or `--input`, compares the latest run against a prior run or `--baseline`, classifies metric direction heuristically (with explicit `--metric`, `--lower-is-better`, and `--higher-is-better` overrides), and emits bounded deltas plus a markdown-ready history table for news/session updates.
 
 This shipped as `tsift v0.1.29` with direct helper coverage, CLI parsing coverage, and a compiled stdin-path regression. Verification passed in `src/tsift`: `cargo test`, `make check`, `cargo build --release`, and `cargo install --path . --force`; `tsift --version` now reports `0.1.29`. Committed and pushed in `src/tsift` as `1af09d3` (`feat: add metric run digest`).
-<!-- agent:boundary:66f7e652 -->
+❯ do [#sessiondigest]. spec-test-build-install-commit-push
+### Re: #sessiondigest spec-test-build-install-commit-push — gpt-5
+
+Implemented `tsift session-digest` as a bounded transcript digest for markdown session docs and Claude JSONL. It reads from stdin or `--input`, auto-detects or accepts `--source markdown|jsonl`, extracts prompt targets, shell commands, touched files/symbols, failures, and closeout evidence, and emits both JSON and human-readable summaries without replaying transcript state.
+
+Updated the CLI/docs/version surfaces for `tsift v0.1.30`, added direct helper coverage plus CLI parsing coverage, and added a compiled stdin-path regression for the new command. Verification in `src/tsift` passed: `cargo test`, `make check`, `cargo build --release`, and `cargo install --path . --force`; `tsift --version` now reports `0.1.30`. Committed and pushed in `src/tsift` as `cdfb504` (`feat: add session digest command`).
+<!-- agent:boundary:842ca114 -->
 <!-- /agent:exchange -->
 ###
 
@@ -285,7 +291,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sessiondigest] Session-transcript digest for agent-doc / Claude JSONL / Codex docs: collapse long sessions to prompt targets, commands, touched files/symbols, failures, and closeout evidence. #spec-test-build-install-commit-push
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

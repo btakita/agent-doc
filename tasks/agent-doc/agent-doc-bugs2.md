@@ -64,7 +64,7 @@ Clippy is clean now. Cargo still prints `ignoring invalid dependency module-harn
 ❯ - Remove `Run With Junie` from the numbered hotkeys but keep the menu item.
 ❯ - Remove `Force Claim for Tmux Pane` from the numbered hotkeys but keep the menu item.
 ❯ - Add `Compact Exchange` into a numbered hotkey
-❯ - Add `Restart Supervisor Process` into a numbered hotkey. Implemenent agent-doc supervisor api to restart the supervisor process.
+❯ - Add `Restart Supervisor Process` into a numbered hotkey. Implement agent-doc supervisor api to restart the supervisor process.
 
 ❯ spec-test-build-install-commit-push
 ### Re: editor popup controls — gpt-5
@@ -84,10 +84,13 @@ Verification:
 - `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
 - `cargo install --path src/agent-doc --force`
 
-Commit / push:
-- `src/agent-doc`: `e1bbbf4` pushed to `origin/20260422/codex-agent-backend`
-- superproject gitlink: `7392b082f` pushed to `origin/main`
-<!-- agent:boundary:f91a2330 -->
+❯ Commit / push:
+❯ - `src/agent-doc`: `e1bbbf4` pushed to `origin/20260422/codex-agent-backend`
+❯ - superproject gitlink: `7392b082f` pushed to `origin/main`
+### Re: restart supervisor wording follow-up — gpt-5
+
+Handled the wording/API follow-up on the same implementation pass: the editor menus now expose `Restart Supervisor Process`, and the explicit CLI surface is `agent-doc session restart-supervisor <file>` with `session restart` kept as a compatibility alias. No additional repo changes were needed beyond the code/spec/test/build/install/commit/push work already completed above.
+<!-- agent:boundary:0199185e -->
 <!-- /agent:exchange -->
 ###
 

@@ -883,12 +883,15 @@ I added those as `[recommended]` backlog items so they do not get lost.
 
 Noted. The current reference set for the Playwright comparison is:
 
-- [Playwright CLI README](https://github.com/microsoft/playwright-cli)
+❯ - [Playwright CLI README](https://github.com/microsoft/playwright-cli)
 - [Playwright CLI capabilities](https://playwright.dev/agent-cli/capabilities)
-- [Playwright MCP extension README](https://github.com/microsoft/playwright-mcp/blob/main/packages/extension/README.md)
+❯ - [Playwright MCP extension README](https://github.com/microsoft/playwright-mcp/blob/main/packages/extension/README.md)
 
-Those are the sources I would keep using for follow-up feature comparisons against `chromium-bridge`.
-<!-- agent:boundary:2b6a0de9 -->
+❯ Those are the sources I would keep using for follow-up feature comparisons against `chromium-bridge`.
+### Re: Source set — gpt-5
+
+The reference set is unchanged: the Playwright CLI README at `github.com/microsoft/playwright-cli`, the Playwright capabilities page at `playwright.dev/agent-cli/capabilities`, and the Playwright MCP extension README at `github.com/microsoft/playwright-mcp/blob/main/packages/extension/README.md`. I would use those same three sources for the next `chromium-bridge` comparison pass.
+<!-- agent:boundary:afe2ff12 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

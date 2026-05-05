@@ -3,8 +3,10 @@
 //! ## Spec
 //! - Implements the repo-local Codex hook bridge used by `agent-doc` installs.
 //! - `handle_user_prompt_submit()` reads the Codex `UserPromptSubmit` JSON payload
-//!   from stdin, detects `agent-doc <FILE>`-style invocations, and records the
-//!   active document for the Codex session under `.agent-doc/codex-hooks/`.
+//!   from stdin, finds the effective `agent-doc <FILE>`-style invocation even
+//!   when the prompt body includes injected instruction preambles, and records
+//!   the active document for the Codex session under
+//!   `.agent-doc/codex-hooks/`.
 //! - `handle_stop()` reads the Codex `Stop` JSON payload from stdin, checks the
 //!   tracked document with `session_check::inspect()`, and only intervenes when
 //!   the cycle is still open.
@@ -384,23 +386,43 @@ fn read_stdin_payload() -> Result<String> {
 }
 
 fn resolve_agent_doc_path(prompt: &str, cwd: &Path) -> Option<PathBuf> {
-    let line = prompt.lines().find(|line| !line.trim().is_empty())?.trim();
+    let mut inside_code_fence = false;
+    for raw_line in prompt.lines().rev() {
+        let line = raw_line.trim();
+        if line.starts_with("```") {
+            inside_code_fence = !inside_code_fence;
+            continue;
+        }
+        if inside_code_fence || line.is_empty() {
+            continue;
+        }
+        let Some(file) = parse_agent_doc_invocation_line(line) else {
+            continue;
+        };
+        if file.starts_with('<') && file.ends_with('>') {
+            continue;
+        }
+        let path = PathBuf::from(file);
+        let joined = if path.is_absolute() {
+            path
+        } else {
+            cwd.join(path)
+        };
+        return Some(joined.canonicalize().unwrap_or(joined));
+    }
+    None
+}
+
+fn parse_agent_doc_invocation_line(line: &str) -> Option<&str> {
     let tokens: Vec<&str> = line.split_whitespace().collect();
-    let file = match tokens.as_slice() {
+    match tokens.as_slice() {
         ["agent-doc", file] | ["/agent-doc", file] => Some(*file),
         ["agent-doc", "claim", file] | ["/agent-doc", "claim", file] => Some(*file),
         ["agent-doc", "compact", file] | ["/agent-doc", "compact", file] => Some(*file),
         ["agent-doc", "compact", "exchange", file]
         | ["/agent-doc", "compact", "exchange", file] => Some(*file),
         _ => None,
-    }?;
-    let path = PathBuf::from(file);
-    let joined = if path.is_absolute() {
-        path
-    } else {
-        cwd.join(path)
-    };
-    Some(joined.canonicalize().unwrap_or(joined))
+    }
 }
 
 #[cfg(test)]
@@ -727,6 +749,30 @@ mod tests {
         assert_eq!(PathBuf::from(state.doc_path), doc);
         assert_eq!(state.last_turn_id, "turn-1");
         assert_eq!(state.last_prompt, format!("agent-doc {}", doc.display()));
+    }
+
+    #[test]
+    fn resolve_agent_doc_path_prefers_real_invocation_after_instruction_preamble() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let prompt = format!(
+            "# AGENTS.md instructions for {}\n\
+\n\
+```\n\
+agent-doc <FILE>\n\
+agent-doc compact <FILE>\n\
+```\n\
+\n\
+Use the harness-native entrypoint below.\n\
+\n\
+agent-doc {}\n",
+            dir.path().display(),
+            doc.display()
+        );
+
+        let resolved = resolve_agent_doc_path(&prompt, dir.path()).expect("doc path");
+
+        assert_eq!(resolved, doc);
     }
 
     #[test]
@@ -1141,6 +1187,72 @@ mod tests {
         let outer_root = project_root_for(dir.path()).unwrap();
         assert!(load_state(&outer_root, "codex-session").unwrap().is_none());
         assert!(load_state(&nested_root, "codex-session").unwrap().is_none());
+    }
+
+    #[test]
+    fn stop_auto_closes_active_session_drift_when_prompt_has_instruction_preamble() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        fs::write(&doc, format!("{original}\nVisible drift after committed closeout.\n")).unwrap();
+
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: format!(
+                "# AGENTS.md instructions for {}\n\n```\nagent-doc <FILE>\n```\n\nagent-doc {}\n",
+                dir.path().display(),
+                doc.display()
+            ),
+        })
+        .unwrap();
+
+        let _lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("CODEX_THREAD_ID").ok();
+        unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
+
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("active Codex session changed this document"));
+            }
+            other => panic!("expected interrupted session-check status, got {other:?}"),
+        }
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Recovered after preamble prompt tracking.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        if let Some(value) = prev {
+            unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
+        } else {
+            unsafe { std::env::remove_var("CODEX_THREAD_ID") };
+        }
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("Visible drift after committed closeout."));
+        assert!(content.contains("Recovered after preamble prompt tracking."));
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected committed session-check status, got {other:?}"),
+        }
     }
 
     #[test]

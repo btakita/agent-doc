@@ -29,18 +29,37 @@ chromium-bridge v0.2.0 released. Type command shipped. Sift integration via cork
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/bb8c740a0ebacf764f935ba2b918e38c9401a2d86031faaf8bfbf291cb18ba6a-20260505-173309.md`*
 
-Active backlog:
-- [ ] [#cbnet] [recommended] Add network request listing/inspection to chromium-bridge
-- [ ] [#cbsnap] [recommended] Add structured accessibility snapshot output with stable element refs to chromium-bridge
-- [ ] [#brewtap] Create btakita/homebrew-tap for brew formula distribution (deferred — low priority)
-- 2 more active item(s)
-<!-- agent:boundary:97f5e73b -->
+❯ Active backlog:
+❯ - [ ] [#cbnet] [recommended] Add network request listing/inspection to chromium-bridge
+❯ - [ ] [#cbsnap] [recommended] Add structured accessibility snapshot output with stable element refs to chromium-bridge
+❯ - [ ] [#brewtap] Create btakita/homebrew-tap for brew formula distribution (deferred — low priority)
+❯ - 2 more active item(s)
+❯ do [#cbnet]. spec-test-build-install-commit-push
+### Re: #cbnet — gpt-5
+Implemented `network` capture for chromium-bridge.
+
+What shipped:
+- `chromium-bridge network list` reloads the target tab by default, or navigates first with `--url`, then prints captured request ids, status, type, size, and mime.
+- `chromium-bridge network inspect <matcher>` captures the same load, matches by exact request id or URL substring, and prints request/response headers plus request/response bodies when CDP retains them.
+- `README.md`, `SPEC.md`, and bundled `SKILL.md` now document the new command family and its capture window flags.
+
+Verification completed:
+- `cargo fmt`
+- `cargo test`
+- `cargo clippy -- -D warnings`
+- `cargo build --release`
+- `cargo install --path . --force`
+- Installed binary smoke check: `chromium-bridge network --help` and `chromium-bridge network inspect --help`
+
+Git:
+- Commit: `078f943` (`feat: add network request inspection`)
+- Pushed to `origin/main`
+<!-- agent:boundary:608aab6f -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
-<!-- agent:backlog patch=replace -->
-- [ ] [#cbnet] [recommended] Add network request listing/inspection to chromium-bridge
+<!-- agent:backlog -->
 - [ ] [#cbsnap] [recommended] Add structured accessibility snapshot output with stable element refs to chromium-bridge
 - [ ] [#brewtap] Create btakita/homebrew-tap for brew formula distribution (deferred — low priority)
 - [ ] [#3jmq] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)

@@ -60,19 +60,38 @@ Verification:
 - `cargo install --path src/agent-doc --force`
 
 Clippy is clean now. Cargo still prints `ignoring invalid dependency module-harness which is missing a lib target`; that is a Cargo manifest/dependency warning rather than a Clippy lint. The local `agent-doc` binary was rebuilt and reinstalled successfully.
-<!-- agent:boundary:23272dbd -->
+❯ In the JB Plugin context menu and in the equivalent VSCode plugin menu:
+❯ - Remove `Run With Junie` from the numbered hotkeys but keep the menu item.
+❯ - Remove `Force Claim for Tmux Pane` from the numbered hotkeys but keep the menu item.
+❯ - Add `Compact Exchange` into a numbered hotkey
+❯ - Add `Restart Supervisor Process` into a numbered hotkey. Implemenent agent-doc supervisor api to restart the supervisor process.
+
+❯ spec-test-build-install-commit-push
+### Re: editor popup controls — gpt-5
+
+Implemented the editor-menu reshuffle across JetBrains, VS Code, and the CLI surface.
+
+What changed:
+- JetBrains now keeps `Compact Exchange` and `Restart Supervisor Process` in the primary numbered popup, while `Run with Junie` and `Force Claim for Tmux Pane` stay available from a `More Actions` overflow and remain present in the regular menus.
+- VS Code now mirrors that shape with a numbered primary QuickPick, an overflow QuickPick for `Run with Junie` and `Force Claim for Tmux Pane`, and new command wiring for `Compact Exchange` plus the supervisor restart action.
+- Added the explicit `agent-doc session restart-supervisor <file>` command surface, kept `session restart` as a compatible alias, and routed both editor plugins through that named supervisor-restart path.
+- Updated the editor/plugin specs and added focused popup/command tests for both plugins.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Commit / push:
+- `src/agent-doc`: `e1bbbf4` pushed to `origin/20260422/codex-agent-backend`
+- superproject gitlink: `7392b082f` pushed to `origin/main`
+<!-- agent:boundary:f91a2330 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-In the JB Plugin context menu and in the equivalent VSCode plugin menu:
-- Remove `Run With Junie` from the numbered hotkeys.
-- Remove `Force Claim for Tmux Pane` from the numbered hotkeys.
-- Add `Compact Exchange` into a numbered hotkey
-- Add `Restart Supervisor Process` into a numbered hotkey. Implemenent agent-doc supervisor api to restart the supervisor process.
-
-spec-test-build-install-commit-push
----
 A visible unselected editor's (/home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md) tmux pane is removed from the agent-doc tmux window during an active turn. Syncing brings back the tmux pane. The pane should always remain visible if the document is visible in the editor or was the last visible agent doc. This regression has been around for a few days at least. Please identify root cause(s) and fix. spec-test-build-install-commit-push 
 ---
 do [#jbqbusy]. spec-test-build-install-commit-push

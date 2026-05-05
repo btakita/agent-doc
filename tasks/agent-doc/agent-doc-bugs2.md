@@ -123,7 +123,7 @@ Repo commits:
 - `src/agent-doc`: `454970a` (`test: lock mixed-root passive sync replay`)
 - `agent-loop`: `03fd52ea1` (`chore: bump agent-doc for passive sync replay`)
 
-Repo push follows after this closeout commit.
+❯ Repo push follows after this closeout commit.
 ❯ `Run Agent Doc` on /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not submit `agent-doc ...` to the tmux pane. spec-test-build-install-commit-push
 ### Re: equityfundingsource reroute missed reopen — gpt-5
 
@@ -147,8 +147,11 @@ Repo commits:
 ❯ Repo push follows after this closeout commit.
 ### Re: closeout guard recovery — gpt-5
 
-Re-opened the binary-owned closeout path for this Codex turn after the prior waiting-input reroute response had already landed. No additional repo or document work was required beyond that fix.
-<!-- agent:boundary:7adfe451 -->
+❯ Re-opened the binary-owned closeout path for this Codex turn after the prior waiting-input reroute response had already landed. No additional repo or document work was required beyond that fix.
+### Re: repo push closeout recovery — gpt-5
+
+No additional repo changes were required. This recovery closeout re-opened the binary-owned commit path for the current Codex turn so the repo push can proceed from a committed document state.
+<!-- agent:boundary:baa69851 -->
 <!-- /agent:exchange -->
 ###
 

@@ -218,8 +218,35 @@ So the answer is:
 - No, that alone will not fix a Claude repro where route emits no keys, because the ready direct route already behaves that way.
 - The next useful investigation is to instrument which route branch Claude is actually taking before submit, and why it is not reaching the ready authoritative direct-pane path.
 
-No code changes in this cycle. This is a narrower branch diagnosis so the next fix can target route selection instead of CR formatting again.
-<!-- agent:boundary:ab7eabda -->
+❯ No code changes in this cycle. This is a narrower branch diagnosis so the next fix can target route selection instead of CR formatting again.
+❯ Please implement using your analysis. spec-test-build-install-commit-push
+### Re: Claude Run Agent Doc degraded authoritative fallback — gpt-5
+
+I implemented the route-side fix and added the branch logging needed to isolate the next live repro.
+
+Root cause:
+- `agent-doc session clear <FILE>` could still work on a live authoritative pane because it only needed the pane binding.
+- `agent-doc route --dispatch-only` rejected that same pane as soon as supervisor IPC stopped reporting a healthy runtime or actor state, then dropped to stale registry heuristics.
+- That mismatch is what could produce the Claude `Run Agent Doc` "no send keys" shape even when the authoritative pane was still alive.
+
+What changed:
+- `src/agent-doc/src/route.rs` now separates “authoritative actor binding exists” from “full authoritative supervisor path is healthy”.
+- Dispatch-only reroutes keep the strict supervisor gate for the normal authoritative IPC path, but when the authoritative pane is still the current registered/live-owner binding and supervisor state is missing or degraded, route now reuses that same authoritative pane directly.
+- Added explicit ops-log diagnostics for both the used fallback and skipped fallback cases. The new markers are `route_dispatch_only_authoritative_fallback` and `route_dispatch_only_authoritative_fallback_skipped` in `.agent-doc/logs/ops.log`.
+- Updated `specs/07-session-tmux-commands.md` and `VERSIONS.md` to document the degraded authoritative fallback contract.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_dispatch_only_falls_back_to_registered_authoritative_actor_pane_when_supervisor_state_is_missing -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Git:
+- Committed in `src/agent-doc` as `7f9f473` (`fix: keep dispatch-only reroutes on degraded actor pane`)
+- Pushed to `origin/20260422/codex-agent-backend`
+
+I did not run a live JetBrains/VS Code replay from this CLI session, so the new logging is the main added signal for the next editor repro.
+<!-- agent:boundary:d5fecd32 -->
 <!-- /agent:exchange -->
 ###
 

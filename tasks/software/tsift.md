@@ -182,8 +182,21 @@ Verification in `src/tsift` passed:
 Committed and pushed in `src/tsift` as `2979e59` (`feat: add diff digest command`).
 
 Top remaining backlog item: `#testdigest`.
-<!-- agent:boundary:86a8753f -->
+❯ do [#testdigest]. spec-test-build-install-commit-push
+The hang was not `agent-doc --version`. That command returned immediately with `0.33.16`.
+
+What’s actually stuck is an old `agent-doc` session for this same file that was already running since May 4, 2026. I found these live processes:
+
+- `agent-doc start tasks/software/tsift.md` pid `3264565`
+- child `node ... codex` pid `3264582`
+- child `codex` pid `3264592`
+
+So the likely failure mode is: a stale `agent-doc`/Codex session for `tasks/software/tsift.md` was already open, and my new turn ended up waiting behind or alongside that orphaned session instead of progressing normally. The wrapper also showed one branch as “aborted by user after 10886.9s”, which is about 3 hours.
+
+If you want, I can kill that stale `tsift.md` session and restart `agent-doc /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` cleanly.
+<!-- agent:boundary:9940e649 -->
 <!-- /agent:exchange -->
+##
 
 <!--
 Can tsift use rtk to compress tool call output in the context?

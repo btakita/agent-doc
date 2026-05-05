@@ -317,7 +317,7 @@ Commit / push:
 I did not create a superproject gitlink commit because the workspace root already had unrelated dirty changes outside this fix.
 
 There were no actionable follow-up items to capture.
-<!-- agent:boundary:dc89a2e8 -->
+<!-- agent:boundary:2b491001 -->
 <!-- /agent:exchange -->
 ###
 
@@ -328,9 +328,6 @@ There were no actionable follow-up items to capture.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [/] [#jbpdrop] [recommended] Replay the live tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/buildparty-investor-demo/dev.md mixed-root routed-turn scenario after the injected tmux-context fix and confirm the visible sibling pane no longer gets stashed. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
-- [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc after the canonical Claude harness alias fix and confirm Claude-owned authoritative actor sessions reroute cleanly without claude-code/claude mismatch errors.
-- [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#devmdcmt] [recommended]
   `agent-doc` left
   `src/session-share/tasks/buildparty-investor-demo/dev.md` in a synthetic

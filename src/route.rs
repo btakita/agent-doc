@@ -3283,7 +3283,7 @@ fn send_command_once_unchecked(
         eprintln!("[route] warning: display-message failed: {}", e);
     }
 
-    tmux.send_keys(pane, &payload)?;
+    crate::sessions::send_submitted_text(tmux, pane, &payload)?;
     if let Err(e) = tmux.select_pane(pane) {
         eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
     }
@@ -3641,17 +3641,6 @@ fn send_command_checked(
 ) -> Result<CommandDispatchStatus> {
     ensure_dispatch_target_matches_file(pane, file_path)?;
     send_command_unchecked(tmux, pane, file_path, harness)
-}
-
-fn send_command_once_checked(
-    tmux: &Tmux,
-    pane: &str,
-    file_path: &str,
-    harness: &HarnessConfig,
-) -> Result<()> {
-    ensure_dispatch_target_matches_file(pane, file_path)?;
-    let _ = send_command_once_unchecked(tmux, pane, file_path, harness)?;
-    Ok(())
 }
 
 fn dispatch_existing_managed_reopen(

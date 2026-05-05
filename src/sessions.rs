@@ -204,6 +204,15 @@ pub fn send_key(tmux: &Tmux, pane_id: &str, key: &str) -> Result<()> {
     tmux.send_key(pane_id, key)
 }
 
+/// Submit a single-line command through a tmux pane's normal text+Enter path.
+///
+/// This is the canonical live-pane submission helper for agent-doc-managed
+/// harness commands such as routed reopen triggers and file-scoped `/clear`.
+pub fn send_submitted_text(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()> {
+    tmux.send_keys(pane_id, text)
+        .with_context(|| format!("failed to submit input to pane {}", pane_id))
+}
+
 // ---------------------------------------------------------------------------
 // Free functions — registry operations and env-based checks
 // ---------------------------------------------------------------------------

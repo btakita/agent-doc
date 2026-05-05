@@ -10,6 +10,23 @@ const TMUX_DIRECT_SUBMIT_MODE: &str = "tmux_literal_enter_batch";
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DirectSubmitPaneSource {
+    AuthoritativeActor,
+    LiveOwner,
+    Registry,
+}
+
+impl DirectSubmitPaneSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::AuthoritativeActor => "authoritative_actor",
+            Self::LiveOwner => "live_owner",
+            Self::Registry => "registry",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestartMode {
     Continue,
     Fresh,
@@ -188,21 +205,16 @@ pub fn clear(file: &Path) -> Result<()> {
     let ctx = build_context(file)?;
     ensure_supervisor_socket(&ctx)?;
     let tmux = Tmux::default_server();
-    let pane_sent = ctx
-        .registry_entry
-        .as_ref()
-        .map(|entry| entry.pane.clone())
-        .filter(|pane| tmux.pane_alive(pane));
-
-    if let Some(pane) = pane_sent {
+    if let Some((pane, pane_source)) = resolve_direct_submit_pane(&ctx, &tmux) {
         send_clear_to_pane(&tmux, &pane, &ctx.canonical_file)?;
         crate::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
-                "session_clear_sent file={} pane={} delivery=direct_pane_submit submit_mode={}",
+                "session_clear_sent file={} pane={} delivery=direct_pane_submit submit_mode={} pane_source={}",
                 ctx.canonical_file.display(),
                 pane,
-                TMUX_DIRECT_SUBMIT_MODE
+                TMUX_DIRECT_SUBMIT_MODE,
+                pane_source.as_str()
             ),
         );
     } else {
@@ -229,7 +241,7 @@ pub fn clear(file: &Path) -> Result<()> {
         crate::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
-                "session_clear_sent file={} delivery=supervisor_ipc submit_mode={}",
+                "session_clear_sent file={} delivery=supervisor_ipc submit_mode={} pane_source=none",
                 ctx.canonical_file.display(),
                 SUPERVISOR_INJECT_SUBMIT_MODE
             ),
@@ -250,13 +262,39 @@ pub fn clear(file: &Path) -> Result<()> {
 }
 
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path) -> Result<()> {
-    tmux.send_keys(pane, "/clear").with_context(|| {
+    crate::sessions::send_submitted_text(tmux, pane, "/clear").with_context(|| {
         format!(
             "failed to send `/clear` to authoritative pane {} for {}",
             pane,
             file.display()
         )
     })
+}
+
+fn resolve_direct_submit_pane(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+) -> Option<(String, DirectSubmitPaneSource)> {
+    if let Some(pane) = ctx
+        .actor_record
+        .as_ref()
+        .map(|record| record.pane_id.as_str())
+        .filter(|pane| tmux.pane_alive(pane))
+    {
+        return Some((pane.to_string(), DirectSubmitPaneSource::AuthoritativeActor));
+    }
+
+    if let Some(pane) =
+        crate::sync::find_normal_path_owner_pane(tmux, &ctx.canonical_file, &ctx.session_id)
+    {
+        return Some((pane, DirectSubmitPaneSource::LiveOwner));
+    }
+
+    ctx.registry_entry
+        .as_ref()
+        .map(|entry| entry.pane.as_str())
+        .filter(|pane| tmux.pane_alive(pane))
+        .map(|pane| (pane.to_string(), DirectSubmitPaneSource::Registry))
 }
 
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
@@ -770,5 +808,120 @@ mod tests {
             &[crate::supervisor::ipc::normalize_submit_text("/clear")]
         );
         drop(sock);
+    }
+
+    #[test]
+    fn resolve_direct_submit_pane_prefers_authoritative_actor() {
+        let dir = tempfile::tempdir().unwrap();
+        let iso = crate::sessions::IsolatedTmux::new("session-clear-pane-select-actor");
+        let actor_pane = iso.new_session("test", dir.path()).unwrap();
+        let registry_pane = iso.new_window("test", dir.path()).unwrap();
+        let ctx = SessionContext {
+            canonical_file: dir.path().join("doc.md"),
+            base_dir: dir.path().to_path_buf(),
+            session_id: "session-clear".to_string(),
+            harness: "codex".to_string(),
+            actor_record: Some(crate::session_actor::ActorRecord {
+                document_id: "doc".to_string(),
+                session_id: "session-clear".to_string(),
+                generation: 3,
+                pane_id: actor_pane.clone(),
+                window_id: iso.pane_window(&actor_pane).unwrap(),
+                harness: "codex".to_string(),
+                state: ActorState::Ready,
+                last_transition: crate::session_actor::ActorLastTransition {
+                    caller: "test".to_string(),
+                    reason: "actor".to_string(),
+                    timestamp: 1,
+                    prior_generation: 2,
+                    new_generation: 3,
+                },
+            }),
+            registry_entry: Some(SessionEntry {
+                pane: registry_pane.clone(),
+                pid: 1,
+                cwd: dir.path().display().to_string(),
+                started: "now".to_string(),
+                session_id: "session-clear".to_string(),
+                file: dir.path().join("doc.md").display().to_string(),
+                window: iso.pane_window(&registry_pane).unwrap(),
+                supervisor_instance_id: "sup".to_string(),
+            }),
+            startup_miss: None,
+            log_status: None,
+            supervisor_runtime: SupervisorRuntime {
+                health: SupervisorHealth::Healthy,
+                actor_state: Some(ActorState::Ready),
+                supervisor_state: Some("healthy".to_string()),
+                restart_count: 0,
+                supervisor_pid: Some(1),
+                supervisor_instance_id: Some("sup".to_string()),
+                child_pid: Some(2),
+                cwd_source: Some("config".to_string()),
+            },
+            supervisor_socket: dir.path().join("session-clear.sock"),
+        };
+
+        assert_eq!(
+            resolve_direct_submit_pane(&ctx, &iso),
+            Some((actor_pane, DirectSubmitPaneSource::AuthoritativeActor))
+        );
+    }
+
+    #[test]
+    fn resolve_direct_submit_pane_falls_back_to_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        let iso = crate::sessions::IsolatedTmux::new("session-clear-pane-select-registry");
+        let registry_pane = iso.new_session("test", dir.path()).unwrap();
+        let ctx = SessionContext {
+            canonical_file: dir.path().join("doc.md"),
+            base_dir: dir.path().to_path_buf(),
+            session_id: "session-clear".to_string(),
+            harness: "codex".to_string(),
+            actor_record: Some(crate::session_actor::ActorRecord {
+                document_id: "doc".to_string(),
+                session_id: "session-clear".to_string(),
+                generation: 3,
+                pane_id: "%9999".to_string(),
+                window_id: "@9999".to_string(),
+                harness: "codex".to_string(),
+                state: ActorState::Ready,
+                last_transition: crate::session_actor::ActorLastTransition {
+                    caller: "test".to_string(),
+                    reason: "actor".to_string(),
+                    timestamp: 1,
+                    prior_generation: 2,
+                    new_generation: 3,
+                },
+            }),
+            registry_entry: Some(SessionEntry {
+                pane: registry_pane.clone(),
+                pid: 1,
+                cwd: dir.path().display().to_string(),
+                started: "now".to_string(),
+                session_id: "session-clear".to_string(),
+                file: dir.path().join("doc.md").display().to_string(),
+                window: iso.pane_window(&registry_pane).unwrap(),
+                supervisor_instance_id: "sup".to_string(),
+            }),
+            startup_miss: None,
+            log_status: None,
+            supervisor_runtime: SupervisorRuntime {
+                health: SupervisorHealth::Healthy,
+                actor_state: Some(ActorState::Ready),
+                supervisor_state: Some("healthy".to_string()),
+                restart_count: 0,
+                supervisor_pid: Some(1),
+                supervisor_instance_id: Some("sup".to_string()),
+                child_pid: Some(2),
+                cwd_source: Some("config".to_string()),
+            },
+            supervisor_socket: dir.path().join("session-clear.sock"),
+        };
+
+        assert_eq!(
+            resolve_direct_submit_pane(&ctx, &iso),
+            Some((registry_pane, DirectSubmitPaneSource::Registry))
+        );
     }
 }

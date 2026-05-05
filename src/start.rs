@@ -763,8 +763,7 @@ fn dispatch_submit_text_to_tmux(
     pane: &str,
     text: &str,
 ) -> Result<()> {
-    let submitted_text = crate::supervisor::ipc::normalize_submit_text(text);
-    tmux.send_keys(pane, &submitted_text)
+    crate::sessions::send_submitted_text(tmux, pane, text)
         .with_context(|| format!("failed to inject submitted input into pane {}", pane))
 }
 
@@ -3587,8 +3586,7 @@ mod tests {
         .unwrap();
         std::thread::sleep(Duration::from_millis(150));
 
-        dispatch_submit_text_to_tmux(&iso, &pane, "agent-doc tasks/software/tsift.md\n")
-            .unwrap();
+        dispatch_submit_text_to_tmux(&iso, &pane, "agent-doc tasks/software/tsift.md\n").unwrap();
         for _ in 0..40 {
             if done_path.exists() {
                 break;

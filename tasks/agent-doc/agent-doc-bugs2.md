@@ -103,7 +103,28 @@ Verification:
 Repo commits:
 - `src/agent-doc`: `e598848` (`test: stabilize retained-dead stash pane coverage`)
 - `agent-loop`: `47432fade` (`chore: bump agent-doc for resync flake fix`)
-<!-- agent:boundary:444493fa -->
+❯ do [#vssplitreplay]. spec-test-build-install-commit-push
+### Re: #vssplitreplay — gpt-5
+
+Closed `#vssplitreplay` by locking the exact VS Code mixed-root passive-sync replay into the repo instead of leaving it as a one-off manual check.
+
+Changes:
+- Tightened the tmux regression in `src/sync.rs` so it now replays the concrete `tasks/agent-doc/agent-doc-bugs2.md` + `src/session-share/tasks/claudescore-3.md` split and proves a blocked sibling file does not stash either healthy visible pane.
+- Updated `specs/07-session-tmux-commands.md` with the same mixed-root replay contract.
+- Added a `VERSIONS.md` entry documenting the closeout.
+
+Verification:
+- `cargo test -p agent-doc safe_passive_sync_preserves_existing_layout_for_vscode_mixed_root_split_replay -- --nocapture`
+- `make check`
+- `cargo install --path .`
+- `cargo build --release`
+
+Repo commits:
+- `src/agent-doc`: `454970a` (`test: lock mixed-root passive sync replay`)
+- `agent-loop`: `03fd52ea1` (`chore: bump agent-doc for passive sync replay`)
+
+Repo push follows after this closeout commit.
+<!-- agent:boundary:b9560f8e -->
 <!-- /agent:exchange -->
 ###
 
@@ -114,7 +135,6 @@ Repo commits:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to
   `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where
   `finalize`/

@@ -1925,6 +1925,19 @@ fn route_via_authoritative_actor(
                 DispatchOnlyReopenDelivery::DirectPaneSubmit,
             );
         }
+        if dispatch_only && authoritative_actor_dispatch_waiting_input_recoverable(actor_state) {
+            return recover_dispatch_only_authoritative_waiting_input(
+                tmux,
+                file,
+                session_id,
+                file_path,
+                target_session,
+                split_before,
+                harness,
+                &dispatch_pane,
+                actor.record.generation,
+            );
+        }
         if authoritative_actor_dispatch_can_queue_optimistically(actor_state) {
             crate::ops_log::log_op(
                 file,
@@ -2007,6 +2020,82 @@ fn route_via_authoritative_actor(
         dispatch_start,
     )?;
     Ok(ack_pane.unwrap_or(dispatch_pane))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn recover_dispatch_only_authoritative_waiting_input(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    target_session: &str,
+    split_before: bool,
+    harness: &HarnessConfig,
+    pane: &str,
+    generation: u64,
+) -> Result<String> {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_waiting_input_restart file={} pane={} harness={} generation={}",
+            file.display(),
+            pane,
+            harness.binary,
+            generation
+        ),
+    );
+    eprintln!(
+        "[route] authoritative actor generation {} for {} is waiting for supervisor restart input on pane {} — restarting fresh once before the dispatch-only reroute",
+        generation,
+        file.display(),
+        pane
+    );
+    let initial_status = crate::startup_miss::session_log_status(file, session_id)
+        .ok()
+        .flatten();
+
+    if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
+        anyhow::bail!(
+            "authoritative actor generation {} for {} owns pane {} but route could not restart the waiting supervisor fresh. Run `agent-doc start {}` manually to recover",
+            generation,
+            file.display(),
+            pane,
+            file.display()
+        );
+    }
+
+    let dispatch_pane = match wait_for_starting_pane_recovery_target(
+        tmux,
+        file,
+        session_id,
+        pane,
+        file_path,
+        initial_status.as_ref(),
+    ) {
+        Some(StartingPaneRecoveryTarget::DifferentPane(recovered)) => recovered,
+        Some(StartingPaneRecoveryTarget::SamePane) | None => {
+            resolve_fresh_dispatch_target_after_ready_wait(tmux, session_id, pane, file_path, None)?
+        }
+    };
+
+    rescue_from_stash(
+        tmux,
+        &dispatch_pane,
+        session_id,
+        file_path,
+        target_session,
+        split_before,
+    );
+    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+    dispatch_only_send_reopen(
+        tmux,
+        file,
+        session_id,
+        &dispatch_pane,
+        file_path,
+        harness,
+        DispatchOnlyReopenDelivery::DirectPaneSubmit,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3493,6 +3582,12 @@ fn authoritative_actor_dispatch_can_queue_optimistically(
         state,
         crate::session_actor::ActorState::Starting | crate::session_actor::ActorState::Busy
     )
+}
+
+fn authoritative_actor_dispatch_waiting_input_recoverable(
+    state: crate::session_actor::ActorState,
+) -> bool {
+    state == crate::session_actor::ActorState::WaitingInput
 }
 
 fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {
@@ -10175,6 +10270,110 @@ Body\n\
         assert!(
             !stale_content.contains("STALE:agent-doc "),
             "dispatch-only reroute should still avoid the stale registered pane after session clear: {stale_content}"
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn resolve_or_create_pane_dispatch_only_recovers_waiting_input_actor_with_fresh_restart() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-waiting-input-restart");
+        let session = "codex";
+        let cwd = test_cwd();
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &actor_pane, "> ", std::time::Duration::from_secs(3));
+
+        let doc = dir.path().join("dispatch-only-waiting-input.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-dispatch-only-waiting-input";
+        sessions::register(session_id, &actor_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => {
+                let actor_state = if restart_called_for_ipc.load(Ordering::Relaxed) {
+                    "ready"
+                } else {
+                    "waiting_input"
+                };
+                IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "actor_state": actor_state,
+                    "restart_count": 0
+                }))
+            }
+            IpcMethod::Restart { mode } => {
+                assert_eq!(mode, "fresh");
+                restart_called_for_ipc.store(true, Ordering::Relaxed);
+                IpcResponse::ok_empty()
+            }
+            IpcMethod::Inject { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let resolved = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("dispatch-only reroute should recover a waiting-input authoritative actor");
+        assert_eq!(resolved, actor_pane);
+        assert!(
+            restart_called.load(Ordering::Relaxed),
+            "dispatch-only reroute should request one fresh restart when the authoritative actor is waiting for supervisor input"
+        );
+
+        let actor_after = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            &HarnessConfig::codex().trigger_command(&file_path),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
+            "dispatch-only reroute should still submit the bare reopen after recovering the waiting-input supervisor prompt: {actor_after}"
         );
 
         ipc.stop();

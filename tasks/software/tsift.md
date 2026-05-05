@@ -280,7 +280,17 @@ This shipped as `tsift v0.1.29` with direct helper coverage, CLI parsing coverag
 Implemented `tsift session-digest` as a bounded transcript digest for markdown session docs and Claude JSONL. It reads from stdin or `--input`, auto-detects or accepts `--source markdown|jsonl`, extracts prompt targets, shell commands, touched files/symbols, failures, and closeout evidence, and emits both JSON and human-readable summaries without replaying transcript state.
 
 Updated the CLI/docs/version surfaces for `tsift v0.1.30`, added direct helper coverage plus CLI parsing coverage, and added a compiled stdin-path regression for the new command. Verification in `src/tsift` passed: `cargo test`, `make check`, `cargo build --release`, and `cargo install --path . --force`; `tsift --version` now reports `0.1.30`. Committed and pushed in `src/tsift` as `cdfb504` (`feat: add session digest command`).
-<!-- agent:boundary:842ca114 -->
+❯ What are the #next-steps to save on token usage?
+### Re: next steps — gpt-5
+
+Yes. The next token-saving work should stay focused on flows that are still raw by default.
+
+1. `#revisiondigest` — extend the diff-digest path beyond plain working-tree diffs. Right now `git diff` is covered, but staged diffs, `git show`, and patch-style history review can still spill raw hunks into context. This is the highest-leverage remaining gap, so I put it at the top of backlog.
+2. `#sessionrewrite` — auto-route long session/doc reads into `tsift session-digest`. The command exists now, but long `agent-doc` markdown reviews and Claude JSONL handoffs are still mostly opt-in. Making that path default would cut a lot of transcript-shaped context.
+3. `#searchcollapse` — add grouped result collapse for broad search/explain output. RTK line caps help, but they are still transport truncation. The better token saver is tsift-native grouping by file/module with counts first, then only a few representative snippets.
+
+Top backlog item: `#revisiondigest`.
+<!-- agent:boundary:76766480 -->
 <!-- /agent:exchange -->
 ###
 
@@ -291,6 +301,43 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tq0h] revisiondigest=Revision/staged diff digest plus rewrite coverage for git diff --cached, git show, and patch-style history output so non-working-tree diff review stays bounded. #spec-test-build-install-commit-push
+- [ ] [#yyhd] sessionrewrite=Auto-route long session/doc transcript reads into tsift session-digest for agent-doc markdown and Claude JSONL handoff/review flows. #spec-test-build-install-commit-push
+- [ ] [#4bzh] searchcollapse=Collapse high-hit tsift search/explain output by file/module counts before snippets so broad exact queries stay useful without RTK-only truncation. #spec-test-build-install-commit-push
+- [ ] [#9aep] revisiondigest=Revision/staged diff digest + rewrite coverage for , commit 6922d9f3927e2cec56d6548de7d9fb0d7a3a9ebf
+Author: Brian Takita <brian.takita@gmail.com>
+Date:   Tue May 5 15:45:36 2026 -0400
+
+    agent-doc(dev): 2026-05-05 15:45:36 (submodule pointer)
+
+diff --git a/src/session-share b/src/session-share
+index b3ae48ffb..79f2a46e7 160000
+--- a/src/session-share
++++ b/src/session-share
+@@ -1 +1 @@
+-Subproject commit b3ae48ffb0a1d372322127410f514daa3c861cf1
++Subproject commit 79f2a46e7206c7437b54f55ea1053b5cb9982f61, and patch-style history output so non-working-tree diff review stays bounded. #spec-test-build-install-commit-push
+- [ ] [#a7e3] sessionrewrite=Auto-route long session/doc transcript reads into Session digest (markdown)
+  transcript items: 11
+  prompt targets:   0
+  commands:         4
+  touched files:    4
+  touched symbols:  0
+  failures:         0
+  closeout:         0
+
+Commands:
+  - agent-doc (1)
+  - git diff (1)
+  - git show (1)
+  - tsift session-digest (1)
+
+Touched files:
+  - /patch:exchange (1)
+  - file/module (1)
+  - search/explain (1)
+  - session/doc (1) for agent-doc markdown and Claude JSONL handoff/review flows. #spec-test-build-install-commit-push
+- [ ] [#tmfb] searchcollapse=Collapse high-hit / output by file/module counts before snippets so broad exact queries stay useful without RTK-only truncation. #spec-test-build-install-commit-push
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

@@ -40,12 +40,7 @@ Icebox:
 - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement:
 - 1 more active item(s)
-<!-- agent:boundary:6ecba8a8 -->
-<!-- /agent:exchange -->
-###
-
-<!--
-Fix all clippy warnings
+❯ Fix all clippy warnings
 ```
 • Ran cargo build --manifest-path src/agent-doc/Cargo.toml --release && cargo install --path src/agent-doc --force
   └ warning: function `send_command_once_checked` is never used
@@ -54,7 +49,22 @@ Fix all clippy warnings
         Replaced package `agent-doc v0.33.16 (/home/brian/work/btakita/agent-loop/src/agent-doc)` with `agent-doc
     v0.33.16 (/home/brian/work/btakita/agent-loop/src/agent-doc)` (executable `agent-doc`)
 ```
----
+### Re: clippy cleanup — gpt-5
+
+Fixed the `agent-doc` clippy warning surface across `route`, `sync`, `sessions`, support modules, and the debounce/finalize tests. The largest code changes were the dispatch-only ready-probe loop rewrite in `route.rs`, pruning or test-gating dead helpers, and tightening the test fixtures so the warning cleanup stays green.
+
+Verification:
+- `cargo clippy --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Clippy is clean now. Cargo still prints `ignoring invalid dependency module-harness which is missing a lib target`; that is a Cargo manifest/dependency warning rather than a Clippy lint. The local `agent-doc` binary was rebuilt and reinstalled successfully.
+<!-- agent:boundary:23272dbd -->
+<!-- /agent:exchange -->
+###
+
+<!--
 In the JB Plugin context menu and in the equivalent VSCode plugin menu:
 - Remove `Run With Junie` from the numbered hotkeys.
 - Remove `Force Claim for Tmux Pane` from the numbered hotkeys.

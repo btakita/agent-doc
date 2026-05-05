@@ -164,6 +164,8 @@ Better replacement:
 
 > `Price: $100/hr, with an anticipated working schedule of 40 hrs/week, prorated to the nearest half day.`
 
+❯ The job seems like it will be hourly. Should I prorate to the nearest 15 or 30 minutes?
+
 And then keep the separate line:
 
 > `Budget constraints: No more than 40 hrs/week without prior written consent.`
@@ -178,8 +180,31 @@ If you want the email redrafted around that point, I would change only that para
 
 > For Exhibit A, please revise the hours wording to read: `Price: $100/hr, with an anticipated working schedule of 40 hrs/week, prorated to the nearest half day.`
 
-So the short answer is: **yes, `up to 40 hrs/week` is a bit too soft for your stated expectation; `anticipated working schedule of 40 hrs/week` is better.**
-<!-- agent:boundary:b5629f18 -->
+❯ So the short answer is: **yes, `up to 40 hrs/week` is a bit too soft for your stated expectation; `anticipated working schedule of 40 hrs/week` is better.**
+### Re: hourly proration increment — gpt-5
+
+If this is truly an **hourly** engagement, I would not leave `prorated to the nearest half day` in place.
+
+My recommendation is **nearest 30 minutes only if you want a simple compromise**, but **nearest 15 minutes is the cleaner hourly-billing convention**.
+
+Why:
+
+- **half day** is too coarse for hourly software work
+- **30 minutes** is workable, but it still rounds more aggressively than many contractor arrangements
+- **15 minutes** is common, easier to defend as actual time billing, and less likely to create friction on partial-day work
+
+So if you want the most natural hourly wording, I would use:
+
+> `Price: $100/hr, with an anticipated working schedule of 40 hrs/week, billed in 15-minute increments.`
+
+If you want a slightly simpler / more conservative admin version, then:
+
+> `Price: $100/hr, with an anticipated working schedule of 40 hrs/week, billed in 30-minute increments.`
+
+My default recommendation would be **15-minute increments**, unless you already know Test Double strongly prefers coarser invoice rounding.
+
+So the short answer is: **between 15 and 30, I would choose 15 for an hourly engagement.**
+<!-- agent:boundary:8915c7e9 -->
 <!-- /agent:exchange -->
 
 ## Queue

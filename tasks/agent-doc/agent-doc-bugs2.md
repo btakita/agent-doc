@@ -203,15 +203,39 @@ What changed in the plan:
 - called out the existing `guard_no_conversation_tail_outside_exchange(...)` and `repair_duplicate_exchange_close_tail(...)` protections as part of the root-cause trace, since at least one live closeout/recovery path still reached a bad tail shape before those protections prevented commit
 - tightened the exit criteria so this bug is not considered addressed until the malformed-tail shape fails closed or is deterministically repaired before commit
 
-I am keeping `#tailpatch` open because this cycle was plan refresh only, per the backlog contract. No `src/agent-doc` code, spec, or test files were changed in this turn.
-<!-- agent:boundary:e7c5f509 -->
+❯ I am keeping `#tailpatch` open because this cycle was plan refresh only, per the backlog contract. No `src/agent-doc` code, spec, or test files were changed in this turn.
+❯ I manually transitioned backlog items with [/] to [x]. The agent-doc pipeline removed the done items but then brought some of the items back. Please investigate root cause(s) and fix.
+❯ spec-test-build-install-commit-push
+### Re: backlog reap resurrection fix — gpt-5
+
+Root cause fixed.
+
+What was happening:
+- `repair` / `preflight` could reap user-marked `[x]` backlog items correctly.
+- A later stale local/editor rewrite could put the same `[#id]` lines back into the live `agent:backlog` before closeout.
+- `git::commit()` treated that as generic post-commit local drift, so HEAD stayed clean while the working tree resurrected the supposedly removed items, and the next cycle had to reap them again.
+
+What changed:
+- added a cycle-scoped `reaped_pending_ids` ledger in `cycle_state`
+- recorded reaped tracked-work ids from both `preflight` and `repair`
+- made `git::commit()` fail closed if any id reaped earlier in the same cycle reappears in the live `agent:backlog` or `agent:icebox` before commit
+- updated the pending spec + version notes to make that resurrection case an explicit closeout invariant
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Commit / push:
+- `src/agent-doc`: `28fb2fb` pushed to `origin/20260422/codex-agent-backend`
+- superproject gitlink: `610ab0bb2` pushed to `origin/main`
+
+There were no actionable follow-up items to capture.
+<!-- agent:boundary:dedbfae8 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-I manually transitioned backlog items with [/] to [x]. The agent-doc pipeline removed the done items but then brought some of the items back.
-spec-test-build-install-commit-push
----
 "Press Enter to restart, or 'q' to exit."
 -->
 

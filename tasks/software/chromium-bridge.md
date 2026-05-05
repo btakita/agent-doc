@@ -51,18 +51,37 @@ Verification completed:
 - `cargo install --path . --force`
 - Installed binary smoke check: `chromium-bridge network --help` and `chromium-bridge network inspect --help`
 
+❯ Git:
+❯ - Commit: `078f943` (`feat: add network request inspection`)
+❯ - Pushed to `origin/main`
+❯ do [#cbsnap]. spec-test-build-install-commit-push
+### Re: #cbsnap — gpt-5
+Implemented structured accessibility snapshots for `chromium-bridge`.
+
+What shipped:
+- `chromium-bridge snapshot` now renders the visible accessibility tree with stable `ref=dom:<id>` / `ref=ax:<nodeId>` handles and preserved indentation.
+- `chromium-bridge snapshot --json` now returns a normalized snapshot object with `rootRefs`, `nodes[*].ref`, `parentRef`, `childRefs`, and serialized AX values/properties for follow-up tooling.
+- `chromium-bridge snapshot --json --raw` preserves the protocol-level AXNode dump for low-level debugging.
+- `README.md`, `SPEC.md`, and bundled `SKILL.md` now document the normalized snapshot output and raw escape hatch.
+
+Verification completed:
+- `cargo fmt`
+- `cargo test`
+- `cargo clippy -- -D warnings`
+- `cargo build --release`
+- `cargo install --path . --force`
+- Installed binary smoke checks: `chromium-bridge snapshot --help`, `chromium-bridge --help`
+
 Git:
-- Commit: `078f943` (`feat: add network request inspection`)
+- Commit: `f47cb1b` (`feat: add structured accessibility snapshots`)
 - Pushed to `origin/main`
-<!-- closeout-normalization -->
-<!-- agent:boundary:2a053c1c -->
+<!-- agent:boundary:803f30e6 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
-<!-- agent:backlog patch=replace -->
-- [ ] [#cbsnap] [recommended] Add structured accessibility snapshot output with stable element refs to chromium-bridge
+<!-- agent:backlog -->
 - [ ] [#brewtap] Create btakita/homebrew-tap for brew formula distribution (deferred — low priority)
 - [ ] [#3jmq] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)
 - [ ] [#fp48] Explore sift corpus configuration for multi-project search

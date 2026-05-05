@@ -875,16 +875,25 @@ My practical priority order for `chromium-bridge` would be:
 
 I added those as `[recommended]` backlog items so they do not get lost.
 
-Sources:
+❯ Sources:
+❯ - [Playwright CLI README](https://github.com/microsoft/playwright-cli)
+❯ - [Playwright CLI capabilities](https://playwright.dev/agent-cli/capabilities)
+❯ - [Playwright MCP extension README](https://github.com/microsoft/playwright-mcp/blob/main/packages/extension/README.md)
+### Re: Sources — gpt-5
+
+Noted. The current reference set for the Playwright comparison is:
+
 - [Playwright CLI README](https://github.com/microsoft/playwright-cli)
 - [Playwright CLI capabilities](https://playwright.dev/agent-cli/capabilities)
 - [Playwright MCP extension README](https://github.com/microsoft/playwright-mcp/blob/main/packages/extension/README.md)
-<!-- agent:boundary:3d1f5f10 -->
+
+Those are the sources I would keep using for follow-up feature comparisons against `chromium-bridge`.
+<!-- agent:boundary:2b6a0de9 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
-<!-- agent:pending -->
+<!-- agent:pending patch=replace -->
 - [ ] [#cbstate] [recommended] Add persistent session/profile support plus state save/load to chromium-bridge
 - [ ] [#cbnet] [recommended] Add network request listing/inspection to chromium-bridge
 - [ ] [#cbsnap] [recommended] Add structured accessibility snapshot output with stable element refs to chromium-bridge

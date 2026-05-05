@@ -143,7 +143,7 @@ I would send this version:
 >
 > `Any claim that work performed or intellectual property utilized in the performance of the Services violates the rights of a third party shall be governed exclusively by Sections 12 and 5 of this Agreement, and this Section 10.1 shall not create any broader indemnity or liability obligation.`
 >
-> For Exhibit A, please revise the hours wording to read as anticipated at up to 40 hrs/week rather than `@ 40hrs week`.
+❯ > For Exhibit A, please revise the hours wording to read as anticipated at up to 40 hrs/week rather than `@ 40hrs week`.
 >
 > One minor cleanup item I still see is that the defined term appears once as `BackgroundTechnology` without the space; it should match `Background Technology` used elsewhere.
 >
@@ -151,8 +151,35 @@ I would send this version:
 >
 > Brian
 
-This is better than the earlier draft because it keeps the formatting point narrow and concrete instead of making it sound like there are broad document-polish problems.
-<!-- agent:boundary:be6f3149 -->
+❯ This is better than the earlier draft because it keeps the formatting point narrow and concrete instead of making it sound like there are broad document-polish problems.
+❯ The expectation is that I will work 40 hr/week. Does this language make it seem that I will reduce my hours even if I am requested to work 40 hrs/week?
+❯ > For Exhibit A, please revise the hours wording to read as anticipated at up to 40 hrs/week rather than `@ 40hrs week`.
+### Re: 40-hours wording risk — gpt-5
+
+Yes. `anticipated at up to 40 hrs/week` can imply that **anything up to 40** is equally consistent with the deal, which is a little softer than what you described.
+
+If the real expectation is that you will generally work a **40-hour week when requested**, but you do not want the awkward `@ 40hrs week` wording, I would use language that preserves the expected cadence and keeps the separate approval cap.
+
+Better replacement:
+
+> `Price: $100/hr, with an anticipated working schedule of 40 hrs/week, prorated to the nearest half day.`
+
+And then keep the separate line:
+
+> `Budget constraints: No more than 40 hrs/week without prior written consent.`
+
+That reads as:
+
+- expected cadence = 40 hrs/week
+- over-40 requires consent
+- it does **not** suggest you are planning to scale back below 40 whenever you want
+
+If you want the email redrafted around that point, I would change only that paragraph to:
+
+> For Exhibit A, please revise the hours wording to read: `Price: $100/hr, with an anticipated working schedule of 40 hrs/week, prorated to the nearest half day.`
+
+So the short answer is: **yes, `up to 40 hrs/week` is a bit too soft for your stated expectation; `anticipated working schedule of 40 hrs/week` is better.**
+<!-- agent:boundary:b5629f18 -->
 <!-- /agent:exchange -->
 
 ## Queue

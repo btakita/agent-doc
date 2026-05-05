@@ -320,11 +320,25 @@ I also tried to close the backlog item during finalize, but `agent-doc` rejected
 The result is unchanged: `#9aep` is already complete in `src/tsift`, and rerunning the same `do [#9aep]` prompt does not uncover missing repo work. I rechecked the planning/execution path for this cycle, and the only live document change was the repeated prompt itself.
 
 The remaining issue is document state, not `src/tsift`: the `#9aep` backlog line is malformed because it contains pasted commit/diff transcript text, so `agent-doc` is not parsing it as a valid pending item and cannot close it with `--pending-done`. Until that backlog row is normalized back into a single-line pending entry, this prompt will keep reopening as if the task were still pending even though the underlying revision-digest work is already shipped.
-<!-- agent:boundary:f52cad21 -->
+❯ do [#a7e3]. spec-test-build-install-commit-push
+### Re: #a7e3 spec-test-build-install-commit-push — gpt-5
+
+`#a7e3` is already complete in `src/tsift`. The shipped implementation is commit `3c8de09` (`feat: auto-route session transcript reads`), and the current branch is still at `origin/main`/`HEAD` `b81e9a1`, so there is no missing repo delta to spec/test/build/install/commit/push again.
+
+The implementation and evidence are still present in the repo:
+- rewrite routing for long agent-doc markdown and Claude JSONL transcript reads in [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:9567) and the rewrite tests at [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:6056)
+- compiled CLI/session-digest coverage in [src/tsift/tests/exit_code.rs](/home/brian/work/btakita/agent-loop/src/tsift/tests/exit_code.rs:2941)
+- command/docs surface in [src/tsift/SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md:1010), [src/tsift/CLAUDE.md](/home/brian/work/btakita/agent-loop/src/tsift/CLAUDE.md:107), and [src/tsift/VERSIONS.md](/home/brian/work/btakita/agent-loop/src/tsift/VERSIONS.md:19)
+
+I did not create a new `src/tsift` commit or rerun a no-op release cycle because the feature is already shipped and `src/tsift` is clean. The remaining issue is document state: the current `#a7e3` backlog row contains pasted transcript text, so this session cannot close it cleanly with `--pending-done` even though the underlying tsift work is done.
+<!-- agent:boundary:5a6b4514 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+[#9aep] was a multi-line backlog item.
+When I manually entered `[x]` for [#9aep], only the first line was removed during the `agent-doc preflight`. The rest of the multi-line definition remained.
+---
 Can tsift use rtk to compress tool call output in the context?
 -->
 

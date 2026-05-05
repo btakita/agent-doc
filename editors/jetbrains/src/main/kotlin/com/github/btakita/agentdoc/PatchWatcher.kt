@@ -558,11 +558,6 @@ class PatchWatcher(private val project: Project) : Disposable {
                 ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
         }
 
-        // Apply ❯  prefix normalization to user-typed lines before agent patches
-        if (patch.normalizePrefixLines.isNotEmpty()) {
-            result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
-        }
-
         for (p in patch.patches) {
             val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
                 findBoundaryInComponent(result, p.component)
@@ -577,6 +572,12 @@ class PatchWatcher(private val project: Project) : Disposable {
             val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched, caretOffset)
             result = if (exchangeResult != result) exchangeResult
                 else applyComponentPatchNative(result, "output", patch.unmatched, caretOffset)
+        }
+
+        // Normalize after patches/unmatched content so later exchange rewrites do not
+        // overwrite the repaired ❯ prefixes in the editor buffer / ack sidecar.
+        if (patch.normalizePrefixLines.isNotEmpty()) {
+            result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
         }
 
         // Reposition boundary to end of exchange if requested
@@ -639,11 +640,6 @@ class PatchWatcher(private val project: Project) : Disposable {
                     ?: applyFrontmatterPatchKotlin(result, patch.frontmatter)
             }
 
-            // Apply ❯  prefix normalization to user-typed lines before agent patches
-            if (patch.normalizePrefixLines.isNotEmpty()) {
-                result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
-            }
-
             for (p in patch.patches) {
                 val effectiveBoundaryId = if (p.ensureBoundary && p.boundaryId == null) {
                     findBoundaryInComponent(result, p.component)
@@ -657,6 +653,12 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val exchangeResult = applyComponentPatchNative(result, "exchange", patch.unmatched, null)
                 result = if (exchangeResult != result) exchangeResult
                     else applyComponentPatchNative(result, "output", patch.unmatched, null)
+            }
+
+            // Normalize after patches/unmatched content so later exchange rewrites do not
+            // overwrite the repaired ❯ prefixes in the editor buffer / ack sidecar.
+            if (patch.normalizePrefixLines.isNotEmpty()) {
+                result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
             }
 
             if (patch.repositionBoundary) {

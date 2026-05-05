@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { execFile } from 'child_process';
 import * as native from './native';
 import { consumeClaimedPatch, isPatchAlreadyApplied } from './patchGuard';
+import { isPureRepositionSignal } from './patchPlan';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
     buildRouteFailurePresentation,
@@ -1200,7 +1201,7 @@ class PatchWatcher implements vscode.Disposable {
             }
 
             // Handle reposition-only signals with typing debounce
-            if (patch.reposition_boundary && patch.patches.length === 0) {
+            if (isPureRepositionSignal(patch)) {
                 this.repositionBoundaryWithDebounce(
                     patch.file,
                     uri.fsPath,

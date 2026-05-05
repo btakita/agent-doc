@@ -1037,8 +1037,27 @@ Yes. I would use this version:
 > Thanks,
 > Brian
 
-This version is better because it sounds like consistency and cleanup, not like you are trying to remove consequences altogether.
-<!-- agent:boundary:3db27ace -->
+❯ This version is better because it sounds like consistency and cleanup, not like you are trying to remove consequences altogether.
+❯ I believe the formatting artifacts were due to the pdf to md conversion. I already sent the email. The raw pdf is /home/brian/work/btakita/agent-loop/tasks/professional/testdouble/Test_Double_Subcontractor_Agreement_Brian_Takita_v2.pdf. Should I send a correction?
+### Re: correction on formatting-artifact note — gpt-5
+
+I would **not** send a correction saying the formatting issue was only caused by the PDF-to-markdown conversion.
+
+I checked the source PDF, and at least some of the issues are present there too. In particular:
+
+- Section 2.2 in the PDF still shows literal backticks around the inserted breach language.
+- The work-for-hire section in the PDF still shows `BackgroundTechnology` without the space.
+
+So your earlier point was not fabricated by the markdown conversion. At most, the conversion may have made the formatting look a little rougher, but the underlying document still has real cleanup issues.
+
+My practical view: do **not** send a separate correction just on that point. The email you already sent is still directionally fair.
+
+If they push back specifically and say the formatting issue was just a conversion artifact, then the clean reply would be:
+
+> I re-checked the source PDF, and at least some of the cleanup issues appear there as well, including the backticks in Section 2.2 and the `BackgroundTechnology` formatting in the work-for-hire section.
+
+So the short answer is: **no correction needed right now.**
+<!-- agent:boundary:15d5f276 -->
 <!-- /agent:exchange -->
 
 ## Queue

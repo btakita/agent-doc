@@ -320,7 +320,7 @@ I also tried to close the backlog item during finalize, but `agent-doc` rejected
 The result is unchanged: `#9aep` is already complete in `src/tsift`, and rerunning the same `do [#9aep]` prompt does not uncover missing repo work. I rechecked the planning/execution path for this cycle, and the only live document change was the repeated prompt itself.
 
 The remaining issue is document state, not `src/tsift`: the `#9aep` backlog line is malformed because it contains pasted commit/diff transcript text, so `agent-doc` is not parsing it as a valid pending item and cannot close it with `--pending-done`. Until that backlog row is normalized back into a single-line pending entry, this prompt will keep reopening as if the task were still pending even though the underlying revision-digest work is already shipped.
-<!-- agent:boundary:e940ef7b -->
+<!-- agent:boundary:f52cad21 -->
 <!-- /agent:exchange -->
 ###
 
@@ -331,7 +331,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#9aep] revisiondigest=Revision/staged diff digest + rewrite coverage for , commit 6922d9f3927e2cec56d6548de7d9fb0d7a3a9ebf
 Author: Brian Takita <brian.takita@gmail.com>
 Date:   Tue May 5 15:45:36 2026 -0400
 

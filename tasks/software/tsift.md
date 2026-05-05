@@ -252,7 +252,23 @@ Verification in `src/tsift` passed:
 - `tsift --version` → `tsift 0.1.28`
 
 Top remaining backlog item: `#benchdigest`.
-<!-- agent:boundary:11c02189 -->
+❯ Can [#benchdigest] be generalized across any workflow? The workflow in question is unique to session-share.
+### Re: #benchdigest scope — gpt-5
+
+Yes. I would generalize it.
+
+The session-share benchmark loop is just one instance of a broader pattern: repeated metric-producing runs where the raw output is high-volume but the agent usually needs the same compressed shape back out. The durable abstraction is not "session-share benchmark digest"; it is "metric-run digest" or "run-delta digest": ingest one or more run outputs, normalize the metrics, compare against a prior run or baseline, and emit the bounded report the agent actually needs.
+
+That general shape can cover:
+- benchmark suites
+- perf/regression runs
+- repeated test suites with timing/count deltas
+- news/status summaries built from run-to-run changes
+
+What should stay specific is the parser layer, not the feature concept. The core digest surface should be generic over repeated metric workflows, and session-share should just be one adapter/profile on top of it.
+
+I updated the backlog text for `#benchdigest` to reflect that broader scope while keeping the existing id.
+<!-- agent:boundary:6f8936e0 -->
 <!-- /agent:exchange -->
 ###
 
@@ -263,7 +279,7 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#benchdigest] Benchmark-specific digest: summarize repeated benchmark suites into compact deltas, prior-run comparisons, top regressions/improvements, and news-ready tables. #spec-test-build-install-commit-push
+- [ ] [#benchdigest] Metric-run digest: generalize repeated benchmark/test/perf-style workflows into compact deltas, prior-run comparisons, top regressions/improvements, and news-ready tables. #spec-test-build-install-commit-push
 - [ ] [#sessiondigest] Session-transcript digest for agent-doc / Claude JSONL / Codex docs: collapse long sessions to prompt targets, commands, touched files/symbols, failures, and closeout evidence. #spec-test-build-install-commit-push
 <!-- /agent:backlog -->
 

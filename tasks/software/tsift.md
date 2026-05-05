@@ -224,7 +224,21 @@ Verification in `src/tsift` passed:
 Committed and pushed in `src/tsift` as `fdf773e` (`feat: add log digest command`).
 
 ❯ Backlog item `#logdigest` is complete.
-<!-- agent:boundary:7158e368 -->
+❯ Look in both my Codex and Claude Code sessions. Are there opportunities for new features for tsift to save tokens? #next-steps
+### Re: next steps — gpt-5
+
+Yes. Looking at both sessions, the biggest remaining token leak is that the new digest surfaces are still mostly opt-in.
+
+In this Codex `tsift.md` session, the wins came from `diff-digest`, `test-digest`, `log-digest`, and exact-search routing, but the workflow still depends on explicitly choosing those commands. In the Claude `claudescore-3.md` session, the repeated `benchmark/news/commit` loops and long retained-session surfaces are still mostly raw or document-heavy.
+
+I added these backlog items in priority order:
+
+1. `#digestrewrite` — extend `tsift rewrite` / hook integration so raw `git diff`, `cargo test`, `pytest`, and verbose build/log commands are auto-routed into bounded digest flows by default. This is the highest-leverage item because it turns the existing token-saving commands into the default path instead of an opt-in path.
+2. `#benchdigest` — add a benchmark-specific digest that turns repeated benchmark runs into compact deltas: run ids, prior-day comparison, top regressions/improvements, and news-ready tables.
+3. `#sessiondigest` — add a session-transcript digest for `agent-doc` / Claude JSONL / Codex docs so long session review can collapse to prompt targets, commands, touched files/symbols, failures, and closeout evidence.
+
+Top backlog item: `#digestrewrite`.
+<!-- agent:boundary:f39e9677 -->
 <!-- /agent:exchange -->
 ##
 
@@ -235,6 +249,9 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#digestrewrite] Hook/rewrite pipeline for tsift digests: auto-route git diff, cargo test, pytest, and verbose build/log commands through diff-digest/test-digest/log-digest or RTK-capped wrappers. #spec-test-build-install-commit-push
+- [ ] [#benchdigest] Benchmark-specific digest: summarize repeated benchmark suites into compact deltas, prior-run comparisons, top regressions/improvements, and news-ready tables. #spec-test-build-install-commit-push
+- [ ] [#sessiondigest] Session-transcript digest for agent-doc / Claude JSONL / Codex docs: collapse long sessions to prompt targets, commands, touched files/symbols, failures, and closeout evidence. #spec-test-build-install-commit-push
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

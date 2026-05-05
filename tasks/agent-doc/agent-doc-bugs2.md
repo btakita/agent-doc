@@ -187,7 +187,24 @@ Repo commits:
 - `agent-loop`: `adee04362` (`chore: bump agent-doc for prompt-prefix duplicate repair`)
 
 Repo push follows after this closeout commit.
-<!-- agent:boundary:68c62a62 -->
+❯ do [#mlreap]. spec-test-build-install-commit-push
+### Re: #mlreap — gpt-5
+Implemented the `#mlreap` fix. The backlog reaper now treats malformed flush-left transcript spill as part of the completed parent block, so preflight/repair/backlog reap no longer delete only the `[x] [#id]` line and leave orphan prose behind.
+
+Changes:
+- `src/pending.rs` now strips the leading non-structural text run that immediately trails a completed backlog item, while preserving real structural separators like headings/comments.
+- Added regression coverage for direct reap behavior, CLI backlog reap, and the preflight path that must still preserve live prompt drift while cleaning the backlog.
+- Updated `specs/pending-system.md` and `VERSIONS.md` to record the new no-partial-reap invariant.
+
+Verification:
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+
+Repo commits:
+- `src/agent-doc`: `b9437b8` (`fix: reap malformed backlog spill`)
+- `agent-loop`: `14b3b86f8` (`chore: bump agent-doc for backlog spill reap`)
+<!-- agent:boundary:55ab2e89 -->
 <!-- /agent:exchange -->
 ###
 
@@ -198,7 +215,6 @@ Repo push follows after this closeout commit.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#mlreap] Manual `[x]` on a multi-line backlog item can reap only the first tracked parent line and leave orphan continuation text behind. Reproduce the `tasks/software/tsift.md` `#9aep` / `#a7e3` shape, trace `pending.rs` continuation parsing vs reap, decide whether malformed flush-left continuation blocks should be reaped atomically or fail closed, and add regressions plus a no-partial-reap invariant. Plan: `tasks/agent-doc/plan-multiline-backlog-partial-reap.md`
 - [ ] [#rspcmt] [recommended] Previous response was written to
   `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where
   `finalize`/

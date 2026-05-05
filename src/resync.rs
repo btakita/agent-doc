@@ -2482,6 +2482,31 @@ mod tests {
         !tmux.pane_alive(pane) && !tmux.pane_dead(pane)
     }
 
+    fn drive_pane_to_retained_dead(
+        tmux: &IsolatedTmux,
+        pane: &str,
+        command: &str,
+        timeout: std::time::Duration,
+    ) {
+        {
+            let _tmux_guard = tmux_start_lock();
+            assert!(
+                wait_for_shell(tmux, pane, 5000),
+                "shell did not become ready before driving {} to retained-dead",
+                pane
+            );
+            send_keys_with_retry(tmux, pane, command);
+        }
+        assert!(
+            wait_for_pane_dead(tmux, pane, timeout),
+            "pane should first become a retained dead pane"
+        );
+        assert!(
+            tmux.pane_dead(pane),
+            "pane should still be retained by tmux"
+        );
+    }
+
     fn send_keys_with_retry(tmux: &IsolatedTmux, pane: &str, text: &str) {
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(3);
@@ -3222,15 +3247,11 @@ mod tests {
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
         iso.enable_remain_on_exit(&pane2).unwrap();
-        iso.send_keys(&pane2, "printf 'dead stash\\n'; exit 11")
-            .unwrap();
-        assert!(
-            wait_for_pane_dead(&iso, &pane2, std::time::Duration::from_secs(3)),
-            "pane should first become a retained dead pane"
-        );
-        assert!(
-            iso.pane_dead(&pane2),
-            "pane should still be retained by tmux"
+        drive_pane_to_retained_dead(
+            &iso,
+            &pane2,
+            "printf 'dead stash\\n'; exit 11",
+            std::time::Duration::from_secs(6),
         );
         iso.stash_pane(&pane2, "test").unwrap();
         assert!(
@@ -3508,15 +3529,11 @@ mod tests {
         let live_pane = iso.auto_start("test", &cwd).unwrap();
         let dead_pane = iso.split_window(&live_pane, &cwd, "-dh").unwrap();
         iso.enable_remain_on_exit(&dead_pane).unwrap();
-        iso.send_keys(&dead_pane, "printf 'dead pane\\n'; exit 0")
-            .unwrap();
-        assert!(
-            wait_for_pane_dead(&iso, &dead_pane, std::time::Duration::from_secs(6)),
-            "pane should first become retained dead"
-        );
-        assert!(
-            iso.pane_dead(&dead_pane),
-            "pane should remain visible as dead before cleanup"
+        drive_pane_to_retained_dead(
+            &iso,
+            &dead_pane,
+            "printf 'dead pane\\n'; exit 0",
+            std::time::Duration::from_secs(6),
         );
 
         let registry = SessionRegistry::new();
@@ -3558,13 +3575,12 @@ mod tests {
         let pane = iso.auto_start("test", &cwd).unwrap();
         let _other_window = iso.new_window("test", &cwd).unwrap();
         iso.enable_remain_on_exit(&pane).unwrap();
-        iso.send_keys(&pane, "printf 'dead last pane\\n'; exit 0")
-            .unwrap();
-        assert!(
-            wait_for_pane_dead(&iso, &pane, std::time::Duration::from_secs(3)),
-            "pane should become retained dead"
+        drive_pane_to_retained_dead(
+            &iso,
+            &pane,
+            "printf 'dead last pane\\n'; exit 0",
+            std::time::Duration::from_secs(6),
         );
-        assert!(iso.pane_dead(&pane), "pane should be retained as dead");
 
         let registry = SessionRegistry::new();
         purge_unregistered_dead_non_stash_panes_with_registry(&iso, &registry);

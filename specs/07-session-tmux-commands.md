@@ -130,6 +130,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - When sync creates new panes it should prefer splitting in the visible `agent-doc` window, not beside a stash pane when a visible anchor exists.
 - Post-sync registration must fail closed if one pane would be mirrored back into the registry for multiple documents.
 - Cross-session stash rescue is intentionally non-destructive: if a live stashed pane belongs to another tmux session, preserve it in place and report the mismatch instead of moving or killing it.
+- Retained-dead pane cleanup regressions must drive the pane from a confirmed idle shell state before sending the exit command; split-pane shell startup is asynchronous under parallel tmux test load, so verification must fail closed on an unready shell instead of assuming the pane already accepted input.
 
 ## repair_layout
 

@@ -296,7 +296,7 @@ Top backlog item: `#revisiondigest`.
 Implemented revision/staged diff digest support in `src/tsift`. `tsift diff-digest` now supports `--cached` for staged-index review and `--revision <rev>` for single-commit history review while the default mode stays worktree-based. The digest report now records mode/revision metadata, compares the correct snapshot source for worktree/index/commit paths, and the rewrite surface now auto-routes `git diff --cached`, `git show`, and simple `git log -p -1 ...` history commands into the bounded diff-digest flow. I added regression coverage in direct tests, CLI parsing, rewrite tests, and compiled exit-code integration tests, and updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, `Cargo.toml`, and `Cargo.lock` for `tsift v0.1.31`.
 
 Verification in `src/tsift` passed: `cargo test`, `make check`, `cargo build --release`, `cargo install --path . --force`, and `cargo fmt --check`. The local binary now reports `tsift 0.1.31`. Committed locally in `src/tsift` as `ae4dd04` (`feat: add revision diff digest modes`). Top remaining backlog item: `#yyhd`.
-<!-- agent:boundary:22058bbc -->
+<!-- agent:boundary:17942195 -->
 <!-- /agent:exchange -->
 ###
 
@@ -307,7 +307,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#yyhd] sessionrewrite=Auto-route long session/doc transcript reads into tsift session-digest for agent-doc markdown and Claude JSONL handoff/review flows. #spec-test-build-install-commit-push
 - [ ] [#4bzh] searchcollapse=Collapse high-hit tsift search/explain output by file/module counts before snippets so broad exact queries stay useful without RTK-only truncation. #spec-test-build-install-commit-push
 - [ ] [#9aep] revisiondigest=Revision/staged diff digest + rewrite coverage for , commit 6922d9f3927e2cec56d6548de7d9fb0d7a3a9ebf
 Author: Brian Takita <brian.takita@gmail.com>

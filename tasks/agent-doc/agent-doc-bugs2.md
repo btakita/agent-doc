@@ -164,7 +164,7 @@ Plan: `tasks/agent-doc/plan-jb-completed-run-pane-retention.md`
 I did not run a literal JetBrains/VS Code GUI click-through in this cycle, so I am leaving `#jbpdrop` gated as a human/editor validation gate instead of marking it fully done.
 
 I also did not create a repo commit/push: the worktree already contains unrelated dirty changes in both the superproject and `src/agent-doc`, and this cycle's delta was verification plus the plan update only.
-<!-- agent:boundary:ea254280 -->
+<!-- agent:boundary:a884dd29 -->
 <!-- /agent:exchange -->
 ###
 
@@ -205,7 +205,6 @@ do [#jbqbusy]. spec-test-build-install-commit-push
   `finalize`/
   `write --commit` can report success without a persisted commit, identify any stash/sync/session-check interaction that can leave the response uncommitted, then add regression coverage and a fail-closed acceptance criterion so agent-doc never reports a completed closeout until the response commit is verifiably present.
 - [ ] [#rprdrift] [recommended] `agent-doc repair` reported "No pending response found" for `src/boost-client/tasks/monsterrodholders.md` even though `session-check` still failed on a committed cycle with unresolved prompt-bearing user drift after a direct patchback. Fix plan only: reproduce the exact state transition where a committed cycle still has prompt-bearing follow-up edits, compare `repair`, `session-check`, `write --commit`, and `finalize --pending-done` behavior on that state, decide whether `repair` should automatically convert the drift into a recoverable finalize path or fail with the same actionable guidance as `session-check`, and add regressions plus a fail-closed invariant so repo/session repair never stops at a false "nothing to repair" result while the document remains blocked.
-- [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 
 <!-- /agent:backlog -->
 

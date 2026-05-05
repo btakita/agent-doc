@@ -30,12 +30,52 @@ Active backlog:
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
 - [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)
 - 18 more active item(s)
-<!-- agent:boundary:dbcdb4bf -->
+❯ Please read:
+❯ - /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource/2026-05-05-lucas.md
+❯ - /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource/2026-05-05-efs-confirm.md
+❯ - /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource/2026-05-05-project-plan.md
+
+❯ The demo is at https://equityfundingsource.brian-takita.workers.dev/
+
+❯ Draft an email for judith-krug and robert-waldman to explain current progress and what I need from them.
+### Re: email draft — gpt-5
+
+Subject: Equity Funding Source portal progress and feedback needed
+
+Hi Judith and Robert,
+
+I wanted to send a quick progress update on the Equity Funding Source portal and outline the feedback I need so I can keep the next phase moving.
+
+Current progress:
+- The current deployment includes 25 live pages plus the working form backend.
+- Core public pages are in place, including Home, About Us, and role-based login/signup.
+- Phase 1 is underway with the borrower portal pages for new loan applications, loan status tracking, settings, and notifications.
+- The admin portal now includes the loan application management page.
+- The live demo is here: https://equityfundingsource.brian-takita.workers.dev/
+
+What I need from you:
+- Please review the borrower onboarding flow at `/portal-borrower/new-application` and confirm that the fields and step-by-step flow are correct.
+- Please confirm how many documents a borrower is required to submit during onboarding.
+- Please confirm whether uploaded files should be stored in Dropbox using `/loan_applications/{loan_number}/{file_name}.{file_type}`.
+- Please confirm whether this logic is correct on the borrower status side: the six-step admin review process determines Progress, and once all six steps are approved the Loan Status changes to Open.
+- Please clarify what Open, Closed, and Unassigned mean in TMO so I can align the UI behavior with the source system.
+- Please review the admin loan table and let me know whether it should stay similar to the borrower status table or whether you want clearer differentiation.
+- Please confirm whether the loan progress modal feels right, including the ability for an admin to deny a step and provide a reason.
+
+Judith, I would especially value your feedback on the overall business flow, wording, and whether the borrower/admin experience matches how you want clients and staff to move through the process.
+
+Robert, I especially need your confirmation on the TMO status meanings, required document count, and Dropbox storage path so I can lock down the technical behavior correctly.
+
+Once I have that feedback, I can move into end-to-end testing for the borrower/admin workflow and then continue into the next portal phases.
+
+Thanks,
+Brian
+<!-- agent:boundary:daa151d3 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
 - [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)

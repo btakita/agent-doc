@@ -308,7 +308,25 @@ Git:
 - `src/agent-doc`: `5fa93e1` (`fix: log reroute submit delivery`) pushed to `origin/20260422/codex-agent-backend`
 
 I did not run a live JetBrains/VS Code replay from this CLI turn, so `#edispatch` remains the right backlog item for end-to-end editor confirmation.
-<!-- agent:boundary:8f73183d -->
+❯ Same issues. We made many attempts to fix this issue with many edge case "fixes" and defensive coding. Please strip out all  the previous attempts to fix the `\n` issue and have all tmux submissions use the clean submission path.
+
+❯ spec-test-build-install-commit-push
+### Re: tmux submit path cleanup — gpt-5
+
+I stripped the accumulated newline/CR workaround layering back to one tmux submission model. Tmux-bound command paths now normalize submitted text once and rely on the existing literal-text-plus-`Enter` pane submit helper; only the direct PTY-writer fallback still encodes raw `\r`. I also removed the route and queue-dispatch follow-up `Enter` retries, so `Run Agent Doc`, file-scoped `session clear`, queued command dispatch, and supervisor-owned reopen injects all use one single-submit tmux path.
+
+Updated `src/agent-doc/src/supervisor/ipc.rs`, `src/start.rs`, `src/route.rs`, `src/queue_dispatch.rs`, `src/session_actor_cmd.rs`, plus the README/spec/version notes. I also fixed the route IPC regression shims in the tmux tests so they replay injects through the same submit helper as production instead of a stale raw-key path.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Git:
+- `src/agent-doc`: `385bc42` (`fix: simplify tmux submit path`) pushed to `origin/20260422/codex-agent-backend`
+
+I did not run a live JetBrains/VS Code replay from this CLI turn, so the existing editor replay validation backlog item remains the right follow-up for end-to-end confirmation.
+<!-- agent:boundary:54553b73 -->
 <!-- /agent:exchange -->
 ###
 

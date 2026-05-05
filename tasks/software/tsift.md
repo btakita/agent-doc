@@ -58,7 +58,21 @@ Recommended backlog order:
 Top backlog id: `#toklog`.
 
 Short version: tsift already compresses command output reasonably well, but the next major token win is to make harness transcripts and restart churn first-class digest inputs instead of letting Claude/Codex pay raw session overhead around tsift.
-<!-- agent:boundary:24d73d4d -->
+❯ do [#toklog]. spec-test-build-install-commit-push
+### Re: #toklog session cost digest — gpt-5
+
+Implemented `tsift session-cost` in `src/tsift` for Claude JSONL, Codex JSONL, and `agent-doc` runtime logs. It reports prompt/cached/output totals, largest turn outliers, cached-input ratios, and restart churn without replaying raw transcripts; Codex parsing now skips rate-limit-only `token_count` rows where `info` is null.
+
+Updated `SPEC.md`, `CLAUDE.md`, and `VERSIONS.md`, added direct/unit coverage plus compiled CLI coverage for the new command, and stabilized the repeated-hit exact-search assertion that was failing in the full suite.
+
+Verification completed in `src/tsift`:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path . --force`
+- smoke tests with the installed `tsift session-cost` against a real Codex session JSONL and `/home/brian/work/btakita/agent-loop/.agent-doc/logs/tsift-v0.1.log`
+
+Committed and pushed in `src/tsift` as `943d77d` (`feat: add session cost digest`). Recorded the parent `agent-loop` submodule pointer as `1a0757717` (`chore: bump tsift submodule`); I will push `agent-loop` after this response finalizes so the document closeout commit is included.
+<!-- agent:boundary:f79abc9f -->
 <!-- /agent:exchange -->
 ###
 
@@ -69,7 +83,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#toklog] [recommended] Add a tsift session-cost digest for Claude/Codex transcripts and agent-doc logs so per-doc token totals, cached-input ratios, and restart churn are visible without manual jq/rg analysis
 - [ ] [#cdxlog] [recommended] Extend tsift session-digest and rewrite coverage to Codex JSONL plus .agent-doc/logs/*.log so raw harness-log reads collapse into bounded digests instead of replaying transcripts
 - [ ] [#ctxscope] [recommended] Add tsift harness integration that scopes context to the owning repo/submodule root when the work is in src/tsift, avoiding repeated agent-loop-wide instruction and workspace payload
 - [ ] [#rchurn] [recommended] Teach tsift log/session digests to detect and summarize restart churn patterns such as fresh_restart, auto_trigger_timeout, ctrl_d restart loops, and quit-after-eof cycles

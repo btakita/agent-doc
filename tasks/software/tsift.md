@@ -153,8 +153,20 @@ For `tsift`'s own commands, the tool is already biased toward lower-context outp
 
 What tsift does **not** currently do is act as a general compressor for arbitrary tool calls like `cargo test`, `pytest`, or raw `git diff`. For diffs, the closest existing fit is `tsift summarize --extract --diff`, which gives cached LLM summaries of changed files instead of pasting hunks, but that is "summarize changed code" rather than "compress any command transcript." So the short answer is: `yes` for tsift-native/navigation output and diff-adjacent workflows, `not yet` for generic long shell commands.
 
-If you want to push this further, the clean direction is not to bloat `tsift search`; it is to add a separate transcript-compaction surface around the hook/RTK layer, and let tsift contribute code-aware summarization for diffs and file-scoped changes.
-<!-- agent:boundary:21acf098 -->
+❯ If you want to push this further, the clean direction is not to bloat `tsift search`; it is to add a separate transcript-compaction surface around the hook/RTK layer, and let tsift contribute code-aware summarization for diffs and file-scoped changes.
+❯ Can we implement ways for tsift to save tokens for diff-ajacent workflows? How about for test suites outputs and verbose logs?
+### Re: diff-adjacent workflows, test output, and verbose logs — gpt-5
+
+Yes. Diff-adjacent workflows are the best fit, because `tsift` already has most of the pieces: repo-root resolution, `git diff` scoping via `tsift summarize --extract --diff`, cached per-file summaries, token accounting in `summaries.db`, and compact output modes. The missing piece is a purpose-built digest surface that emits "what changed and why it matters" instead of raw patch text.
+
+I would split the work three ways.
+
+1. `#diffdigest`: add a diff digest command that starts from git-changed files, resolves touched symbols from the AST index, pulls cached summaries when available, and emits a bounded report like `files changed`, `symbols touched`, `new/removed callers`, and short per-file rationale. That is the most tsift-native token saver because it uses structure instead of compressing text after the fact.
+2. `#testdigest`: add a test-output digest command for common runners (`cargo test`, `pytest`, maybe `npm test`) that strips passing noise, groups duplicate failures, preserves the failing assertion plus file/line, and then optionally enriches those files or symbols with `tsift explain` / cached summaries. This is implementable, but it is transcript parsing rather than search.
+3. `#logdigest`: add a general log compactor for verbose stdout/stderr. Here tsift should not pretend to understand every log format semantically; the value is repeated-line collapsing, path/symbol extraction, stack-frame grouping, and then code-aware enrichment for referenced files.
+
+RTK is still useful here, but only as the transport guardrail: cap lines before they enter context, then let tsift provide the repo-aware digest. I would implement in exactly that order: diff first, test output second, generic logs third. I added those as recommended backlog items.
+<!-- agent:boundary:cd62ac30 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -164,6 +176,9 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#diffdigest] [recommended] Add a tsift diff-digest surface for git changes: changed files, touched symbols, cached summaries, and token-budgeted output instead of raw hunks
+- [ ] [#testdigest] [recommended] Add a tsift test-output digest for common runners that collapses passing noise, groups failures, and extracts file/symbol anchors from stderr/stdout
+- [ ] [#logdigest] [recommended] Add a tsift transcript compactor for verbose logs via stdin/file input with repeated-line collapsing, path/symbol extraction, and optional tsift summary enrichment
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

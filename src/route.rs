@@ -241,7 +241,7 @@ enum DispatchOnlyReopenDelivery {
 fn dispatch_only_reopen_submit_mode(delivery: DispatchOnlyReopenDelivery) -> &'static str {
     match delivery {
         DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_normalized_submit",
-        DispatchOnlyReopenDelivery::DirectPaneSubmit => "tmux_literal_enter_batch",
+        DispatchOnlyReopenDelivery::DirectPaneSubmit => "tmux_literal_enter_delayed",
     }
 }
 

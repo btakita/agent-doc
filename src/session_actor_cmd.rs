@@ -6,7 +6,7 @@ use crate::sessions::{SessionEntry, SessionRegistry, Tmux};
 use crate::startup_miss::{SessionLogStatus, StartupMiss};
 use crate::supervisor::ipc::IpcMethod;
 
-const TMUX_DIRECT_SUBMIT_MODE: &str = "tmux_literal_enter_batch";
+const TMUX_DIRECT_SUBMIT_MODE: &str = "tmux_literal_enter_delayed";
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

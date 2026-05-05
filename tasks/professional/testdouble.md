@@ -1048,6 +1048,8 @@ I checked the source PDF, and at least some of the issues are present there too.
 - Section 2.2 in the PDF still shows literal backticks around the inserted breach language.
 - The work-for-hire section in the PDF still shows `BackgroundTechnology` without the space.
 
+❯ That seems like a small formatting issue. Is there anything more substantial with the formatting issues? I don't want to be nitpicky.
+
 So your earlier point was not fabricated by the markdown conversion. At most, the conversion may have made the formatting look a little rougher, but the underlying document still has real cleanup issues.
 
 My practical view: do **not** send a separate correction just on that point. The email you already sent is still directionally fair.
@@ -1056,8 +1058,26 @@ If they push back specifically and say the formatting issue was just a conversio
 
 > I re-checked the source PDF, and at least some of the cleanup issues appear there as well, including the backticks in Section 2.2 and the `BackgroundTechnology` formatting in the work-for-hire section.
 
-So the short answer is: **no correction needed right now.**
-<!-- agent:boundary:15d5f276 -->
+❯ So the short answer is: **no correction needed right now.**
+### Re: whether the formatting issues are substantial — gpt-5
+
+I agree that the formatting items by themselves are **not major economic terms**. I would not elevate them as though they were on the same level as the payment and liability issues.
+
+What makes them worth mentioning is not that a missing space or stray backticks are devastating on their own. It is that they can signal the document was revised a bit carelessly, especially where substantive language was being edited.
+
+So I would separate them into two buckets:
+
+- **Substantive issues:** Section 4.2 payment qualifier, Section 10.1 overlap, Exhibit A hours wording.
+- **Minor cleanup issues:** backticks in Section 2.2, `BackgroundTechnology` formatting, general polish.
+
+If you do not want to sound nitpicky, the better framing is:
+
+> Please send a clean final copy reflecting the agreed revisions.
+
+That gets the point across without turning small formatting flaws into a standalone fight.
+
+So the short answer is: **no, I do not think the formatting issues are the substantial part.** The substantial part is still the payment, indemnity/liability, and hours-language cleanup. The formatting point is just a light signal that the final paper should be cleaned before signature.
+<!-- agent:boundary:1845b172 -->
 <!-- /agent:exchange -->
 
 ## Queue

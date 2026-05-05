@@ -439,8 +439,42 @@ Git:
 - committed in `src/agent-doc` as `3c4b922` (`fix: unify direct tmux submit path`)
 - pushed to `origin/20260422/codex-agent-backend`
 
-I did not run a live JetBrains/VS Code replay from this CLI session, so I added a backlog follow-up for that end-to-end verification.
-<!-- agent:boundary:31a3081b -->
+❯ I did not run a live JetBrains/VS Code replay from this CLI session, so I added a backlog follow-up for that end-to-end verification.
+❯ Why does `Clear Session Context` to Codex have the `\n` issue but not to Claude Code?
+❯ Please use logs & git history to understand the exact differences. Please fix.
+❯ spec-test-build-install-commit-push
+### Re: Codex clear-session newline behavior — gpt-5
+
+I traced this through the live logs, the submit-path history, and isolated tmux repros against the real installed CLIs. The exact difference is not that Clear Session Context takes a different route than Claude Code. The current logs show the failing Codex paths had already converged on the same direct-pane submit path, and both were logging the same submit mode before this fix. In other words, the route-level unification work in `agent-doc` was already done; that was a necessary cleanup, but it was not the root cause of the lingering `\n` / drafted-command behavior.
+
+The real difference is timing at the target TUI. In an isolated tmux pane, Codex leaves a command like `/clear` or `/help` drafted in the composer when tmux injects literal text and `Enter` in the same tick. Claude Code accepts that same injection pattern and submits immediately. Once I introduced a small delay between the literal text and the submit key, Codex started submitting reliably. A 50ms gap was enough in the live repros; Claude still works with and without that delay.
+
+That also explains the misleading git history. The recent history mostly changes *how* tmux encoded submit keys, not *when* the submit key was delivered:
+
+- `agent-doc`: `dc4c011`, `72bb116`, `c6f6d81`, `b15238f`, `f517bf0`, `3c4b922` progressively unified reroute/live-pane submit handling so Clear Session Context and Run Agent Doc use the same pane-input path.
+- `tmux-router`: `66e853f` switched to a single byte stream, `eb5ebf7` switched submit to named `Enter`, and this fix `d6d7a4f` adds the missing delay before `Enter`.
+
+So the answer is: Claude Code does not exhibit the issue because it accepts same-tick tmux text+submit injection, while Codex needs a short settle window before `Enter` or it treats the injected slash command as drafted input.
+
+What I changed:
+
+- `tmux-router`: added a 50ms delay between literal tmux text injection and the submit key in `Tmux::send_keys`, plus a regression test that only reports success when CR/LF arrives at least 40ms after the typed bytes.
+- `agent-doc`: updated the submit-mode label from `tmux_literal_enter_batch` to `tmux_literal_enter_delayed`, and updated the README/spec/version notes to record the actual Codex-vs-Claude difference.
+
+Verification:
+
+- Live isolated tmux repro against `codex-cli 0.128.0`: no-delay `/clear` stays drafted; 50ms-delay `/help` and `/clear` submit correctly.
+- Live isolated tmux repro against `Claude Code 2.1.123`: `/help` submits both with no delay and with 50ms delay.
+- `cargo test` in `src/tmux-router`: pass.
+- `cargo test` in `src/agent-doc`: pass.
+- `cargo build --release` in both crates: pass.
+- `cargo install --path src/agent-doc --force`: pass, binary replaced.
+
+Commits pushed:
+
+- `tmux-router` `main`: `d6d7a4f` `fix: delay tmux submit after literal send`
+- `agent-doc` `20260422/codex-agent-backend`: `86a07d6` `docs: record delayed tmux submit mode`
+<!-- agent:boundary:56f6797f -->
 <!-- /agent:exchange -->
 ###
 

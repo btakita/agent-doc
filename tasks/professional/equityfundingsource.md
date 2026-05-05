@@ -84,8 +84,29 @@ What I did:
 3. Validated the draft with `corky draft validate` and it passes.
 
 It is marked `status: review` and is ready for the next step when you want to push it with Corky.
-<!-- agent:boundary:df9ac012 -->
+❯ In the draft, please use real urls that can be clicked. For the Dropbox question, please ask for access to I can inspect the directory conventions:
+❯ > 1. Please review `/portal-borrower/new-application` and confirm that the fields and step-by-step flow are correct.
+❯ > 2. Please confirm how many documents a borrower is required to submit during onboarding.
+❯ > 3. Please confirm whether uploaded files should be stored in Dropbox using `/loan_applications/{loan_number}/{file_name}.{file_type}`.
+### Re: corky draft revision — gpt-5
+
+Updated the existing Corky draft as requested.
+
+1. Replaced the inline route literal with the full clickable URL for the borrower onboarding flow:
+   https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application
+2. Replaced the Dropbox storage-path confirmation question with a request for Dropbox access so I can inspect the directory conventions directly.
+3. Updated Robert's specific ask to request Dropbox access instead of confirming a presumed path.
+4. Re-validated the draft with `corky draft validate` and it passes.
+
+Draft file remains:
+- `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`
+<!-- agent:boundary:8293f705 -->
 <!-- /agent:exchange -->
+###
+
+<!--
+Please directly send the draft email using brian.takita@gmail.com
+-->
 
 ## Pending / Not Built
 

@@ -314,7 +314,13 @@ Verification in `src/tsift` passed: `cargo test`, `cargo clippy -- -D warnings`,
 `#9aep` is already complete. I verified that the backlog text is a malformed duplicate of the revision/staged diff digest work that shipped in `src/tsift` as `ae4dd04` and is still present at `origin/main`/`HEAD` `b81e9a1`. The implemented surface is documented in [src/tsift/SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md:927) and [src/tsift/CLAUDE.md](/home/brian/work/btakita/agent-loop/src/tsift/CLAUDE.md:16), with rewrite/tests still anchored in [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:6008), [src/tsift/src/main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:6038), [src/tsift/tests/exit_code.rs](/home/brian/work/btakita/agent-loop/src/tsift/tests/exit_code.rs:2678), and [src/tsift/tests/exit_code.rs](/home/brian/work/btakita/agent-loop/src/tsift/tests/exit_code.rs:2747).
 
 I also tried to close the backlog item during finalize, but `agent-doc` rejected `--pending-done '#9aep'` because the current backlog line is malformed and is not being parsed as a live pending id. Because there was no missing implementation left to add, I did not make a second code patch, rerun a no-op release cycle, or create another commit.
-<!-- agent:boundary:75c6b192 -->
+❯ do [#9aep]. spec-test-build-install-commit-push
+### Re: #9aep spec-test-build-install-commit-push — gpt-5
+
+The result is unchanged: `#9aep` is already complete in `src/tsift`, and rerunning the same `do [#9aep]` prompt does not uncover missing repo work. I rechecked the planning/execution path for this cycle, and the only live document change was the repeated prompt itself.
+
+The remaining issue is document state, not `src/tsift`: the `#9aep` backlog line is malformed because it contains pasted commit/diff transcript text, so `agent-doc` is not parsing it as a valid pending item and cannot close it with `--pending-done`. Until that backlog row is normalized back into a single-line pending entry, this prompt will keep reopening as if the task were still pending even though the underlying revision-digest work is already shipped.
+<!-- agent:boundary:e940ef7b -->
 <!-- /agent:exchange -->
 ###
 

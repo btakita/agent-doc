@@ -401,7 +401,46 @@ Git:
 - pushed to `origin/20260422/codex-agent-backend`
 
 I did not run a live JetBrains/VS Code replay from this CLI session, so the existing replay-validation backlog item remains the right place to confirm the editor repro is actually gone end to end.
-<!-- agent:boundary:571348fb -->
+Now `Run Agent Doc` on Codex has an error:
+```
+resync: stash pane %221 is registered in its own project root — skipping kill
+resync: stash pane %220 is registered in its own project root — skipping kill
+resync: stash pane %206 is registered in its own project root — skipping kill
+resync: stash pane %214 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+[route] authoritative actor generation 96 for tasks/agent-doc/agent-doc-bugs2.md still reports starting on pane %210 — keeping dispatch-only reroutes on the live pane submit path instead of queueing through supervisor IPC
+Error: dispatch-only codex reopen refused to inject into pane %210 for tasks/agent-doc/agent-doc-bugs2.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+```
+
+❯ Same issues + behavior for the other behavior. Why are we not able to figure out the cause/solution? What do the logs tell us? Are we still using divergent tmux submit paths? Please unify all tmux submit paths. 
+❯ On Codex, I'm still getting the `\n` error with `Clear Session Context`.
+❯ On Claude, `Run Agent Doc` still has the `\n` error. `Clear Session Context` works as intended.
+### Re: tmux submit path unification — gpt-5
+
+The logs show the remaining split was narrower than "all tmux submits are still divergent," but it was real. `session_clear_sent ... delivery=direct_pane_submit` was already proving that file-scoped clear was using the live pane tmux submit helper, while `route --dispatch-only` could still stop earlier with `route_dispatch_only_starting_pane_not_ready ... outcome=timed_out`. So the direct submit method itself was already shared in one branch, but `Run Agent Doc` still had an extra startup-window readiness gate that `Clear Session Context` did not.
+
+I removed that second gate for the direct live-pane reroute path and kept the boot-window probe only on the supervisor-IPC reopen path. In code terms:
+- `src/route.rs` now keeps dispatch-only live-pane reroutes on the same single-submit tmux path as file-scoped clear even when the latest run is still in the fresh-start window, and it logs that branch explicitly.
+- The remaining command-submit call sites in `src/route.rs`, `src/queue_dispatch.rs`, and `src/parallel.rs` now go through the shared `sessions::send_submitted_text(...)` helper instead of open-coded `tmux.send_keys(...)` calls.
+- Updated `specs/07-session-tmux-commands.md`, `README.md`, and `VERSIONS.md` so the contract matches the code: direct pane submit does not wait on a separate dispatch-ready probe that clear never had.
+
+That means the logs now support a more concrete answer to your question:
+- We were not failing because every tmux path was still different.
+- We were still failing because `Run Agent Doc` had one extra route-only startup-window refusal in front of the same direct tmux submit helper.
+- This turn removes that route-only divergence and collapses the remaining command-submit call sites onto the same helper boundary.
+
+Verification:
+- targeted route regressions for starting authoritative and starting registered-pane dispatch-only reroutes passed
+- full `cargo test --manifest-path src/agent-doc/Cargo.toml` passed
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed
+- `cargo install --path src/agent-doc --force` replaced `/home/brian/.cargo/bin/agent-doc`
+
+Git:
+- committed in `src/agent-doc` as `3c4b922` (`fix: unify direct tmux submit path`)
+- pushed to `origin/20260422/codex-agent-backend`
+
+I did not run a live JetBrains/VS Code replay from this CLI session, so I added a backlog follow-up for that end-to-end verification.
+<!-- agent:boundary:31a3081b -->
 <!-- /agent:exchange -->
 ###
 
@@ -434,6 +473,7 @@ do [#jbqbusy]. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbdirsubmit] [recommended] Replay JetBrains/VS Code Run Agent Doc + Clear Session Context after direct tmux submit-path unification and confirm Codex no longer drafts literal \\n and Run Agent Doc no longer surfaces still booting.
 - [ ] [#jbqbusy] [recommended] Replay JetBrains Run Agent Doc after the authoritative busy/starting queue fix and confirm reroutes now enqueue instead of fail-closing on supervisor busy/starting state.
 - [ ] [#jbhalias] [recommended] Replay JetBrains Run Agent Doc against src/session-share/tasks/buildparty-investor-demo/dev.md after the canonical Claude harness alias fix and confirm authoritative reroutes no longer fail on claude-code/claude mismatch.
 - [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc after the canonical Claude harness alias fix and confirm Claude-owned authoritative actor sessions reroute cleanly without claude-code/claude mismatch errors.

@@ -164,7 +164,7 @@ Plan: `tasks/agent-doc/plan-jb-completed-run-pane-retention.md`
 I did not run a literal JetBrains/VS Code GUI click-through in this cycle, so I am leaving `#jbpdrop` gated as a human/editor validation gate instead of marking it fully done.
 
 I also did not create a repo commit/push: the worktree already contains unrelated dirty changes in both the superproject and `src/agent-doc`, and this cycle's delta was verification plus the plan update only.
-<!-- agent:boundary:a884dd29 -->
+<!-- agent:boundary:4917ec69 -->
 <!-- /agent:exchange -->
 ###
 
@@ -177,11 +177,6 @@ do [#jbqbusy]. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [/] [#jbpdrop] [recommended] Replay the live tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/buildparty-investor-demo/dev.md mixed-root routed-turn scenario after the injected tmux-context fix and confirm the visible sibling pane no longer gets stashed. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
-- [ ] [#jbdirsubmit] [recommended] Replay JetBrains/VS Code Run Agent Doc + Clear Session Context after direct tmux submit-path unification and confirm Codex no longer drafts literal \\n and Run Agent Doc no longer surfaces still booting.
-- [ ] [#jbqbusy] [recommended] Replay JetBrains Run Agent Doc after the authoritative busy/starting queue fix and confirm reroutes now enqueue instead of fail-closing on supervisor busy/starting state.
-- [ ] [#jbhalias] [recommended] Replay JetBrains Run Agent Doc against src/session-share/tasks/buildparty-investor-demo/dev.md after the canonical Claude harness alias fix and confirm authoritative reroutes no longer fail on claude-code/claude mismatch.
-- [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc after the canonical Claude harness alias fix and confirm Claude-owned authoritative actor sessions reroute cleanly without claude-code/claude mismatch errors.
 - [ ] [#tailpatch] [recommended] Last response was written outside the live
   `agent:exchange` block instead of being appended inside it. Fix plan only: refresh
   `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across

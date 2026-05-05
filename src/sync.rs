@@ -8159,7 +8159,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
-    fn safe_passive_sync_preserves_existing_layout_when_file_is_blocked() {
+    fn safe_passive_sync_preserves_existing_layout_for_vscode_mixed_root_split_replay() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let subroot = root.join("src/session-share");
@@ -8167,7 +8167,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         std::fs::create_dir_all(root.join("tasks/software")).unwrap();
         std::fs::create_dir_all(root.join("tasks/agent-doc")).unwrap();
         std::fs::create_dir_all(subroot.join(".agent-doc")).unwrap();
-        std::fs::create_dir_all(subroot.join("tasks/buildparty-investor-demo")).unwrap();
+        std::fs::create_dir_all(subroot.join("tasks")).unwrap();
         std::fs::write(
             root.join(".agent-doc/config.toml"),
             "tmux_session = \"test\"\n",
@@ -8177,7 +8177,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 
         let tsift_doc = root.join("tasks/software/tsift.md");
         let bugs_doc = root.join("tasks/agent-doc/agent-doc-bugs2.md");
-        let dev_doc = subroot.join("tasks/buildparty-investor-demo/dev.md");
+        let claudescore_doc = subroot.join("tasks/claudescore-3.md");
         std::fs::write(
             &tsift_doc,
             "---\nagent_doc_session: tsift-v0.1\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
@@ -8189,8 +8189,8 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         )
         .unwrap();
         std::fs::write(
-            &dev_doc,
-            "---\nagent_doc_session: dev-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+            &claudescore_doc,
+            "---\nagent_doc_session: claudescore-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
         )
         .unwrap();
         std::fs::write(
@@ -8207,7 +8207,10 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         let dev_pane_pid = pane_pid_from_tmux(&iso, &dev_pane).unwrap();
 
         let _ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(subroot.as_path(), "dev-session", {
+            crate::supervisor::ipc::SupervisorIpc::start(
+                subroot.as_path(),
+                "claudescore-session",
+                {
                 move |method| match method {
                     crate::supervisor::ipc::IpcMethod::Pid => {
                         crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
@@ -8222,7 +8225,8 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
                     }
                     _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
                 }
-            })
+            },
+            )
             .unwrap();
 
         sessions::register_full_with_cwd(
@@ -8236,9 +8240,9 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         .unwrap();
         sessions::register_full_with_cwd_in(
             &subroot,
-            "dev-session",
+            "claudescore-session",
             &dev_pane,
-            &dev_doc.to_string_lossy(),
+            &claudescore_doc.to_string_lossy(),
             pane_pid_from_tmux(&iso, &dev_pane).unwrap(),
             &agent_doc_window,
             &subroot.to_string_lossy(),
@@ -8248,7 +8252,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         run_with_options(
             &[
                 tsift_doc.to_string_lossy().to_string(),
-                dev_doc.to_string_lossy().to_string(),
+                claudescore_doc.to_string_lossy().to_string(),
             ],
             None,
             Some(tsift_doc.to_string_lossy().as_ref()),
@@ -8269,7 +8273,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         assert_eq!(
             ordered,
             vec![bugs_pane.clone(), dev_pane.clone()],
-            "blocked passive sync must preserve the existing visible panes instead of letting the remaining foreign pane become authoritative"
+            "blocked passive sync must preserve the agent-doc-bugs2/claudescore-3 visible split instead of letting the remaining foreign pane become authoritative"
         );
         assert!(
             iso.pane_alive(&bugs_pane),

@@ -74,14 +74,38 @@ Verification completed:
 Git:
 - Commit: `f47cb1b` (`feat: add structured accessibility snapshots`)
 - Pushed to `origin/main`
-<!-- agent:boundary:f91176aa -->
+❯ do [#brewtap]. spec-test-build-install-commit-push
+### Re: #brewtap — gpt-5
+Created the Homebrew tap and wired `chromium-bridge`'s install docs/spec to it.
+
+What shipped:
+- Created `btakita/homebrew-tap` (`https://github.com/btakita/homebrew-tap`) with `Formula/chromium-bridge.rb` targeting the published `v0.2.0` GitHub release assets for macOS/Linux on `x86_64` and `aarch64`, plus a tap README with install/upgrade commands.
+- Updated `src/chromium-bridge/README.md` and `SPEC.md` to document `brew tap btakita/tap && brew install chromium-bridge`.
+- Formula validation now uses `chromium-bridge help` instead of `--version`, because the CLI does not expose a version flag.
+
+Verification completed:
+- `cargo fmt --check`
+- `cargo test`
+- `cargo clippy -- -D warnings`
+- `cargo build --release`
+- `cargo install --path . --force`
+- Smoke checks: `chromium-bridge help`, `chromium-bridge network --help`
+- Release asset digests verified from GitHub for `v0.2.0`
+- `brew` and `ruby` are not installed in this environment, so I could not run `brew audit` or a Ruby syntax check locally.
+
+Git:
+- `btakita/homebrew-tap`: `2a5f674` (`feat: add chromium-bridge formula`) — pushed to `origin/main`
+- `btakita/chromium-bridge`: `7a59853` (`docs: add homebrew install path`) — pushed to `origin/main`
+
+Note:
+- The tap currently targets the latest published release assets, which are `v0.2.0`. The source repo is already at `0.2.1`, so the formula needs a version/digest bump when `v0.2.1` is released.
+<!-- agent:boundary:4a6b420e -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#brewtap] Create btakita/homebrew-tap for brew formula distribution (deferred — low priority)
 - [ ] [#3jmq] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)
 - [ ] [#fp48] Explore sift corpus configuration for multi-project search
 <!-- /agent:backlog -->

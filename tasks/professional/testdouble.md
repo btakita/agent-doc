@@ -203,8 +203,36 @@ If you want a slightly simpler / more conservative admin version, then:
 
 My default recommendation would be **15-minute increments**, unless you already know Test Double strongly prefers coarser invoice rounding.
 
-So the short answer is: **between 15 and 30, I would choose 15 for an hourly engagement.**
-<!-- agent:boundary:8915c7e9 -->
+❯ So the short answer is: **between 15 and 30, I would choose 15 for an hourly engagement.**
+❯ Please write the draft email.
+### Re: draft email with latest wording — gpt-5
+
+I would send this version:
+
+> Hi Anya,
+>
+> Thanks for the quick follow-up.
+>
+> For Section 4.2, please replace the last sentence with:
+>
+> `In the event of such termination, Company shall pay Subcontractor for the Services performed satisfactorily prior to termination within thirty (30) days of receipt of an invoice, subject only to ordinary invoice review and any rights or remedies expressly provided elsewhere in this Agreement.`
+>
+> For Section 10.1, please replace the second sentence with:
+>
+> `Any claim that work performed or intellectual property utilized in the performance of the Services violates the rights of a third party shall be governed exclusively by Sections 12 and 5 of this Agreement, and this Section 10.1 shall not create any broader indemnity or liability obligation.`
+>
+> For Exhibit A, please revise the pricing line to read:
+>
+> `Price: $100/hr, with an anticipated working schedule of 40 hrs/week, billed in 15-minute increments.`
+>
+> One minor cleanup item I still see is that the defined term appears once as `BackgroundTechnology` without the space; it should match `Background Technology` used elsewhere.
+>
+> Thanks again. Once those are cleaned up, I should be in good shape to sign.
+>
+> Brian
+
+This is the cleanest version so far because it preserves the expected 40-hour cadence, uses a normal hourly billing increment, and keeps the formatting note narrow.
+<!-- agent:boundary:b370645a -->
 <!-- /agent:exchange -->
 
 ## Queue

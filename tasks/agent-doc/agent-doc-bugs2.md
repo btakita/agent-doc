@@ -89,8 +89,30 @@ Verification:
 ❯ - superproject gitlink: `7392b082f` pushed to `origin/main`
 ### Re: restart supervisor wording follow-up — gpt-5
 
-Handled the wording/API follow-up on the same implementation pass: the editor menus now expose `Restart Supervisor Process`, and the explicit CLI surface is `agent-doc session restart-supervisor <file>` with `session restart` kept as a compatibility alias. No additional repo changes were needed beyond the code/spec/test/build/install/commit/push work already completed above.
-<!-- agent:boundary:0199185e -->
+❯ Handled the wording/API follow-up on the same implementation pass: the editor menus now expose `Restart Supervisor Process`, and the explicit CLI surface is `agent-doc session restart-supervisor <file>` with `session restart` kept as a compatibility alias. No additional repo changes were needed beyond the code/spec/test/build/install/commit/push work already completed above.
+❯ Do we need to bump, build, and install the JB + VSCode plugins?
+### Re: plugin bump/install question — gpt-5
+
+For this change set:
+
+- **Local testing / local use:** you do **not** need a version bump, but you **do** need to build/package and install the plugins if you want the JetBrains and VS Code menus on your machine to pick up the new actions.
+- **Published release / `plugin update` flow:** you **do** need a version bump before publishing new plugin artifacts, otherwise the released version identity does not advance.
+
+Current repo state:
+- JetBrains plugin version is still `0.2.92` in `editors/jetbrains/gradle.properties`.
+- VS Code extension version is still `0.2.12` in `editors/vscode/package.json`.
+- I already ran `./gradlew test buildPlugin`, so the JetBrains zip is built, but I did **not** install it.
+- I ran `npm test` for VS Code, but I did **not** package a `.vsix` or install it.
+
+Why the split is different:
+- JetBrains local install removes the old plugin dir and installs from the local built zip, so same-version local testing is fine.
+- VS Code local install uses the local `.vsix`, so same-version local testing is also fine.
+- The release/update path is version-sensitive: JetBrains `plugin update` explicitly skips reinstall when the installed version already matches the released version, so a release without a version bump is the wrong shape.
+
+So the practical answer is:
+- **Need install for live editor testing:** yes.
+- **Need version bump right now:** only if you want me to package/publish the plugins as a new release rather than just install local builds.
+<!-- agent:boundary:c229595c -->
 <!-- /agent:exchange -->
 ###
 

@@ -120,12 +120,31 @@ Verification completed:
 Git:
 - Commit: `a293d3f` (`feat: add corky ingest command`)
 - Pushed to `origin/main`
-<!-- agent:boundary:2b5f6a92 -->
+❯ do [#fp48]. spec-test-build-install-commit-push
+### Re: #fp48 — gpt-5
+Implemented project mailbox mirroring for `chromium-bridge ingest` so one capture can stay in the shared corky corpus and also land in a project-specific corpus for sift.
+
+What shipped:
+- `chromium-bridge ingest --mailbox <name>` now writes the normal root file plus a mirrored copy under `mailboxes/<name>/conversations/`, with path-separator validation so the extra write stays inside the corky tree.
+- Human and JSON output now report the mailbox copy path when present.
+- `README.md`, `SPEC.md`, `SKILL.md`, and `CLAUDE.md` now document the mailbox corpus pattern and show how to point multiple corky sift backends at shared plus project-specific corpora.
+
+Verification completed:
+- `cargo fmt`
+- `cargo test`
+- `cargo clippy -- -D warnings`
+- `cargo build --release`
+- `cargo install --path . --force`
+- Smoke checks: `chromium-bridge ingest --help`, `chromium-bridge --help`
+
+Git:
+- Commit: `85aa751` (`feat: mirror ingests into project mailboxes`)
+- Pushed to `origin/main`
+<!-- agent:boundary:28f7ea75 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#fp48] Explore sift corpus configuration for multi-project search
 <!-- /agent:backlog -->

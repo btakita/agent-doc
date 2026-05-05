@@ -209,7 +209,22 @@ Verification in `src/tsift` passed:
 Committed and pushed in `src/tsift` as `6942a18` (`feat: add test digest command`).
 
 ❯ Top remaining backlog item: `#logdigest`.
-<!-- agent:boundary:11e14b62 -->
+❯ do [#logdigest]. spec-test-build-install-commit-push
+### Re: #logdigest spec-test-build-install-commit-push — gpt-5
+
+Implemented `tsift log-digest` as a bounded verbose-log digest for captured stdout/stderr. It reads from stdin or `--input`, collapses repeated lines, groups warning/error signals, extracts file anchors plus symbol-like tokens, groups repeated stack blocks, and attaches up to two current cached summary snippets for anchored files or extracted symbols when `.tsift/summaries.db` is current. I also wired JSON/compact human output, added direct + compiled CLI regression coverage, and bumped the command surface/docs to `tsift v0.1.27`.
+
+Verification in `src/tsift` passed:
+- `cargo test`
+- `make check`
+- `cargo build --release`
+- `cargo install --path . --force`
+- `tsift --version` → `tsift 0.1.27`
+
+Committed and pushed in `src/tsift` as `fdf773e` (`feat: add log digest command`).
+
+❯ Backlog item `#logdigest` is complete.
+<!-- agent:boundary:7158e368 -->
 <!-- /agent:exchange -->
 ##
 
@@ -220,7 +235,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#logdigest] [recommended] Add a tsift transcript compactor for verbose logs via stdin/file input with repeated-line collapsing, path/symbol extraction, and optional tsift summary enrichment
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

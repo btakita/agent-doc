@@ -1015,8 +1015,30 @@ So my view is:
 - **good-faith reading:** very likely.
 - **looks like planned breach:** unlikely, unless someone is being unusually adversarial.
 
-If you want, I can also tighten that sentence into the most diplomacy-safe wording for the email.
-<!-- agent:boundary:dee2e3df -->
+❯ If you want, I can also tighten that sentence into the most diplomacy-safe wording for the email.
+❯ Yes, rewrite the draft using diplomacy-safe language.
+### Re: diplomacy-safe draft rewrite — gpt-5
+
+Yes. I would use this version:
+
+> Hi Anya,
+>
+> Thanks for the revised draft. I think we are very close.
+>
+> Before I sign, could you please make four final cleanup edits:
+>
+> 1. In Section 4.2, I’d like to clarify that payment for services satisfactorily performed prior to termination remains due in the ordinary course, with any actual breach-related remedies governed by the agreement rather than forfeiture of earned payment.
+> 2. In Section 10.1, please revise the third-party rights / indemnity language so it is consistent with the narrower indemnity language in Section 12 and the limitation-of-liability clause in Section 5.
+> 3. In Exhibit A, please clarify the hours wording so it reads as anticipated at up to 40 hrs/week, rather than `@ 40hrs week`.
+> 4. Please send a clean final copy with the formatting artifacts removed.
+>
+> Once those are cleaned up, I should be in good shape to sign.
+>
+> Thanks,
+> Brian
+
+This version is better because it sounds like consistency and cleanup, not like you are trying to remove consequences altogether.
+<!-- agent:boundary:3db27ace -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -316,8 +316,25 @@ Commit / push:
 
 I did not create a superproject gitlink commit because the workspace root already had unrelated dirty changes outside this fix.
 
-There were no actionable follow-up items to capture.
-<!-- agent:boundary:2b491001 -->
+❯ There were no actionable follow-up items to capture.
+❯ do [#devmdcmt]. spec-test-build-install-commit-push
+### Re: `#devmdcmt` closeout-gap plan — gpt-5
+
+Created the fix plan for the BuildParty `write_stream` closeout gap.
+
+Plan: `tasks/agent-doc/plan-buildparty-write-stream-closeout-gap.md`
+
+Why this stays separate from `#rspcmt`:
+- `#rspcmt` is the broader "visible response but no commit proof" family.
+- `#devmdcmt` is narrower: the `dev.md` repro already recorded a synthetic binary-owned `response_captured -> write_applied (event=write_stream)` chain before the terminal commit lagged behind.
+
+Evidence captured in the plan:
+- `src/session-share/.agent-doc/logs/586ffeea-ca3a-490b-80bd-883dd0e95673.log` shows `synthetic-1777883041000` reaching `response_captured` and `write_stream` at `1777883041`, with `commit_success` only later at `1777883128`.
+- `src/session-share/.agent-doc/captures/fbdde1a9f60dab3cf06c00e1e747fb607d46afdad89003acd3745214fff0dd30/synthetic-1777883041000.json` preserves the same gap with a visible response body already captured.
+- Later `dev.md` cycles on May 5 close immediately, so the plan also treats this as a historical but distinct regression against the expected CRDT/template closeout path.
+
+I am keeping `#devmdcmt` open because this cycle was plan-only, per the backlog contract. I did not change `src/agent-doc` code, specs, tests, build artifacts, or plugin outputs in this turn.
+<!-- agent:boundary:2acbf460 -->
 <!-- /agent:exchange -->
 ###
 
@@ -328,15 +345,7 @@ There were no actionable follow-up items to capture.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#devmdcmt] [recommended]
-  `agent-doc` left
-  `src/session-share/tasks/buildparty-investor-demo/dev.md` in a synthetic
-  `write_stream` cycle with
-  `phase=write_applied` after the response had already landed, so
-  `session-check` still failed until an explicit later
-  `agent-doc commit` closed it. Create a fix plan only: reproduce the exact template/CRDT closeout path that writes the response, verify why no terminal commit/finalize step followed, compare the failure with
-  `#rspcmt`, trace any boundary/backlog/session-check interaction that allows
-  `write_applied` to survive as a nonterminal state, and define regression coverage plus a fail-closed acceptance check so agent-doc never reports a completed turn until the document closeout is verifiably committed.
+- [ ] [#devmdcmt] [recommended] Investigate the historical BuildParty synthetic `write_stream` closeout gap on `src/session-share/tasks/buildparty-investor-demo/dev.md`: the response landed, the cycle stayed at `write_applied`, and a later explicit `agent-doc commit` provided the terminal closeout. Reproduce the exact template/CRDT path, compare it with `#rspcmt`, trace any boundary/backlog/session-check interaction that lets synthetic `write_applied` survive as a nonterminal state, and add fail-closed regression coverage. Plan: tasks/agent-doc/plan-buildparty-write-stream-closeout-gap.md
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to

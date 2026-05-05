@@ -84,7 +84,26 @@ Repo commits:
 - `agent-loop`: `7e2cdc25d` (`chore: bump agent-doc for splitter replay`)
 
 Next live check: restart IntelliJ IDEA before testing the updated plugin, then retry the rapid splitter-cycle repro in `tasks/agent-doc/agent-doc-bugs2.md`.
-<!-- agent:boundary:8cd0664d -->
+❯ do [#resyncflake]. spec-test-build-install-commit-push
+### Re: #resyncflake — gpt-5
+
+Implemented the `#resyncflake` fix. The failure was in the retained-dead pane test setup, not the purge logic: under parallel tmux test load the split pane sometimes had not reached an idle shell before `send_keys`, so the exit command never landed.
+
+Changes:
+- Added a shared retained-dead test helper in `src/resync.rs` that waits for an idle shell under the existing tmux start lock, retries command submission, and only then asserts the retained-dead precondition.
+- Switched the flaky stash-dead-pane test and the adjacent dead-pane regressions to that helper so the suite stops assuming split-pane shells are immediately ready.
+- Recorded the verification contract in `specs/07-session-tmux-commands.md` so this stays explicit.
+
+Verification:
+- `cargo test -p agent-doc sync:: -- --nocapture`
+- `make check`
+- `cargo install --path .`
+- `cargo build --release`
+
+Repo commits:
+- `src/agent-doc`: `e598848` (`test: stabilize retained-dead stash pane coverage`)
+- `agent-loop`: `47432fade` (`chore: bump agent-doc for resync flake fix`)
+<!-- agent:boundary:444493fa -->
 <!-- /agent:exchange -->
 ###
 
@@ -95,7 +114,6 @@ Next live check: restart IntelliJ IDEA before testing the updated plugin, then r
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to
   `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where

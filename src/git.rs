@@ -6799,3 +6799,149 @@ More content.
         );
     }
 }
+fn detect_reintroduced_reaped_pending_ids(
+    doc: &str,
+    reaped_ids: &HashSet<String>,
+) -> Result<Vec<String>> {
+    if reaped_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let components = crate::component::parse(doc)?;
+    let mut seen = HashSet::new();
+    let mut reintroduced = Vec::new();
+    for component in components
+        .iter()
+        .filter(|component| crate::component::is_tracked_work_component(&component.name))
+    {
+        let (_, items, _) = crate::pending::parse_items(component.content(doc));
+        for item in items {
+            if !item.id.is_empty() && reaped_ids.contains(&item.id) && seen.insert(item.id.clone()) {
+                reintroduced.push(item.id);
+            }
+        }
+    }
+
+    reintroduced.sort();
+    Ok(reintroduced)
+}
+
+    let reintroduced_reaped_ids = crate::cycle_state::load(file)?
+        .map(|state| state.reaped_pending_ids.into_iter().collect::<HashSet<_>>())
+        .map(|ids| detect_reintroduced_reaped_pending_ids(&file_content, &ids))
+        .transpose()?
+        .unwrap_or_default();
+    if !reintroduced_reaped_ids.is_empty() {
+        let refs = reintroduced_reaped_ids
+            .iter()
+            .map(|id| format!("#{}", id))
+            .collect::<Vec<_>>()
+            .join(", ");
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "commit_blocked_reintroduced_reaped_pending file={} ids={}",
+                file.display(),
+                refs
+            ),
+        );
+        anyhow::bail!(
+            "refusing to close {}: tracked backlog/icebox item(s) reaped earlier in this cycle reappeared in the live file: {}. Re-run preflight after resolving the stale local/editor rewrite",
+            file.display(),
+            refs
+        );
+    }
+
+    #[test]
+    fn commit_fails_closed_when_reaped_backlog_ids_reappear_before_closeout() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let cleaned = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        fs::write(&doc, cleaned).unwrap();
+        crate::snapshot::save(&doc, cleaned).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(cleaned), Some(cleaned)).unwrap();
+        crate::cycle_state::record_reaped_pending_ids(&doc, &["gone1".to_string()])
+            .unwrap()
+            .unwrap();
+
+        let resurrected = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [/] [#gone1] Resurrected by stale editor state\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        fs::write(&doc, resurrected).unwrap();
+
+        let err = commit(&doc).expect_err("reintroduced reaped ids must fail closed");
+        let message = err.to_string();
+        assert!(message.contains("#gone1"), "unexpected error: {message}");
+        assert!(
+            message.contains("reappeared in the live file"),
+            "unexpected error: {message}"
+        );
+
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(head.status.success(), "git show HEAD:session.md failed");
+        let committed = String::from_utf8_lossy(&head.stdout);
+        assert!(
+            !committed.contains("[#gone1]"),
+            "HEAD must stay at the cleaned backlog state:\n{committed}"
+        );
+    }
+

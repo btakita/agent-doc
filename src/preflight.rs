@@ -4290,3 +4290,4 @@ mod tests {
         assert_eq!(result, None);
     }
 }
+            let _ = crate::cycle_state::record_reaped_pending_ids(file, &removed_ids);

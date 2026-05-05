@@ -539,6 +539,8 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
         .map(|item| format!("#{}", item.id))
         .collect::<Vec<_>>()
         .join(", ");
+    let removed_ids: Vec<String> = removed.iter().map(|item| item.id.clone()).collect();
+    let _ = crate::cycle_state::record_reaped_pending_ids(file, &removed_ids);
     crate::ops_log::log_op(
         file,
         &format!(

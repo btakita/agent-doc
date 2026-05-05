@@ -124,7 +124,28 @@ Repo commits:
 - `agent-loop`: `03fd52ea1` (`chore: bump agent-doc for passive sync replay`)
 
 Repo push follows after this closeout commit.
-<!-- agent:boundary:b9560f8e -->
+❯ `Run Agent Doc` on /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not submit `agent-doc ...` to the tmux pane. spec-test-build-install-commit-push
+### Re: equityfundingsource reroute missed reopen — gpt-5
+
+Root cause was the authoritative `route --dispatch-only` path treating `waiting_input` as a hard stop. When Codex had already exited to the supervisor's `Press Enter to restart...` prompt, route could preserve or refresh ownership but never re-submit the bare `agent-doc <FILE>` reopen into the live pane.
+
+Changes:
+- `src/route.rs` now treats authoritative `waiting_input` as one bounded dispatch-only recovery path: request one fresh supervisor restart, follow same-pane or same-file handoff, then submit the reopen through the live tmux pane path.
+- Added a route regression that reproduces the waiting-input supervisor prompt and proves the reroute still issues the bare reopen after the fresh restart.
+- Updated `specs/07-session-tmux-commands.md` so the restart-prompt recovery contract is explicit.
+
+Verification:
+- `cargo test -p agent-doc resolve_or_create_pane_dispatch_only_ -- --nocapture`
+- `make check`
+- `cargo install --path .`
+- `cargo build --release`
+
+Repo commits:
+- `src/agent-doc`: `a81f8a9` (`fix: reroute waiting-input actor prompts`)
+- `agent-loop`: `e8831906a` (`chore: bump agent-doc for waiting-input reroute`)
+
+Repo push follows after this closeout commit.
+<!-- agent:boundary:65662fe2 -->
 <!-- /agent:exchange -->
 ###
 
@@ -135,6 +156,8 @@ Repo push follows after this closeout commit.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#mlreap] Manual `[x]` on a multi-line backlog item can reap only the first tracked parent line and leave orphan continuation text behind. Reproduce the `tasks/software/tsift.md` `#9aep` / `#a7e3` shape, trace `pending.rs` continuation parsing vs reap, decide whether malformed flush-left continuation blocks should be reaped atomically or fail closed, and add regressions plus a no-partial-reap invariant. Plan: `tasks/agent-doc/plan-multiline-backlog-partial-reap.md`
+- [ ] [#pfxstrip] Skill finalize strips ❯ prefix on inline prompt-preset lines (spec-test-news-commit-push in dev.md). content_ours sidecar fallback or IPC post-commit path drops canonicalization. Plan: tasks/agent-doc/plan-skill-finalize-prompt-prefix-strip.md
 - [ ] [#rspcmt] [recommended] Previous response was written to
   `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where
   `finalize`/

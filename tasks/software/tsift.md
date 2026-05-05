@@ -238,9 +238,23 @@ I added these backlog items in priority order:
 3. `#sessiondigest` — add a session-transcript digest for `agent-doc` / Claude JSONL / Codex docs so long session review can collapse to prompt targets, commands, touched files/symbols, failures, and closeout evidence.
 
 Top backlog item: `#digestrewrite`.
-<!-- agent:boundary:f39e9677 -->
+❯ do [#digestrewrite]
+### Re: #digestrewrite spec-test-build-install-commit-push — gpt-5
+
+Implemented the hook/rewrite auto-routing in `src/tsift` and released `tsift v0.1.28`. `tsift rewrite` now maps plain `git diff` to `tsift diff-digest`, `cargo test` / `pytest` to a tsift-owned test-digest wrapper, and verbose `cargo build` / `check` / `clippy` / `install` commands to a log-digest wrapper. I added the hidden `tsift __digest-runner` helper so those wrapped commands digest captured stdout/stderr while preserving the underlying exit code instead of masking failures behind a successful pipeline.
+
+Updated `SPEC.md`, `CLAUDE.md`, and `VERSIONS.md`, added rewrite plus exit-code coverage in unit and integration tests, built and installed the local binary, and pushed `3bb7483` (`feat: auto-route verbose commands through digests`) to `origin/main`.
+
+Verification in `src/tsift` passed:
+- `make check`
+- `cargo build --release`
+- `cargo install --path . --force`
+- `tsift --version` → `tsift 0.1.28`
+
+Top remaining backlog item: `#benchdigest`.
+<!-- agent:boundary:11c02189 -->
 <!-- /agent:exchange -->
-##
+###
 
 <!--
 Can tsift use rtk to compress tool call output in the context?
@@ -249,7 +263,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#digestrewrite] Hook/rewrite pipeline for tsift digests: auto-route git diff, cargo test, pytest, and verbose build/log commands through diff-digest/test-digest/log-digest or RTK-capped wrappers. #spec-test-build-install-commit-push
 - [ ] [#benchdigest] Benchmark-specific digest: summarize repeated benchmark suites into compact deltas, prior-run comparisons, top regressions/improvements, and news-ready tables. #spec-test-build-install-commit-push
 - [ ] [#sessiondigest] Session-transcript digest for agent-doc / Claude JSONL / Codex docs: collapse long sessions to prompt targets, commands, touched files/symbols, failures, and closeout evidence. #spec-test-build-install-commit-push
 <!-- /agent:backlog -->

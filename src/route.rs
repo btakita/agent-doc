@@ -5604,7 +5604,10 @@ fn sync_after_claim(tmux: &Tmux, pane_id: &str, col_args: &[String]) {
     }
 
     let file_count = effective_col_args.len();
-    if let Err(e) = sync::run(&effective_col_args, Some(&window_id), None) {
+    // Keep the reconcile scoped to the caller's tmux handle. Falling back to the
+    // default server here can mutate an unrelated live agent-doc window during
+    // isolated verification runs.
+    if let Err(e) = sync::run_with_tmux(&effective_col_args, Some(&window_id), None, tmux) {
         eprintln!("[route] warning: post-claim sync failed: {}", e);
     } else {
         eprintln!(
@@ -12119,6 +12122,84 @@ Body\n\
     }
 
     // --- split_before positional target tests ---
+    #[test]
+    fn sync_after_claim_stays_on_injected_tmux_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+
+        let file_a = dir.path().join("tasks/file_a.md");
+        let file_b = dir.path().join("tasks/file_b.md");
+        std::fs::write(
+            &file_a,
+            "---\nagent_doc_session: route-sync-claim-a\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &file_b,
+            "---\nagent_doc_session: route-sync-claim-b\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("route-test-sync-after-claim-injected");
+        let session = "test";
+        let pane_a = iso.new_session(session, dir.path()).unwrap();
+        let window = iso.pane_window(&pane_a).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"]);
+        let _ = iso.raw_cmd(&["resize-window", "-t", &window, "-x", "300", "-y", "60"]);
+        let pane_b = iso.split_window(&pane_a, dir.path(), "-dh").unwrap();
+        let extra_pane = iso.split_window(&pane_b, dir.path(), "-dh").unwrap();
+        let pane_a_pid = pane_display_value(&iso, &pane_a, "#{pane_pid}")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap();
+        let pane_b_pid = pane_display_value(&iso, &pane_b, "#{pane_pid}")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap();
+
+        sessions::register_full_with_cwd(
+            "route-sync-claim-a",
+            &pane_a,
+            &file_a.to_string_lossy(),
+            pane_a_pid,
+            &window,
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd(
+            "route-sync-claim-b",
+            &pane_b,
+            &file_b.to_string_lossy(),
+            pane_b_pid,
+            &window,
+            &dir.path().to_string_lossy(),
+        )
+        .unwrap();
+
+        sync_after_claim(&iso, &pane_a, &[]);
+
+        let visible = iso.list_window_panes(&window).unwrap();
+        assert_eq!(
+            visible.len(),
+            2,
+            "post-claim sync should reconcile the injected tmux window instead of mutating the default server"
+        );
+        assert!(
+            visible.contains(&pane_a) && visible.contains(&pane_b),
+            "registered panes should remain visible after the injected-server reconcile, got {:?}",
+            visible
+        );
+        assert!(
+            !visible.contains(&extra_pane),
+            "unregistered overflow pane should be removed from the injected tmux window, got {:?}",
+            visible
+        );
+        assert!(
+            iso.pane_alive(&extra_pane),
+            "overflow pane should be stashed, not killed"
+        );
+    }
+
 
     #[test]
     fn split_before_true_picks_leftmost_pane() {

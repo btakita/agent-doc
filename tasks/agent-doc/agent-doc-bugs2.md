@@ -374,8 +374,34 @@ Git:
 - Committed in `src/agent-doc` as `b15238f` (`fix: unify live pane submit path`).
 - Pushed to `origin/20260422/codex-agent-backend`.
 
-I did not run a live JetBrains/VS Code replay from this CLI session, so the existing replay-validation backlog remains the right place to confirm the end-to-end editor repro is actually gone.
-<!-- agent:boundary:e6f163f3 -->
+❯ I did not run a live JetBrains/VS Code replay from this CLI session, so the existing replay-validation backlog remains the right place to confirm the end-to-end editor repro is actually gone.
+❯ Same issues. Please have proper integration testing with a supervisor, tmux, ensuring the command comes through cleanly.
+❯ On Codex, I'm still getting the `\n` error with `Clear Session Context` and `Run Agent Doc`.
+❯ On Claude, `Run Agent Doc` still has the `\n` error. `Clear Session Context` works as intended.
+❯ spec-test-build-install-commit-push
+### Re: supervisor/tmux dispatch-only submit path — gpt-5
+
+I traced the live split in `.agent-doc/logs/ops.log` before changing code. The failing Codex `Run Agent Doc` path for this document was still taking `route_actor_dispatch_optimistic_queue`, while `session clear` was already logging `delivery=direct_pane_submit`. So the remaining mismatch was real: prompt-bearing dispatch-only reroutes could still queue through supervisor IPC during the short `starting` / `busy` window instead of staying on the same live-pane tmux submit path as the working clear flow.
+
+I changed `src/route.rs` so prompt-bearing `route --dispatch-only` reroutes keep using the live authoritative pane submit path even when the actor runtime still reports `starting` or `busy`, instead of queueing through supervisor IPC in that window. That keeps `Run Agent Doc` on the same tmux delivery boundary as `Clear Session Context` once the pane itself is dispatch-ready.
+
+I also added the supervisor/tmux integration coverage you asked for instead of relying only on mocked writers:
+- `src/start.rs` now has a real socket-backed supervisor IPC regression that starts a live IPC listener, injects through the socket, and proves the command lands in an isolated tmux pane through the pane submit path.
+- `src/route.rs` now has a tmux-backed regression that proves a `starting` authoritative actor still keeps dispatch-only reroutes on direct pane submit instead of falling back to supervisor inject.
+- Updated `specs/07-session-tmux-commands.md` and `VERSIONS.md` to document the direct-pane rule and the new integration floor.
+
+Verification:
+- targeted tests passed for the new dispatch-only authoritative path and the new supervisor socket-to-tmux regression
+- full `cargo test --manifest-path src/agent-doc/Cargo.toml` passed
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed
+- `cargo install --path src/agent-doc --force` replaced `/home/brian/.cargo/bin/agent-doc`
+
+Git:
+- committed in `src/agent-doc` as `f517bf0` (`fix: keep dispatch-only reroutes on live pane submit path`)
+- pushed to `origin/20260422/codex-agent-backend`
+
+I did not run a live JetBrains/VS Code replay from this CLI session, so the existing replay-validation backlog item remains the right place to confirm the editor repro is actually gone end to end.
+<!-- agent:boundary:571348fb -->
 <!-- /agent:exchange -->
 ###
 

@@ -296,7 +296,13 @@ Top backlog item: `#revisiondigest`.
 Implemented revision/staged diff digest support in `src/tsift`. `tsift diff-digest` now supports `--cached` for staged-index review and `--revision <rev>` for single-commit history review while the default mode stays worktree-based. The digest report now records mode/revision metadata, compares the correct snapshot source for worktree/index/commit paths, and the rewrite surface now auto-routes `git diff --cached`, `git show`, and simple `git log -p -1 ...` history commands into the bounded diff-digest flow. I added regression coverage in direct tests, CLI parsing, rewrite tests, and compiled exit-code integration tests, and updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, `Cargo.toml`, and `Cargo.lock` for `tsift v0.1.31`.
 
 Verification in `src/tsift` passed: `cargo test`, `make check`, `cargo build --release`, `cargo install --path . --force`, and `cargo fmt --check`. The local binary now reports `tsift 0.1.31`. Committed locally in `src/tsift` as `ae4dd04` (`feat: add revision diff digest modes`). Top remaining backlog item: `#yyhd`.
-<!-- agent:boundary:17942195 -->
+❯ do [#yyhd]
+### Re: #yyhd spec-test-build-install-commit-push — gpt-5
+
+Implemented session transcript auto-routing in `src/tsift`. `tsift rewrite` now detects long `cat` / `bat` / `head -n` / `tail -n` / `sed -n` reads over recognized agent-doc markdown sessions and Claude JSONL transcripts, and rewrites them to `tsift session-digest` instead of spilling raw transcript text into context. The routing stays narrow: it only fires for transcript-looking files and only when the requested read is large enough to be token-expensive. I added direct rewrite coverage for markdown/jsonl positives plus passthrough negatives, and a compiled CLI rewrite regression in `tests/exit_code.rs`. Updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, `Cargo.toml`, and `Cargo.lock` for `tsift v0.1.32`.
+
+Verification in `src/tsift` passed: `cargo test`, `cargo clippy -- -D warnings`, `make check`, `cargo build --release`, `cargo install --path . --force`, and `cargo fmt --check`. The installed binary now reports `tsift 0.1.32`. Committed and pushed in `src/tsift` as `3c8de09` (`feat: auto-route session transcript reads`). Top remaining backlog item: `#4bzh`.
+<!-- agent:boundary:7309fd1a -->
 <!-- /agent:exchange -->
 ###
 

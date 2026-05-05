@@ -99,13 +99,33 @@ Git:
 
 Note:
 - The tap currently targets the latest published release assets, which are `v0.2.0`. The source repo is already at `0.2.1`, so the formula needs a version/digest bump when `v0.2.1` is released.
-<!-- agent:boundary:4a6b420e -->
+❯ do [#3jmq]. spec-test-build-install-commit-push
+### Re: #3jmq — gpt-5
+Implemented `chromium-bridge ingest` for direct corky ingestion.
+
+What shipped:
+- Added `chromium-bridge ingest <url>` to navigate, extract markdown, and write a corky-style conversation document directly into the resolved `mail/conversations/` corpus.
+- Added corky-aware resolution for the target mailbox root (`.corky.toml` / `corky.toml` in cwd, `mail/` in cwd, `CORKY_DATA`, then `~/Documents/mail`).
+- Added optional post-write integration flags: `--route` runs `corky sync routes`, and `--ragie-push` / `--ragie-full` run Ragie indexing through corky.
+- Updated `README.md`, `SPEC.md`, `SKILL.md`, and `CLAUDE.md`, and added unit coverage for slug generation, corky path resolution, and rendered document shape.
+
+Verification completed:
+- `cargo fmt`
+- `cargo test`
+- `cargo clippy -- -D warnings`
+- `cargo build --release`
+- `cargo install --path . --force`
+- Smoke checks: `chromium-bridge ingest --help`, `chromium-bridge --help`
+
+Git:
+- Commit: `a293d3f` (`feat: add corky ingest command`)
+- Pushed to `origin/main`
+<!-- agent:boundary:2b5f6a92 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#3jmq] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)
 - [ ] [#fp48] Explore sift corpus configuration for multi-project search
 <!-- /agent:backlog -->

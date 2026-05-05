@@ -193,8 +193,23 @@ What’s actually stuck is an old `agent-doc` session for this same file that wa
 
 So the likely failure mode is: a stale `agent-doc`/Codex session for `tasks/software/tsift.md` was already open, and my new turn ended up waiting behind or alongside that orphaned session instead of progressing normally. The wrapper also showed one branch as “aborted by user after 10886.9s”, which is about 3 hours.
 
-If you want, I can kill that stale `tsift.md` session and restart `agent-doc /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` cleanly.
-<!-- agent:boundary:9940e649 -->
+❯ If you want, I can kill that stale `tsift.md` session and restart `agent-doc /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` cleanly.
+❯ do [#testdigest]. spec-test-build-install-commit-push
+### Re: #testdigest spec-test-build-install-commit-push — gpt-5
+
+Implemented `tsift test-digest` as a bounded test-output digest for captured `cargo` and `pytest` logs. It reads from stdin or `--input`, auto-detects or accepts an explicit runner, groups duplicate failures by file/line/message, preserves the failing test names and assertion text, and attaches up to two current cached summary snippets for anchored files when `.tsift/summaries.db` is current. I also bumped the command surface/docs to `tsift v0.1.26`, added helper plus CLI regression coverage, and repaired the lockfile's unavailable `unicode-normalization 0.1.26` pin so the full suite resolves again in this environment.
+
+Verification in `src/tsift` passed:
+- `cargo test`
+- `make check`
+- `cargo build --release`
+- `cargo install --path . --force`
+- `tsift --version` → `tsift 0.1.26`
+
+Committed and pushed in `src/tsift` as `6942a18` (`feat: add test digest command`).
+
+❯ Top remaining backlog item: `#logdigest`.
+<!-- agent:boundary:11e14b62 -->
 <!-- /agent:exchange -->
 ##
 
@@ -205,7 +220,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#testdigest] [recommended] Add a tsift test-output digest for common runners that collapses passing noise, groups failures, and extracts file/symbol anchors from stderr/stdout
 - [ ] [#logdigest] [recommended] Add a tsift transcript compactor for verbose logs via stdin/file input with repeated-line collapsing, path/symbol extraction, and optional tsift summary enrichment
 <!-- /agent:backlog -->
 

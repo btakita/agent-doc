@@ -654,17 +654,15 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     let commit_result = finalize_commit(file, commit_mode);
-    let bare_session_write_result = if write_result.is_ok()
-        && commit_mode == CommitMode::None
-        && is_session_document(file)?
-    {
-        crate::session_check::enforce_clean_closeout(file).context(
-            "bare `agent-doc write` preserved the response body, but the session closeout \
+    let bare_session_write_result =
+        if write_result.is_ok() && commit_mode == CommitMode::None && is_session_document(file)? {
+            crate::session_check::enforce_clean_closeout(file).context(
+                "bare `agent-doc write` preserved the response body, but the session closeout \
              is still outside the commit boundary",
-        )
-    } else {
-        Ok(())
-    };
+            )
+        } else {
+            Ok(())
+        };
 
     match (write_result, commit_result, bare_session_write_result) {
         (Ok(()), Ok(()), Ok(())) => Ok(()),
@@ -678,9 +676,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         (Ok(()), Err(commit_err), Err(boundary_err)) => {
             Err(boundary_err.context(commit_err.to_string()))
         }
-        (Err(write_err), Err(commit_err), Err(boundary_err)) => Err(
-            write_err.context(format!("{commit_err}\n{boundary_err}")),
-        ),
+        (Err(write_err), Err(commit_err), Err(boundary_err)) => {
+            Err(write_err.context(format!("{commit_err}\n{boundary_err}")))
+        }
     }
 }
 
@@ -2033,13 +2031,12 @@ pub fn extract_normalization_targets(before: &str, after: &str) -> Vec<String> {
     // Line-by-line: find positions where before had `text` and after has `❯ text`.
     // Using position comparison prevents false negatives when the exchange already
     // contains `❯ text` lines elsewhere (HashSet membership would exclude them).
-    let mut seen = std::collections::HashSet::<String>::new();
     let mut targets = Vec::new();
 
     for (before_line, after_line) in before_exc.lines().zip(after_exc.lines()) {
         if let Some(stripped) = after_line.strip_prefix("❯ ") {
             // after has ❯ prefix; before must have the plain version at the same position
-            if before_line == stripped && seen.insert(stripped.to_string()) {
+            if before_line == stripped {
                 targets.push(stripped.to_string());
             }
         }
@@ -2611,23 +2608,38 @@ pub fn normalize_user_prompts_in_exchange_safe(
 
 /// Verify that the sidecar content preserved the expected `❯ ` prefixes.
 ///
-/// For each non-blank target in `normalize_prefix_lines`, checks whether a
-/// `trimEnd()`-matched prefixed line (`❯ <target>`) exists in the sidecar.
-/// Returns `true` when all expected prefixes are present (or when there are
-/// no targets to check).
+/// For each non-blank target in `normalize_prefix_lines`, checks whether the
+/// exchange user region contains the required number of `❯ <target>`
+/// occurrences. Duplicate targets must be preserved by occurrence, not just by
+/// set membership, because prompt presets often repeat verbatim across turns.
+/// Returns `true` when all expected prefixes are present (or when there are no
+/// targets to check).
 pub fn verify_sidecar_normalization(sidecar: &str, normalize_prefix_lines: &[String]) -> bool {
     if normalize_prefix_lines.is_empty() {
         return true;
     }
 
-    let sidecar_lines: Vec<&str> = sidecar.lines().collect();
-    for target in normalize_prefix_lines {
-        let trimmed = target.trim_end();
-        if trimmed.is_empty() {
-            continue;
+    let sidecar_exchange = component::parse(sidecar)
+        .ok()
+        .and_then(|components| {
+            components
+                .iter()
+                .find(|component| component.name == "exchange")
+                .map(|component| component.content(sidecar).to_string())
+        })
+        .unwrap_or_else(|| sidecar.to_string());
+    let sidecar_user_region = exchange_user_region(&sidecar_exchange);
+
+    let mut prefixed_counts = std::collections::HashMap::<String, usize>::new();
+    for line in sidecar_user_region.lines() {
+        let trimmed = line.trim_end();
+        if let Some(stripped) = trimmed.strip_prefix("❯ ") {
+            *prefixed_counts.entry(stripped.to_string()).or_default() += 1;
         }
-        let expected = format!("❯ {}", trimmed);
-        if !sidecar_lines.iter().any(|l| l.trim_end() == expected) {
+    }
+
+    for (target, required) in normalization_target_counts(normalize_prefix_lines) {
+        if prefixed_counts.get(&target).copied().unwrap_or(0) < required {
             return false;
         }
     }
@@ -2671,22 +2683,21 @@ pub fn extract_post_commit_normalization_targets(committed: &str, working: &str)
     let committed_user_region = exchange_user_region(committed_exc);
     let working_user_region = exchange_user_region(working_exc);
 
-    let mut working_prefixed = std::collections::HashSet::<String>::new();
-    let mut working_unprefixed = std::collections::HashSet::<String>::new();
+    let mut working_prefixed = std::collections::HashMap::<String, usize>::new();
+    let mut working_unprefixed = std::collections::HashMap::<String, usize>::new();
     for line in working_user_region.lines() {
         let trimmed = line.trim_end();
         if trimmed.is_empty() {
             continue;
         }
         if let Some(stripped) = trimmed.strip_prefix("❯ ") {
-            working_prefixed.insert(stripped.to_string());
+            *working_prefixed.entry(stripped.to_string()).or_default() += 1;
         } else {
-            working_unprefixed.insert(trimmed.to_string());
+            *working_unprefixed.entry(trimmed.to_string()).or_default() += 1;
         }
     }
 
-    let mut seen = std::collections::HashSet::<String>::new();
-    let mut targets = Vec::new();
+    let mut committed_prefixed = std::collections::HashMap::<String, usize>::new();
     for line in committed_user_region.lines() {
         let Some(stripped) = line.strip_prefix("❯ ") else {
             continue;
@@ -2695,12 +2706,36 @@ pub fn extract_post_commit_normalization_targets(committed: &str, working: &str)
         if normalized.is_empty() {
             continue;
         }
-        if working_unprefixed.contains(normalized)
-            && !working_prefixed.contains(normalized)
-            && seen.insert(normalized.to_string())
-        {
-            targets.push(stripped.to_string());
+        *committed_prefixed
+            .entry(normalized.to_string())
+            .or_default() += 1;
+    }
+
+    let mut missing_counts = std::collections::HashMap::<String, usize>::new();
+    for (line, committed_count) in committed_prefixed {
+        let working_prefixed_count = working_prefixed.get(&line).copied().unwrap_or(0);
+        let working_unprefixed_count = working_unprefixed.get(&line).copied().unwrap_or(0);
+        let missing = committed_count.saturating_sub(working_prefixed_count);
+        let repairable = missing.min(working_unprefixed_count);
+        if repairable > 0 {
+            missing_counts.insert(line, repairable);
         }
+    }
+
+    let mut targets = Vec::new();
+    for line in committed_user_region.lines() {
+        let Some(stripped) = line.strip_prefix("❯ ") else {
+            continue;
+        };
+        let normalized = stripped.trim_end();
+        let Some(remaining) = missing_counts.get_mut(normalized) else {
+            continue;
+        };
+        if *remaining == 0 {
+            continue;
+        }
+        targets.push(stripped.to_string());
+        *remaining -= 1;
     }
 
     targets
@@ -2748,13 +2783,8 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
     let user_region = &exchange_content[..user_region_end];
     let agent_region = &exchange_content[user_region_end..];
 
-    let target_lines: std::collections::HashSet<String> = prefix_lines
-        .iter()
-        .map(|line| line.trim_end())
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect();
-    if target_lines.is_empty() {
+    let mut remaining = normalization_target_counts(prefix_lines);
+    if remaining.is_empty() {
         return doc.to_string();
     }
 
@@ -2762,11 +2792,17 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
         .split('\n')
         .map(|doc_line| {
             let normalized = doc_line.trim_end();
-            if normalized.starts_with("❯ ") || !target_lines.contains(normalized) {
-                doc_line.to_string()
-            } else {
-                format!("❯ {doc_line}")
+            if normalized.starts_with("❯ ") {
+                return doc_line.to_string();
             }
+            let Some(remaining_count) = remaining.get_mut(normalized) else {
+                return doc_line.to_string();
+            };
+            if *remaining_count == 0 {
+                return doc_line.to_string();
+            }
+            *remaining_count -= 1;
+            format!("❯ {doc_line}")
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -5025,13 +5061,19 @@ fn normalize_patch_content(content: &str, prefix_lines: &[String]) -> String {
     if prefix_lines.is_empty() {
         return content.to_string();
     }
-    let prefix_set: std::collections::HashSet<&str> =
-        prefix_lines.iter().map(|s| s.as_str()).collect();
+    let mut remaining = normalization_target_counts(prefix_lines);
     let mut result = String::with_capacity(content.len() + 2 * prefix_lines.len());
     for line in content.lines() {
-        let bare = line.strip_prefix("\u{276f} ").unwrap_or(line);
-        if prefix_set.contains(bare) && !line.starts_with("\u{276f} ") {
+        let bare = line
+            .trim_end()
+            .strip_prefix("\u{276f} ")
+            .unwrap_or(line.trim_end());
+        if !line.starts_with("\u{276f} ")
+            && let Some(remaining_count) = remaining.get_mut(bare)
+            && *remaining_count > 0
+        {
             result.push_str("\u{276f} ");
+            *remaining_count -= 1;
         }
         result.push_str(line);
         result.push('\n');
@@ -5040,6 +5082,20 @@ fn normalize_patch_content(content: &str, prefix_lines: &[String]) -> String {
         result.truncate(result.len() - 1);
     }
     result
+}
+
+fn normalization_target_counts(
+    prefix_lines: &[String],
+) -> std::collections::HashMap<String, usize> {
+    let mut counts = std::collections::HashMap::<String, usize>::new();
+    for line in prefix_lines {
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            continue;
+        }
+        *counts.entry(trimmed.to_string()).or_default() += 1;
+    }
+    counts
 }
 
 /// Build the IPC patches JSON array (shared between socket and file-based paths).
@@ -6674,6 +6730,24 @@ mod tests {
     }
 
     #[test]
+    fn extract_normalization_targets_preserves_duplicate_lines() {
+        let before = "<!-- agent:exchange patch=append -->\nQuestion?\nspec-test-build-install-commit-push\nQuestion?\nspec-test-build-install-commit-push\n<!-- /agent:exchange -->\n";
+        let after = "<!-- agent:exchange patch=append -->\n❯ Question?\n❯ spec-test-build-install-commit-push\n❯ Question?\n❯ spec-test-build-install-commit-push\n<!-- /agent:exchange -->\n";
+
+        let targets = extract_normalization_targets(before, after);
+
+        assert_eq!(
+            targets,
+            vec![
+                "Question?".to_string(),
+                "spec-test-build-install-commit-push".to_string(),
+                "Question?".to_string(),
+                "spec-test-build-install-commit-push".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn normalize_user_prompts_code_fence_skipped() {
         let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         let baseline = "<!-- agent:exchange patch=append -->\nSome text.\n```bash\necho hello\n```\n<!-- /agent:exchange -->\n";
@@ -6817,6 +6891,22 @@ mod tests {
         assert_eq!(
             result, patch_content,
             "non-matching lines should pass through unchanged"
+        );
+    }
+
+    #[test]
+    fn normalize_patch_content_counts_duplicate_targets() {
+        let patch_content = "spec-test-build-install-commit-push\nspec-test-build-install-commit-push\nspec-test-build-install-commit-push\n";
+        let prefix_lines = vec![
+            "spec-test-build-install-commit-push".to_string(),
+            "spec-test-build-install-commit-push".to_string(),
+        ];
+
+        let result = normalize_patch_content(patch_content, &prefix_lines);
+
+        assert_eq!(
+            result,
+            "❯ spec-test-build-install-commit-push\n❯ spec-test-build-install-commit-push\nspec-test-build-install-commit-push\n"
         );
     }
 
@@ -7640,6 +7730,108 @@ agent response
             snap.contains("- [ ] [#keepme] Preserve pending add from disk"),
             "snapshot must preserve pending mutations from disk during normalization fallback; got: {}",
             snap
+        );
+    }
+
+    #[test]
+    fn verify_sidecar_normalization_requires_duplicate_occurrences() {
+        let sidecar = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+❯ do [#dup]. Are repeated presets handled?
+❯ spec-test-build-install-commit-push
+### Re: #dup — gpt-5
+
+Done.
+
+❯ follow-up
+spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let normalize_prefix_lines = vec![
+            "do [#dup]. Are repeated presets handled?".to_string(),
+            "spec-test-build-install-commit-push".to_string(),
+            "follow-up".to_string(),
+            "spec-test-build-install-commit-push".to_string(),
+        ];
+
+        assert!(
+            !verify_sidecar_normalization(sidecar, &normalize_prefix_lines),
+            "one earlier prefixed preset line must not mask a later bare duplicate"
+        );
+    }
+
+    #[test]
+    fn extract_post_commit_normalization_targets_preserves_duplicate_missing_lines() {
+        let committed = "\
+<!-- agent:exchange patch=append -->
+❯ do [#dup]. Are repeated presets handled?
+❯ spec-test-build-install-commit-push
+### Re: #dup — gpt-5
+
+Done.
+
+❯ follow-up
+❯ spec-test-build-install-commit-push
+<!-- agent:boundary:committed -->
+<!-- /agent:exchange -->
+";
+        let working = "\
+<!-- agent:exchange patch=append -->
+❯ do [#dup]. Are repeated presets handled?
+❯ spec-test-build-install-commit-push
+### Re: #dup — gpt-5 (HEAD)
+
+Done.
+
+❯ follow-up
+spec-test-build-install-commit-push
+<!-- agent:boundary:working -->
+<!-- /agent:exchange -->
+";
+
+        let targets = extract_post_commit_normalization_targets(committed, working);
+
+        assert_eq!(
+            targets,
+            vec!["spec-test-build-install-commit-push".to_string()]
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_repairs_late_duplicate_occurrence() {
+        let working = "\
+<!-- agent:exchange patch=append -->
+❯ do [#dup]. Are repeated presets handled?
+❯ spec-test-build-install-commit-push
+### Re: #dup — gpt-5 (HEAD)
+
+Done.
+
+❯ follow-up
+spec-test-build-install-commit-push
+<!-- agent:boundary:working -->
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &[String::from("spec-test-build-install-commit-push")],
+        );
+
+        assert_eq!(
+            repaired
+                .matches("❯ spec-test-build-install-commit-push")
+                .count(),
+            2,
+            "repair should prefix the later bare duplicate without losing the earlier one"
+        );
+        assert!(
+            !repaired.contains("\n❯ ❯ spec-test-build-install-commit-push"),
+            "repair must not double-prefix existing matches"
         );
     }
 }

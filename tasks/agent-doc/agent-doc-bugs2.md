@@ -219,7 +219,7 @@ So the answer is:
 - The next useful investigation is to instrument which route branch Claude is actually taking before submit, and why it is not reaching the ready authoritative direct-pane path.
 
 ❯ No code changes in this cycle. This is a narrower branch diagnosis so the next fix can target route selection instead of CR formatting again.
-❯ Please implement using your analysis. spec-test-build-install-commit-push
+❯ Please implement using your analysis. Please add logging so we can better isolate the regression. spec-test-build-install-commit-push
 ### Re: Claude Run Agent Doc degraded authoritative fallback — gpt-5
 
 I implemented the route-side fix and added the branch logging needed to isolate the next live repro.

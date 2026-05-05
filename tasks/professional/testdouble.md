@@ -80,27 +80,53 @@ If you want one combined reply back to Anya, I would send:
 I would send this:
 
 > Hi Anya,
->
+❯ >
 > Thanks for the quick follow-up.
->
+❯ >
 > For Section 4.2, please replace the last sentence with:
->
+❯ >
 > `In the event of such termination, Company shall pay Subcontractor for the Services performed satisfactorily prior to termination within thirty (30) days of receipt of an invoice, subject only to ordinary invoice review and any rights or remedies expressly provided elsewhere in this Agreement.`
->
+❯ >
 > For Section 10.1, please replace the second sentence with:
->
+❯ >
 > `Any claim that work performed or intellectual property utilized in the performance of the Services violates the rights of a third party shall be governed exclusively by Sections 12 and 5 of this Agreement, and this Section 10.1 shall not create any broader indemnity or liability obligation.`
->
+❯ >
 > For the formatting cleanup point, I mean the backticks around the inserted Section 2.2 text, the `BackgroundTechnology` spacing issue, and any similar stray markup or spacing artifacts in the final clean copy.
->
+❯ >
 > Thanks again. Once those are cleaned up, I should be in good shape to sign.
->
+❯ >
 > Brian
 
 If you want a slightly softer close, change the last paragraph to:
 
 > Thanks again. Once those are cleaned up, I expect I should be in good shape to sign.
-<!-- agent:boundary:c7c392c7 -->
+❯ In the online document, the section is formatted as:
+```
+Work For Hire.  The Subcontractor expressly acknowledges and agrees that any deliverables specially prepared by Subcontractor for Company or Client under this Agreement, excluding Background Technology, shall be considered work made for hire and the exclusive property of Company or Client unless otherwise specified in writing. To the extent such deliverables may not be deemed a work made for hire under applicable
+law, the Subcontractor hereby assigns to the Company or Client all right, title, and interest in and to such deliverables. Notwithstanding the foregoing, Subcontractor retains all right, title, and interest in and to any preexisting materials, software, source code, object code, libraries, frameworks, tools, templates, routines, processes, documentation, concepts, know-how, and other technology or intellectual property owned, developed, or licensed by Subcontractor outside the scope of this Agreement, together with any modifications,
+enhancements, or derivatives thereof that do not constitute deliverables uniquely created for Company or Client ("BackgroundTechnology"). To the extent any Background Technology is incorporated into a deliverable, Subcontractor grants Company and Client a non-exclusive, perpetual, worldwide, fully paid-up license to use such Background Technology solely as incorporated in, and as necessary to use, the deliverable.
+```
+
+❯ Do we still have a formatting issue?
+### Re: whether the online clause still has a formatting issue — gpt-5
+
+Yes, but only a minor one.
+
+In the text you pasted, `Background Technology` is written correctly in most places, but the defined term still appears once as `("BackgroundTechnology")` without the space. So there is still a real formatting / consistency issue in that clause.
+
+I would separate the points this way:
+
+- **Still a real minor cleanup issue:** `BackgroundTechnology` should match `Background Technology`.
+- **Not really a problem:** the line breaks in the pasted online version look like ordinary document wrapping, not a substantive formatting defect.
+
+So if your question is whether you were wrong to mention formatting cleanup, I do not think you were wrong. But at this point I would treat it as a **small polish item**, not a major point worth pressing on by itself.
+
+If you want a tighter formulation for any follow-up, use:
+
+> One minor cleanup item I still see is that the defined term appears once as `BackgroundTechnology` without the space; it should match `Background Technology` used elsewhere.
+
+So the short answer is: **yes, there is still a minor formatting consistency issue, but it is not a big one.**
+<!-- agent:boundary:d1cfae3e -->
 <!-- /agent:exchange -->
 
 ## Queue

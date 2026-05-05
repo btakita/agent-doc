@@ -372,18 +372,38 @@ Verification ran clean:
 `cargo install --path src/agent-doc --force`
 
 The document cycle was finalized and `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` passed. I did not create a superproject gitlink commit because the workspace root still has unrelated dirty changes.
-<!-- agent:boundary:602a7c1d -->
+❯ do [#devmdcmt]. spec-test-build-install-commit-push
+### Re: #devmdcmt synthetic `write_stream` closeout gap — gpt-5
+
+Root cause was narrower than the generic missed-commit family: real session docs could still run bare `agent-doc write` through the CRDT/template `write_stream` path, persist the response/capture, and stop at a synthetic `response_captured` / `write_applied` cycle while returning success. That matched the historical BuildParty `dev.md` evidence where the visible response landed first and a later explicit `agent-doc commit` supplied the terminal `commit_success`.
+
+I fixed that in `src/agent-doc/src/write.rs` by making bare session-document `write` fail closed once the response has been preserved but the closeout is still outside the commit boundary. The command now surfaces the open-cycle `session-check` interruption instead of silently succeeding. Added `tests/finalize_integration.rs` coverage for the exact synthetic stream shape: bare `write --stream` now returns nonzero, leaves recoverable `write_applied` evidence, and still allows a later explicit `agent-doc commit` to finish the boundary. Updated `specs/07-closeout-commands.md`, `runbooks/commit.md`, and `VERSIONS.md` to document the tightened contract.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml bare_write_stream_on_session_doc_fails_closed_after_write_applied --test finalize_integration`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Git:
+- Commit: `b52c49f` (`fix: fail closed bare session write closeout`)
+- Pushed: `origin/20260422/codex-agent-backend`
+
+No new backlog follow-ups from this fix.
+<!-- agent:boundary:a9657d16 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+In the editor, when I select another agent doc, the Sync is often not called. I have to manually sync to see the correct tmux pane. Is this an issue with the debounce logic? If it is, please remove the debounce logic and place the sync operations into a queue so the last sync operation is what the user sees. Perhaps we can optimize to only play the last sync if the user rapidly changes the documents.
+spec-test-build-install-commit-push
+---
 "Press Enter to restart, or 'q' to exit."
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#devmdcmt] [recommended] Investigate the historical BuildParty synthetic `write_stream` closeout gap on `src/session-share/tasks/buildparty-investor-demo/dev.md`: the response landed, the cycle stayed at `write_applied`, and a later explicit `agent-doc commit` provided the terminal closeout. Reproduce the exact template/CRDT path, compare it with `#rspcmt`, trace any boundary/backlog/session-check interaction that lets synthetic `write_applied` survive as a nonterminal state, and add fail-closed regression coverage. Plan: tasks/agent-doc/plan-buildparty-write-stream-closeout-gap.md
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to

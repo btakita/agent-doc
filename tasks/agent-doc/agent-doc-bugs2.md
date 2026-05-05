@@ -109,16 +109,41 @@ Why the split is different:
 - VS Code local install uses the local `.vsix`, so same-version local testing is also fine.
 - The release/update path is version-sensitive: JetBrains `plugin update` explicitly skips reinstall when the installed version already matches the released version, so a release without a version bump is the wrong shape.
 
-So the practical answer is:
-- **Need install for live editor testing:** yes.
-- **Need version bump right now:** only if you want me to package/publish the plugins as a new release rather than just install local builds.
-<!-- agent:boundary:c229595c -->
+❯ So the practical answer is:
+❯ - **Need install for live editor testing:** yes.
+❯ - **Need version bump right now:** only if you want me to package/publish the plugins as a new release rather than just install local builds.
+❯ A visible unselected editor's (/home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md) tmux pane is removed from the agent-doc tmux window during an active turn. Syncing brings back the tmux pane. The pane should always remain visible if the document is visible in the editor or was the last visible agent doc. This regression has been around for a few days at least. Please identify root cause(s) and fix. spec-test-build-install-commit-push
+### Re: tmux pane retention regression — gpt-5
+
+
+Root cause identified and fixed.
+
+- The pane loss was not coming from the normal editor `sync --no-autostart` path.
+- `route::sync_after_claim()` was calling `sync::run(...)`, which jumps to the default tmux server instead of staying on the injected tmux handle.
+- During local verification, that let an isolated reconcile using dummy files mutate the real live `agent-doc` window and stash a visible sibling pane like `src/session-share/tasks/buildparty-investor-demo/dev.md` out of view.
+- A later normal sync would rescue the pane back, which is why the issue looked intermittent and recoverable.
+
+What I changed:
+- switched `sync_after_claim()` to `sync::run_with_tmux(...)` so post-claim reconcile stays on the caller's tmux server
+- added a focused regression that proves the injected server's overflow pane is stashed locally instead of the default server being touched
+- updated `specs/06-config.md` and `VERSIONS.md` to record the tmux-context invariant
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml sync_after_claim_stays_on_injected_tmux_server -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Submodule commit / push:
+- `src/agent-doc`: `b9a7f1a` pushed to `origin/20260422/codex-agent-backend`
+
+Recommended follow-up kept open:
+- `#jbpdrop` — replay the live mixed-root editor scenario after this fix. Plan: `tasks/agent-doc/plan-jb-completed-run-pane-retention.md`
+<!-- agent:boundary:e52241d2 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-A visible unselected editor's (/home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md) tmux pane is removed from the agent-doc tmux window during an active turn. Syncing brings back the tmux pane. The pane should always remain visible if the document is visible in the editor or was the last visible agent doc. This regression has been around for a few days at least. Please identify root cause(s) and fix. spec-test-build-install-commit-push 
----
 do [#jbqbusy]. spec-test-build-install-commit-push
 ---
 "Press Enter to restart, or 'q' to exit."
@@ -127,6 +152,7 @@ do [#jbqbusy]. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbpdrop] [recommended] Replay the live tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/buildparty-investor-demo/dev.md mixed-root routed-turn scenario after the injected tmux-context fix and confirm the visible sibling pane no longer gets stashed. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
 - [ ] [#jbdirsubmit] [recommended] Replay JetBrains/VS Code Run Agent Doc + Clear Session Context after direct tmux submit-path unification and confirm Codex no longer drafts literal \\n and Run Agent Doc no longer surfaces still booting.
 - [ ] [#jbqbusy] [recommended] Replay JetBrains Run Agent Doc after the authoritative busy/starting queue fix and confirm reroutes now enqueue instead of fail-closing on supervisor busy/starting state.
 - [ ] [#jbhalias] [recommended] Replay JetBrains Run Agent Doc against src/session-share/tasks/buildparty-investor-demo/dev.md after the canonical Claude harness alias fix and confirm authoritative reroutes no longer fail on claude-code/claude mismatch.

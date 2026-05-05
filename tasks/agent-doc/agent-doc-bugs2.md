@@ -144,12 +144,18 @@ Repo commits:
 - `src/agent-doc`: `a81f8a9` (`fix: reroute waiting-input actor prompts`)
 - `agent-loop`: `e8831906a` (`chore: bump agent-doc for waiting-input reroute`)
 
-Repo push follows after this closeout commit.
-<!-- agent:boundary:65662fe2 -->
+❯ Repo push follows after this closeout commit.
+### Re: closeout guard recovery — gpt-5
+
+Re-opened the binary-owned closeout path for this Codex turn after the prior waiting-input reroute response had already landed. No additional repo or document work was required beyond that fix.
+<!-- agent:boundary:7adfe451 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+do [#pfxstrip]. It seems there have been various repeat issues with the IPC. Are we running into race conditions caused by architecture? Should we use an Actor that runs in the editor plugins instead of the file based IPC?
+spec-test-build-install-commit-push
+---
 "Press Enter to restart, or 'q' to exit."
 -->
 

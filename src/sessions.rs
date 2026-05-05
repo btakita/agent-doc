@@ -279,6 +279,7 @@ pub fn register(session_id: &str, pane_id: &str, file: &str) -> Result<()> {
     register_with_pid(session_id, pane_id, file, std::process::id())
 }
 
+#[allow(dead_code)]
 pub fn deregister(session_id: &str) -> Result<bool> {
     let registry_path = registry_path();
     let _lock = RegistryLock::acquire(&registry_path)?;
@@ -414,6 +415,7 @@ pub fn register_supervisor_in(
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub fn register_full(
     session_id: &str,
     pane_id: &str,
@@ -544,6 +546,7 @@ fn register_full_with_cwd_and_instance_in(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn register_full_internal_call(
     session_id: &str,
     pane_id: &str,
@@ -576,6 +579,7 @@ fn register_full_internal_call(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn register_full_with_cwd_internal_call(
     session_id: &str,
     pane_id: &str,
@@ -687,6 +691,7 @@ fn register_full_internal(
     save_in(base_dir, registry)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn log_session_rebind(
     base_dir: &Path,
     session_id: &str,

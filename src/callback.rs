@@ -372,7 +372,7 @@ mod tests {
 
         let tmp = setup_test_project();
         let doc = create_test_doc(&tmp, "test.md");
-        let request = create_request(&doc, &["compact"], None, 300).unwrap();
+        let _request = create_request(&doc, &["compact"], None, 300).unwrap();
 
         let dir = callback_dir_for(&doc).unwrap();
         let wrong_response = CallbackResponse {

@@ -178,12 +178,6 @@ mod tests {
     }
 
     fn write_pid_lock(so_path: &Path, pid: u32) -> PathBuf {
-        let lock = so_path.with_extension(format!(
-            "{}.pid.{}",
-            so_path.extension().unwrap().to_str().unwrap(),
-            pid
-        ));
-        // Fix: lock name should be <so_name>.pid.<pid>
         let so_name = so_path.file_name().unwrap().to_str().unwrap();
         let lock = so_path
             .parent()

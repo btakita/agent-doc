@@ -597,6 +597,27 @@ fn answered_prompt_prelude_should_be_prefixed(lines: &[&str]) -> bool {
         || !crate::diff::line_looks_like_plain_response_after_prompt(first)
 }
 
+fn answered_prompt_prelude_start(lines: &[&str]) -> Option<usize> {
+    let mut first_meaningful = None;
+
+    for (idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        first_meaningful.get_or_insert(idx);
+        if trimmed.starts_with('❯')
+            || crate::diff::text_line_looks_like_prompt_target(trimmed)
+            || crate::diff::line_looks_like_fresh_prompt_after_response(trimmed)
+        {
+            return Some(idx);
+        }
+    }
+
+    let first_idx = first_meaningful?;
+    answered_prompt_prelude_should_be_prefixed(lines).then_some(first_idx)
+}
+
 fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
     // When a response heading is present, the contiguous prose block
     // immediately above it is the user prelude for that turn. Canonicalize
@@ -663,10 +684,10 @@ fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
             .iter()
             .map(|&line_idx| lines[line_idx])
             .collect();
-        if !answered_prompt_prelude_should_be_prefixed(&block_lines) {
+        let Some(prefix_start) = answered_prompt_prelude_start(&block_lines) else {
             continue;
-        }
-        for line_idx in block_indices {
+        };
+        for line_idx in block_indices.into_iter().skip(prefix_start) {
             prefix_targets[line_idx] = true;
         }
     }
@@ -920,6 +941,34 @@ fn is_safe_out_of_band_pending_mutation(snapshot_content: &str, file_content: &s
         .iter()
         .filter(|item| !item.id.is_empty())
         .all(|item| file_ids.contains(item.id.as_str()))
+}
+
+fn detect_reintroduced_reaped_pending_ids(
+    doc: &str,
+    reaped_ids: &HashSet<String>,
+) -> Result<Vec<String>> {
+    if reaped_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let components = crate::component::parse(doc)?;
+    let mut seen = HashSet::new();
+    let mut reintroduced = Vec::new();
+    for component in components
+        .iter()
+        .filter(|component| crate::component::is_tracked_work_component(&component.name))
+    {
+        let (_, items, _) = crate::pending::parse_items(component.content(doc));
+        for item in items {
+            if !item.id.is_empty() && reaped_ids.contains(&item.id) && seen.insert(item.id.clone())
+            {
+                reintroduced.push(item.id);
+            }
+        }
+    }
+
+    reintroduced.sort();
+    Ok(reintroduced)
 }
 
 fn strip_promptish_list_prefix(line: &str) -> &str {
@@ -1459,6 +1508,32 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         } else {
             false
         };
+
+    let reintroduced_reaped_ids = crate::cycle_state::load(file)?
+        .map(|state| state.reaped_pending_ids.into_iter().collect::<HashSet<_>>())
+        .map(|ids| detect_reintroduced_reaped_pending_ids(&file_content, &ids))
+        .transpose()?
+        .unwrap_or_default();
+    if !reintroduced_reaped_ids.is_empty() {
+        let refs = reintroduced_reaped_ids
+            .iter()
+            .map(|id| format!("#{}", id))
+            .collect::<Vec<_>>()
+            .join(", ");
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "commit_blocked_reintroduced_reaped_pending file={} ids={}",
+                file.display(),
+                refs
+            ),
+        );
+        anyhow::bail!(
+            "refusing to close {}: tracked backlog/icebox item(s) reaped earlier in this cycle reappeared in the live file: {}. Re-run preflight after resolving the stale local/editor rewrite",
+            file.display(),
+            refs
+        );
+    }
 
     let snapshot_matches_current_file = snapshot_content
         .as_deref()
@@ -3605,6 +3680,69 @@ mod tests {
     }
 
     #[test]
+    fn commit_does_not_prefix_prior_response_tail_before_answered_prompt() {
+        use std::fs;
+        use std::process::Command;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init", "-q"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test User"])
+            .output()
+            .unwrap();
+        fs::write(root.join(".gitignore"), ".agent-doc/\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", ".gitignore"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let cycle = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: prior — gpt-5\n\nCommit / push:\n- `src/agent-doc`: `abc1234` pushed to `origin/main`\n\nI did not create a superproject gitlink commit because the workspace root already had unrelated dirty changes outside this fix.\n\nThere were no actionable follow-up items to capture.\ndo [#tailpatch]. spec-test-build-install-commit-push\n### Re: `#tailpatch` closeout-gap plan — gpt-5\n\nPlan refreshed.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, cycle).unwrap();
+        let snap_path = crate::snapshot::path_for(&doc).unwrap();
+        let snap_abs = root.join(&snap_path);
+        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
+        fs::write(&snap_abs, cycle).unwrap();
+
+        commit(&doc).expect("commit should keep prior response tail unprefixed");
+
+        let show = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "git show HEAD:session.md failed");
+        let blob = String::from_utf8_lossy(&show.stdout);
+        assert!(
+            blob.contains(
+                "\nThere were no actionable follow-up items to capture.\n❯ do [#tailpatch]. spec-test-build-install-commit-push\n"
+            ),
+            "assistant tail must stay bare while the real prompt is prefixed:\n{blob}"
+        );
+        assert!(
+            !blob.contains("\n❯ There were no actionable follow-up items to capture.\n"),
+            "assistant tail must not be rewritten as a prompt:\n{blob}"
+        );
+    }
+
+    #[test]
     fn commit_blocks_out_of_band_exchange_and_pending_mutation() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
@@ -4997,6 +5135,99 @@ mod tests {
         assert!(
             !log.contains("drift_warning file="),
             "post-commit local drift should not be mislabeled as a generic out-of-band write:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_fails_closed_when_reaped_backlog_ids_reappear_before_closeout() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let cleaned = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        fs::write(&doc, cleaned).unwrap();
+        crate::snapshot::save(&doc, cleaned).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(cleaned), Some(cleaned)).unwrap();
+        crate::cycle_state::record_reaped_pending_ids(&doc, &["gone1".to_string()])
+            .unwrap()
+            .unwrap();
+
+        let resurrected = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [/] [#gone1] Resurrected by stale editor state\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        fs::write(&doc, resurrected).unwrap();
+
+        let err = commit(&doc).expect_err("reintroduced reaped ids must fail closed");
+        let message = err.to_string();
+        assert!(message.contains("#gone1"), "unexpected error: {message}");
+        assert!(
+            message.contains("reappeared in the live file"),
+            "unexpected error: {message}"
+        );
+
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(head.status.success(), "git show HEAD:session.md failed");
+        let committed = String::from_utf8_lossy(&head.stdout);
+        assert!(
+            !committed.contains("[#gone1]"),
+            "HEAD must stay at the cleaned backlog state:\n{committed}"
         );
     }
 
@@ -6562,9 +6793,10 @@ mod tests {
 
         held.unlock().unwrap();
 
-        let mut results = Vec::new();
-        results.push(rx.recv_timeout(Duration::from_secs(5)).unwrap());
-        results.push(rx.recv_timeout(Duration::from_secs(5)).unwrap());
+        let results = vec![
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        ];
         for handle in handles {
             handle.join().unwrap();
         }
@@ -6799,149 +7031,3 @@ More content.
         );
     }
 }
-fn detect_reintroduced_reaped_pending_ids(
-    doc: &str,
-    reaped_ids: &HashSet<String>,
-) -> Result<Vec<String>> {
-    if reaped_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let components = crate::component::parse(doc)?;
-    let mut seen = HashSet::new();
-    let mut reintroduced = Vec::new();
-    for component in components
-        .iter()
-        .filter(|component| crate::component::is_tracked_work_component(&component.name))
-    {
-        let (_, items, _) = crate::pending::parse_items(component.content(doc));
-        for item in items {
-            if !item.id.is_empty() && reaped_ids.contains(&item.id) && seen.insert(item.id.clone()) {
-                reintroduced.push(item.id);
-            }
-        }
-    }
-
-    reintroduced.sort();
-    Ok(reintroduced)
-}
-
-    let reintroduced_reaped_ids = crate::cycle_state::load(file)?
-        .map(|state| state.reaped_pending_ids.into_iter().collect::<HashSet<_>>())
-        .map(|ids| detect_reintroduced_reaped_pending_ids(&file_content, &ids))
-        .transpose()?
-        .unwrap_or_default();
-    if !reintroduced_reaped_ids.is_empty() {
-        let refs = reintroduced_reaped_ids
-            .iter()
-            .map(|id| format!("#{}", id))
-            .collect::<Vec<_>>()
-            .join(", ");
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "commit_blocked_reintroduced_reaped_pending file={} ids={}",
-                file.display(),
-                refs
-            ),
-        );
-        anyhow::bail!(
-            "refusing to close {}: tracked backlog/icebox item(s) reaped earlier in this cycle reappeared in the live file: {}. Re-run preflight after resolving the stale local/editor rewrite",
-            file.display(),
-            refs
-        );
-    }
-
-    #[test]
-    fn commit_fails_closed_when_reaped_backlog_ids_reappear_before_closeout() {
-        use std::fs;
-        let dir = tempfile::TempDir::new().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-
-        Command::new("git")
-            .current_dir(root)
-            .args(["init"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["config", "user.email", "test@example.com"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["config", "user.name", "Test"])
-            .output()
-            .unwrap();
-
-        let readme = root.join("README.md");
-        fs::write(&readme, "# test\n").unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["add", "README.md"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["commit", "-m", "initial", "--no-verify"])
-            .output()
-            .unwrap();
-
-        let doc = root.join("session.md");
-        let cleaned = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "## Pending / Not Built\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#keep1] Keep me\n",
-            "<!-- /agent:backlog -->\n"
-        );
-        fs::write(&doc, cleaned).unwrap();
-        crate::snapshot::save(&doc, cleaned).unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["add", "session.md"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["commit", "-m", "add doc", "--no-verify"])
-            .output()
-            .unwrap();
-
-        crate::cycle_state::start_preflight(&doc, Some(cleaned), Some(cleaned)).unwrap();
-        crate::cycle_state::record_reaped_pending_ids(&doc, &["gone1".to_string()])
-            .unwrap()
-            .unwrap();
-
-        let resurrected = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "## Pending / Not Built\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [/] [#gone1] Resurrected by stale editor state\n",
-            "- [ ] [#keep1] Keep me\n",
-            "<!-- /agent:backlog -->\n"
-        );
-        fs::write(&doc, resurrected).unwrap();
-
-        let err = commit(&doc).expect_err("reintroduced reaped ids must fail closed");
-        let message = err.to_string();
-        assert!(message.contains("#gone1"), "unexpected error: {message}");
-        assert!(
-            message.contains("reappeared in the live file"),
-            "unexpected error: {message}"
-        );
-
-        let head = Command::new("git")
-            .current_dir(root)
-            .args(["show", "HEAD:session.md"])
-            .output()
-            .unwrap();
-        assert!(head.status.success(), "git show HEAD:session.md failed");
-        let committed = String::from_utf8_lossy(&head.stdout);
-        assert!(
-            !committed.contains("[#gone1]"),
-            "HEAD must stay at the cleaned backlog state:\n{committed}"
-        );
-    }
-

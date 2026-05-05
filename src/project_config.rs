@@ -307,8 +307,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let config_path = setup_project(dir.path());
 
-        let mut cfg = ProjectConfig::default();
-        cfg.tmux_session = Some("rt".to_string());
+        let mut cfg = ProjectConfig {
+            tmux_session: Some("rt".to_string()),
+            ..Default::default()
+        };
         cfg.components.insert(
             "status".to_string(),
             ComponentConfig {

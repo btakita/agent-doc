@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn query_terminal_size_on_non_tty_fails() {
         // /dev/null is not a tty — ioctl should fail
-        let fd = unsafe { libc::open(b"/dev/null\0".as_ptr() as *const _, libc::O_RDONLY) };
+        let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
         assert!(fd >= 0);
         let result = query_terminal_size(fd);
         unsafe {

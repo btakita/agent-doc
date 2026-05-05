@@ -284,10 +284,12 @@ mod tests {
 
     #[test]
     fn resolve_terminal_from_config() {
-        let mut cfg = config::Config::default();
-        cfg.terminal = Some(config::TerminalConfig {
-            command: Some("wezterm start -- {tmux_command}".to_string()),
-        });
+        let cfg = config::Config {
+            terminal: Some(config::TerminalConfig {
+                command: Some("wezterm start -- {tmux_command}".to_string()),
+            }),
+            ..Default::default()
+        };
         let result = resolve_terminal_command(&cfg, "tmux new-session -A -s 0").unwrap();
         assert_eq!(result, "wezterm start -- tmux new-session -A -s 0");
     }

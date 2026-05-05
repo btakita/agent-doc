@@ -13,7 +13,6 @@
 
 #![allow(dead_code)]
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,7 +60,7 @@ fn test_mtime_granularity_100ms_rapid_edits() {
     // Setup: Create a document and set up .agent-doc/typing/
     let tmp = tempfile::TempDir::new().unwrap();
     let agent_doc_dir = tmp.path().join(".agent-doc");
-    std::fs::create_dir_all(&agent_doc_dir.join("typing")).unwrap();
+    std::fs::create_dir_all(agent_doc_dir.join("typing")).unwrap();
     let doc = tmp.path().join("test-rapid-edits.md");
     std::fs::write(&doc, "initial content").unwrap();
     let doc_str = doc.to_string_lossy().to_string();
@@ -115,7 +114,7 @@ fn test_mtime_granularity_1s_coarse_system() {
     // Setup: Create document in temp dir
     let tmp = tempfile::TempDir::new().unwrap();
     let agent_doc_dir = tmp.path().join(".agent-doc");
-    std::fs::create_dir_all(&agent_doc_dir.join("typing")).unwrap();
+    std::fs::create_dir_all(agent_doc_dir.join("typing")).unwrap();
     let doc = tmp.path().join("test-1s-granularity.md");
     std::fs::write(&doc, "initial").unwrap();
     let doc_str = doc.to_string_lossy().to_string();
@@ -224,10 +223,6 @@ fn test_probe_pattern_untracked_skips_await() {
     // Probe pattern: check is_tracked first
     if !agent_doc::debounce::is_tracked(untracked) {
         // Skip await_idle for untracked files
-        assert!(
-            true,
-            "Probe correctly skipped await_idle for untracked file"
-        );
         return;
     }
 
@@ -320,7 +315,6 @@ fn test_hash_collision_no_collisions_for_common_paths() {
 ///
 #[test]
 fn test_hash_collision_cleanup_removes_stale_indicators() {
-    use assert_cmd::Command;
     use filetime::FileTime;
 
     let tmp = tempfile::TempDir::new().unwrap();
@@ -351,8 +345,7 @@ fn test_hash_collision_cleanup_removes_stale_indicators() {
     let fresh = typing_dir.join("fresh_indicator");
     std::fs::write(&fresh, "9999999999999").unwrap();
 
-    Command::cargo_bin("agent-doc")
-        .unwrap()
+    assert_cmd::cargo::cargo_bin_cmd!("agent-doc")
         .args(["gc", "--root", root.to_str().unwrap()])
         .assert()
         .success();
@@ -650,27 +643,27 @@ Content
 
     // Prerequisite: git init and create snapshot
     std::process::Command::new("git")
-        .args(&["init"])
+        .args(["init"])
         .current_dir(tmp.path())
         .output()
         .ok();
     std::process::Command::new("git")
-        .args(&["config", "user.email", "test@example.com"])
+        .args(["config", "user.email", "test@example.com"])
         .current_dir(tmp.path())
         .output()
         .ok();
     std::process::Command::new("git")
-        .args(&["config", "user.name", "Test"])
+        .args(["config", "user.name", "Test"])
         .current_dir(tmp.path())
         .output()
         .ok();
     std::process::Command::new("git")
-        .args(&["add", "."])
+        .args(["add", "."])
         .current_dir(tmp.path())
         .output()
         .ok();
     std::process::Command::new("git")
-        .args(&["commit", "-m", "init"])
+        .args(["commit", "-m", "init"])
         .current_dir(tmp.path())
         .output()
         .ok();
@@ -736,6 +729,13 @@ fn test_timing_constants_are_documented() {
     // - grep -n "1500\|3000\|30000\|500" src/agent-doc/src/*.rs should show comments
     // - Each constant should have a docstring or comment block explaining it
 
-    // Placeholder assertion to allow this test to exist
-    assert!(true, "See code review for constant documentation");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let debounce_src = std::fs::read_to_string(root.join("src/debounce.rs")).unwrap();
+    let preflight_src = std::fs::read_to_string(root.join("src/preflight.rs")).unwrap();
+    assert!(
+        debounce_src.contains("1500")
+            && preflight_src.contains("3000")
+            && preflight_src.contains("500 ms old"),
+        "expected debounce.rs and preflight.rs to retain the documented debounce-related timeout constants"
+    );
 }

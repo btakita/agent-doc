@@ -159,6 +159,7 @@ mod tests {
             }
             Self { key, prior }
         }
+        #[allow(dead_code)]
         fn unset(key: &'static str) -> Self {
             let prior = std::env::var(key).ok();
             unsafe {

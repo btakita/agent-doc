@@ -1523,9 +1523,20 @@ mod tests {
         }
     }
 
+    type AgentEnv = Vec<(String, Option<String>)>;
+    type ParallelRunCall = (
+        String,
+        Vec<parallel::ParallelTask>,
+        Option<String>,
+        bool,
+        bool,
+        u64,
+        bool,
+    );
+
     struct FakeAgentRunner {
         prompts: RefCell<Vec<String>>,
-        envs: RefCell<Vec<Vec<(String, Option<String>)>>>,
+        envs: RefCell<Vec<AgentEnv>>,
         fresh_calls: RefCell<usize>,
         streaming_calls: RefCell<usize>,
         response: String,
@@ -1575,17 +1586,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeParallelRunner {
-        calls: RefCell<
-            Vec<(
-                String,
-                Vec<parallel::ParallelTask>,
-                Option<String>,
-                bool,
-                bool,
-                u64,
-                bool,
-            )>,
-        >,
+        calls: RefCell<Vec<ParallelRunCall>>,
     }
 
     impl ParallelRunner for FakeParallelRunner {
@@ -2431,8 +2432,10 @@ mod tests {
 
     #[test]
     fn resolve_orchestrate_agent_args_claude_frontmatter() {
-        let mut fm = frontmatter::Frontmatter::default();
-        fm.claude_args = Some("--dangerously-skip-permissions".into());
+        let fm = frontmatter::Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
         let config = Config::default();
         let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
         assert_eq!(result.as_deref(), Some("--dangerously-skip-permissions"));
@@ -2440,8 +2443,10 @@ mod tests {
 
     #[test]
     fn resolve_orchestrate_agent_args_codex_frontmatter() {
-        let mut fm = frontmatter::Frontmatter::default();
-        fm.codex_args = Some("-s danger-full-access".into());
+        let fm = frontmatter::Frontmatter {
+            codex_args: Some("-s danger-full-access".into()),
+            ..Default::default()
+        };
         let config = Config::default();
         let result = resolve_orchestrate_agent_args(&fm, "codex", &config);
         assert_eq!(result.as_deref(), Some("-s danger-full-access"));
@@ -2449,9 +2454,11 @@ mod tests {
 
     #[test]
     fn resolve_orchestrate_agent_args_agent_args_beats_harness_specific() {
-        let mut fm = frontmatter::Frontmatter::default();
-        fm.agent_args = Some("--model sonnet".into());
-        fm.claude_args = Some("--dangerously-skip-permissions".into());
+        let fm = frontmatter::Frontmatter {
+            agent_args: Some("--model sonnet".into()),
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            ..Default::default()
+        };
         let config = Config::default();
         let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
         assert_eq!(result.as_deref(), Some("--model sonnet"));
@@ -2460,8 +2467,10 @@ mod tests {
     #[test]
     fn resolve_orchestrate_agent_args_falls_through_to_config() {
         let fm = frontmatter::Frontmatter::default();
-        let mut config = Config::default();
-        config.claude_args = Some("--from-config".into());
+        let config = Config {
+            claude_args: Some("--from-config".into()),
+            ..Default::default()
+        };
         let result = resolve_orchestrate_agent_args(&fm, "claude", &config);
         assert_eq!(result.as_deref(), Some("--from-config"));
     }

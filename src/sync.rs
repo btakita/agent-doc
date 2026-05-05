@@ -1225,14 +1225,6 @@ impl AutoStartMode {
     }
 }
 
-fn registered_pane_matches_document_root(tmux: &Tmux, file: &Path, pane_id: &str) -> bool {
-    registry_location_for_file(file)
-        .map(|(_, project_root, _)| {
-            pane_assignment_matches_document_root(tmux, pane_id, &project_root)
-        })
-        .unwrap_or(false)
-}
-
 fn load_live_authoritative_actor_record(
     tmux: &Tmux,
     file: &Path,
@@ -2367,24 +2359,23 @@ fn run_with_options(
                     file_path.display()
                 ));
             }
-            if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-                if let Some(pane_id) = registered_pane.as_ref()
-                    && claimed_owner.is_none()
-                    && registered_pane_proves_live_owner(tmux, file_path, &session_id, pane_id)
-                {
-                    eprintln!(
-                        "[sync] safe passive sync reusing authoritative actor or supervisor-backed registered pane {} for {}",
-                        pane_id,
-                        file_path.display()
-                    );
-                    sync_log(&format!(
-                        "safe_passive_reuse_registered_projection file={} pane={}",
-                        file_path.display(),
-                        pane_id
-                    ));
-                    reserve_sync_pane(&claimed_sync_panes, pane_id, file_path);
-                    continue;
-                }
+            if matches!(auto_start_mode, AutoStartMode::SafePassive)
+                && let Some(pane_id) = registered_pane.as_ref()
+                && claimed_owner.is_none()
+                && registered_pane_proves_live_owner(tmux, file_path, &session_id, pane_id)
+            {
+                eprintln!(
+                    "[sync] safe passive sync reusing authoritative actor or supervisor-backed registered pane {} for {}",
+                    pane_id,
+                    file_path.display()
+                );
+                sync_log(&format!(
+                    "safe_passive_reuse_registered_projection file={} pane={}",
+                    file_path.display(),
+                    pane_id
+                ));
+                reserve_sync_pane(&claimed_sync_panes, pane_id, file_path);
+                continue;
             }
             let registered_live_owner = registered_pane.as_ref().is_some_and(|pane| {
                 registered_pane_proves_live_owner(tmux, file_path, &session_id, pane)
@@ -3695,6 +3686,7 @@ pub(crate) fn resolve_associated_panes(
     AssociatedPaneResolution::Ambiguous(candidates)
 }
 
+#[cfg(test)]
 fn log_stashed_associated_pane(tmux: &Tmux, pane_id: &str, file_path: &Path) {
     eprintln!(
         "[sync] associated pane {} for {} is in stash — deferring rescue to reconciler",
@@ -3721,12 +3713,14 @@ fn log_stashed_associated_pane(tmux: &Tmux, pane_id: &str, file_path: &Path) {
     ));
 }
 
+#[cfg(test)]
 enum ExistingAssociatedPaneRecovery {
     Recovered(String),
     Ambiguous,
     None,
 }
 
+#[cfg(test)]
 fn recover_existing_associated_pane(
     tmux: &Tmux,
     file_path: &Path,
@@ -3879,15 +3873,6 @@ pub(crate) fn find_live_owner_pane_excluding(
     excluded_pane: Option<&str>,
 ) -> Option<String> {
     find_live_owner_pane_excluding_with_logging(tmux, file, session_id, excluded_pane, true)
-}
-
-pub(crate) fn find_live_owner_pane_excluding_quiet(
-    tmux: &Tmux,
-    file: &Path,
-    session_id: &str,
-    excluded_pane: Option<&str>,
-) -> Option<String> {
-    find_live_owner_pane_excluding_with_logging(tmux, file, session_id, excluded_pane, false)
 }
 
 fn find_live_owner_pane_excluding_with_logging(
@@ -5968,9 +5953,7 @@ mod tests {
             output
                 .lines()
                 .filter_map(|line| {
-                    let mut parts = line.splitn(2, ' ');
-                    let id = parts.next()?;
-                    let name = parts.next()?;
+                    let (id, name) = line.split_once(' ')?;
                     if name == "stash" || name.starts_with("stash-") {
                         Some(id.to_string())
                     } else {
@@ -6817,7 +6800,7 @@ mod tests {
 
     #[test]
     fn batch_summary_format_multiple_panes() {
-        let auto_started_panes = vec![
+        let auto_started_panes = [
             ("%80".to_string(), "tasks/cursor.md".to_string()),
             ("%81".to_string(), "tasks/feat.md".to_string()),
             ("%82".to_string(), "tasks/agent-loop.md".to_string()),
@@ -6839,7 +6822,7 @@ mod tests {
 
     #[test]
     fn batch_summary_not_printed_for_single_pane() {
-        let auto_started_panes = vec![("%84".to_string(), "tasks/file.md".to_string())];
+        let auto_started_panes = [("%84".to_string(), "tasks/file.md".to_string())];
         // Batch summary only prints when len > 1
         assert!(
             auto_started_panes.len() <= 1,
@@ -7448,7 +7431,7 @@ mod tests {
                 &iso,
                 "4",
                 "agent-doc",
-                &[root_pane.clone()],
+                std::slice::from_ref(&root_pane),
             ),
             "visible-file rescue should recover the missing root agent-doc window even when cwd points at a child project"
         );

@@ -676,14 +676,6 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
     // Find snapshot path by running agent-doc to create it via the baseline
     let baseline = write_baseline(tmp.path(), &content);
     // Also write snapshot manually to match the document
-    let snap_hash = {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let canonical = doc.canonicalize().unwrap();
-        let mut hasher = DefaultHasher::new();
-        canonical.to_str().unwrap().hash(&mut hasher);
-        format!("{:x}", hasher.finish())
-    };
     // Use agent-doc snapshot path convention — just write the snapshot content
     // The binary will create the correct snapshot via finalize
     agent_doc()

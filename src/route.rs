@@ -1317,84 +1317,85 @@ fn dispatch_only_send_reopen(
             dispatch_pane
         );
     }
-    while requires_ready_probe && matches!(delivery, DispatchOnlyReopenDelivery::SupervisorIpcOnce)
-    {
-        let ready_outcome = wait_for_agent_ready_outcome(
-            tmux,
-            &dispatch_pane,
-            dispatch_only_starting_pane_ready_timeout(),
-            harness,
-        );
-        if ready_outcome.is_ready() {
-            break;
-        }
-
-        if recovery_attempts < 2
-            && let Some(target) = wait_for_starting_pane_recovery_target(
+    if requires_ready_probe && matches!(delivery, DispatchOnlyReopenDelivery::SupervisorIpcOnce) {
+        loop {
+            let ready_outcome = wait_for_agent_ready_outcome(
                 tmux,
-                file,
-                session_id,
                 &dispatch_pane,
-                file_path,
-                log_status.as_ref(),
-            )
-        {
-            recovery_attempts += 1;
-            match target {
-                StartingPaneRecoveryTarget::SamePane => {
-                    crate::ops_log::log_op(
-                        file,
-                        &format!(
-                            "route_dispatch_only_starting_pane_retry_same_pane file={} pane={} harness={} attempt={}",
-                            file.display(),
-                            dispatch_pane,
-                            harness.binary,
-                            recovery_attempts
-                        ),
-                    );
-                    log_status = crate::startup_miss::session_log_status(file, session_id)
-                        .ok()
-                        .flatten();
-                    continue;
-                }
-                StartingPaneRecoveryTarget::DifferentPane(next_pane) => {
-                    crate::ops_log::log_op(
-                        file,
-                        &format!(
-                            "route_dispatch_only_starting_pane_handoff file={} old_pane={} new_pane={} harness={} attempt={}",
-                            file.display(),
-                            dispatch_pane,
-                            next_pane,
-                            harness.binary,
-                            recovery_attempts
-                        ),
-                    );
-                    dispatch_pane = next_pane;
-                    log_status = crate::startup_miss::session_log_status(file, session_id)
-                        .ok()
-                        .flatten();
-                    continue;
+                dispatch_only_starting_pane_ready_timeout(),
+                harness,
+            );
+            if ready_outcome.is_ready() {
+                break;
+            }
+
+            if recovery_attempts < 2
+                && let Some(target) = wait_for_starting_pane_recovery_target(
+                    tmux,
+                    file,
+                    session_id,
+                    &dispatch_pane,
+                    file_path,
+                    log_status.as_ref(),
+                )
+            {
+                recovery_attempts += 1;
+                match target {
+                    StartingPaneRecoveryTarget::SamePane => {
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "route_dispatch_only_starting_pane_retry_same_pane file={} pane={} harness={} attempt={}",
+                                file.display(),
+                                dispatch_pane,
+                                harness.binary,
+                                recovery_attempts
+                            ),
+                        );
+                        log_status = crate::startup_miss::session_log_status(file, session_id)
+                            .ok()
+                            .flatten();
+                        continue;
+                    }
+                    StartingPaneRecoveryTarget::DifferentPane(next_pane) => {
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "route_dispatch_only_starting_pane_handoff file={} old_pane={} new_pane={} harness={} attempt={}",
+                                file.display(),
+                                dispatch_pane,
+                                next_pane,
+                                harness.binary,
+                                recovery_attempts
+                            ),
+                        );
+                        dispatch_pane = next_pane;
+                        log_status = crate::startup_miss::session_log_status(file, session_id)
+                            .ok()
+                            .flatten();
+                        continue;
+                    }
                 }
             }
-        }
 
-        let detail = ready_outcome.blocker_reason().unwrap_or("timed_out");
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome={}",
-                file.display(),
-                dispatch_pane,
+            let detail = ready_outcome.blocker_reason().unwrap_or("timed_out");
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome={}",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    detail
+                ),
+            );
+            anyhow::bail!(
+                "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({detail}); wait for the pane to become ready and reroute again",
                 harness.binary,
-                detail
-            ),
-        );
-        anyhow::bail!(
-            "dispatch-only {} reopen refused to inject into pane {} for {} because the latest run is still booting and never reached a dispatch-ready prompt ({detail}); wait for the pane to become ready and reroute again",
-            harness.binary,
-            dispatch_pane,
-            file.display()
-        );
+                dispatch_pane,
+                file.display()
+            );
+        }
     }
 
     if let Ok(content) = sessions::capture_pane(tmux, &dispatch_pane)
@@ -6484,7 +6485,7 @@ done
                 "new-session",
                 "-d",
                 "-s",
-                &session,
+                session,
                 "-c",
                 &cwd.to_string_lossy(),
                 "-P",
@@ -9582,7 +9583,7 @@ Body\n\
         let mock_start = write_mock_start_agent_doc(dir.path());
 
         let doc_for_thread = doc.clone();
-        let current_for_thread = format!("# Session\n❯ follow-up question\n");
+        let current_for_thread = "# Session\n❯ follow-up question\n".to_string();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(250));
             crate::cycle_state::start_preflight(
@@ -9612,7 +9613,7 @@ Body\n\
                 &[],
                 "route-live-owner-missing",
                 &file_path,
-                &session,
+                session,
                 &HarnessConfig::codex(),
                 &mut Vec::new(),
             );
@@ -12121,7 +12122,6 @@ Body\n\
         );
     }
 
-    // --- split_before positional target tests ---
     #[test]
     fn sync_after_claim_stays_on_injected_tmux_server() {
         let dir = tempfile::tempdir().unwrap();
@@ -12200,6 +12200,7 @@ Body\n\
         );
     }
 
+    // --- split_before positional target tests ---
 
     #[test]
     fn split_before_true_picks_leftmost_pane() {

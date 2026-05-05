@@ -507,6 +507,7 @@ pub fn update(editor: &str) -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{find_asset, find_best_local_zip, find_local_zip, has_asset, release_version};
     use serde_json::json;

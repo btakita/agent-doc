@@ -2355,10 +2355,10 @@ mod tests {
     fn wait_for_shell(iso: &IsolatedTmux, pane: &str, timeout_ms: u64) -> bool {
         let start = std::time::Instant::now();
         loop {
-            if let Some(cmd) = pane_current_command(iso, pane) {
-                if IDLE_SHELLS.contains(&cmd.as_str()) {
-                    return true;
-                }
+            if let Some(cmd) = pane_current_command(iso, pane)
+                && IDLE_SHELLS.contains(&cmd.as_str())
+            {
+                return true;
             }
             if start.elapsed().as_millis() >= timeout_ms as u128 {
                 return false;

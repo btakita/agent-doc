@@ -3019,11 +3019,11 @@ Please fix the bug.\n\
     fn make_diff(added: &[&str], removed: &[&str]) -> String {
         let mut lines = vec!["--- snapshot", "+++ document", "@@ -1,5 +1,5 @@"];
         for r in removed {
-            lines.push(&r);
+            lines.push(r);
         }
         lines.push(" context line");
         for a in added {
-            lines.push(&a);
+            lines.push(a);
         }
         lines.join("\n")
     }
@@ -3087,7 +3087,7 @@ Please fix the bug.\n\
     fn classify_multi_topic() {
         // Two added blocks separated by context
         let diff = "--- snapshot\n+++ document\n@@ -1,5 +1,7 @@\n context\n+first topic\n context middle\n+second topic\n context end\n";
-        let c = classify_diff(&diff);
+        let c = classify_diff(diff);
         assert_eq!(c.diff_type, DiffType::MultiTopic);
     }
 

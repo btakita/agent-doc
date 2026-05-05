@@ -6467,7 +6467,7 @@ mod tests {
 
         // Case 2: explicit patches (no synthesis) — unmatched passes through
         let explicit_patch = crate::template::PatchBlock::new("exchange", "response");
-        let patches_explicit = vec![explicit_patch];
+        let patches_explicit = [explicit_patch];
         let ipc_explicit: Vec<serde_json::Value> = vec![serde_json::json!({
             "component": "exchange",
             "content": "response",
@@ -7458,17 +7458,13 @@ mod ack_content_snapshot_tests {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.extension().is_some_and(|e| e == "json") {
-                        if let Ok(text) = std::fs::read_to_string(&path) {
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                                if let Some(pid) = json.get("patch_id").and_then(|v| v.as_str()) {
-                                    // Write sidecar WITHOUT ❯ prefix (plugin failure)
-                                    let bad_sidecar = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
-                                    let _ = std::fs::write(
-                                        ack_dir.join(format!("{pid}.md")),
-                                        bad_sidecar,
-                                    );
-                                }
-                            }
+                        if let Ok(text) = std::fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            // Write sidecar WITHOUT ❯ prefix (plugin failure)
+                            let bad_sidecar = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
+                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
                         }
                         let _ = std::fs::remove_file(&path);
                         return;
@@ -7568,10 +7564,11 @@ agent response
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.extension().is_some_and(|e| e == "json") {
-                        if let Ok(text) = std::fs::read_to_string(&path) {
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                                if let Some(pid) = json.get("patch_id").and_then(|v| v.as_str()) {
-                                    let bad_sidecar = "\
+                        if let Ok(text) = std::fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            let bad_sidecar = "\
 ---
 session: test
 ---
@@ -7584,12 +7581,7 @@ agent response
 <!-- agent:backlog -->
 <!-- /agent:backlog -->
 ";
-                                    let _ = std::fs::write(
-                                        ack_dir.join(format!("{pid}.md")),
-                                        bad_sidecar,
-                                    );
-                                }
-                            }
+                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
                         }
                         let _ = std::fs::remove_file(&path);
                         return;

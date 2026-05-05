@@ -4003,7 +4003,7 @@ mod tests {
             parsed["slash_commands"].is_null()
                 || parsed["slash_commands"]
                     .as_array()
-                    .map_or(true, |a| a.is_empty())
+                    .is_none_or(|a| a.is_empty())
         );
     }
 

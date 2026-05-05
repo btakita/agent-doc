@@ -257,12 +257,17 @@ Repo commits:
 - `src/agent-doc`: `c3c18a4` (`fix: fail closed explicit repair drift`)
 - `agent-loop`: `bde8e61a4` (`chore: bump agent-doc for repair drift guard`)
 
-Repo push follows after this closeout commit.
-<!-- agent:boundary:371bbce1 -->
+❯ Repo push follows after this closeout commit.
+### Re: closeout guard recovery — gpt-5
+
+Re-opened the binary-owned closeout path for this Codex turn after the prior `#rprdrift` response had already committed. No additional repo, test, or document work was required.
+<!-- agent:boundary:fb82e0b0 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+When I just switched the editor from equityfundingsource.md to agent-doc-bugs2.md, `agent-doc sync` did not run. This seems like a recent regression. Please investigate and fix root cause(s). spec-test-build-install-commit-push
+---
 "Press Enter to restart, or 'q' to exit."
 -->
 

@@ -54,12 +54,14 @@ Verification completed:
 Git:
 - Commit: `078f943` (`feat: add network request inspection`)
 - Pushed to `origin/main`
-<!-- agent:boundary:608aab6f -->
+
+<!-- agent:boundary:bd9dad9f -->
 <!-- /agent:exchange -->
+###
 
 ## Pending / Not Built
 
-<!-- agent:backlog -->
+<!-- agent:backlog patch=replace -->
 - [ ] [#cbsnap] [recommended] Add structured accessibility snapshot output with stable element refs to chromium-bridge
 - [ ] [#brewtap] Create btakita/homebrew-tap for brew formula distribution (deferred — low priority)
 - [ ] [#3jmq] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)

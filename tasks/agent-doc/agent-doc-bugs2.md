@@ -234,7 +234,31 @@ Pushed:
 - `agent-loop` -> `origin/main`
 
 This closes the direct-invocation preamble escape that could leave the session doc outside the binary-owned closeout path. I did not change the broader post-commit `out_of_band_write` family tracked separately in the existing `claudescore-3` / `patchback-uncommitted` plans.
-<!-- agent:boundary:be6cc00a -->
+❯ do [#rprdrift]. spec-test-build-install-commit-push
+### Re: #rprdrift — gpt-5
+
+Implemented the `#rprdrift` closeout fix.
+
+Root cause:
+- `repair::run()` could legitimately return `Noop` once only later prompt-bearing drift remained, even though `session-check` would still fail closed after self-healing the committed historical patchback from `HEAD`.
+- The explicit `agent-doc repair` command then surfaced that `Noop` as `No pending response found`, which hid the real blocked state.
+
+Changes:
+- `src/repair.rs` now re-runs the closeout interruption check on no-op explicit repairs and surfaces any remaining `session-check` failure instead of silently treating the document as clean.
+- Added a regression for the exact committed-patchback-plus-later-prompt shape, and updated the closeout/spec docs to make the fail-closed contract explicit.
+
+Verification:
+- `cargo test -p agent-doc repair_fails_closed_when_only_later_prompt_drift_remains_after_committed_patchback -- --nocapture`
+- `make check`
+- `cargo install --path .`
+- `cargo build --release`
+
+Repo commits:
+- `src/agent-doc`: `c3c18a4` (`fix: fail closed explicit repair drift`)
+- `agent-loop`: `bde8e61a4` (`chore: bump agent-doc for repair drift guard`)
+
+Repo push follows after this closeout commit.
+<!-- agent:boundary:371bbce1 -->
 <!-- /agent:exchange -->
 ###
 
@@ -245,7 +269,6 @@ This closes the direct-invocation preamble escape that could leave the session d
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rprdrift] [recommended] `agent-doc repair` reported "No pending response found" for `src/boost-client/tasks/monsterrodholders.md` even though `session-check` still failed on a committed cycle with unresolved prompt-bearing user drift after a direct patchback. Fix plan only: reproduce the exact state transition where a committed cycle still has prompt-bearing follow-up edits, compare `repair`, `session-check`, `write --commit`, and `finalize --pending-done` behavior on that state, decide whether `repair` should automatically convert the drift into a recoverable finalize path or fail with the same actionable guidance as `session-check`, and add regressions plus a fail-closed invariant so repo/session repair never stops at a false "nothing to repair" result while the document remains blocked.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

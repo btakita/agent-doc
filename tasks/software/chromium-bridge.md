@@ -891,13 +891,13 @@ Noted. The current reference set for the Playwright comparison is:
 ### Re: Source set — gpt-5
 
 The reference set is unchanged: the Playwright CLI README at `github.com/microsoft/playwright-cli`, the Playwright capabilities page at `playwright.dev/agent-cli/capabilities`, and the Playwright MCP extension README at `github.com/microsoft/playwright-mcp/blob/main/packages/extension/README.md`. I would use those same three sources for the next `chromium-bridge` comparison pass.
-<!-- agent:boundary:afe2ff12 -->
+<!-- agent:boundary:172f05e2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:pending patch=replace -->
-- [ ] [#cbstate] [recommended] Add persistent session/profile support plus state save/load to chromium-bridge
+- [ ] [#63ww] t [recommended] Add persistent session/profile support plus state save/load to chromium-bridge
 - [ ] [#cbnet] [recommended] Add network request listing/inspection to chromium-bridge
 - [ ] [#cbsnap] [recommended] Add structured accessibility snapshot output with stable element refs to chromium-bridge
 - [ ] [#brewtap] Create btakita/homebrew-tap for brew formula distribution (deferred — low priority)

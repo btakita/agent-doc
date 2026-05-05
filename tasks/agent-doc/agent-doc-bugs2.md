@@ -287,8 +287,37 @@ Verification:
 Commit / push:
 - `src/agent-doc`: `7f93d01` pushed to `origin/20260422/codex-agent-backend`
 
-I also restored the gated backlog items `#jbpdrop`, `#jbipcr`, and `#edispatch` after preflight failed closed on their absence; they remain open follow-ups in this session. I did not create a superproject gitlink commit because the workspace root already has unrelated dirty changes outside this fix.
-<!-- agent:boundary:b70e595b -->
+❯ I also restored the gated backlog items `#jbpdrop`, `#jbipcr`, and `#edispatch` after preflight failed closed on their absence; they remain open follow-ups in this session. I did not create a superproject gitlink commit because the workspace root already has unrelated dirty changes outside this fix.
+❯ Before the previous run, I completed all `[/]` backlog tasks with `[x]`. The `[x]` items were removed in the preflight but then the repair readded the items with `[/]`. Since I marked the backlog items as complete, the repair should honor that. How can we ensure that user intent is completed while keeping the repair processes focused on repairing issues with the document? spec-test-build-install-commit-push
+### Re: manual backlog completion replay regression — gpt-5
+
+Root cause fixed.
+
+What was happening:
+- preflight / repair already knew how to reap a user-edited `[x]` backlog item
+- the backlog replay guard still only exempted ids recorded through `--pending-done`
+- when the completion came from a manual document edit instead, that just-reaped id looked like a dropped historical backlog item and the older `[ ]` / `[/]` state could be restored on the next repair path
+
+What changed:
+- added `cycle_state::resolved_pending_ids(...)` to unify explicit `pending_done_ids` with same-cycle `reaped_pending_ids`
+- updated both the preflight history guard and the post-commit session-check history guard to treat same-cycle reaps as intentional completion
+- added regressions for the exact manual `[x]` path in preflight and session-check
+- updated the pending-system spec and `VERSIONS.md` to document the manual-completion invariant
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml preflight_allows_user_marked_done_item_reaped_in_same_cycle -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml session_check_backlog_replay_guard_accepts_reaped_ids_from_cycle_state -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Commit / push:
+- `src/agent-doc`: `c3def78` pushed to `origin/20260422/codex-agent-backend`
+
+I did not create a superproject gitlink commit because the workspace root already had unrelated dirty changes outside this fix.
+
+There were no actionable follow-up items to capture.
+<!-- agent:boundary:dc89a2e8 -->
 <!-- /agent:exchange -->
 ###
 

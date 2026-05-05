@@ -15,6 +15,13 @@ describe('sessionUi', () => {
         );
     });
 
+    it('builds session command args for supervisor restart routing', () => {
+        assert.deepStrictEqual(
+            buildSessionCommandArgs('restart-supervisor', 'tasks/agent-doc/agent-doc-bugs2.md'),
+            ['session', 'restart-supervisor', 'tasks/agent-doc/agent-doc-bugs2.md'],
+        );
+    });
+
     it('keeps exact session status output in the diagnostics surface', () => {
         const output = 'generation=4\nstate=waiting_input\npane=%12';
         assert.deepStrictEqual(
@@ -31,6 +38,13 @@ describe('sessionUi', () => {
         assert.strictEqual(
             buildSessionSuccessHint('clear', 'tasks/agent-doc/agent-doc-bugs2.md', ''),
             'Cleared session context for tasks/agent-doc/agent-doc-bugs2.md',
+        );
+    });
+
+    it('falls back to the supervisor restart success hint when the CLI returns no text', () => {
+        assert.strictEqual(
+            buildSessionSuccessHint('restart-supervisor', 'tasks/agent-doc/agent-doc-bugs2.md', ''),
+            'Restart requested for supervisor handling tasks/agent-doc/agent-doc-bugs2.md',
         );
     });
 

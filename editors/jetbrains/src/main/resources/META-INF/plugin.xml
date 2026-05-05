@@ -68,6 +68,14 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.CompactExchange"
+                class="com.github.btakita.agentdoc.CompactExchangeAction"
+                text="Compact Exchange"
+                description="Compact the exchange component for this document and commit the result">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.ForceClaim"
                 class="com.github.btakita.agentdoc.ForceClaimAction"
                 text="Force Claim for Tmux Pane"
@@ -92,10 +100,10 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
-        <action id="AgentDoc.RestartSession"
-                class="com.github.btakita.agentdoc.RestartSessionAction"
-                text="Restart Session"
-                description="Restart the bound agent-doc session for this document">
+        <action id="AgentDoc.RestartSupervisorProcess"
+                class="com.github.btakita.agentdoc.RestartSupervisorProcessAction"
+                text="Restart Supervisor Process"
+                description="Restart the bound agent-doc supervisor process for this document">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>

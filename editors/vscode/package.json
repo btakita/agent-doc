@@ -31,6 +31,18 @@
         "title": "Agent Doc: Claim"
       },
       {
+        "command": "agentDoc.forceClaim",
+        "title": "Agent Doc: Force Claim for Tmux Pane"
+      },
+      {
+        "command": "agentDoc.runWithJunie",
+        "title": "Agent Doc: Run with Junie"
+      },
+      {
+        "command": "agentDoc.compactExchange",
+        "title": "Agent Doc: Compact Exchange"
+      },
+      {
         "command": "agentDoc.syncLayout",
         "title": "Agent Doc: Sync Layout"
       },
@@ -40,7 +52,7 @@
       },
       {
         "command": "agentDoc.restartSession",
-        "title": "Agent Doc: Restart Session"
+        "title": "Agent Doc: Restart Supervisor Process"
       },
       {
         "command": "agentDoc.clearSessionContext",
@@ -81,7 +93,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "tsc -p ./ && node --test out/native.test.js out/reposition.test.js out/patchGuard.test.js out/tabSync.test.js out/sessionUi.test.js",
+    "test": "tsc -p ./ && node --test out/native.test.js out/reposition.test.js out/patchGuard.test.js out/tabSync.test.js out/sessionUi.test.js out/popupMenu.test.js",
     "package": "vsce package",
     "publish": "vsce publish"
   },

@@ -315,10 +315,24 @@ object TerminalUtil {
         runSessionCommand(
             project = project,
             file = file,
-            args = listOf("restart"),
-            startedMessage = "Restarting session for ${file.name}",
+            args = listOf("restart-supervisor"),
+            startedMessage = "Restarting supervisor for ${file.name}",
             onSuccess = { relativePath, output ->
-                showHint(project, output.ifBlank { "Restart requested for $relativePath" })
+                showHint(project, output.ifBlank { "Restart requested for supervisor handling $relativePath" })
+            },
+            onComplete = onComplete,
+        )
+    }
+
+    fun compactExchange(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        val (cwd, relativePath) = resolveProject(project, file)
+        runDocumentCommand(
+            project = project,
+            file = file,
+            command = buildCompactExchangeCommand(resolveAgentDoc(cwd), relativePath),
+            startedMessage = "Compacting exchange for ${file.name}",
+            onSuccess = { resolvedPath, output ->
+                showHint(project, output.ifBlank { "Compacted exchange for $resolvedPath" })
             },
             onComplete = onComplete,
         )
@@ -362,8 +376,27 @@ object TerminalUtil {
         val (cwd, relativePath) = resolveProject(project, file)
         val agentDoc = resolveAgentDoc(cwd)
         val cmd = buildSessionCommand(agentDoc, args, relativePath)
+        runDocumentCommand(
+            project = project,
+            file = file,
+            command = cmd,
+            startedMessage = startedMessage,
+            onSuccess = onSuccess,
+            onComplete = onComplete,
+        )
+    }
+
+    private fun runDocumentCommand(
+        project: Project,
+        file: VirtualFile,
+        command: List<String>,
+        startedMessage: String,
+        onSuccess: (String, String) -> Unit,
+        onComplete: (() -> Unit)? = null,
+    ) {
+        val (cwd, relativePath) = resolveProject(project, file)
         try {
-            val process = ProcessBuilder(cmd)
+            val process = ProcessBuilder(command)
                 .directory(java.io.File(cwd))
                 .redirectErrorStream(true)
                 .start()
@@ -377,7 +410,7 @@ object TerminalUtil {
                     if (exitCode != 0) {
                         notifyError(
                             project,
-                            "agent-doc session ${args.firstOrNull().orEmpty()} failed (exit $exitCode):\n$output",
+                            "agent-doc command failed (exit $exitCode):\n$output",
                         )
                     } else {
                         onSuccess(relativePath, output)
@@ -388,7 +421,8 @@ object TerminalUtil {
             }.start()
         } catch (e: Exception) {
             onComplete?.invoke()
-            notifyError(project, "Failed to run agent-doc session command: ${e.message}\nLooked for: $agentDoc")
+            val binary = command.firstOrNull() ?: "agent-doc"
+            notifyError(project, "Failed to run agent-doc command: ${e.message}\nLooked for: $binary")
         }
     }
 
@@ -418,6 +452,18 @@ object TerminalUtil {
         addAll(args)
         add(relativePath)
     }
+
+    internal fun buildCompactExchangeCommand(
+        agentDoc: String,
+        relativePath: String,
+    ): List<String> = listOf(
+        agentDoc,
+        "compact",
+        relativePath,
+        "--component",
+        "exchange",
+        "--commit",
+    )
 
     internal fun sessionStatusSuccessMessage(relativePath: String, output: String): String =
         output.ifBlank { "Loaded session status for $relativePath" }

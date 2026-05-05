@@ -1096,6 +1096,7 @@ enum SessionAction {
         pane: Option<String>,
     },
     /// Restart the live session supervisor for a document
+    #[command(name = "restart-supervisor", visible_alias = "restart")]
     Restart {
         /// Path to the session document
         file: PathBuf,

@@ -51,7 +51,7 @@ Two strategies for detecting the file's position in the editor split:
 ### Session Operator Actions
 
 - `Show Session Status` runs `agent-doc session status <relative-path>` and surfaces the exact output in an IDE notification instead of re-deriving status inside the plugin.
-- `Restart Session` runs `agent-doc session restart <relative-path>` and keeps restart ownership in the binary/supervisor path.
+- `Restart Supervisor Process` runs `agent-doc session restart-supervisor <relative-path>` and keeps restart ownership in the binary/supervisor path.
 - `Clear Session Context` runs `agent-doc session clear <relative-path>` so Codex/Claude clear semantics stay aligned with the binary-owned clear command path while leaving the next `Run Agent Doc` dispatch-only reroute on the same live session.
 - `Copy Session Diagnostics` runs `agent-doc session doctor <relative-path>`, copies the exact output, and keeps the binary-owned diagnostics text available for bug reports.
 - Plugin verification must cover exact session-status display, `session clear` command wiring, and persistent route-failure retention for stage-specific dispatch diagnostics.
@@ -93,7 +93,7 @@ Two strategies for detecting the file's position in the editor split:
 
 ## Context Menu
 
-Run, Fix Document, Claim, Sync Layout, Show Session Status, Restart Session, Clear Session Context, and Copy Session Diagnostics are available in:
+Run, Fix Document, Claim, Compact Exchange, Sync Layout, Show Session Status, Restart Supervisor Process, Clear Session Context, and Copy Session Diagnostics are available in:
 - Tools menu
 - Editor right-click context menu
 - Project view right-click context menu (Run, Fix Document, Claim, and session operator actions)

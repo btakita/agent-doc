@@ -146,6 +146,41 @@ class TerminalUtilTest {
         )
     }
 
+    @Test
+    fun `restart supervisor uses explicit supervisor session command`() {
+        assertEquals(
+            listOf(
+                "agent-doc",
+                "session",
+                "restart-supervisor",
+                "tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+            TerminalUtil.buildSessionCommand(
+                "agent-doc",
+                listOf("restart-supervisor"),
+                "tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+        )
+    }
+
+    @Test
+    fun `compact exchange uses committed exchange compact command`() {
+        assertEquals(
+            listOf(
+                "agent-doc",
+                "compact",
+                "tasks/agent-doc/agent-doc-bugs2.md",
+                "--component",
+                "exchange",
+                "--commit",
+            ),
+            TerminalUtil.buildCompactExchangeCommand(
+                "agent-doc",
+                "tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+        )
+    }
+
     private class FakeRouteHandle(private var alive: Boolean) : TerminalUtil.InFlightRouteHandle {
         var cancelCount: Int = 0
             private set

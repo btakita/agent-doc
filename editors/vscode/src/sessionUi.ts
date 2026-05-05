@@ -1,4 +1,4 @@
-export type SessionCommandName = 'status' | 'restart' | 'clear' | 'doctor';
+export type SessionCommandName = 'status' | 'restart-supervisor' | 'clear' | 'doctor';
 
 export interface OutputPresentation {
     title: string;
@@ -39,8 +39,8 @@ export function buildSessionSuccessHint(
     const trimmed = output.trim();
     if (trimmed) return trimmed;
     switch (command) {
-        case 'restart':
-            return `Restart requested for ${relativePath}`;
+        case 'restart-supervisor':
+            return `Restart requested for supervisor handling ${relativePath}`;
         case 'clear':
             return `Cleared session context for ${relativePath}`;
         case 'doctor':

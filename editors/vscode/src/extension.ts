@@ -14,6 +14,10 @@ import {
     type SessionCommandName,
 } from './sessionUi';
 import {
+    buildOverflowPopupMenuItems,
+    buildPrimaryPopupMenuItems,
+} from './popupMenu';
+import {
     buildSyncCommandArgs,
     buildTabChangeCommand,
     flattenVisibleColumns,
@@ -589,12 +593,52 @@ async function showSessionStatusAction(): Promise<void> {
 
 async function restartSessionAction(): Promise<void> {
     await runSessionCommandForActiveFile(
-        'restart',
+        'restart-supervisor',
         (output, rel) => {
-            showHint(buildSessionSuccessHint('restart', rel, output));
+            showHint(buildSessionSuccessHint('restart-supervisor', rel, output));
         },
-        'session restart failed',
+        'supervisor restart failed',
     );
+}
+
+async function compactExchangeAction(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+
+    try {
+        await editor.document.save();
+        const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+        const output = await runCli(['compact', rel, '--component', 'exchange', '--commit'], cwd);
+        showHint(output || `Compacted exchange for ${rel}`);
+    } catch (err: any) {
+        showError(`compact exchange failed: ${err.message}`);
+    }
+}
+
+async function runWithJunieAction(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+
+    try {
+        await editor.document.save();
+        const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+        const output = await runCli(['run', '--agent', 'junie', rel], cwd);
+        showHint(output || `Ran Junie for ${rel}`);
+    } catch (err: any) {
+        showError(`run with Junie failed: ${err.message}`);
+    }
 }
 
 async function clearSessionContextAction(): Promise<void> {
@@ -624,6 +668,14 @@ async function copySessionDiagnosticsAction(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function claimAction(): Promise<void> {
+    await claimActionInternal(false);
+}
+
+async function forceClaimAction(): Promise<void> {
+    await claimActionInternal(true);
+}
+
+async function claimActionInternal(force: boolean): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return;
 
@@ -643,12 +695,16 @@ async function claimAction(): Promise<void> {
         const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
         const split = detectSplit(editor);
         const args = ['claim', rel];
+        if (force) {
+            args.push('--force');
+        }
         if (split.position) {
             args.push('--position', split.position);
         }
 
         const output = await runCli(args, cwd);
-        showHint(output || `Claimed ${rel} (pos=${split.position || 'none'})`);
+        const actionVerb = force ? 'Force-claimed' : 'Claimed';
+        showHint(output || `${actionVerb} ${rel} (pos=${split.position || 'none'})`);
 
         // Trigger silent layout sync after claiming
         await syncLayoutInternal(cwd, false, true);
@@ -928,17 +984,7 @@ async function popupMenuAction(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return;
 
-    const items = [
-        { label: '$(play) Run (Submit)', id: 'submit' },
-        { label: '$(link) Claim', id: 'claim' },
-        { label: '$(layout) Sync Layout', id: 'syncLayout' },
-        { label: '$(pulse) Show Session Status', id: 'status' },
-        { label: '$(debug-restart) Restart Session', id: 'restart' },
-        { label: '$(clear-all) Clear Session Context', id: 'clear' },
-        { label: '$(copy) Copy Session Diagnostics', id: 'doctor' },
-    ];
-
-    const selected = await vscode.window.showQuickPick(items, {
+    const selected = await vscode.window.showQuickPick(buildPrimaryPopupMenuItems(), {
         title: 'Agent Doc',
         placeHolder: 'Select action',
     });
@@ -952,13 +998,16 @@ async function popupMenuAction(): Promise<void> {
         case 'claim':
             await claimAction();
             break;
+        case 'compactExchange':
+            await compactExchangeAction();
+            break;
         case 'syncLayout':
             await syncLayoutAction();
             break;
         case 'status':
             await showSessionStatusAction();
             break;
-        case 'restart':
+        case 'restartSupervisor':
             await restartSessionAction();
             break;
         case 'clear':
@@ -967,6 +1016,22 @@ async function popupMenuAction(): Promise<void> {
         case 'doctor':
             await copySessionDiagnosticsAction();
             break;
+        case 'more': {
+            const overflow = await vscode.window.showQuickPick(buildOverflowPopupMenuItems(), {
+                title: 'Agent Doc More Actions',
+                placeHolder: 'Select action',
+            });
+            if (!overflow) return;
+            switch (overflow.id) {
+                case 'runWithJunie':
+                    await runWithJunieAction();
+                    break;
+                case 'forceClaim':
+                    await forceClaimAction();
+                    break;
+            }
+            break;
+        }
     }
 }
 
@@ -1530,6 +1595,18 @@ export function activate(context: vscode.ExtensionContext): void {
     // Feature 2: Claim
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.claim', claimAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.forceClaim', forceClaimAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.runWithJunie', runWithJunieAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.compactExchange', compactExchangeAction)
     );
 
     // Feature 3: Sync Layout

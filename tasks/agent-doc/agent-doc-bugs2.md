@@ -190,7 +190,7 @@ Editor/build/install verification:
 No new `src/agent-doc` source edit was required in this cycle. I did not create a repo commit/push there because the submodule already had unrelated dirty changes before this replay and this turn's delta was proof/build/install plus the document response, not a new isolated backend patch.
 
 I am leaving `#jbdirsubmit`, `#jbqbusy`, and `#jbhalias` open as gated follow-ups rather than marking them fully done because I did not perform a literal live JetBrains/VS Code click-through in this cycle. The backend and plugin proof surface is green; the remaining gap is human GUI confirmation only.
-<!-- agent:boundary:8365a705 -->
+<!-- agent:boundary:df1cf2e0 -->
 <!-- /agent:exchange -->
 ###
 
@@ -201,12 +201,6 @@ I am leaving `#jbdirsubmit`, `#jbqbusy`, and `#jbhalias` open as gated follow-up
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [/] [#jbpdrop] [recommended] Replay the live tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/buildparty-investor-demo/dev.md mixed-root routed-turn scenario after the injected tmux-context fix and confirm the visible sibling pane no longer gets stashed. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
-- [/] [#jbdirsubmit] [recommended] Replay JetBrains/VS Code Run Agent Doc + Clear Session Context after direct tmux submit-path unification and confirm Codex no longer drafts literal \\n and Run Agent Doc no longer surfaces still booting.
-- [/] [#jbqbusy] [recommended] Replay JetBrains Run Agent Doc after the authoritative busy/starting queue fix and confirm reroutes now enqueue instead of fail-closing on supervisor busy/starting state.
-- [/] [#jbhalias] [recommended] Replay JetBrains Run Agent Doc against src/session-share/tasks/buildparty-investor-demo/dev.md after the canonical Claude harness alias fix and confirm authoritative reroutes no longer fail on claude-code/claude mismatch.
-- [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc after the canonical Claude harness alias fix and confirm Claude-owned authoritative actor sessions reroute cleanly without claude-code/claude mismatch errors.
-- [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#tailpatch] [recommended] Last response was written outside the live
   `agent:exchange` block instead of being appended inside it. Fix plan only: refresh
   `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across

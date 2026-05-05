@@ -48,7 +48,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Template/CRDT retries must adopt the already-visible response instead of appending a duplicate block.
 - Prompt-prefix normalization for append-mode exchange comes from the shared prompt-bearing classifier, not ad hoc line-shape guesses.
 - Carried-forward formatting directives from historical `❯ ...` prompt blocks must be re-injected into new agent prompts when they still read as active document-level requirements.
-- Template writes fail closed if live conversation content would end up outside `agent:exchange`, except for the narrow duplicate-close / duplicate-open repair shapes the binary knows how to normalize safely.
+- Template writes fail closed if live conversation content would end up outside `agent:exchange`, including the inter-component gap between the exchange close marker and later components such as backlog, except for the narrow duplicate-close / duplicate-open repair shapes the binary knows how to normalize safely.
 - Boundary markers are binary-owned. The write path removes stale boundaries, inserts a fresh end-of-exchange boundary, applies the response, and re-inserts a fresh boundary at the new exchange end.
 - Exchange append replies must bind to the oldest compatible unresolved prompt block rather than skipping earlier prompts still ahead of the old boundary.
 
@@ -70,7 +70,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - The same repair path also handles stale `preflight_started` cycles only when the hashes or safe historical `HEAD` proof make that deterministic.
 - Historical capture replay is narrow: it requires either an active capture artifact or a matching orphan prompt target in the live exchange.
 - Transcript-shaped or full-document-dump captured payloads must fail closed and be parked under `.agent-doc/repair-blocked/`.
-- No-pending repair still runs transcript canonicalization, completed-backlog reap, safe duplicate-close repair, and deterministic stale-boundary repair when applicable.
+- No-pending repair still runs transcript canonicalization, completed-backlog reap, safe escaped-conversation repair (including the exchange-to-backlog gap case), safe duplicate-close repair, and deterministic stale-boundary repair when applicable.
 - For git-backed docs, repair must not stop after updating the document or snapshot. The same command must carry the recovered closeout through commit.
 
 ## preflight

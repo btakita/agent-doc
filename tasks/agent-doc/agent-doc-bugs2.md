@@ -204,7 +204,37 @@ Verification:
 Repo commits:
 - `src/agent-doc`: `b9437b8` (`fix: reap malformed backlog spill`)
 - `agent-loop`: `14b3b86f8` (`chore: bump agent-doc for backlog spill reap`)
-<!-- agent:boundary:55ab2e89 -->
+❯ do [#rspcmt]. spec-test-build-install-commit-push
+### Re: #rspcmt — gpt-5
+
+Implemented the `#rspcmt` closeout fix for direct Codex `agent-doc <FILE>` turns that arrive wrapped in AGENTS/instruction preambles. Plan: `tasks/agent-doc/plan-buildparty-direct-invocation-closeout-regression.md`
+
+Root cause:
+- `codex_hook.rs` only inspected the first non-empty prompt line for `agent-doc ...`.
+- When the Codex `UserPromptSubmit` payload started with injected AGENTS text or fenced examples, the hook never tracked the target doc, so the `Stop` hook could not recover or block an unfinished closeout.
+
+Changes:
+- `codex_hook.rs` now scans prompt lines from the end, skips fenced placeholder examples like `agent-doc <FILE>`, and records the last real harness-native invocation line.
+- Added hook regressions for prompt-preamble parsing and for the resulting active-session post-commit drift recovery path.
+- Updated `SPEC.md`, `README.md`, and `VERSIONS.md` to make the Codex hook contract explicit.
+
+Verification:
+- `cargo test -p agent-doc resolve_agent_doc_path_prefers_real_invocation_after_instruction_preamble -- --nocapture`
+- `cargo test -p agent-doc stop_auto_closes_active_session_drift_when_prompt_has_instruction_preamble -- --nocapture`
+- `make check`
+- `cargo install --path .`
+- `cargo build --release`
+
+Repo commits:
+- `src/agent-doc`: `c3e163e` (`fix: track codex hook prompts after preambles`)
+- `agent-loop`: `3659deccd` (`chore: bump agent-doc for codex hook preamble tracking`)
+
+Pushed:
+- `src/agent-doc` -> `origin/20260422/codex-agent-backend`
+- `agent-loop` -> `origin/main`
+
+This closes the direct-invocation preamble escape that could leave the session doc outside the binary-owned closeout path. I did not change the broader post-commit `out_of_band_write` family tracked separately in the existing `claudescore-3` / `patchback-uncommitted` plans.
+<!-- agent:boundary:be6cc00a -->
 <!-- /agent:exchange -->
 ###
 
@@ -215,10 +245,6 @@ Repo commits:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspcmt] [recommended] Previous response was written to
-  `src/session-share/tasks/claudescore-3.md` but not committed. Create a fix plan only: reproduce the closeout path, trace where
-  `finalize`/
-  `write --commit` can report success without a persisted commit, identify any stash/sync/session-check interaction that can leave the response uncommitted, then add regression coverage and a fail-closed acceptance criterion so agent-doc never reports a completed closeout until the response commit is verifiably present.
 - [ ] [#rprdrift] [recommended] `agent-doc repair` reported "No pending response found" for `src/boost-client/tasks/monsterrodholders.md` even though `session-check` still failed on a committed cycle with unresolved prompt-bearing user drift after a direct patchback. Fix plan only: reproduce the exact state transition where a committed cycle still has prompt-bearing follow-up edits, compare `repair`, `session-check`, `write --commit`, and `finalize --pending-done` behavior on that state, decide whether `repair` should automatically convert the drift into a recoverable finalize path or fail with the same actionable guidance as `session-check`, and add regressions plus a fail-closed invariant so repo/session repair never stops at a false "nothing to repair" result while the document remains blocked.
 <!-- /agent:backlog -->
 

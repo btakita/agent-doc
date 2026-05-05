@@ -337,7 +337,15 @@ I did not create a new `src/tsift` commit or rerun a no-op release cycle because
 `#a7e3` is already complete in `src/tsift`; the shipped work is commit `3c8de09` (`feat: auto-route session transcript reads`), and `src/tsift` is still at `origin/main`/`HEAD` `b81e9a1` with no missing repo delta to spec/test/build/install/commit/push again.
 
 I verified the evidence remains in place in `src/tsift`, and there was no new code/build/install/push work to perform in this cycle. The actionable closeout here was document state, so I resolved backlog item `#a7e3` in this response cycle.
-<!-- agent:boundary:30b8c401 -->
+❯ do [#tmfb]
+### Re: #tmfb spec-test-build-install-commit-push — gpt-5
+
+`#tmfb` is already complete in `src/tsift`. The backlog text matches the grouped high-hit search/explain collapse that shipped in commit `b81e9a1` (`feat: collapse dense search and explain output`), and `src/tsift` is still at `origin/main`/`HEAD` `b81e9a1`, so there is no missing repo delta to spec/test/build/install/commit/push again.
+
+The shipped surface is still present in the repo: the grouped-output behavior is documented in [src/tsift/SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md:138) and [src/tsift/VERSIONS.md](/home/brian/work/btakita/agent-loop/src/tsift/VERSIONS.md:13), and this session already records the original implementation response for `#4bzh`, which is the same underlying work under a different backlog id.
+
+I did not rerun a no-op release cycle because the implementation is already shipped and `src/tsift` is clean. The actionable work in this cycle was backlog closeout, so I resolved `#tmfb` here.
+<!-- agent:boundary:da057880 -->
 <!-- /agent:exchange -->
 ###
 
@@ -348,19 +356,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-
-Commands:
-  - agent-doc (1)
-  - git diff (1)
-  - git show (1)
-  - tsift session-digest (1)
-
-Touched files:
-  - /patch:exchange (1)
-  - file/module (1)
-  - search/explain (1)
-  - session/doc (1) for agent-doc markdown and Claude JSONL handoff/review flows. #spec-test-build-install-commit-push
-- [ ] [#tmfb] searchcollapse=Collapse high-hit / output by file/module counts before snippets so broad exact queries stay useful without RTK-only truncation. #spec-test-build-install-commit-push
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

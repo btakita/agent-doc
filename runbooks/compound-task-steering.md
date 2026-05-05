@@ -25,6 +25,7 @@ Keep execution and recovery deterministic by normalizing compound prose into exp
 3. Use `agent-doc orchestrate <FILE> --mode sequential` for straight-line follow-up work.
 4. Use `agent-doc orchestrate <FILE> --mode dag` only when the user already expressed real dependencies.
 5. Keep `commit + push` as the last explicit step, not an ambiguous sentence fragment buried inside the primary task prompt.
+6. When the work is happening inside an `agent-doc` session, interpret that final `commit + push` step as: commit any non-session repo files first if needed, run `agent-doc finalize` / `write --commit` so the session document gets its own binary-owned closeout commit, then push after closeout.
 
 ## Examples
 
@@ -32,14 +33,14 @@ Keep execution and recovery deterministic by normalizing compound prose into exp
   Normalize to:
   - primary `do #ntoc`
   - follow-up `Add #ntoc result to today's news`
-  - final `commit + push`
+  - final `commit non-session repo files, finalize the session document, then push`
 
 - `do #bench. Run benchmarks. Add to today's news. commit + push`
   Normalize to:
   - primary `do #bench`
   - same-task verification `Run benchmarks`
   - follow-up `Add #bench result to today's news`
-  - final `commit + push`
+  - final `commit non-session repo files, finalize the session document, then push`
 
 - Explicit metadata already present:
   ```md

@@ -1059,6 +1059,9 @@ mod tests {
                 .contains("Do not manually patch the final assistant response into the document")
         );
         assert!(SKILL_TEMPLATE.contains("agent-doc write --commit <FILE>` completes"));
+        assert!(SKILL_TEMPLATE.contains(
+            "do not stage or commit the active session document in that manual git commit"
+        ));
     }
 
     #[test]
@@ -1259,6 +1262,9 @@ mod tests {
                 "Do not patch the document early and then keep working for the same turn"
             )
         );
+        assert!(content.contains(
+            "the manual repo commit must exclude the active session document"
+        ));
         assert!(content.contains(".codex/hooks.json"));
         assert!(content.contains("UserPromptSubmit"));
         assert!(content.contains("agent-doc hook codex-stop"));
@@ -1274,6 +1280,26 @@ mod tests {
         assert!(content.contains("agent-doc finalize <FILE>"));
         assert!(content.contains("agent-doc write --commit <FILE>"));
         assert!(content.contains("bare `agent-doc write`"));
+        assert!(content.contains(
+            "keep the active session document out of that manual git commit"
+        ));
+        assert!(content.contains(
+            "Do **not** stage the active session document into an ordinary repo `git commit`"
+        ));
+    }
+
+    #[test]
+    fn compound_task_runbook_defers_session_doc_commit_until_finalize() {
+        let (_, content) = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "compound-task-steering.md")
+            .expect("compound-task-steering.md not found");
+        assert!(content.contains(
+            "run `agent-doc finalize` / `write --commit` so the session document gets its own binary-owned closeout commit"
+        ));
+        assert!(content.contains(
+            "commit non-session repo files, finalize the session document, then push"
+        ));
     }
 
     #[test]

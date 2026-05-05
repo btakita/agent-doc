@@ -14,6 +14,7 @@ The core workflow (preflight, respond, persist the response) is identical across
 
 - Imperative user edits inside an `agent-doc` session document are executable directives, not just topics to comment on.
 - `do #qj5w now`, `fix this`, `run tests`, `build + install`, `commit + push`, and similar document edits authorize the same underlying repo work they would authorize in chat.
+- If that work includes an ordinary repo `commit + push`, the manual repo commit must exclude the active session document. `agent-doc finalize` / `write --commit` still owns the session-document closeout commit, and the push happens after that closeout so the response commit is included.
 - The agent should either perform that work before `finalize` / `write --commit`, or stop on a concrete blocker. Do **not** emit status-only progress prose while doing neither.
 
 ## Post-Preflight Planning
@@ -63,6 +64,7 @@ Identify your harness from your environment:
 - **Auto-update prompt:** Print a message asking the user to restart.
 - **Installed hook backstop:** `agent-doc skill install` also writes `.codex/hooks.json` and enables `features.codex_hooks = true` in `.codex/config.toml`. The installed commands are `agent-doc hook codex-user-prompt-submit` for `UserPromptSubmit` and `agent-doc hook codex-stop` for `Stop`. `UserPromptSubmit` tracks the active document for the Codex session across nested `.agent-doc` roots in the same workspace; `Stop` first tries to finish the response cycle deterministically from `last_assistant_message`, but only when that payload validates as a single assistant closeout. Transcript-shaped payloads (for example full `agent:exchange` dumps, prompt-target lines, or repeated response headings) are blocked and saved only for diagnostics instead of being replayed, even when the stop arrives on a later turn in that same Codex session.
 - **Ordering:** finish the turn's requested coding / testing / build-install work before the response persistence command. Do not patch the document early and then keep working for the same turn.
+- **Commit/push ordering:** when the document directive includes ordinary repo `commit + push`, do not stage the active session document into that manual git commit. Commit only non-session repo files, run `agent-doc finalize` / `write --commit`, then push after the closeout commit lands.
 - **Write-back:** Execute `agent-doc finalize` directly for the normal response cycle (Codex runs shell commands natively), then immediately run `agent-doc session-check <FILE>`.
 - **Fail closed:** If `agent-doc session-check <FILE>` exits nonzero after write-back, the cycle is still open or the document still has prompt-bearing user edits with no newer cycle start. Do **not** report success or stop; continue recovery instead.
 - **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file. After `agent-doc write --commit <FILE>`, run the same `agent-doc session-check <FILE>` guard before ending the turn. That repair write-back should also be the last substantial action of the turn.

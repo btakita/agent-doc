@@ -262,8 +262,33 @@ Commit / push:
 - `src/agent-doc`: `362bcd1` pushed to `origin/20260422/codex-agent-backend`
 - superproject gitlink: `e05975450` pushed to `origin/main`
 
-There were no actionable follow-up items to capture.
-<!-- agent:boundary:6f746506 -->
+❯ There were no actionable follow-up items to capture.
+❯ do [#tailpatch]. spec-test-build-install-commit-push
+### Re: `#tailpatch` exchange-gap closeout fix — gpt-5
+
+Fixed the `#tailpatch` closeout blind spot in `src/agent-doc`.
+
+Root cause:
+- the template guard/repair only scanned for escaped conversation after the last parsed agent component
+- that missed prompt/response blocks that landed in the gap between `&lt;!-- /agent:exchange --&gt;` and later components such as the stray `###` marker or `agent:backlog`, so malformed closeouts could survive while the document still parsed cleanly
+
+What changed:
+- `src/template.rs` now shares one range detector for escaped conversation outside exchange gaps
+- the fail-closed guard, explicit repair path, and manual tail-strip path all use that same detector
+- added regressions for guard failure, repair, and strip on the exchange-to-backlog gap shape
+- updated `specs/07-closeout-commands.md`, `README.md`, and `VERSIONS.md` to document the inter-component gap invariant
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml gap_before_backlog`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Commit / push:
+- `src/agent-doc`: `7f93d01` pushed to `origin/20260422/codex-agent-backend`
+
+I also restored the gated backlog items `#jbpdrop`, `#jbipcr`, and `#edispatch` after preflight failed closed on their absence; they remain open follow-ups in this session. I did not create a superproject gitlink commit because the workspace root already has unrelated dirty changes outside this fix.
+<!-- agent:boundary:b70e595b -->
 <!-- /agent:exchange -->
 ###
 
@@ -277,13 +302,6 @@ There were no actionable follow-up items to capture.
 - [/] [#jbpdrop] [recommended] Replay the live tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/buildparty-investor-demo/dev.md mixed-root routed-turn scenario after the injected tmux-context fix and confirm the visible sibling pane no longer gets stashed. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
 - [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc after the canonical Claude harness alias fix and confirm Claude-owned authoritative actor sessions reroute cleanly without claude-code/claude mismatch errors.
 - [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
-- [ ] [#tailpatch] [recommended] Last response was written outside the live
-  `agent:exchange` block instead of being appended inside it. Fix plan only: refresh
-  `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across
-  `write`,
-  `finalize`, repair, and routed closeout paths, then add a fail-closed invariant plus regressions so response-bearing patchbacks can only land between
-  `<!-- agent:exchange ... -->` and
-  `<!-- /agent:exchange -->`.
 - [ ] [#devmdcmt] [recommended]
   `agent-doc` left
   `src/session-share/tasks/buildparty-investor-demo/dev.md` in a synthetic

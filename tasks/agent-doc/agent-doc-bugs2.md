@@ -246,7 +246,34 @@ Git:
 - Pushed to `origin/20260422/codex-agent-backend`
 
 I did not run a live JetBrains/VS Code replay from this CLI session, so the new logging is the main added signal for the next editor repro.
-<!-- agent:boundary:d5fecd32 -->
+❯ On Codex, I'm still getting the `\n` error with `Clear Session Context` and `Run Agent Doc`.
+❯ On Claude, `Run Agent Doc` still has the `\n` error. `Clear Session Context` works as intended.
+
+❯ Please unify the submissions to the terminal to ensure the CR is correctly passed. Use the Claude Code `Clear Session Context` as the example of correct application of the CR.
+
+❯ spec-test-build-install-commit-push
+### Re: Unified dispatch-only Enter submit path — gpt-5
+
+I fixed the remaining `\n` submit split by making `agent-doc route --dispatch-only` reuse the same live-pane tmux submit boundary as the working `agent-doc session clear` path instead of leaving some existing-session reroutes on the one-shot supervisor IPC inject branch. The bug was in `src/route.rs`: healthy authoritative-actor reroutes already used direct pane submit, but plain registered live-pane dispatch-only reroutes could still take the older delivery path. That meant `Run Agent Doc` and `Clear Session Context` were still not guaranteed to cross the same carriage-return boundary.
+
+Updated:
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml dispatch_only_send_reopen_direct_pane_submit_avoids_extra_enter_retries -- --nocapture`
+- full `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Git:
+- Committed in `src/agent-doc` as `c6f6d81` (`fix: unify dispatch-only pane submit path`)
+- Pushed to `origin/20260422/codex-agent-backend`
+
+I did not run a live JetBrains/VS Code replay from this CLI session, so the existing replay validation backlog item remains the right place to confirm the end-to-end editor repro is gone.
+<!-- agent:boundary:a025f4a8 -->
 <!-- /agent:exchange -->
 ###
 

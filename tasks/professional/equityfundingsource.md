@@ -118,7 +118,20 @@ Draft file remains:
 Corky reached the Gmail send step and is waiting for OAuth authorization for `brian.takita@gmail.com` at `http://127.0.0.1:8484/callback`.
 
 Use the browser window that Corky opened, or open the printed Google auth URL from the terminal output, then tell me once authorization is complete. After that I can finish the send and close the `agent-doc` cycle.
-<!-- agent:boundary:c3caf4a5 -->
+❯ authorization is complete
+### Re: corky email send — gpt-5
+
+The email has been sent via Corky from `brian.takita@gmail.com`.
+
+1. Transport: Gmail API
+2. Recipient: `judithkrug@gmail.com`
+3. Subject: `Equity Funding Source portal progress and review items`
+4. Thread ID: `19dfa8523afb9b00`
+5. Message ID: `19dfa8523afb9b00`
+
+Draft source:
+- `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`
+<!-- agent:boundary:be1bc6fb -->
 <!-- /agent:exchange -->
 ###
 

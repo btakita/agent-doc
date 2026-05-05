@@ -100,7 +100,21 @@ Updated the existing Corky draft as requested.
 
 Draft file remains:
 - `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`
-<!-- agent:boundary:8293f705 -->
+❯ Re: Dropbox folders, I don't need access if I can have a spec re: the folder + document name conventions, what to do if a document already exists, and each type of document with sensitive data fakes.
+
+❯ Update the draft.
+### Re: corky draft Dropbox spec revision — gpt-5
+
+Updated the existing Corky draft as requested.
+
+1. Replaced the Dropbox access request with a request for a written spec covering folder conventions, document naming conventions, and duplicate-file handling.
+2. Added a separate ask for one sanitized or fake example of each sensitive document type so the upload flow can be built against realistic inputs without needing real data.
+3. Updated Robert's specific ask to match the new spec-based request.
+4. Re-validated the draft with `corky draft validate` and it passes.
+
+Draft file remains:
+- `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`
+<!-- agent:boundary:b3eb2b47 -->
 <!-- /agent:exchange -->
 ###
 

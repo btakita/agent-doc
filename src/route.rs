@@ -238,6 +238,13 @@ enum DispatchOnlyReopenDelivery {
     DirectPaneSubmit,
 }
 
+fn dispatch_only_reopen_submit_mode(delivery: DispatchOnlyReopenDelivery) -> &'static str {
+    match delivery {
+        DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_submit_bytes",
+        DispatchOnlyReopenDelivery::DirectPaneSubmit => "tmux_literal_enter_batch",
+    }
+}
+
 impl RoutedDispatchStartProof {
     fn dispatch_stage_label(self) -> &'static str {
         match self {
@@ -1412,22 +1419,25 @@ fn dispatch_only_send_reopen(
         DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_ipc_once",
         DispatchOnlyReopenDelivery::DirectPaneSubmit => "direct_pane_submit",
     };
+    let submit_mode = dispatch_only_reopen_submit_mode(delivery);
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_dispatch_only_sent file={} pane={} harness={} delivery={}",
+            "route_dispatch_only_sent file={} pane={} harness={} delivery={} submit_mode={}",
             file.display(),
             dispatch_pane,
             harness.binary,
-            delivery_label
+            delivery_label,
+            submit_mode
         ),
     );
     eprintln!(
-        "[route] dispatch-only {} reopen for {} was sent to pane {} via {} without acceptance polling",
+        "[route] dispatch-only {} reopen for {} was sent to pane {} via {} ({}) without acceptance polling",
         harness.binary,
         file.display(),
         dispatch_pane,
-        delivery_label
+        delivery_label,
+        submit_mode
     );
     Ok(dispatch_pane)
 }

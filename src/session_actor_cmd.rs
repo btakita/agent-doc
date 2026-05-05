@@ -6,6 +6,9 @@ use crate::sessions::{SessionEntry, SessionRegistry, Tmux};
 use crate::startup_miss::{SessionLogStatus, StartupMiss};
 use crate::supervisor::ipc::IpcMethod;
 
+const TMUX_DIRECT_SUBMIT_MODE: &str = "tmux_literal_enter_batch";
+const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_submit_bytes";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestartMode {
     Continue,
@@ -193,6 +196,15 @@ pub fn clear(file: &Path) -> Result<()> {
 
     if let Some(pane) = pane_sent {
         send_clear_to_pane(&tmux, &pane, &ctx.canonical_file)?;
+        crate::ops_log::log_op(
+            &ctx.canonical_file,
+            &format!(
+                "session_clear_sent file={} pane={} delivery=direct_pane_submit submit_mode={}",
+                ctx.canonical_file.display(),
+                pane,
+                TMUX_DIRECT_SUBMIT_MODE
+            ),
+        );
     } else {
         let response = crate::supervisor::ipc::send_command(
             &ctx.supervisor_socket,
@@ -214,6 +226,14 @@ pub fn clear(file: &Path) -> Result<()> {
                     .unwrap_or_else(|| "supervisor inject request failed".to_string())
             );
         }
+        crate::ops_log::log_op(
+            &ctx.canonical_file,
+            &format!(
+                "session_clear_sent file={} delivery=supervisor_ipc submit_mode={}",
+                ctx.canonical_file.display(),
+                SUPERVISOR_INJECT_SUBMIT_MODE
+            ),
+        );
     }
     if ctx.harness == "codex" {
         crate::codex_hook::record_external_prompt_for_file(

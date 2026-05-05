@@ -350,8 +350,32 @@ Verification completed:
 - `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
 - `cargo install --path src/agent-doc --force`
 
-One blocker remains on the session document closeout itself: `agent-doc finalize` committed the response body, but the post-commit `session-check` kept interrupting on active Codex-session drift in [tasks/agent-doc/agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md). The code work is done and pushed, but that document still has binary-owned closeout drift that likely needs the Stop-hook recovery path or a follow-up repair after this turn ends.
-<!-- agent:boundary:4edfad12 -->
+❯ One blocker remains on the session document closeout itself: `agent-doc finalize` committed the response body, but the post-commit `session-check` kept interrupting on active Codex-session drift in [tasks/agent-doc/agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md). The code work is done and pushed, but that document still has binary-owned closeout drift that likely needs the Stop-hook recovery path or a follow-up repair after this turn ends.
+❯ Same exact issues. Why is there a difference between Claude Code `Clear Session Context` vs Codex `Clear Session Context` & Claude + Codex `Run Agent Doc`. Please unify the code paths to submit to tmux. spec-test-build-install-commit-push
+### Re: unified Run Agent Doc / Clear Session Context tmux submit path — gpt-5
+
+Yes. There was still a real architectural split.
+
+`Run Agent Doc`, supervisor-owned injects, and file-scoped `session clear` were all supposed to share the same tmux submit boundary, but the code still had multiple direct-pane wrappers and `session clear` only trusted the registry pane before falling back to supervisor IPC. That meant Claude `Clear Session Context` could still succeed on the directly-addressable live pane while Codex clear and routed reopen paths could diverge depending on which pane record happened to be consulted first.
+
+I unified the live-pane submit path in `src/agent-doc`:
+- `src/sessions.rs` now owns the canonical `send_submitted_text(...)` helper used by route, start/supervisor inject, and `session clear`.
+- `src/session_actor_cmd.rs` now resolves direct-pane clear targets in the same order that dispatch-only reroute prefers an existing live session binding: authoritative actor pane, then live-owner pane, then registry pane; only after that does it fall back to supervisor IPC.
+- `src/route.rs` and `src/start.rs` now use that same shared pane-submit helper instead of separate wrappers.
+- Updated `specs/07-session-tmux-commands.md` and `VERSIONS.md` to document the unified precedence and submit contract.
+
+Verification:
+- New regressions passed for direct-pane selection priority and registry fallback.
+- Full `cargo test --manifest-path src/agent-doc/Cargo.toml` passed.
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release` passed.
+- `cargo install --path src/agent-doc --force` replaced `/home/brian/.cargo/bin/agent-doc`.
+
+Git:
+- Committed in `src/agent-doc` as `b15238f` (`fix: unify live pane submit path`).
+- Pushed to `origin/20260422/codex-agent-backend`.
+
+I did not run a live JetBrains/VS Code replay from this CLI session, so the existing replay-validation backlog remains the right place to confirm the end-to-end editor repro is actually gone.
+<!-- agent:boundary:e6f163f3 -->
 <!-- /agent:exchange -->
 ###
 

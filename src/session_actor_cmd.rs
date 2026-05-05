@@ -7,7 +7,7 @@ use crate::startup_miss::{SessionLogStatus, StartupMiss};
 use crate::supervisor::ipc::IpcMethod;
 
 const TMUX_DIRECT_SUBMIT_MODE: &str = "tmux_literal_enter_batch";
-const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_submit_bytes";
+const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestartMode {
@@ -209,7 +209,7 @@ pub fn clear(file: &Path) -> Result<()> {
         let response = crate::supervisor::ipc::send_command(
             &ctx.supervisor_socket,
             &IpcMethod::Inject {
-                bytes: crate::supervisor::ipc::submit_bytes("/clear"),
+                bytes: crate::supervisor::ipc::normalize_submit_text("/clear"),
             },
         )
         .with_context(|| {
@@ -767,7 +767,7 @@ mod tests {
         assert_eq!(latest, "/clear");
         assert_eq!(
             captured.lock().unwrap().as_slice(),
-            &[crate::supervisor::ipc::submit_bytes("/clear")]
+            &[crate::supervisor::ipc::normalize_submit_text("/clear")]
         );
         drop(sock);
     }

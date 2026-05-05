@@ -706,9 +706,9 @@ fn auto_trigger_inject_command(
         "dispatch",
         "auto_trigger_inject",
     );
-    let payload = crate::supervisor::ipc::submit_bytes(trigger_cmd);
+    let submitted_text = crate::supervisor::ipc::normalize_submit_text(trigger_cmd);
     if let Some(pane_id) = shared.inject_pane.as_deref() {
-        return match dispatch_submit_bytes_to_pane(pane_id, &payload) {
+        return match dispatch_submit_text_to_pane(pane_id, &submitted_text) {
             Ok(()) => AutoTriggerOutcome::Sent,
             Err(_) => AutoTriggerOutcome::SendFailed,
         };
@@ -721,7 +721,7 @@ fn auto_trigger_inject_command(
         return AutoTriggerOutcome::Cancelled;
     }
 
-    let payload = payload.into_bytes();
+    let payload = crate::supervisor::ipc::submit_bytes(&submitted_text).into_bytes();
 
     let Some(mut writer) = lock_writer_interruptibly(&writer_arc, stop) else {
         return AutoTriggerOutcome::Cancelled;
@@ -758,18 +758,19 @@ fn normalize_supervisor_inject_bytes(bytes: &str) -> Vec<u8> {
     normalized
 }
 
-fn dispatch_submit_bytes_to_tmux(
+fn dispatch_submit_text_to_tmux(
     tmux: &crate::sessions::Tmux,
     pane: &str,
-    bytes: &str,
+    text: &str,
 ) -> Result<()> {
-    tmux.send_keys(pane, bytes)
+    let submitted_text = crate::supervisor::ipc::normalize_submit_text(text);
+    tmux.send_keys(pane, &submitted_text)
         .with_context(|| format!("failed to inject submitted input into pane {}", pane))
 }
 
-fn dispatch_submit_bytes_to_pane(pane: &str, bytes: &str) -> Result<()> {
+fn dispatch_submit_text_to_pane(pane: &str, text: &str) -> Result<()> {
     let tmux = crate::sessions::Tmux::default_server();
-    dispatch_submit_bytes_to_tmux(&tmux, pane, bytes)
+    dispatch_submit_text_to_tmux(&tmux, pane, text)
 }
 
 fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
@@ -1307,7 +1308,7 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
         }
         IpcMethod::Inject { bytes } => {
             let injected = if let Some(pane_id) = shared.inject_pane.as_deref() {
-                dispatch_submit_bytes_to_pane(pane_id, &bytes).map_err(|e| e.to_string())
+                dispatch_submit_text_to_pane(pane_id, &bytes).map_err(|e| e.to_string())
             } else {
                 let guard = shared.inject_writer.lock().unwrap();
                 match guard.as_ref() {
@@ -3567,7 +3568,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_submit_bytes_to_tmux_uses_pane_submit_path() {
+    fn dispatch_submit_text_to_tmux_uses_pane_submit_path() {
         let tmp = TempDir::new().unwrap();
         let iso = IsolatedTmux::new("start-ipc-submit-path");
         let pane = iso.new_session("test", tmp.path()).unwrap();
@@ -3586,7 +3587,8 @@ mod tests {
         .unwrap();
         std::thread::sleep(Duration::from_millis(150));
 
-        dispatch_submit_bytes_to_tmux(&iso, &pane, "agent-doc tasks/software/tsift.md\n").unwrap();
+        dispatch_submit_text_to_tmux(&iso, &pane, "agent-doc tasks/software/tsift.md\n")
+            .unwrap();
         for _ in 0..40 {
             if done_path.exists() {
                 break;

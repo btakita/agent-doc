@@ -226,7 +226,7 @@ fn try_supervisor_dispatch(
 
     // Use `inject` method to send the command text to the harness stdin.
     // The harness interprets `/command` lines natively.
-    let bytes = supervisor_ipc::submit_bytes(&item.raw);
+    let bytes = supervisor_ipc::normalize_submit_text(&item.raw);
     let method = supervisor_ipc::IpcMethod::Inject { bytes };
     let resp =
         supervisor_ipc::send_command(&sock, &method).context("supervisor IPC dispatch failed")?;
@@ -261,8 +261,6 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(30);
     let poll_interval = std::time::Duration::from_millis(500);
-    let mut enter_retries = 0u32;
-
     while start.elapsed() < timeout {
         std::thread::sleep(poll_interval);
         if let Ok(content) = sessions::capture_pane(&tmux, &pane_id) {
@@ -274,23 +272,16 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
 
             if !still_visible {
                 eprintln!(
-                    "[queue_dispatch] command accepted ({:.1}s, {} Enter retries)",
-                    start.elapsed().as_secs_f64(),
-                    enter_retries
+                    "[queue_dispatch] command accepted after single submit ({:.1}s)",
+                    start.elapsed().as_secs_f64()
                 );
                 return Ok(Some(DispatchResult::Ok));
-            }
-
-            // Command text still in input — retry Enter
-            enter_retries += 1;
-            if let Err(e) = tmux.send_keys_raw(&pane_id, "Enter") {
-                eprintln!("[queue_dispatch] warning: retry Enter failed: {}", e);
             }
         }
     }
 
     eprintln!(
-        "[queue_dispatch] warning: command may not have been accepted after {:.1}s",
+        "[queue_dispatch] warning: command may not have been accepted after {:.1}s (single-submit path only)",
         start.elapsed().as_secs_f64()
     );
     Ok(Some(DispatchResult::Ok))
@@ -406,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_supervisor_injects_command_with_shared_submit_bytes() {
+    fn dispatch_supervisor_injects_command_with_normalized_submit_text() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("doc.md");
@@ -438,7 +429,7 @@ mod tests {
         assert!(matches!(result, DispatchResult::Ok));
         assert_eq!(
             captured.lock().unwrap().as_slice(),
-            &[crate::supervisor::ipc::submit_bytes("/clear")]
+            &[crate::supervisor::ipc::normalize_submit_text("/clear")]
         );
 
         ipc.stop();

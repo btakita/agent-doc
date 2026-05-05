@@ -174,6 +174,11 @@ single-owner actor controls:
   otherwise it may fall back to supervisor IPC inject. For Codex, it still
   records the clear prompt state so the next reroute can reapply the original
   launch contract.
+- Any tmux-bound command submit in this surface (`route --dispatch-only`,
+  file-scoped `session clear`, queued slash-command dispatch, supervisor-owned
+  reopen inject) must normalize trailing line endings once and use exactly one
+  tmux literal-text-plus-`Enter` submission. These paths must not layer
+  follow-up synthetic `Enter` retries on top of the first submit.
 - `agent-doc session doctor <FILE> [--repair]` reports actor/registry/supervisor
   drift in one read-only summary, with `--repair` explicitly escalating into the
   destructive repair path before re-checking status.

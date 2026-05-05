@@ -150,13 +150,18 @@ fn default_restart_mode() -> String {
     "continue".to_string()
 }
 
-/// Build the canonical Enter-style submit bytes for a single-line harness input.
+/// Normalize a single-line harness command before handing it to a submit path.
 ///
-/// All supervisor-owned command injection paths should use this helper so the
-/// sender contract stays explicit and consistent instead of relying on
-/// receiver-side newline normalization.
+/// Tmux-backed submissions should use this normalized text directly and let the
+/// pane submit helper add Enter. Raw PTY fallbacks should feed the normalized
+/// text into `submit_bytes`.
+pub fn normalize_submit_text(text: &str) -> String {
+    text.trim_end_matches(['\r', '\n']).to_string()
+}
+
+/// Build the canonical raw-PTY submit bytes for a single-line harness input.
 pub fn submit_bytes(text: &str) -> String {
-    let payload = text.trim_end_matches(['\r', '\n']);
+    let payload = normalize_submit_text(text);
     format!("{payload}\r")
 }
 
@@ -515,6 +520,13 @@ mod tests {
         assert_eq!(submit_bytes("/clear"), "/clear\r");
         assert_eq!(submit_bytes("/clear\n"), "/clear\r");
         assert_eq!(submit_bytes("/clear\r\n"), "/clear\r");
+    }
+
+    #[test]
+    fn normalize_submit_text_strips_trailing_line_endings() {
+        assert_eq!(normalize_submit_text("/clear"), "/clear");
+        assert_eq!(normalize_submit_text("/clear\n"), "/clear");
+        assert_eq!(normalize_submit_text("/clear\r\n"), "/clear");
     }
 
     #[test]

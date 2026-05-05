@@ -240,7 +240,7 @@ enum DispatchOnlyReopenDelivery {
 
 fn dispatch_only_reopen_submit_mode(delivery: DispatchOnlyReopenDelivery) -> &'static str {
     match delivery {
-        DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_submit_bytes",
+        DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_normalized_submit",
         DispatchOnlyReopenDelivery::DirectPaneSubmit => "tmux_literal_enter_batch",
     }
 }
@@ -3240,8 +3240,6 @@ fn send_command_unchecked(
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(5);
     let poll_interval = std::time::Duration::from_millis(300);
-    let mut enter_retries = 0u32;
-
     while start.elapsed() < timeout {
         std::thread::sleep(poll_interval);
         if let Ok(content) = sessions::capture_pane(tmux, pane) {
@@ -3249,23 +3247,16 @@ fn send_command_unchecked(
 
             if !cmd_still_in_input {
                 eprintln!(
-                    "[route] Command accepted ({:.1}s, {} Enter retries)",
-                    start.elapsed().as_secs_f64(),
-                    enter_retries
+                    "[route] Command accepted after single submit ({:.1}s)",
+                    start.elapsed().as_secs_f64()
                 );
                 return Ok(CommandDispatchStatus::Accepted);
-            }
-
-            enter_retries += 1;
-            if let Err(e) = tmux.send_keys_raw(pane, "Enter") {
-                eprintln!("[route] warning: retry Enter failed: {}", e);
             }
         }
     }
     eprintln!(
-        "[route] warning: command may not have been accepted after {:.1}s ({} Enter retries)",
-        start.elapsed().as_secs_f64(),
-        enter_retries
+        "[route] warning: command may not have been accepted after {:.1}s (single-submit path only)",
+        start.elapsed().as_secs_f64()
     );
     Ok(CommandDispatchStatus::TimedOut)
 }
@@ -3334,7 +3325,7 @@ fn dispatch_via_supervisor_ipc_with_mode(
 
     let tracker = build_routed_dispatch_start_tracker(file, file_path, harness)?;
     let method = IpcMethod::Inject {
-        bytes: routed_trigger_submit_bytes(&payload),
+        bytes: routed_trigger_submit_payload(&payload),
     };
     let response = crate::supervisor::ipc::send_command(&sock, &method).with_context(|| {
         format!(
@@ -3738,8 +3729,8 @@ fn routed_trigger_payload(trigger: &str) -> String {
     trigger.to_string()
 }
 
-fn routed_trigger_submit_bytes(payload: &str) -> String {
-    crate::supervisor::ipc::submit_bytes(payload)
+fn routed_trigger_submit_payload(payload: &str) -> String {
+    crate::supervisor::ipc::normalize_submit_text(payload)
 }
 
 fn validate_routed_trigger_payload(
@@ -6767,10 +6758,10 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
 
     #[test]
-    fn routed_trigger_submit_bytes_use_carriage_return_submit() {
+    fn routed_trigger_submit_payload_strips_trailing_line_endings() {
         assert_eq!(
-            routed_trigger_submit_bytes("agent-doc test.md"),
-            "agent-doc test.md\r"
+            routed_trigger_submit_payload("agent-doc test.md\r\n"),
+            "agent-doc test.md"
         );
     }
 
@@ -7168,7 +7159,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         assert_eq!(routed, pane);
         assert_eq!(
             *injects.lock().unwrap(),
-            vec![routed_trigger_submit_bytes(
+            vec![routed_trigger_submit_payload(
                 &HarnessConfig::codex().trigger_command(&file_path)
             )],
             "route should dispatch the bare Codex reopen through supervisor IPC before waiting for the delayed live-child ack"
@@ -7374,7 +7365,7 @@ Body\n\
             !injects.is_empty()
                 && injects.iter().all(|inject| {
                     inject
-                        == &routed_trigger_submit_bytes(
+                        == &routed_trigger_submit_payload(
                             &HarnessConfig::codex().trigger_command(&file_path),
                         )
                 }),
@@ -7826,7 +7817,7 @@ Body\n\
         let trigger = HarnessConfig::codex().trigger_command(&file_path);
         let injects = injects.lock().unwrap().clone();
         assert!(
-            injects == vec![routed_trigger_submit_bytes(&trigger)],
+            injects == vec![routed_trigger_submit_payload(&trigger)],
             "route should inject exactly one bare reopen through supervisor IPC after the fresh restart: {injects:?}"
         );
 
@@ -8314,8 +8305,7 @@ Body\n\
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
             IpcMethod::Inject { bytes } => {
-                let normalized = bytes.replace("\r\n", "\r").replace('\n', "\r");
-                let _ = ipc_tmux.send_keys_raw(&pane_for_ipc, &normalized);
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
@@ -9160,7 +9150,7 @@ Body\n\
         assert_eq!(routed, replacement_pane);
         assert!(
             *injects.lock().unwrap()
-                == vec![routed_trigger_submit_bytes(
+                == vec![routed_trigger_submit_payload(
                     &HarnessConfig::codex().trigger_command(&file_path)
                 )],
             "route should dispatch exactly one bare Codex reopen through supervisor IPC after the restart handoff"
@@ -9365,8 +9355,7 @@ Body\n\
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
             IpcMethod::Inject { bytes } => {
-                let normalized = bytes.replace("\r\n", "\r").replace('\n', "\r");
-                let _ = ipc_tmux.send_keys_raw(&pane_for_ipc, &normalized);
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
@@ -9454,8 +9443,7 @@ Body\n\
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
             IpcMethod::Inject { bytes } => {
-                let normalized = bytes.replace("\r\n", "\r").replace('\n', "\r");
-                let _ = ipc_tmux.send_keys_raw(&pane_for_ipc, &normalized);
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
@@ -9805,7 +9793,7 @@ Body\n\
         assert_eq!(resolved, actor_pane);
 
         let trigger =
-            routed_trigger_submit_bytes(&HarnessConfig::codex().trigger_command(&file_path));
+            routed_trigger_submit_payload(&HarnessConfig::codex().trigger_command(&file_path));
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
@@ -10301,7 +10289,7 @@ Body\n\
         assert_eq!(resolved, actor_pane);
 
         let trigger =
-            routed_trigger_submit_bytes(&HarnessConfig::claude().trigger_command(&file_path));
+            routed_trigger_submit_payload(&HarnessConfig::claude().trigger_command(&file_path));
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
@@ -10403,7 +10391,7 @@ Body\n\
         assert_eq!(resolved, actor_pane);
 
         let trigger =
-            routed_trigger_submit_bytes(&HarnessConfig::codex().trigger_command(&file_path));
+            routed_trigger_submit_payload(&HarnessConfig::codex().trigger_command(&file_path));
         assert_eq!(*injects.lock().unwrap(), vec![trigger]);
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
@@ -11038,7 +11026,7 @@ Body\n\
         assert_eq!(resolved, pane);
         assert!(
             *injects.lock().unwrap()
-                == vec![routed_trigger_submit_bytes(
+                == vec![routed_trigger_submit_payload(
                     &HarnessConfig::codex().trigger_command(&file_path)
                 )],
             "route should dispatch to the registered pane via supervisor IPC after recovering the live owner via supervisor pid"

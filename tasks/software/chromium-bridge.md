@@ -845,16 +845,49 @@ No. Based on the current Microsoft docs, `playwright-cli` and Playwright MCP are
 
 If you want one browser automation stack for agent-driven product testing, Playwright CLI is a serious candidate. If you want a small repo-native CLI optimized for your current Chromium-only ingestion and messaging workflows, `chromium-bridge` still earns its keep.
 
+❯ Sources:
+❯ - [playwright-cli README](https://github.com/microsoft/playwright-cli/blob/main/README.md)
+❯ - [Playwright MCP README](https://github.com/microsoft/playwright-mcp)
+❯ - [Playwright CLI capabilities](https://playwright.dev/agent-cli/capabilities)
+❯ Are there any useful features from Playwright CLI that chromium-bridge should use?
+### Re: Playwright CLI features worth borrowing — gpt-5
+
+Yes, but mostly as product ideas rather than as a dependency mandate.
+
+The highest-value features to borrow from Playwright CLI are:
+
+1. **Persistent sessions + state save/load**. Playwright CLI supports named sessions, persistent profiles, and explicit state save/load for cookies and storage. For `chromium-bridge`, the analogous value is smoother reuse of authenticated Chromium sessions and repeatable automation state.
+2. **Structured snapshots with stable refs**. Playwright CLI emits accessibility-oriented snapshots and lets later commands target stable element refs. That is stronger than repeated ad hoc selector hunting, especially for agent loops.
+3. **Network inspection**. Playwright CLI exposes request listing and per-request inspection. That would be useful for debugging login flows, scraping APIs behind the page, and validating ingestion pipelines.
+4. **Attach/session ergonomics**. The Playwright attach model, session naming, and dashboard are good operational patterns even if `chromium-bridge` stays small and CDP-native.
+
+What I would *not* rush to copy:
+
+- Full cross-browser scope. That is Playwright's advantage, but it pushes `chromium-bridge` away from its current niche.
+- Heavy test-runner behavior. `chromium-bridge` looks better as a sharp CLI for live Chromium-family control, extraction, and integration.
+- Full visual dashboard/tracing/video stack unless the debugging need becomes frequent; those are useful, but they are materially more work than the first three items above.
+
+My practical priority order for `chromium-bridge` would be:
+
+1. Persistent session/profile support
+2. Structured snapshot + stable refs
+3. Network inspection
+
+I added those as `[recommended]` backlog items so they do not get lost.
+
 Sources:
-- [playwright-cli README](https://github.com/microsoft/playwright-cli/blob/main/README.md)
-- [Playwright MCP README](https://github.com/microsoft/playwright-mcp)
+- [Playwright CLI README](https://github.com/microsoft/playwright-cli)
 - [Playwright CLI capabilities](https://playwright.dev/agent-cli/capabilities)
-<!-- agent:boundary:0e23ebbe -->
+- [Playwright MCP extension README](https://github.com/microsoft/playwright-mcp/blob/main/packages/extension/README.md)
+<!-- agent:boundary:3d1f5f10 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
+- [ ] [#cbstate] [recommended] Add persistent session/profile support plus state save/load to chromium-bridge
+- [ ] [#cbnet] [recommended] Add network request listing/inspection to chromium-bridge
+- [ ] [#cbsnap] [recommended] Add structured accessibility snapshot output with stable element refs to chromium-bridge
 - [ ] [#brewtap] Create btakita/homebrew-tap for brew formula distribution (deferred — low priority)
 - [ ] [#3jmq] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)
 - [ ] [#fp48] Explore sift corpus configuration for multi-project search

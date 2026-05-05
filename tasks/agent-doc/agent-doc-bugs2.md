@@ -340,8 +340,18 @@ Verification:
 Git:
 - `src/agent-doc`: `385bc42` (`fix: simplify tmux submit path`) pushed to `origin/20260422/codex-agent-backend`
 
-I did not run a live JetBrains/VS Code replay from this CLI turn, so the existing editor replay validation backlog item remains the right follow-up for end-to-end confirmation.
-<!-- agent:boundary:da446218 -->
+❯ I did not run a live JetBrains/VS Code replay from this CLI turn, so the existing editor replay validation backlog item remains the right follow-up for end-to-end confirmation.
+Implemented in `src/agent-doc` and pushed as `385bc42` on `origin/20260422/codex-agent-backend`.
+
+The change collapses tmux-bound command submission onto one path: submitted text is normalized once, tmux delivery always relies on the existing literal-text-plus-`Enter` submit helper, and the route/queue-dispatch follow-up `Enter` retries are gone. Raw `\r` encoding now remains only on the direct PTY-writer fallback. I updated [src/agent-doc/src/supervisor/ipc.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/supervisor/ipc.rs), [src/agent-doc/src/start.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/start.rs), [src/agent-doc/src/route.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/route.rs), [src/agent-doc/src/queue_dispatch.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/queue_dispatch.rs), [src/agent-doc/src/session_actor_cmd.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/session_actor_cmd.rs), plus the README/spec/version notes.
+
+Verification completed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+One blocker remains on the session document closeout itself: `agent-doc finalize` committed the response body, but the post-commit `session-check` kept interrupting on active Codex-session drift in [tasks/agent-doc/agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md). The code work is done and pushed, but that document still has binary-owned closeout drift that likely needs the Stop-hook recovery path or a follow-up repair after this turn ends.
+<!-- agent:boundary:4edfad12 -->
 <!-- /agent:exchange -->
 ###
 

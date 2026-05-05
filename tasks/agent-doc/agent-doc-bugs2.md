@@ -415,7 +415,34 @@ Commit / push:
 I did not create a superproject gitlink commit because the workspace root already has unrelated dirty changes outside this fix stream.
 
 There were no actionable follow-up items to capture.
-<!-- agent:boundary:cc394526 -->
+❯ do [#pfxcommit]. spec-test-build-install-commit-push
+### Re: `#pfxcommit` skill commit ordering — gpt-5
+
+Root causes identified and fixed.
+
+- The binary-owned closeout path was already safe: `agent-doc commit` stages the snapshot-selected response state, not the raw working-tree prompt. The regression was in the harness instruction layer.
+- The bundled skill/runbooks told the agent to finish repo work before `finalize`, but they did not explicitly state that a manual repo `commit + push` inside an `agent-doc` turn must exclude the active session document.
+- The compound-task steering rules also left `commit + push` too ambiguous, so a skill could reasonably interpret it as a generic repo commit before the binary-owned closeout. That is how a raw prompt-bearing session document could land in an intermediate history commit without its final `❯ ` normalization.
+
+What changed:
+- Updated the bundled `SKILL.md`, `runbooks/commit.md`, `runbooks/harness-invocation.md`, and `runbooks/compound-task-steering.md` so manual repo commits in an `agent-doc` turn must keep the session document off that commit, defer session-doc closeout to `agent-doc finalize` / `write --commit`, and only push after the binary-owned closeout commit lands.
+- Updated the checked-in high-level contract docs (`CLAUDE.md`, `README.md`, `SPEC.md`, `specs/09-git-integration.md`, `VERSIONS.md`) to carry the same ordering invariant.
+- Added regression assertions in `src/skill.rs` so future skill/runbook installs keep this staging/order rule.
+- Refreshed the checked-in installed Claude skill snapshot under `src/agent-doc/.claude/...` so `audit-docs` is green on the final tree.
+
+Verification:
+- `make precommit`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Git:
+- Commit: `1c06a09` (`fix: keep session docs off manual repo commits`)
+- Pushed: `origin/20260422/codex-agent-backend`
+
+I did not create a superproject gitlink commit because the workspace root already has unrelated dirty changes outside this fix stream.
+
+❯ No new backlog follow-ups from this fix.
+<!-- agent:boundary:7fc1a716 -->
 <!-- /agent:exchange -->
 ###
 
@@ -426,7 +453,6 @@ There were no actionable follow-up items to capture.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pfxcommit] Prompt prefix stripped when skill commits session doc via direct git add before finalize. Plan: tasks/agent-doc/plans/prompt-prefix-stripping-on-skill-commit.md
 - [ ] [#gitstage] [recommended] In the previous `boost-client` turn, the intended root superproject submodule-pointer bump was blocked by `fatal: Unable to create .../.git/modules/src/boost-client/index.lock: File exists` during `git add src/monsterrodholders-dev`, but a later root `git commit` still succeeded against pre-existing staged paths and created an unrelated local commit that deleted task images while leaving the intended submodule pointer unstaged. Fix plan only: reproduce the nested-submodule lock + dirty-index path, trace where the agent-doc closeout/commit workflow keeps going after a failed stage step, compare the requested path set with the actual staged diff before commit, and define a fail-closed rule so path-scoped closeout either (a) stages exactly the expected paths and commits only that set or (b) stops with actionable guidance instead of consuming unrelated staged changes.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.

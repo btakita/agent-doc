@@ -273,7 +273,42 @@ Git:
 - Pushed to `origin/20260422/codex-agent-backend`
 
 I did not run a live JetBrains/VS Code replay from this CLI session, so the existing replay validation backlog item remains the right place to confirm the end-to-end editor repro is gone.
-<!-- agent:boundary:a025f4a8 -->
+❯ On Codex, I'm still getting the `\n` error with `Clear Session Context` and `Run Agent Doc`.
+❯ On Claude, `Run Agent Doc` still has the `\n` error. `Clear Session Context` works as intended.
+
+❯ Are you sure we are installing to `/home/brian/.cargo/bin/agent-doc`?
+
+❯ spec-test-build-install-commit-push
+### Re: unified Run Agent Doc / Clear Session Context submit path — gpt-5
+
+Yes, the local install target is `/home/brian/.cargo/bin/agent-doc`. I verified that before and after reinstall with `which agent-doc`, and `agent-doc --version` is still `0.33.16`.
+
+I changed the shared tmux submit primitive instead of adding another route-specific CR workaround. The remaining common path was `tmux-router::Tmux::send_keys()`, which was still using the ASCII `send-keys -H ... 0d` fast path. That path is now gone. Submitted pane commands now always use one tmux batch with literal text plus a named `Enter`, so `Run Agent Doc` and `Clear Session Context` cross the same live-pane submit boundary as the working Claude `Clear Session Context` flow.
+
+I also added path logging so the next live replay is diagnosable instead of ambiguous:
+- `route_dispatch_only_sent ... delivery=... submit_mode=...`
+- `session_clear_sent ... delivery=... submit_mode=...`
+
+Updated:
+- `src/tmux-router/src/tmux.rs`
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/src/session_actor_cmd.rs`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification:
+- full `cargo test --manifest-path src/tmux-router/Cargo.toml`
+- full `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Git:
+- `src/tmux-router`: `eb5ebf7` (`fix: use named Enter for tmux submits`) pushed to `origin/main`
+- `src/agent-doc`: `5fa93e1` (`fix: log reroute submit delivery`) pushed to `origin/20260422/codex-agent-backend`
+
+I did not run a live JetBrains/VS Code replay from this CLI turn, so `#edispatch` remains the right backlog item for end-to-end editor confirmation.
+<!-- agent:boundary:8f73183d -->
 <!-- /agent:exchange -->
 ###
 

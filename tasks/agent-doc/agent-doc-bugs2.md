@@ -361,7 +361,18 @@ Commit / push:
 I did not create a superproject gitlink commit because the workspace root still has unrelated dirty changes outside this fix stream.
 
 ❯ There were no actionable follow-up items to capture.
-<!-- agent:boundary:ffd814b5 -->
+❯ do
+Fixed in `src/agent-doc` and pushed as `71daf48` on `origin/20260422/codex-agent-backend`.
+
+The root cause was in [src/git.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/git.rs): commit-time answered-prompt canonicalization was too greedy and could rewrite prior assistant tail prose into fake `❯ ` prompts when a real answered prompt later in the same contiguous block matched `do [#...]`. I tightened that logic so prefix repair starts at the first prompt-like line, added a regression for the exact mixed tail shape, and updated [specs/09-git-integration.md](/home/brian/work/btakita/agent-loop/src/agent-doc/specs/09-git-integration.md) plus [VERSIONS.md](/home/brian/work/btakita/agent-loop/src/agent-doc/VERSIONS.md).
+
+Verification ran clean:
+`cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+`cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+`cargo install --path src/agent-doc --force`
+
+The document cycle was finalized and `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` passed. I did not create a superproject gitlink commit because the workspace root still has unrelated dirty changes.
+<!-- agent:boundary:602a7c1d -->
 <!-- /agent:exchange -->
 ###
 

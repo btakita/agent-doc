@@ -144,7 +144,17 @@ It would not replace `sift` for general retrieval. `sift` is still the broad fil
 Closed `#fpt7` by deciding against a native content/FTS table and fixing the real gap instead: plain `tsift search <query>` now auto-routes single-token identifier/path-like queries such as `claudescore-3`, `alpha_helper`, `src/main.rs`, and `crate::module` to the exact `rg -F` backend. That keeps broad prose retrieval on sift/BM25, but makes the literal lookup cases that motivated this backlog item fast without requiring `--exact`.
 
 Updated the search-strategy resolver, added unit and CLI regression coverage, and documented the decision in `SPEC.md` and `VERSIONS.md`. Verification in `src/tsift` passed with `make check`, `cargo build --release`, and `cargo install --path . --force`; the installed binary is now `tsift 0.1.24`. Committed and pushed in `src/tsift` as `9013e17` (`feat: auto-route identifier queries to exact search`).
-<!-- agent:boundary:3bfd2bbd -->
+❯ Can tsift save tokens for long tool calls such as test suites and diffs?
+### Re: token savings for long tool calls — gpt-5
+
+Partly, and some of that already exists.
+
+For `tsift`'s own commands, the tool is already biased toward lower-context output: relative paths by default, compact JSON by default, `--compact`, `--terse`, `--schema`, `--tabular`, and `tsift index --quiet` all reduce tokens materially. On top of that, the existing `tsift-rewrite.sh` hook already routes verbose `tsift` commands through RTK when installed, with caps for `communities`, `explain`, `graph`, `index`, and `search`, so those outputs can be line-limited before they hit agent context.
+
+What tsift does **not** currently do is act as a general compressor for arbitrary tool calls like `cargo test`, `pytest`, or raw `git diff`. For diffs, the closest existing fit is `tsift summarize --extract --diff`, which gives cached LLM summaries of changed files instead of pasting hunks, but that is "summarize changed code" rather than "compress any command transcript." So the short answer is: `yes` for tsift-native/navigation output and diff-adjacent workflows, `not yet` for generic long shell commands.
+
+If you want to push this further, the clean direction is not to bloat `tsift search`; it is to add a separate transcript-compaction surface around the hook/RTK layer, and let tsift contribute code-aware summarization for diffs and file-scoped changes.
+<!-- agent:boundary:21acf098 -->
 <!-- /agent:exchange -->
 
 <!--

@@ -261,6 +261,18 @@ pub fn record_reaped_pending_ids(file: &Path, ids: &[String]) -> Result<Option<C
     Ok(Some(state))
 }
 
+pub fn resolved_pending_ids(file: &Path) -> Result<std::collections::HashSet<String>> {
+    let Some(state) = load(file)? else {
+        return Ok(std::collections::HashSet::new());
+    };
+
+    Ok(state
+        .pending_done_ids
+        .into_iter()
+        .chain(state.reaped_pending_ids)
+        .collect())
+}
+
 pub fn record_backlog_capture_requirement(
     file: &Path,
     required: bool,

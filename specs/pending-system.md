@@ -117,7 +117,8 @@ On every preflight run:
    - `[ ]` and `[/]` are never auto-reaped. `[/]` explicitly survives forever until an operator moves it to `[x]`. No TTL on gated state — the operator owns the gate.
    - (Optional, deferred) Append an archive entry to `agent:backlog-done` if the component exists.
    - Persistence invariant: the reap must land in both the working tree document and the snapshot that the commit boundary stages. If preflight cannot persist that synchronized reap safely, it must fail closed instead of continuing with completed tracked-work items still present in backlog or icebox.
-   - Same-cycle resurrection invariant: once a cycle reaps a tracked `[#id]`, closeout must fail closed if that same id reappears in the live `agent:backlog` or `agent:icebox` before commit. Do not silently treat the stale rewrite as generic local drift.
+- Same-cycle resurrection invariant: once a cycle reaps a tracked `[#id]`, closeout must fail closed if that same id reappears in the live `agent:backlog` or `agent:icebox` before commit. Do not silently treat the stale rewrite as generic local drift.
+- Same-cycle completion invariant: when preflight/repair reap a user-authored `[x]` tracked item directly from the document, that id counts as intentionally resolved for the current cycle's history-replay guards even if no explicit `--pending-done <id>` flag was recorded. Do not restore the older `[ ]` or `[/]` history entry just because the completion came from a manual document edit.
 4. Commit the rewritten component as part of the existing boundary-maintenance commit.
 
 **Migration of existing items:** No auto-migration. Existing `[ ]` items with "✅ landed" / "shipped" / "awaiting release" prose stay as-is until touched manually. Auto-classifying prose is fuzzy (what counts?); blast radius is unclear. With only a handful of real gated items in-tree, retagging by hand via `--pending-gate` is faster and safer than writing a heuristic.

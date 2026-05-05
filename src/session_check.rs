@@ -382,12 +382,10 @@ fn check_backlog_replay_guard(file: &Path) -> Result<GuardResult> {
         },
     };
 
-    let done_ids: std::collections::HashSet<String> = crate::cycle_state::load(file)?
-        .map(|state| state.pending_done_ids.into_iter().collect())
-        .unwrap_or_default();
+    let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
 
     let report =
-        crate::pending::detect_dropped_from_history(&current_content, &baseline, &done_ids)?;
+        crate::pending::detect_dropped_from_history(&current_content, &baseline, &resolved_ids)?;
 
     if !report.dropped.is_empty() {
         let refs = report
@@ -3118,6 +3116,41 @@ Body\n\
         let report = inspect_with_warnings(&doc).unwrap();
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_backlog_replay_guard_accepts_reaped_ids_from_cycle_state() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: `#done1` manual backlog completion — gpt-5\n\nReaped the user-marked done backlog item.\n",
+            false,
+            Some("- [ ] [#keep1] Keep backlog item\n"),
+            &[],
+        );
+        let baseline = tmp.path().join(".agent-doc/baselines");
+        std::fs::create_dir_all(&baseline).unwrap();
+        let canonical = std::fs::canonicalize(&doc).unwrap();
+        let hash = crate::snapshot::doc_hash(&canonical).unwrap();
+        std::fs::write(
+            baseline.join(format!("{hash}.md")),
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "## Exchange\n\nHello\n",
+                "\n<!-- agent:pending -->\n",
+                "- [/] [#done1] Waiting on manual validation\n",
+                "- [ ] [#keep1] Keep backlog item\n",
+                "<!-- /agent:pending -->\n"
+            ),
+        )
+        .unwrap();
+        crate::cycle_state::record_reaped_pending_ids(&doc, &["done1".to_string()])
+            .unwrap()
+            .unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
     }
 
     #[test]

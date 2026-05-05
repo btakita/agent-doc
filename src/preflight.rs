@@ -1522,6 +1522,7 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
                 removed_items.len(),
                 removed_ids.join(", ")
             );
+            let _ = crate::cycle_state::record_reaped_pending_ids(file, &removed_ids);
             current_body = after_reap;
             mutated = true;
         }
@@ -1733,12 +1734,13 @@ fn enforce_no_dropped_backlog(file: &Path) -> Result<()> {
             file.display()
         )
     })?;
-    let done_ids: std::collections::HashSet<String> = crate::cycle_state::load(file)?
-        .map(|state| state.pending_done_ids.into_iter().collect())
-        .unwrap_or_default();
+    let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
 
-    let report =
-        crate::pending::detect_dropped_from_history(&current_content, &head_content, &done_ids)?;
+    let report = crate::pending::detect_dropped_from_history(
+        &current_content,
+        &head_content,
+        &resolved_ids,
+    )?;
     if !report.dropped.is_empty() {
         let refs = report
             .dropped
@@ -2785,6 +2787,49 @@ mod tests {
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
         assert!(!snapshot_after.contains("[#reap1]"));
         assert!(snapshot_after.contains("[#keep1]"));
+    }
+
+    #[test]
+    fn preflight_allows_user_marked_done_item_reaped_in_same_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [/] [#done1] Waiting on manual validation\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "baseline", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#done1] Waiting on manual validation\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(baseline), Some(current)).unwrap();
+
+        let (reordered, gated_count) = run_pending_maintenance(&doc).unwrap();
+        assert!(!reordered);
+        assert_eq!(gated_count, 0);
+        enforce_no_dropped_backlog(&doc)
+            .expect("same-cycle reap should count as intentional completion");
     }
 
     #[test]
@@ -4290,4 +4335,3 @@ mod tests {
         assert_eq!(result, None);
     }
 }
-            let _ = crate::cycle_state::record_reaped_pending_ids(file, &removed_ids);

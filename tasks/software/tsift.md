@@ -268,7 +268,13 @@ That general shape can cover:
 What should stay specific is the parser layer, not the feature concept. The core digest surface should be generic over repeated metric workflows, and session-share should just be one adapter/profile on top of it.
 
 I updated the backlog text for `#benchdigest` to reflect that broader scope while keeping the existing id.
-<!-- agent:boundary:6f8936e0 -->
+❯ do [#benchdigest]
+### Re: #benchdigest spec-test-build-install-commit-push — gpt-5
+
+Implemented the generalized metric-run digest instead of a session-share-specific benchmark parser. `tsift metric-digest` now reads JSON/NDJSON run history from stdin or `--input`, compares the latest run against a prior run or `--baseline`, classifies metric direction heuristically (with explicit `--metric`, `--lower-is-better`, and `--higher-is-better` overrides), and emits bounded deltas plus a markdown-ready history table for news/session updates.
+
+This shipped as `tsift v0.1.29` with direct helper coverage, CLI parsing coverage, and a compiled stdin-path regression. Verification passed in `src/tsift`: `cargo test`, `make check`, `cargo build --release`, and `cargo install --path . --force`; `tsift --version` now reports `0.1.29`. Committed and pushed in `src/tsift` as `1af09d3` (`feat: add metric run digest`).
+<!-- agent:boundary:66f7e652 -->
 <!-- /agent:exchange -->
 ###
 
@@ -279,7 +285,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#benchdigest] Metric-run digest: generalize repeated benchmark/test/perf-style workflows into compact deltas, prior-run comparisons, top regressions/improvements, and news-ready tables. #spec-test-build-install-commit-push
 - [ ] [#sessiondigest] Session-transcript digest for agent-doc / Claude JSONL / Codex docs: collapse long sessions to prompt targets, commands, touched files/symbols, failures, and closeout evidence. #spec-test-build-install-commit-push
 <!-- /agent:backlog -->
 

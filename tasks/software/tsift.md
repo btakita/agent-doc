@@ -331,40 +331,23 @@ The implementation and evidence are still present in the repo:
 - command/docs surface in [src/tsift/SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md:1010), [src/tsift/CLAUDE.md](/home/brian/work/btakita/agent-loop/src/tsift/CLAUDE.md:107), and [src/tsift/VERSIONS.md](/home/brian/work/btakita/agent-loop/src/tsift/VERSIONS.md:19)
 
 I did not create a new `src/tsift` commit or rerun a no-op release cycle because the feature is already shipped and `src/tsift` is clean. The remaining issue is document state: the current `#a7e3` backlog row contains pasted transcript text, so this session cannot close it cleanly with `--pending-done` even though the underlying tsift work is done.
-<!-- agent:boundary:5a6b4514 -->
+❯ do [#a7e3]. spec-test-build-install-commit-push
+### Re: #a7e3 spec-test-build-install-commit-push — gpt-5
+
+`#a7e3` is already complete in `src/tsift`; the shipped work is commit `3c8de09` (`feat: auto-route session transcript reads`), and `src/tsift` is still at `origin/main`/`HEAD` `b81e9a1` with no missing repo delta to spec/test/build/install/commit/push again.
+
+I verified the evidence remains in place in `src/tsift`, and there was no new code/build/install/push work to perform in this cycle. The actionable closeout here was document state, so I resolved backlog item `#a7e3` in this response cycle.
+<!-- agent:boundary:30b8c401 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-[#9aep] was a multi-line backlog item.
-When I manually entered `[x]` for [#9aep], only the first line was removed during the `agent-doc preflight`. The rest of the multi-line definition remained.
----
 Can tsift use rtk to compress tool call output in the context?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-Author: Brian Takita <brian.takita@gmail.com>
-Date:   Tue May 5 15:45:36 2026 -0400
-
-    agent-doc(dev): 2026-05-05 15:45:36 (submodule pointer)
-
-diff --git a/src/session-share b/src/session-share
-index b3ae48ffb..79f2a46e7 160000
---- a/src/session-share
-+++ b/src/session-share
-@@ -1 +1 @@
--Subproject commit b3ae48ffb0a1d372322127410f514daa3c861cf1
-+Subproject commit 79f2a46e7206c7437b54f55ea1053b5cb9982f61, and patch-style history output so non-working-tree diff review stays bounded. #spec-test-build-install-commit-push
-- [ ] [#a7e3] sessionrewrite=Auto-route long session/doc transcript reads into Session digest (markdown)
-  transcript items: 11
-  prompt targets:   0
-  commands:         4
-  touched files:    4
-  touched symbols:  0
-  failures:         0
-  closeout:         0
 
 Commands:
   - agent-doc (1)

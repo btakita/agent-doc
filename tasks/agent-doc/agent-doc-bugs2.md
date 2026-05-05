@@ -137,9 +137,34 @@ Verification:
 Submodule commit / push:
 - `src/agent-doc`: `b9a7f1a` pushed to `origin/20260422/codex-agent-backend`
 
-Recommended follow-up kept open:
-- `#jbpdrop` — replay the live mixed-root editor scenario after this fix. Plan: `tasks/agent-doc/plan-jb-completed-run-pane-retention.md`
-<!-- agent:boundary:e52241d2 -->
+❯ Recommended follow-up kept open:
+❯ - `#jbpdrop` — replay the live mixed-root editor scenario after this fix. Plan: `tasks/agent-doc/plan-jb-completed-run-pane-retention.md`
+❯ do [#jbpdrop]. spec-test-build-install-commit-push
+### Re: `#jbpdrop` replay — gpt-5
+
+Verified the `#jbpdrop` pane-retention fixes by replaying the route/tmux regressions that model the mixed-root pane-theft path, rather than by introducing a new source change in this cycle.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml sync_after_claim_stays_on_injected_tmux_server -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml register_dispatch_target_rejects_cross_file_rebind_and_preserves_registry -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_dispatch_only_keeps_starting_authoritative_actor_on_direct_pane_submit -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_keeps_fresh_start_authoritative_despite_existing_owner_rebind -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+What this proved:
+- post-claim sync stays on the injected tmux server instead of mutating the live default server
+- dispatch-only reroutes fail closed on cross-file pane rebind attempts instead of transiently stealing another document's pane
+- starting authoritative panes keep the live direct-submit path during boot
+- fresh-start reroutes keep the newly-created pane authoritative even when another same-session registration arrives during boot
+
+Plan: `tasks/agent-doc/plan-jb-completed-run-pane-retention.md`
+
+I did not run a literal JetBrains/VS Code GUI click-through in this cycle, so I am leaving `#jbpdrop` gated as a human/editor validation gate instead of marking it fully done.
+
+I also did not create a repo commit/push: the worktree already contains unrelated dirty changes in both the superproject and `src/agent-doc`, and this cycle's delta was verification plus the plan update only.
+<!-- agent:boundary:ea254280 -->
 <!-- /agent:exchange -->
 ###
 
@@ -152,7 +177,7 @@ do [#jbqbusy]. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbpdrop] [recommended] Replay the live tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/buildparty-investor-demo/dev.md mixed-root routed-turn scenario after the injected tmux-context fix and confirm the visible sibling pane no longer gets stashed. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
+- [/] [#jbpdrop] [recommended] Replay the live tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/buildparty-investor-demo/dev.md mixed-root routed-turn scenario after the injected tmux-context fix and confirm the visible sibling pane no longer gets stashed. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
 - [ ] [#jbdirsubmit] [recommended] Replay JetBrains/VS Code Run Agent Doc + Clear Session Context after direct tmux submit-path unification and confirm Codex no longer drafts literal \\n and Run Agent Doc no longer surfaces still booting.
 - [ ] [#jbqbusy] [recommended] Replay JetBrains Run Agent Doc after the authoritative busy/starting queue fix and confirm reroutes now enqueue instead of fail-closing on supervisor busy/starting state.
 - [ ] [#jbhalias] [recommended] Replay JetBrains Run Agent Doc against src/session-share/tasks/buildparty-investor-demo/dev.md after the canonical Claude harness alias fix and confirm authoritative reroutes no longer fail on claude-code/claude mismatch.

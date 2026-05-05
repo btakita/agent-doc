@@ -1298,7 +1298,27 @@ fn dispatch_only_send_reopen(
         .ok()
         .flatten();
     let mut recovery_attempts = 0usize;
-    while dispatch_only_requires_ready_probe(log_status.as_ref(), &dispatch_pane, harness) {
+    let requires_ready_probe =
+        dispatch_only_requires_ready_probe(log_status.as_ref(), &dispatch_pane, harness);
+    if requires_ready_probe && matches!(delivery, DispatchOnlyReopenDelivery::DirectPaneSubmit) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_starting_direct_submit_without_ready_probe file={} pane={} harness={}",
+                file.display(),
+                dispatch_pane,
+                harness.binary
+            ),
+        );
+        eprintln!(
+            "[route] dispatch-only {} reopen for {} is staying on the same live tmux submit path as `session clear` even though pane {} is still in the startup window",
+            harness.binary,
+            file.display(),
+            dispatch_pane
+        );
+    }
+    while requires_ready_probe && matches!(delivery, DispatchOnlyReopenDelivery::SupervisorIpcOnce)
+    {
         let ready_outcome = wait_for_agent_ready_outcome(
             tmux,
             &dispatch_pane,
@@ -5209,7 +5229,7 @@ fn auto_start_in_session(
 
     // Start agent-doc start in the new pane
     let start_cmd = format!("{} start {}", agent_doc_bin, start_path);
-    tmux.send_keys(&new_pane, &start_cmd)?;
+    crate::sessions::send_submitted_text(tmux, &new_pane, &start_cmd)?;
 
     eprintln!(
         "[route] Started {} for {} in pane {} (session {})",
@@ -7965,7 +7985,7 @@ Body\n\
     }
 
     #[test]
-    fn resolve_or_create_pane_dispatch_only_fails_closed_while_latest_run_is_still_starting() {
+    fn resolve_or_create_pane_dispatch_only_submits_while_latest_run_is_still_starting() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -8017,7 +8037,7 @@ Body\n\
             "busy mock session should be active in pane: {content}"
         );
 
-        let err = resolve_or_create_pane_dispatch_only(
+        let resolved = resolve_or_create_pane_dispatch_only(
             &iso,
             &doc,
             None,
@@ -8028,19 +8048,20 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect_err(
-            "dispatch-only route must fail closed while the latest run is still in the fresh-start boot window",
+        .expect(
+            "dispatch-only route should stay on the same direct tmux submit path as session clear during the fresh-start boot window",
         );
-        assert!(
-            err.to_string().contains("still booting"),
-            "unexpected error: {err:#}"
-        );
+        assert_eq!(resolved, pane);
 
-        let after =
-            wait_for_pane_contains(&iso, &pane, "Working...", std::time::Duration::from_secs(1));
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "EARLY:agent-doc ",
+            std::time::Duration::from_secs(3),
+        );
         assert!(
-            !after.contains("EARLY:agent-doc "),
-            "dispatch-only route must not inject into a pane that never reached a ready prompt: {after}"
+            after.contains("EARLY:agent-doc "),
+            "dispatch-only route should submit through the live pane even before the startup prompt is visible: {after}"
         );
     }
 

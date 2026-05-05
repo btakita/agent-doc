@@ -254,7 +254,7 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
     let tmux = sessions::Tmux::default();
 
     // Send the command text + Enter to the pane
-    tmux.send_keys(&pane_id, &item.raw)?;
+    sessions::send_submitted_text(&tmux, &pane_id, &item.raw)?;
 
     // Poll for completion: wait until the command text disappears from the
     // pane's last few visible lines (same approach as route.rs send_command).

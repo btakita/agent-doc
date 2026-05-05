@@ -179,7 +179,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
         let cmd_str = format!("{}{}", env_prefix, cmd_parts.join(" "));
 
         // Send the command to the pane
-        tmux.send_keys(&pane_id, &cmd_str).with_context(|| {
+        crate::sessions::send_submitted_text(&tmux, &pane_id, &cmd_str).with_context(|| {
             format!("failed to send keys to pane {} for task {}", pane_id, i + 1)
         })?;
 

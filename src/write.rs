@@ -54,7 +54,10 @@
 //!   best-effort for non-session documents and `--pending-only`, but upgrades to
 //!   the same strict commit-boundary contract as `finalize` when the target file
 //!   is a real session document (`agent_doc_session` / legacy `session`) and the
-//!   command is writing a response.
+//!   command is writing a response. A bare session-document `write` may still
+//!   preserve the response body/capture for recovery, but it must fail closed
+//!   instead of returning success while the cycle remains open at
+//!   `response_captured` / `write_applied`.
 //!
 //! - `try_ipc`: low-level IPC helper used by `run_stream`. Writes a JSON patch
 //!   file (component patches + optional frontmatter + `reposition_boundary`
@@ -651,12 +654,33 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     let commit_result = finalize_commit(file, commit_mode);
+    let bare_session_write_result = if write_result.is_ok()
+        && commit_mode == CommitMode::None
+        && is_session_document(file)?
+    {
+        crate::session_check::enforce_clean_closeout(file).context(
+            "bare `agent-doc write` preserved the response body, but the session closeout \
+             is still outside the commit boundary",
+        )
+    } else {
+        Ok(())
+    };
 
-    match (write_result, commit_result) {
-        (Ok(()), Ok(())) => Ok(()),
-        (Err(write_err), Ok(())) => Err(write_err),
-        (Ok(()), Err(commit_err)) => Err(commit_err),
-        (Err(write_err), Err(commit_err)) => Err(write_err.context(commit_err.to_string())),
+    match (write_result, commit_result, bare_session_write_result) {
+        (Ok(()), Ok(()), Ok(())) => Ok(()),
+        (Err(write_err), Ok(()), Ok(())) => Err(write_err),
+        (Ok(()), Err(commit_err), Ok(())) => Err(commit_err),
+        (Ok(()), Ok(()), Err(boundary_err)) => Err(boundary_err),
+        (Err(write_err), Err(commit_err), Ok(())) => Err(write_err.context(commit_err.to_string())),
+        (Err(write_err), Ok(()), Err(boundary_err)) => {
+            Err(write_err.context(boundary_err.to_string()))
+        }
+        (Ok(()), Err(commit_err), Err(boundary_err)) => {
+            Err(boundary_err.context(commit_err.to_string()))
+        }
+        (Err(write_err), Err(commit_err), Err(boundary_err)) => Err(
+            write_err.context(format!("{commit_err}\n{boundary_err}")),
+        ),
     }
 }
 

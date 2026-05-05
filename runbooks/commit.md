@@ -22,6 +22,7 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 ## Explicit Exceptions
 
 - Bare `agent-doc write` is acceptable only when the user explicitly wants the response left uncommitted, or when you are writing an intermediate checkpoint rather than the final response.
+- On real session documents, that path is deliberately nonterminal: the response/capture may be preserved for recovery, but the command now fails closed instead of reporting success while the cycle is still at `response_captured` / `write_applied`.
 - If you intentionally leave a response uncommitted, say so clearly and do not describe the cycle as complete.
 - `agent-doc write --commit` remains the documented repair path because it preserves the older CLI surface while still crossing the write/commit boundary in one invocation.
 - For real session documents (`agent_doc_session` / legacy `session`) that command now fails closed like `finalize`: non-git docs are rejected before mutation, commit errors fail the command, and success means the cycle reached `committed`. Best-effort behavior remains only for non-session docs and `--pending-only` maintenance.

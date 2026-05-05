@@ -41,7 +41,8 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Final parsed responses must be durably captured before any document mutation once they survive strict pre-write guards.
 - Compatibility normalization may rewrite one legacy list-shaped backlog/pending patch through the granular pending primitives before capture, but unsupported shapes still fail closed before `response_captured`.
 - Destructive `patch:todo` replacements are blocked when they would shrink an existing checklist surface.
-- Session-document `write --commit` shares `finalize`'s strict closeout contract. Bare `write` is not the normal final response path.
+- Session-document `write --commit` shares `finalize`'s strict closeout contract.
+- Bare session-document `write` is not a terminal success path: if it preserves a response and leaves the cycle open at `response_captured` / `write_applied`, the command must fail closed with recovery intact instead of returning success and waiting for a later `agent-doc commit`.
 
 ### Write-path invariants
 

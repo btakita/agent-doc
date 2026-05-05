@@ -187,6 +187,67 @@ fn write_commit_writes_and_commits_session_response() {
 }
 
 #[test]
+fn bare_write_stream_on_session_doc_fails_closed_after_write_applied() {
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    let assert_result = agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", doc.to_str().unwrap(), "--stream"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(
+        stderr.contains("outside the commit boundary"),
+        "stderr should explain the open closeout boundary, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("write_applied"),
+        "stderr should surface the open cycle phase, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("synthetic-"),
+        "stderr should preserve the synthetic-cycle evidence, got: {stderr}"
+    );
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: repair — gpt-5"));
+
+    let cycles_dir = tmp.path().join(".agent-doc/state/cycles");
+    let cycle_path = fs::read_dir(&cycles_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let cycle_json = fs::read_to_string(&cycle_path).unwrap();
+    assert!(
+        cycle_json.contains("\"phase\": \"write_applied\""),
+        "cycle should remain open at write_applied after bare write, got: {cycle_json}"
+    );
+    assert!(
+        cycle_json.contains("\"cycle_id\": \"synthetic-"),
+        "cycle should record the synthetic provenance, got: {cycle_json}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["commit", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
 fn write_commit_remains_best_effort_for_non_session_document() {
     let (_tmp, doc) = setup_template_doc();
 

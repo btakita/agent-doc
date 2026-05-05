@@ -230,7 +230,7 @@ Commit / push:
 - `src/agent-doc`: `28fb2fb` pushed to `origin/20260422/codex-agent-backend`
 - superproject gitlink: `610ab0bb2` pushed to `origin/main`
 
-There were no actionable follow-up items to capture.
+❯ There were no actionable follow-up items to capture.
 ❯ In the previous response, the following had an uncommitted change that stripped out the `❯ ` prefix. Please identify the root cause of the regression. spec-test-build-install-commit-push
 ```
 I am keeping `#tailpatch` open because this cycle was plan refresh only, per the backlog contract. No `src/agent-doc` code, spec, or test files were changed in this turn.
@@ -334,7 +334,34 @@ Evidence captured in the plan:
 - Later `dev.md` cycles on May 5 close immediately, so the plan also treats this as a historical but distinct regression against the expected CRDT/template closeout path.
 
 I am keeping `#devmdcmt` open because this cycle was plan-only, per the backlog contract. I did not change `src/agent-doc` code, specs, tests, build artifacts, or plugin outputs in this turn.
-<!-- agent:boundary:2acbf460 -->
+❯ Look at the current uncommitted git state of this document.
+
+❯ "There were no actionable follow-up items to capture." has the `❯ ` prefix removed in the uncommitted state. The `❯ ` prefix is committed. Please identify room cause(s). spec-test-build-install-commit-push
+### Re: answered prompt prefix drift root cause — gpt-5
+
+Root causes identified and fixed.
+
+- `src/git.rs` was over-greedy during commit-time answered-prompt canonicalization. When a real answered prompt such as `do [#tailpatch]...` shared one contiguous block with prior assistant tail prose, the canonicalizer prefixed the whole block and committed assistant text like `There were no actionable follow-up items to capture.` as if it were user input.
+- The current uncommitted state of this document is the fallout from that bug: the working tree still held the bare assistant sentence, while `HEAD` contained the wrongly prompt-prefixed version. In other words, the committed `❯ ` on that line was the regression, not the bare working-tree text.
+
+What changed:
+- `src/git.rs` now starts answered-prompt prefix repair at the first prompt-like line in the block instead of the first nonblank line.
+- Added a regression covering the exact mixed assistant-tail + `do [#...]` shape.
+- Updated `specs/09-git-integration.md` and `VERSIONS.md` with the invariant.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml commit_does_not_prefix_prior_response_tail_before_answered_prompt -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Commit / push:
+- `src/agent-doc`: `71daf48` pushed to `origin/20260422/codex-agent-backend`
+
+I did not create a superproject gitlink commit because the workspace root still has unrelated dirty changes outside this fix stream.
+
+❯ There were no actionable follow-up items to capture.
+<!-- agent:boundary:ffd814b5 -->
 <!-- /agent:exchange -->
 ###
 

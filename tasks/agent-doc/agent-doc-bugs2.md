@@ -231,7 +231,39 @@ Commit / push:
 - superproject gitlink: `610ab0bb2` pushed to `origin/main`
 
 There were no actionable follow-up items to capture.
-<!-- agent:boundary:dedbfae8 -->
+❯ In the previous response, the following had an uncommitted change that stripped out the `❯ ` prefix. Please identify the root cause of the regression. spec-test-build-install-commit-push
+```
+I am keeping `#tailpatch` open because this cycle was plan refresh only, per the backlog contract. No `src/agent-doc` code, spec, or test files were changed in this turn.
+I manually transitioned backlog items with [/] to [x]. The agent-doc pipeline removed the done items but then brought some of the items back. Please investigate root cause(s) and fix.
+spec-test-build-install-commit-push
+```
+### Re: prompt prefix repair regression — gpt-5
+
+Root cause fixed.
+
+What was happening:
+- JetBrains was applying `normalize_prefix_lines` before the exchange patch/unmatched content rewrite, so the later patch could overwrite the repaired `❯ ` lines and persist a broken ack sidecar.
+- VS Code's reposition-only debounce shortcut treated any `reposition_boundary: true` + `patches: []` payload as a pure boundary move, even when the payload still carried `normalize_prefix_lines` for post-commit prompt-prefix repair.
+
+What changed:
+- moved JetBrains exchange-prefix normalization to run after component/unmatched patch application and before boundary/head cleanup in both the open-document and VFS paths
+- added a VS Code `isPureRepositionSignal(...)` gate so normalize-only repair payloads stay on the full patch path instead of being swallowed by the reposition fast path
+- updated `editors/PLUGIN-SPEC.md` and `VERSIONS.md` to record the pure-reposition contract and the editor-side repair ordering invariant
+- added a focused VS Code regression for the patch-shape gate
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Commit / push:
+- `src/agent-doc`: `362bcd1` pushed to `origin/20260422/codex-agent-backend`
+- superproject gitlink: `e05975450` pushed to `origin/main`
+
+There were no actionable follow-up items to capture.
+<!-- agent:boundary:6f746506 -->
 <!-- /agent:exchange -->
 ###
 

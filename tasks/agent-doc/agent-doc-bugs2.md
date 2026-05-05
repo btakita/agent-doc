@@ -62,7 +62,29 @@ Repo commits:
 - `agent-loop`: `306b6895e` (`chore: refresh agent-doc skill mirrors`)
 
 Per the session-document commit boundary, this closeout commit resolves `#gitstage`; repo push follows after closeout.
-<!-- agent:boundary:bbd56992 -->
+❯ When I rapidly cycle to the opposite tab twice by pressing `Go to Next Splitter` two times, the synced tmux pane is the first `Go to Next Splitter` and does not land on the last `Go to Next Splitter`. spec-test-build-install-commit-push
+### Re: rapid splitter cycling lands on the first synced tmux pane — gpt-5
+
+Implemented the JetBrains auto-sync fix so rapid `Go to Next Splitter` sequences replay the latest captured focus/layout snapshot instead of re-sampling editor state after the previous sync finishes.
+
+Changes:
+- `EditorTabSyncListener` now snapshots the exact active file plus detected split layout on each selection event, stores the latest pending snapshot, and replays that captured state after an in-flight sync instead of rebuilding from a later background-thread view.
+- The JetBrains planner now uses a column-aware visible signature so splitter identity survives replay dedup.
+- Added JetBrains regression coverage for the new replay/signature contract, updated the shared plugin spec, and bumped the JetBrains plugin build version to `0.2.93`.
+
+Verification:
+- `./gradlew test --tests com.github.btakita.agentdoc.EditorTabSyncListenerTest`
+- `make check` (the first full run hit one route-suite failure, the isolated rerun passed, and the second full `make check` completed green)
+- `make install`
+- `/usr/bin/zsh -c 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'`
+- `agent-doc plugin install --local jetbrains` into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+
+Repo commits:
+- `src/agent-doc`: `9039fe3` (`fix: replay latest JetBrains splitter snapshot`)
+- `agent-loop`: `7e2cdc25d` (`chore: bump agent-doc for splitter replay`)
+
+Next live check: restart IntelliJ IDEA before testing the updated plugin, then retry the rapid splitter-cycle repro in `tasks/agent-doc/agent-doc-bugs2.md`.
+<!-- agent:boundary:8cd0664d -->
 <!-- /agent:exchange -->
 ###
 

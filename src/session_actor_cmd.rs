@@ -699,7 +699,10 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        assert!(done_path.exists(), "expected `/clear` to submit through pane input");
+        assert!(
+            done_path.exists(),
+            "expected `/clear` to submit through pane input"
+        );
         assert_eq!(std::fs::read_to_string(&output_path).unwrap(), "/clear");
     }
 

@@ -232,6 +232,12 @@ enum RoutedDispatchStartProof {
     HookStateAdvanced,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DispatchOnlyReopenDelivery {
+    SupervisorIpcOnce,
+    DirectPaneSubmit,
+}
+
 impl RoutedDispatchStartProof {
     fn dispatch_stage_label(self) -> &'static str {
         match self {
@@ -555,6 +561,42 @@ fn parse_actor_state(raw: &str) -> Option<crate::session_actor::ActorState> {
         "blocked" => Some(crate::session_actor::ActorState::Blocked),
         _ => None,
     }
+}
+
+fn supervisor_health_label(health: SupervisorHealth) -> String {
+    match health {
+        SupervisorHealth::Healthy => "healthy".to_string(),
+        SupervisorHealth::Restartable => "restartable".to_string(),
+        SupervisorHealth::Halted { restart_count } => {
+            format!("halted(restart_count={restart_count})")
+        }
+        SupervisorHealth::Unreachable => "unreachable".to_string(),
+        SupervisorHealth::NoSocket => "no_socket".to_string(),
+    }
+}
+
+fn runtime_actor_state_label(runtime: &SupervisorRuntime) -> &'static str {
+    runtime
+        .actor_state
+        .map(crate::session_actor::ActorState::as_str)
+        .unwrap_or("missing")
+}
+
+fn authoritative_actor_dispatch_guard_reason(runtime: &SupervisorRuntime) -> Option<String> {
+    if !matches!(runtime.health, SupervisorHealth::Healthy) {
+        return Some(format!(
+            "supervisor health is {}",
+            supervisor_health_label(runtime.health)
+        ));
+    }
+    if runtime.actor_state.is_none() {
+        return Some("supervisor actor_state is missing".to_string());
+    }
+    None
+}
+
+fn authoritative_actor_dispatch_target_eligible(actor: &AuthoritativeActorDispatchTarget) -> bool {
+    authoritative_actor_dispatch_guard_reason(&actor.runtime).is_none()
 }
 
 fn supervisor_socket_path(file: &Path, session_id: &str) -> Option<std::path::PathBuf> {
@@ -1242,6 +1284,7 @@ fn dispatch_only_send_reopen(
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
+    delivery: DispatchOnlyReopenDelivery,
 ) -> Result<String> {
     let mut dispatch_pane = pane.to_string();
     let mut log_status = crate::startup_miss::session_log_status(file, session_id)
@@ -1350,28 +1393,41 @@ fn dispatch_only_send_reopen(
     }
 
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
-    let _ = dispatch_via_supervisor_ipc_once(
-        tmux,
-        file,
-        &dispatch_pane,
-        session_id,
-        file_path,
-        harness,
-    )?;
+    match delivery {
+        DispatchOnlyReopenDelivery::SupervisorIpcOnce => {
+            let _ = dispatch_via_supervisor_ipc_once(
+                tmux,
+                file,
+                &dispatch_pane,
+                session_id,
+                file_path,
+                harness,
+            )?;
+        }
+        DispatchOnlyReopenDelivery::DirectPaneSubmit => {
+            let _ = send_command_once_unchecked(tmux, &dispatch_pane, file_path, harness)?;
+        }
+    }
+    let delivery_label = match delivery {
+        DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_ipc_once",
+        DispatchOnlyReopenDelivery::DirectPaneSubmit => "direct_pane_submit",
+    };
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_dispatch_only_sent file={} pane={} harness={}",
+            "route_dispatch_only_sent file={} pane={} harness={} delivery={}",
             file.display(),
             dispatch_pane,
-            harness.binary
+            harness.binary,
+            delivery_label
         ),
     );
     eprintln!(
-        "[route] dispatch-only {} reopen for {} was sent to pane {} without acceptance polling",
+        "[route] dispatch-only {} reopen for {} was sent to pane {} via {} without acceptance polling",
         harness.binary,
         file.display(),
-        dispatch_pane
+        dispatch_pane,
+        delivery_label
     );
     Ok(dispatch_pane)
 }
@@ -1392,6 +1448,7 @@ fn dispatch_only_reopen_existing_pane(
     allow_busy_interrupt_retry: bool,
     auto_fix_attempted: bool,
     pane_id: &str,
+    delivery: DispatchOnlyReopenDelivery,
 ) -> Result<String> {
     let dispatch_pane = reapply_codex_launch_contract_after_clear(
         tmux, file, pane_id, session_id, file_path, harness, false,
@@ -1407,6 +1464,7 @@ fn dispatch_only_reopen_existing_pane(
             &dispatch_pane,
             file_path,
             harness,
+            delivery,
         );
     }
     if harness.binary == "codex"
@@ -1431,6 +1489,7 @@ fn dispatch_only_reopen_existing_pane(
             &dispatch_pane,
             file_path,
             harness,
+            delivery,
         );
     }
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
@@ -1441,9 +1500,15 @@ fn dispatch_only_reopen_existing_pane(
         harness,
         prompt_bearing_marker,
     )? {
-        ExistingPaneDispatchReadiness::Ready => {
-            dispatch_only_send_reopen(tmux, file, session_id, &dispatch_pane, file_path, harness)
-        }
+        ExistingPaneDispatchReadiness::Ready => dispatch_only_send_reopen(
+            tmux,
+            file,
+            session_id,
+            &dispatch_pane,
+            file_path,
+            harness,
+            delivery,
+        ),
         ExistingPaneDispatchReadiness::BusyAlreadyRunning => Ok(dispatch_pane),
         ExistingPaneDispatchReadiness::BusyNeedsAutoFix {
             provenance,
@@ -1465,6 +1530,7 @@ fn dispatch_only_reopen_existing_pane(
             &dispatch_pane,
             &provenance,
             blocker_reason.as_deref(),
+            delivery,
         ),
     }
 }
@@ -1487,6 +1553,7 @@ fn retry_dispatch_only_after_busy_pane(
     busy_pane: &str,
     provenance: &str,
     blocker_reason: Option<&str>,
+    delivery: DispatchOnlyReopenDelivery,
 ) -> Result<String> {
     let fallback_detail = blocker_reason.map(|reason| format!("still shows {reason}"));
     if allow_auto_fix_retry {
@@ -1507,6 +1574,7 @@ fn retry_dispatch_only_after_busy_pane(
                     allow_busy_interrupt_retry,
                     true,
                     busy_pane,
+                    delivery,
                 );
             }
             BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart => {
@@ -1526,6 +1594,7 @@ fn retry_dispatch_only_after_busy_pane(
                     allow_busy_interrupt_retry,
                     true,
                     busy_pane,
+                    delivery,
                 );
             }
             BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart => {
@@ -1571,6 +1640,7 @@ fn retry_dispatch_only_after_busy_pane(
                     allow_busy_interrupt_retry,
                     true,
                     busy_pane,
+                    delivery,
                 );
             }
             BusyPaneAutoFixOutcome::FailClosed => {}
@@ -1600,6 +1670,7 @@ fn retry_dispatch_only_after_busy_pane(
                     false,
                     true,
                     busy_pane,
+                    delivery,
                 );
             }
             BusyPaneInterruptRecoveryOutcome::Blocked { reason } => {
@@ -1660,7 +1731,7 @@ fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &str) -> Optio
     }
 }
 
-fn load_authoritative_actor_dispatch_target(
+fn load_authoritative_actor_binding(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
@@ -1706,14 +1777,35 @@ fn load_authoritative_actor_dispatch_target(
     }
 
     let runtime = query_supervisor_runtime(file, session_id);
-    if runtime.actor_state.is_none() {
-        return Ok(None);
-    }
-    if !matches!(runtime.health, SupervisorHealth::Healthy) {
-        return Ok(None);
-    }
-
     Ok(Some(AuthoritativeActorDispatchTarget { record, runtime }))
+}
+
+fn load_authoritative_actor_dispatch_target(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    respect_tracked_clear_restart: bool,
+) -> Result<Option<AuthoritativeActorDispatchTarget>> {
+    Ok(load_authoritative_actor_binding(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        harness,
+        respect_tracked_clear_restart,
+    )?
+    .filter(authoritative_actor_dispatch_target_eligible))
+}
+
+fn dispatch_only_can_use_degraded_authoritative_actor(
+    actor: &AuthoritativeActorDispatchTarget,
+    registered: Option<&str>,
+    live_owner: Option<&str>,
+) -> bool {
+    let pane = actor.record.pane_id.as_str();
+    registered == Some(pane) || live_owner == Some(pane)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1873,8 +1965,11 @@ fn resolve_or_create_pane_dispatch_only(
     let cycle_baseline = crate::cycle_state::load(file)?;
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
-    if let Some(actor) =
-        load_authoritative_actor_dispatch_target(tmux, file, session_id, file_path, harness, false)?
+    let authoritative_actor =
+        load_authoritative_actor_binding(tmux, file, session_id, file_path, harness, false)?;
+    if let Some(actor) = authoritative_actor
+        .as_ref()
+        .filter(|actor| authoritative_actor_dispatch_target_eligible(actor))
     {
         return route_via_authoritative_actor(
             tmux,
@@ -1889,7 +1984,7 @@ fn resolve_or_create_pane_dispatch_only(
                 .as_ref()
                 .map(|context| context.marker.as_str()),
             true,
-            actor,
+            actor.clone(),
         );
     }
     let live_owner = if registered.is_some() {
@@ -1914,6 +2009,75 @@ fn resolve_or_create_pane_dispatch_only(
             is_first_column(file, col_args),
         );
     };
+
+    if let Some(actor) = authoritative_actor.as_ref()
+        && let Some(reason) = authoritative_actor_dispatch_guard_reason(&actor.runtime)
+    {
+        if dispatch_only_can_use_degraded_authoritative_actor(
+            actor,
+            registered.as_deref(),
+            live_owner.as_deref(),
+        ) {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_authoritative_fallback file={} pane={} harness={} generation={} record_state={} supervisor_health={} runtime_actor_state={} reason={}",
+                    file.display(),
+                    actor.record.pane_id,
+                    harness.binary,
+                    actor.record.generation,
+                    actor.record.state.as_str(),
+                    supervisor_health_label(actor.runtime.health),
+                    runtime_actor_state_label(&actor.runtime),
+                    reason
+                ),
+            );
+            eprintln!(
+                "[route] dispatch-only {} reroute for {} is using authoritative pane {} without supervisor state because {}",
+                harness.binary,
+                file.display(),
+                actor.record.pane_id,
+                reason
+            );
+            rescue_target(&actor.record.pane_id);
+            return dispatch_only_reopen_existing_pane(
+                tmux,
+                file,
+                pane,
+                col_args,
+                session_id,
+                file_path,
+                target_session,
+                harness,
+                created_panes,
+                pending_prompt_context
+                    .as_ref()
+                    .map(|context| context.marker.as_str()),
+                true,
+                true,
+                false,
+                &actor.record.pane_id,
+                DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            );
+        }
+
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_authoritative_fallback_skipped file={} actor_pane={} harness={} generation={} record_state={} supervisor_health={} runtime_actor_state={} registered_pane={} live_owner={} reason={}",
+                file.display(),
+                actor.record.pane_id,
+                harness.binary,
+                actor.record.generation,
+                actor.record.state.as_str(),
+                supervisor_health_label(actor.runtime.health),
+                runtime_actor_state_label(&actor.runtime),
+                registered.as_deref().unwrap_or("none"),
+                live_owner.as_deref().unwrap_or("none"),
+                reason
+            ),
+        );
+    }
 
     if let Some(ref registered_pane) = registered
         && tmux.pane_alive(registered_pane)
@@ -1971,6 +2135,7 @@ fn resolve_or_create_pane_dispatch_only(
             true,
             false,
             dispatch_pane,
+            DispatchOnlyReopenDelivery::SupervisorIpcOnce,
         );
     }
 
@@ -2036,6 +2201,7 @@ fn resolve_or_create_pane_dispatch_only(
             true,
             false,
             &new_pane,
+            DispatchOnlyReopenDelivery::SupervisorIpcOnce,
         );
     }
 
@@ -5088,6 +5254,7 @@ fn auto_start_in_session(
                     &dispatch_pane,
                     file_path,
                     harness,
+                    DispatchOnlyReopenDelivery::SupervisorIpcOnce,
                 )?;
                 RoutedDispatchStartProof::CommandAcceptedOnly
             } else {
@@ -5106,6 +5273,7 @@ fn auto_start_in_session(
                     &dispatch_pane,
                     file_path,
                     harness,
+                    DispatchOnlyReopenDelivery::SupervisorIpcOnce,
                 )
                 .map(|_| RoutedDispatchStartProof::CommandAcceptedOnly)
             } else {
@@ -7923,6 +8091,7 @@ Body\n\
             &pane,
             &file_path,
             &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::SupervisorIpcOnce,
         )
         .expect("dispatch-only reopen should still send once when no explicit blocker is visible");
         assert!(
@@ -9743,6 +9912,84 @@ Body\n\
         );
 
         ipc.stop();
+    }
+
+    #[test]
+    fn resolve_or_create_pane_dispatch_only_falls_back_to_registered_authoritative_actor_pane_when_supervisor_state_is_missing()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-authoritative-actor-dispatch-only-fallback");
+        let session = "claude";
+        let cwd = test_cwd();
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec /bin/sh -c 'printf "❯ \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &actor_pane, "❯ ", std::time::Duration::from_secs(3));
+
+        let doc = dir.path().join("dispatch-only-claude-fallback.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-authoritative-actor-dispatch-only-fallback";
+        sessions::register(session_id, &actor_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let resolved = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::claude(),
+            &mut Vec::new(),
+        )
+        .expect("dispatch-only reroute should fall back to the authoritative pane when supervisor state is missing");
+        assert_eq!(resolved, actor_pane);
+
+        let actor_after = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            &HarnessConfig::claude().trigger_command(&file_path),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            actor_after.contains(&HarnessConfig::claude().trigger_command(&file_path)),
+            "dispatch-only fallback should still submit the Claude reopen in the authoritative pane: {actor_after}"
+        );
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .expect("dispatch-only fallback should write an ops log entry");
+        assert!(
+            ops_log.contains("route_dispatch_only_authoritative_fallback"),
+            "expected authoritative fallback logging, got: {ops_log}"
+        );
+        assert!(
+            ops_log.contains("supervisor_health=no_socket"),
+            "fallback logging should explain the degraded supervisor state: {ops_log}"
+        );
     }
 
     #[test]

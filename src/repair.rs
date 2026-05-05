@@ -1034,6 +1034,11 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
     let outcome = run(file)?;
     if outcome.repaired() && crate::git::is_in_git_repo(file) {
         crate::write::complete_required_closeout(file)?;
+    } else if !outcome.repaired()
+        && let crate::session_check::SessionCheckStatus::Interrupted(message) =
+            crate::session_check::inspect(file)?
+    {
+        anyhow::bail!(message);
     }
     Ok(outcome)
 }
@@ -2336,5 +2341,79 @@ mod tests {
         assert_eq!(state.last_event, "commit_success");
         let doc_after = std::fs::read_to_string(&doc).unwrap();
         assert!(doc_after.contains("### Re: replay after commit — gpt-5"));
+    }
+
+    #[test]
+    fn repair_fails_closed_when_only_later_prompt_drift_remains_after_committed_patchback() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let base = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Why did repair miss the pending response?\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        init_git_repo(root, &doc);
+
+        let committed_patchback = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Why did repair miss the pending response?\n",
+            "### Re: missed patchback — gpt-5\n\n",
+            "Recovered through a direct patchback.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, committed_patchback).unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["add", "test.md"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .status()
+            .unwrap();
+
+        snapshot::save(&doc, base).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base))
+            .unwrap();
+
+        let current = committed_patchback.replace(
+            "<!-- /agent:exchange -->\n",
+            "do [#followup]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, &current).unwrap();
+
+        let err = repair(&doc).expect_err(
+            "repair should fail closed when only later prompt drift remains after adopting the committed patchback",
+        );
+        let message = err.to_string();
+        assert!(message.contains("unresolved prompt-bearing user changes"));
+        assert!(message.contains("do [#followup]. spec-test-build-install-commit-push"));
+
+        let repaired_snapshot = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            repaired_snapshot.contains("Recovered through a direct patchback."),
+            "snapshot should advance to the committed patchback:\n{repaired_snapshot}"
+        );
+        assert!(
+            !repaired_snapshot.contains("do [#followup]. spec-test-build-install-commit-push"),
+            "snapshot must not absorb the later prompt drift:\n{repaired_snapshot}"
+        );
+
+        let head = crate::git::show_head(&doc).unwrap().unwrap();
+        assert!(
+            head.contains("Recovered through a direct patchback."),
+            "HEAD should keep the committed patchback:\n{head}"
+        );
+        assert!(
+            !head.contains("do [#followup]. spec-test-build-install-commit-push"),
+            "repair must not commit the later prompt drift:\n{head}"
+        );
     }
 }

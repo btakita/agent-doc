@@ -73,6 +73,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Historical capture replay is narrow: it requires either an active capture artifact or a matching orphan prompt target in the live exchange.
 - Transcript-shaped or full-document-dump captured payloads must fail closed and be parked under `.agent-doc/repair-blocked/`.
 - No-pending repair still runs transcript canonicalization, completed-backlog reap, safe escaped-conversation repair (including the exchange-to-backlog gap case), safe duplicate-close repair, and deterministic stale-boundary repair when applicable.
+- Explicit `repair` must fail closed, not print a false clean `No pending response found`, when `session-check` would still block the document after those no-pending repairs. In particular, when a committed historical patchback can be repaired from `HEAD` but later prompt-bearing user drift still remains, `repair` must surface the same interruption instead of downgrading the blocked document to `Noop`.
 - For git-backed docs, repair must not stop after updating the document or snapshot. The same command must carry the recovered closeout through commit.
 
 ## preflight

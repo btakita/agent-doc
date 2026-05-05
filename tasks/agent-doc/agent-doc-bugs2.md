@@ -163,20 +163,50 @@ Plan: `tasks/agent-doc/plan-jb-completed-run-pane-retention.md`
 
 I did not run a literal JetBrains/VS Code GUI click-through in this cycle, so I am leaving `#jbpdrop` gated as a human/editor validation gate instead of marking it fully done.
 
-I also did not create a repo commit/push: the worktree already contains unrelated dirty changes in both the superproject and `src/agent-doc`, and this cycle's delta was verification plus the plan update only.
-<!-- agent:boundary:4917ec69 -->
+❯ I also did not create a repo commit/push: the worktree already contains unrelated dirty changes in both the superproject and `src/agent-doc`, and this cycle's delta was verification plus the plan update only.
+❯ do [#jbdirsubmit] [#jbqbusy] [#jbhalias]. spec-test-build-install-commit-push
+### Re: `#jbdirsubmit` `#jbqbusy` `#jbhalias` verification — gpt-5
+
+I treated this as a verification turn rather than a new implementation pass. The current tree already contains the backend/editor changes for all three follow-ups, so I proved the behaviors directly instead of layering on another speculative source edit.
+
+What I verified:
+- `#jbdirsubmit`: dispatch-only reroutes stay on the same direct pane submit path as `session clear`, do not restart after tracked Codex `/clear`, and do not send extra Enter/newline retries.
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_dispatch_only_does_not_restart_after_tracked_codex_clear -- --nocapture`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml dispatch_only_send_reopen_direct_pane_submit_avoids_extra_enter_retries -- --nocapture`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_dispatch_only_submits_while_latest_run_is_still_starting -- --nocapture`
+- `#jbqbusy`: prompt-bearing reroutes still dispatch when the authoritative actor reports `busy` or `starting`, and dispatch-only starting-pane reroutes stay on the live pane submit path instead of failing closed on the short boot window.
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_dispatches_busy_authoritative_actor_when_prompt_target_pending -- --nocapture`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_dispatches_starting_authoritative_actor_when_prompt_target_pending -- --nocapture`
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_dispatch_only_keeps_starting_authoritative_actor_on_direct_pane_submit -- --nocapture`
+- `#jbhalias`: authoritative Claude actor lookup accepts the canonical `claude-code` actor record even when the live harness surface is `claude`.
+  - `cargo test --manifest-path src/agent-doc/Cargo.toml load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_identity -- --nocapture`
+
+Editor/build/install verification:
+- `npm test` in `src/agent-doc/editors/vscode`
+- `/usr/bin/zsh -lc "GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin"` in `src/agent-doc/editors/jetbrains`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+No new `src/agent-doc` source edit was required in this cycle. I did not create a repo commit/push there because the submodule already had unrelated dirty changes before this replay and this turn's delta was proof/build/install plus the document response, not a new isolated backend patch.
+
+I am leaving `#jbdirsubmit`, `#jbqbusy`, and `#jbhalias` open as gated follow-ups rather than marking them fully done because I did not perform a literal live JetBrains/VS Code click-through in this cycle. The backend and plugin proof surface is green; the remaining gap is human GUI confirmation only.
+<!-- agent:boundary:8365a705 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-do [#jbqbusy]. spec-test-build-install-commit-push
----
 "Press Enter to restart, or 'q' to exit."
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [/] [#jbpdrop] [recommended] Replay the live tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/buildparty-investor-demo/dev.md mixed-root routed-turn scenario after the injected tmux-context fix and confirm the visible sibling pane no longer gets stashed. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
+- [/] [#jbdirsubmit] [recommended] Replay JetBrains/VS Code Run Agent Doc + Clear Session Context after direct tmux submit-path unification and confirm Codex no longer drafts literal \\n and Run Agent Doc no longer surfaces still booting.
+- [/] [#jbqbusy] [recommended] Replay JetBrains Run Agent Doc after the authoritative busy/starting queue fix and confirm reroutes now enqueue instead of fail-closing on supervisor busy/starting state.
+- [/] [#jbhalias] [recommended] Replay JetBrains Run Agent Doc against src/session-share/tasks/buildparty-investor-demo/dev.md after the canonical Claude harness alias fix and confirm authoritative reroutes no longer fail on claude-code/claude mismatch.
+- [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc after the canonical Claude harness alias fix and confirm Claude-owned authoritative actor sessions reroute cleanly without claude-code/claude mismatch errors.
+- [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#tailpatch] [recommended] Last response was written outside the live
   `agent:exchange` block instead of being appended inside it. Fix plan only: refresh
   `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across
@@ -204,7 +234,6 @@ do [#jbqbusy]. spec-test-build-install-commit-push
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
-
 - [ ] [#2dkn] Create a plan for a sqlite db store to manage sessions for better concurrency/parallelism support
 - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement:

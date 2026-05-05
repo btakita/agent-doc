@@ -114,7 +114,11 @@ Updated the existing Corky draft as requested.
 
 Draft file remains:
 - `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`
-<!-- agent:boundary:b3eb2b47 -->
+❯ Please use corky to send the email from brian.takita@gmail.com
+Corky reached the Gmail send step and is waiting for OAuth authorization for `brian.takita@gmail.com` at `http://127.0.0.1:8484/callback`.
+
+Use the browser window that Corky opened, or open the printed Google auth URL from the terminal output, then tell me once authorization is complete. After that I can finish the send and close the `agent-doc` cycle.
+<!-- agent:boundary:c3caf4a5 -->
 <!-- /agent:exchange -->
 ###
 

@@ -1265,6 +1265,9 @@ mod tests {
         assert!(content.contains(
             "the manual repo commit must exclude the active session document"
         ));
+        assert!(content.contains("Resolve the intended non-session path set first"));
+        assert!(content.contains("stop immediately on any stage failure"));
+        assert!(content.contains("verify the staged diff still matches the intended set"));
         assert!(content.contains(".codex/hooks.json"));
         assert!(content.contains("UserPromptSubmit"));
         assert!(content.contains("agent-doc hook codex-stop"));
@@ -1283,6 +1286,9 @@ mod tests {
         assert!(content.contains(
             "keep the active session document out of that manual git commit"
         ));
+        assert!(content.contains("Resolve the exact intended non-session path set first"));
+        assert!(content.contains("verify `git diff --cached --name-only`"));
+        assert!(content.contains("Do **not** continue to `git commit` after a narrowed `git add` / stage failure"));
         assert!(content.contains(
             "Do **not** stage the active session document into an ordinary repo `git commit`"
         ));
@@ -1298,8 +1304,9 @@ mod tests {
             "run `agent-doc finalize` / `write --commit` so the session document gets its own binary-owned closeout commit"
         ));
         assert!(content.contains(
-            "commit non-session repo files, finalize the session document, then push"
+            "validate and commit only the intended non-session repo files, finalize the session document, then push"
         ));
+        assert!(content.contains("stop on any stage failure"));
     }
 
     #[test]

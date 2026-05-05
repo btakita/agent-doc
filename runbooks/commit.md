@@ -14,7 +14,7 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 - Finish the turn's requested implementation / verification / build-install work before the response-persistence command. `finalize` is the close-out boundary, not a mid-turn checkpoint.
 - The default response-cycle command is `agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`.
 - `finalize` is the binary-owned happy path: it writes the response, runs commit, and fails closed unless the cycle reaches `committed`.
-- If the turn also includes ordinary repo `commit + push`, keep the active session document out of that manual git commit. Commit only the non-session repo files first, then let `finalize` or `write --commit` create the session-document closeout commit, then push after the binary-owned closeout so the response commit is included.
+- If the turn also includes ordinary repo `commit + push`, keep the active session document out of that manual git commit. Resolve the exact intended non-session path set first, run stage commands only for that set, stop immediately if any stage step fails, verify `git diff --cached --name-only` (or a stricter submodule-pointer inspection) still matches the intended set, then commit only that validated non-session set before `finalize` or `write --commit` creates the session-document closeout commit. Push only after the binary-owned closeout so the response commit is included.
 - Use `finalize` for the normal preflight → respond → persist flow across Claude Code, Codex, Cursor, and generic harnesses. Harness-specific command dispatch lives in `harness-invocation.md`.
 - For direct-exec harness paths such as Codex, run `agent-doc session-check <FILE>` immediately after the persistence command returns. A nonzero check means the cycle is still open, so do not report success.
 - Do **not** describe a normal harness-native `agent-doc` turn as successful while also saying the response is still uncommitted, unless the user explicitly requested that exception.
@@ -35,4 +35,5 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 - Do **not** stop after bare `agent-doc write` for a final response.
 - Do **not** patch the assistant response directly into the file when `finalize` or `write --commit` should carry it through the commit boundary.
 - Do **not** stage the active session document into an ordinary repo `git commit` before `finalize` / `write --commit`.
+- Do **not** continue to `git commit` after a narrowed `git add` / stage failure, and do **not** trust unrelated pre-existing staged entries to "probably be fine" for the same turn.
 - Do **not** replace `agent-doc finalize` / `agent-doc commit` with manual `git commit` commands.

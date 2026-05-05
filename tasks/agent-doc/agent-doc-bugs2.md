@@ -189,18 +189,38 @@ Editor/build/install verification:
 
 No new `src/agent-doc` source edit was required in this cycle. I did not create a repo commit/push there because the submodule already had unrelated dirty changes before this replay and this turn's delta was proof/build/install plus the document response, not a new isolated backend patch.
 
-I am leaving `#jbdirsubmit`, `#jbqbusy`, and `#jbhalias` open as gated follow-ups rather than marking them fully done because I did not perform a literal live JetBrains/VS Code click-through in this cycle. The backend and plugin proof surface is green; the remaining gap is human GUI confirmation only.
-<!-- agent:boundary:df1cf2e0 -->
+❯ I am leaving `#jbdirsubmit`, `#jbqbusy`, and `#jbhalias` open as gated follow-ups rather than marking them fully done because I did not perform a literal live JetBrains/VS Code click-through in this cycle. The backend and plugin proof surface is green; the remaining gap is human GUI confirmation only.
+❯ do [#tailpatch]
+### Re: `#tailpatch` plan refresh — gpt-5
+
+Refreshed the fix plan only for `#tailpatch`.
+
+Plan: `tasks/agent-doc/plan-tail-patch-outside-exchange.md`
+
+What changed in the plan:
+- added the newer 2026-05-05 `tasks/agent-doc/agent-doc-bugs2.md` evidence alongside the older `claudescore-3.md` tail-placement example
+- narrowed the investigation to the actual current surfaces: `write.rs`, `template.rs`, `repair.rs`, `preflight.rs`, and the closeout integration tests
+- called out the existing `guard_no_conversation_tail_outside_exchange(...)` and `repair_duplicate_exchange_close_tail(...)` protections as part of the root-cause trace, since at least one live closeout/recovery path still reached a bad tail shape before those protections prevented commit
+- tightened the exit criteria so this bug is not considered addressed until the malformed-tail shape fails closed or is deterministically repaired before commit
+
+I am keeping `#tailpatch` open because this cycle was plan refresh only, per the backlog contract. No `src/agent-doc` code, spec, or test files were changed in this turn.
+<!-- agent:boundary:e7c5f509 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+I manually transitioned backlog items with [/] to [x]. The agent-doc pipeline removed the done items but then brought some of the items back.
+spec-test-build-install-commit-push
+---
 "Press Enter to restart, or 'q' to exit."
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [/] [#jbpdrop] [recommended] Replay the live tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/buildparty-investor-demo/dev.md mixed-root routed-turn scenario after the injected tmux-context fix and confirm the visible sibling pane no longer gets stashed. Plan: tasks/agent-doc/plan-jb-completed-run-pane-retention.md
+- [/] [#jbipcr] [recommended] Replay JetBrains Run Agent Doc after the canonical Claude harness alias fix and confirm Claude-owned authoritative actor sessions reroute cleanly without claude-code/claude mismatch errors.
+- [/] [#edispatch] [recommended] Replay JetBrains and VS Code Run Agent Doc against tasks/agent-doc/agent-doc-bugs2.md after the new dispatch-only route path lands. Plan: tasks/agent-doc/plan-editor-dispatch-only-reroute-validation.md
 - [ ] [#tailpatch] [recommended] Last response was written outside the live
   `agent:exchange` block instead of being appended inside it. Fix plan only: refresh
   `tasks/agent-doc/plan-tail-patch-outside-exchange.md` with the current reproduction, trace the template-doc insertion-point chooser across
@@ -224,7 +244,6 @@ I am leaving `#jbdirsubmit`, `#jbqbusy`, and `#jbhalias` open as gated follow-up
   `finalize`/
   `write --commit` can report success without a persisted commit, identify any stash/sync/session-check interaction that can leave the response uncommitted, then add regression coverage and a fail-closed acceptance criterion so agent-doc never reports a completed closeout until the response commit is verifiably present.
 - [ ] [#rprdrift] [recommended] `agent-doc repair` reported "No pending response found" for `src/boost-client/tasks/monsterrodholders.md` even though `session-check` still failed on a committed cycle with unresolved prompt-bearing user drift after a direct patchback. Fix plan only: reproduce the exact state transition where a committed cycle still has prompt-bearing follow-up edits, compare `repair`, `session-check`, `write --commit`, and `finalize --pending-done` behavior on that state, decide whether `repair` should automatically convert the drift into a recoverable finalize path or fail with the same actionable guidance as `session-check`, and add regressions plus a fail-closed invariant so repo/session repair never stops at a false "nothing to repair" result while the document remains blocked.
-
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

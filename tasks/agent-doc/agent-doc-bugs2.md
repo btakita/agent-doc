@@ -389,21 +389,45 @@ Git:
 - Commit: `b52c49f` (`fix: fail closed bare session write closeout`)
 - Pushed: `origin/20260422/codex-agent-backend`
 
-No new backlog follow-ups from this fix.
-<!-- agent:boundary:a9657d16 -->
+❯ No new backlog follow-ups from this fix.
+❯ In the editor, when I select another agent doc, the Sync is often not called. I have to manually sync to see the correct tmux pane. Is this an issue with the debounce logic? If it is, please remove the debounce logic and place the sync operations into a queue so the last sync operation is what the user sees. Perhaps we can optimize to only play the last sync if the user rapidly changes the documents.
+❯ spec-test-build-install-commit-push
+### Re: editor selection sync replay gap — gpt-5
+
+Root cause was only partly the debounce. The real miss was the automatic sync concurrency guard: both editor plugins would coalesce selection/layout churn, but if another automatic sync was already running they simply returned and dropped the newer request. That left the newly selected document without a follow-up `focus`/`sync`, which is why the tmux pane often stayed stale until you manually ran Sync.
+
+What changed:
+- VS Code now keeps a last-wins automatic sync queue. When selection changes arrive during an in-flight automatic sync, it recomputes the live editor state after the current run and immediately replays only the newest queued request.
+- JetBrains now does the same for tab-selection sync, and its layout-change detector also schedules one immediate replay when a newer automatic request lands during an in-flight layout reconcile.
+- I kept the short coalescing debounce, but removed the lossy "skip while running" behavior. The practical behavior is now "coalesce bursts, then guarantee the latest request is what the user sees."
+- Updated the shared editor/plugin specs and `VERSIONS.md` to document the new last-wins contract.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --all-targets --all-features`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `/usr/bin/zsh -lc "GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin"` in `src/agent-doc/editors/jetbrains`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+
+Commit / push:
+- `src/agent-doc`: `642c9a7` pushed to `origin/20260422/codex-agent-backend`
+
+I did not create a superproject gitlink commit because the workspace root already has unrelated dirty changes outside this fix stream.
+
+There were no actionable follow-up items to capture.
+<!-- agent:boundary:cc394526 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-In the editor, when I select another agent doc, the Sync is often not called. I have to manually sync to see the correct tmux pane. Is this an issue with the debounce logic? If it is, please remove the debounce logic and place the sync operations into a queue so the last sync operation is what the user sees. Perhaps we can optimize to only play the last sync if the user rapidly changes the documents.
-spec-test-build-install-commit-push
----
 "Press Enter to restart, or 'q' to exit."
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#pfxcommit] Prompt prefix stripped when skill commits session doc via direct git add before finalize. Plan: tasks/agent-doc/plans/prompt-prefix-stripping-on-skill-commit.md
+- [ ] [#gitstage] [recommended] In the previous `boost-client` turn, the intended root superproject submodule-pointer bump was blocked by `fatal: Unable to create .../.git/modules/src/boost-client/index.lock: File exists` during `git add src/monsterrodholders-dev`, but a later root `git commit` still succeeded against pre-existing staged paths and created an unrelated local commit that deleted task images while leaving the intended submodule pointer unstaged. Fix plan only: reproduce the nested-submodule lock + dirty-index path, trace where the agent-doc closeout/commit workflow keeps going after a failed stage step, compare the requested path set with the actual staged diff before commit, and define a fail-closed rule so path-scoped closeout either (a) stages exactly the expected paths and commits only that set or (b) stops with actionable guidance instead of consuming unrelated staged changes.
 - [ ] [#resyncflake] [recommended] Stabilize resync::tests::purge_unregistered_stash_panes_kills_retained_dead_stash_pane; cargo test sync:: hit it once even though the same test passed in isolation.
 - [ ] [#vssplitreplay] [recommended] Replay the live VS Code mixed-root split (tasks/agent-doc/agent-doc-bugs2.md + src/session-share/tasks/claudescore-3.md) to confirm passive sync no longer stashes a healthy running pane.
 - [ ] [#rspcmt] [recommended] Previous response was written to

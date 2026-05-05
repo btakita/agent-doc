@@ -441,7 +441,7 @@ Git:
 
 ❯ I did not run a live JetBrains/VS Code replay from this CLI session, so I added a backlog follow-up for that end-to-end verification.
 ❯ Why does `Clear Session Context` to Codex have the `\n` issue but not to Claude Code?
-❯ Please use logs & git history to understand the exact differences. Please fix.
+❯ Please use logs & git history to understand the exact differences.
 ❯ spec-test-build-install-commit-push
 ### Re: Codex clear-session newline behavior — gpt-5
 
@@ -474,7 +474,10 @@ Commits pushed:
 
 - `tmux-router` `main`: `d6d7a4f` `fix: delay tmux submit after literal send`
 - `agent-doc` `20260422/codex-agent-backend`: `86a07d6` `docs: record delayed tmux submit mode`
-<!-- agent:boundary:56f6797f -->
+### Re: Follow-up on the split continuation lines — gpt-5
+
+Covered above. The exact logs/history difference was that both Codex paths had already converged on the same shared tmux submit route, but Codex still required a short delay between injected text and `Enter` while Claude Code did not. The fix, verification, build/install, and pushed commits are all in the previous response.
+<!-- agent:boundary:eaf60443 -->
 <!-- /agent:exchange -->
 ###
 

@@ -890,17 +890,34 @@ Noted. The current reference set for the Playwright comparison is:
 ❯ Those are the sources I would keep using for follow-up feature comparisons against `chromium-bridge`.
 ### Re: Source set — gpt-5
 
-The reference set is unchanged: the Playwright CLI README at `github.com/microsoft/playwright-cli`, the Playwright capabilities page at `playwright.dev/agent-cli/capabilities`, and the Playwright MCP extension README at `github.com/microsoft/playwright-mcp/blob/main/packages/extension/README.md`. I would use those same three sources for the next `chromium-bridge` comparison pass.
-<!-- agent:boundary:172f05e2 -->
+❯ The reference set is unchanged: the Playwright CLI README at `github.com/microsoft/playwright-cli`, the Playwright capabilities page at `playwright.dev/agent-cli/capabilities`, and the Playwright MCP extension README at `github.com/microsoft/playwright-mcp/blob/main/packages/extension/README.md`. I would use those same three sources for the next `chromium-bridge` comparison pass.
+❯ do [#cbstate]. spec-test-build-install-commit-push
+### Re: persistent state snapshots — gpt-5
+
+Implemented `chromium-bridge state save`, `state load`, and `state list` in `src/chromium-bridge`, backed by JSON snapshots of cookies plus current-origin `localStorage` and `sessionStorage`. Named snapshots now default to `~/.config/chromium-bridge/states/`, `CHROMIUM_BRIDGE_STATE_DIR` overrides that location, and `--path` supports explicit files. I updated `README.md`, `SPEC.md`, and the bundled `SKILL.md` to document the workflow.
+
+Verification:
+- `make check`
+- `cargo build --release`
+- `./target/release/chromium-bridge check`
+- `./target/release/chromium-bridge state list`
+- `./target/release/chromium-bridge state save smoke-test --path /tmp/chromium-bridge-state-smoke.json --tab 0`
+- `cargo install --path . --force`
+
+Pushes:
+- `btakita/chromium-bridge` `f11fc84` — `feat: add persistent browser state snapshots`
+- `btakita/agent-loop` `532f87f5b` — `chore: update chromium-bridge submodule`
+
+I did not run a live `state load` smoke test because it would reload the active browser tab and risk clobbering the current session state. The restore path is covered by the new unit tests plus the compiled release binary.
+<!-- agent:boundary:1932f7d6 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
-<!-- agent:pending patch=replace -->
-- [ ] [#63ww] t [recommended] Add persistent session/profile support plus state save/load to chromium-bridge
+<!-- agent:backlog patch=replace -->
 - [ ] [#cbnet] [recommended] Add network request listing/inspection to chromium-bridge
 - [ ] [#cbsnap] [recommended] Add structured accessibility snapshot output with stable element refs to chromium-bridge
 - [ ] [#brewtap] Create btakita/homebrew-tap for brew formula distribution (deferred — low priority)
 - [ ] [#3jmq] `chromium-bridge ingest` command — tighter corky integration (optional, filesystem pipeline works today)
 - [ ] [#fp48] Explore sift corpus configuration for multi-project search
-<!-- /agent:pending -->
+<!-- /agent:backlog -->

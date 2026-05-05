@@ -1875,6 +1875,35 @@ fn route_via_authoritative_actor(
             );
             return Ok(dispatch_pane);
         }
+        if dispatch_only && authoritative_actor_dispatch_can_queue_optimistically(actor_state) {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_actor_state_direct_pane_submit file={} pane={} harness={} generation={} actor_state={}",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    actor.record.generation,
+                    actor_state.as_str()
+                ),
+            );
+            eprintln!(
+                "[route] authoritative actor generation {} for {} still reports {} on pane {} — keeping dispatch-only reroutes on the live pane submit path instead of queueing through supervisor IPC",
+                actor.record.generation,
+                file.display(),
+                actor_state.as_str(),
+                dispatch_pane
+            );
+            return dispatch_only_send_reopen(
+                tmux,
+                file,
+                session_id,
+                &dispatch_pane,
+                file_path,
+                harness,
+                DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            );
+        }
         if authoritative_actor_dispatch_can_queue_optimistically(actor_state) {
             crate::ops_log::log_op(
                 file,
@@ -10385,6 +10414,109 @@ Body\n\
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
             Some(actor_pane.as_str())
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn resolve_or_create_pane_dispatch_only_keeps_starting_authoritative_actor_on_direct_pane_submit()
+     {
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-authoritative-starting-direct");
+        let session = "codex";
+        let cwd = test_cwd();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &stale_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &actor_pane, "> ", std::time::Duration::from_secs(3));
+
+        let doc = dir
+            .path()
+            .join("dispatch-only-authoritative-starting-direct.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-dispatch-only-authoritative-starting-direct";
+        sessions::register(session_id, &stale_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "starting",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let resolved = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("dispatch-only reroute should stay on the live authoritative pane even while actor state is starting");
+        assert_eq!(resolved, actor_pane);
+        assert!(
+            injects.lock().unwrap().is_empty(),
+            "dispatch-only authoritative reroute should not queue through supervisor IPC when the live pane is already ready"
+        );
+
+        let actor_after = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            &HarnessConfig::codex().trigger_command(&file_path),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
+            "dispatch-only authoritative reroute should submit through the live pane path: {actor_after}"
         );
 
         ipc.stop();

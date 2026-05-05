@@ -2623,6 +2623,44 @@ mod tests {
         }
     }
 
+    struct ScopedEnvVar {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl ScopedEnvVar {
+        fn set(key: &'static str, value: String) -> Self {
+            let previous = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, &value) };
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.as_deref() {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
+
+    fn tmux_env_for_server(iso: &IsolatedTmux) -> String {
+        let output = iso
+            .cmd()
+            .args(["display-message", "-p", "#{socket_path}"])
+            .output()
+            .expect("tmux should report its socket path");
+        assert!(
+            output.status.success(),
+            "failed to query tmux socket path: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let socket_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        format!("{socket_path},0,0")
+    }
+
     #[test]
     fn resolve_agent_args_claude_prefers_claude_alias_chain() {
         let fm = Frontmatter {
@@ -3599,6 +3637,69 @@ mod tests {
             std::fs::read_to_string(&output_path).unwrap(),
             "agent-doc tasks/software/tsift.md"
         );
+    }
+
+    #[test]
+    fn supervisor_ipc_inject_reaches_live_tmux_pane_submit_path() {
+        let _env_guard = crate::test_support::env_lock();
+        let tmp = TempDir::new().unwrap();
+        let iso = IsolatedTmux::new("start-ipc-live-supervisor-submit");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let output_path = tmp.path().join("submit.txt");
+        let done_path = tmp.path().join("done.txt");
+
+        std::thread::sleep(Duration::from_millis(150));
+        iso.send_keys(
+            &pane,
+            &format!(
+                "sh -lc 'IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"'",
+                output_path.display(),
+                done_path.display()
+            ),
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+
+        let _tmux_env = ScopedEnvVar::set("TMUX", tmux_env_for_server(&iso));
+        let shared = Arc::new(SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            Some(crate::session_actor::ActorState::Ready),
+            Some(pane.clone()),
+        ));
+        let shared_for_ipc = shared.clone();
+        let mut ipc = crate::supervisor::ipc::SupervisorIpc::start(tmp.path(), "test-session", {
+            move |method| handle_ipc(method, &shared_for_ipc)
+        })
+        .unwrap();
+
+        let response = crate::supervisor::ipc::send_command(
+            ipc.path(),
+            &IpcMethod::Inject {
+                bytes: "agent-doc tasks/software/tsift.md".to_string(),
+            },
+        )
+        .expect("supervisor IPC inject should succeed");
+        assert!(response.ok, "supervisor IPC inject should return ok");
+
+        for _ in 0..40 {
+            if done_path.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        assert!(
+            done_path.exists(),
+            "expected supervisor IPC inject to submit through the live tmux pane"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&output_path).unwrap(),
+            "agent-doc tasks/software/tsift.md"
+        );
+
+        ipc.stop();
     }
 
     #[test]

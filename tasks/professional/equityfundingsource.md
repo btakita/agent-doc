@@ -70,7 +70,21 @@ Once I have that feedback, I can move into end-to-end testing for the borrower/a
 
 Thanks,
 Brian
-<!-- agent:boundary:daa151d3 -->
+❯ Create a draft email using corky. Use numbered lists.
+### Re: corky draft email — gpt-5
+
+Created the Corky draft and used numbered lists as requested.
+
+Draft file:
+- `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`
+
+What I did:
+1. Created a real Corky draft addressed to Judith and CC'd Robert.
+2. Structured the email as numbered sections for progress, review items, specific asks, and next step.
+3. Validated the draft with `corky draft validate` and it passes.
+
+It is marked `status: review` and is ready for the next step when you want to push it with Corky.
+<!-- agent:boundary:df9ac012 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

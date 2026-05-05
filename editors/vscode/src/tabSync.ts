@@ -19,6 +19,10 @@ export interface PlannedTabChange {
     nextState: TabSyncState;
 }
 
+export function shouldReplayQueuedTabChange(startedGeneration: number, latestGeneration: number): boolean {
+    return latestGeneration > startedGeneration;
+}
+
 function normalizeVisibleMd(visibleMd: string[]): string[] {
     return [...new Set(visibleMd)].sort();
 }

@@ -127,4 +127,10 @@ class EditorTabSyncListenerTest {
 
         assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
     }
+
+    @Test
+    fun `newer automatic sync generations replay after the running command finishes`() {
+        assertEquals(true, EditorTabSyncListener.AutomaticCommandPlanner.shouldReplayAfterRun(3, 4))
+        assertEquals(false, EditorTabSyncListener.AutomaticCommandPlanner.shouldReplayAfterRun(4, 4))
+    }
 }

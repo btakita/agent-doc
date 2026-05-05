@@ -106,7 +106,7 @@ class LayoutChangeDetector(private val project: Project) {
                 try {
                     Thread.sleep(POLL_INTERVAL_MS)
                     if (!disposed.get()) {
-                        checkAndSync("poll")
+                        scheduleSync("poll", 0)
                         pollCount++
                         if (pollCount % 12 == 0L) { // ~every 60s at 5s interval
                             LOG.info("[state] layout-detector: listeners=${listenerCount.get()} containerEvents=${containerEventCount.get()}")
@@ -122,25 +122,30 @@ class LayoutChangeDetector(private val project: Project) {
         }
     }
 
-    private fun scheduleSync(source: String) {
+    private fun isCurrentGeneration(lib: AgentDocLib?, generation: Long): Boolean =
+        lib?.agent_doc_sync_check_generation(generation)
+            ?: (fallbackGeneration.get() == generation)
+
+    private fun scheduleSync(source: String, delayMs: Long = 500L) {
         if (disposed.get()) return
         // Debounce via FFI (shared across editors), fallback to local counter
         val lib = AgentDocLib.get()
         val myGen = lib?.agent_doc_sync_bump_generation() ?: fallbackGeneration.incrementAndGet()
         Thread({
-            Thread.sleep(500)
+            if (delayMs > 0) {
+                Thread.sleep(delayMs)
+            }
             if (disposed.get()) return@Thread
-            val isCurrent = lib?.agent_doc_sync_check_generation(myGen)
-                ?: (fallbackGeneration.get() == myGen)
+            val isCurrent = isCurrentGeneration(lib, myGen)
             if (!isCurrent) return@Thread // superseded by newer event
-            checkAndSync(source)
+            checkAndSync(source, myGen)
         }, "agent-doc-layout-sync-$source").apply {
             isDaemon = true
             start()
         }
     }
 
-    private fun checkAndSync(source: String) {
+    private fun checkAndSync(source: String, requestedGeneration: Long) {
         if (disposed.get()) return
         // Read Swing component tree on EDT (thread-safe), then sync on background thread
         ApplicationManager.getApplication().invokeLater {
@@ -175,6 +180,9 @@ class LayoutChangeDetector(private val project: Project) {
                         SyncLayoutAction.syncLayout(project, notify = false, noAutostart = true)
                     } finally {
                         lib?.agent_doc_sync_unlock() ?: fallbackSyncing.set(false)
+                        if (!isCurrentGeneration(lib, requestedGeneration)) {
+                            scheduleSync("replay", 0)
+                        }
                     }
                 }, "agent-doc-layout-sync-$source").apply {
                     isDaemon = true

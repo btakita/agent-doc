@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { buildSyncCommandArgs, buildTabChangeCommand, visibleSignatureFromColumns } from './tabSync';
+import {
+    buildSyncCommandArgs,
+    buildTabChangeCommand,
+    shouldReplayQueuedTabChange,
+    visibleSignatureFromColumns,
+} from './tabSync';
 
 describe('buildTabChangeCommand', () => {
     it('returns sync with no autostart when the visible markdown set changes', () => {
@@ -208,5 +213,10 @@ describe('buildTabChangeCommand', () => {
                 '--no-autostart',
             ],
         );
+    });
+
+    it('replays the latest queued tab change after a running sync finishes', () => {
+        assert.strictEqual(shouldReplayQueuedTabChange(3, 4), true);
+        assert.strictEqual(shouldReplayQueuedTabChange(4, 4), false);
     });
 });

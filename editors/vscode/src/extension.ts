@@ -22,6 +22,7 @@ import {
     buildSyncCommandArgs,
     buildTabChangeCommand,
     flattenVisibleColumns,
+    shouldReplayQueuedTabChange,
     type TabSyncState,
 } from './tabSync';
 
@@ -780,54 +781,83 @@ let tabSyncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 let tabSyncRunning = false;
 let lastTabSyncState: TabSyncState | undefined;
 const TAB_SYNC_DEBOUNCE_MS = 100;
+let latestTabSyncGeneration = 0;
 
-function onTabChanged(): void {
+interface PlannedTabSyncExecution {
+    root: string;
+    activeFsPath: string;
+    planned: NonNullable<ReturnType<typeof buildTabChangeCommand>>;
+}
+
+function planCurrentTabChange(): PlannedTabSyncExecution | null {
     const editor = vscode.window.activeTextEditor;
-    if (!editor || !isMarkdown(editor)) return;
+    if (!editor || !isMarkdown(editor)) return null;
 
     const root = getWorkspaceRoot(editor.document.uri);
-    if (!root) return;
+    if (!root) return null;
 
-    // Build a signature of the current visible md file set + active file
     const visibleColumns = collectVisibleMarkdownColumns(root);
     const visibleMd = flattenVisibleColumns(visibleColumns);
-    const activeFile = relativePath(root, editor.document.uri.fsPath);
+    const activeFsPath = editor.document.uri.fsPath;
+    const activeFile = relativePath(root, activeFsPath);
     const planned = buildTabChangeCommand({
         activeFile,
         visibleMd,
         visibleColumns,
         previous: lastTabSyncState,
     });
-    if (planned === null) return;
+    if (planned === null) return null;
+    return { root, activeFsPath, planned };
+}
 
-    // Coalesce rapid selection churn without delaying the first real split switch.
+function requestTabSync(delayMs = TAB_SYNC_DEBOUNCE_MS): void {
+    const requestedGeneration = ++latestTabSyncGeneration;
     if (tabSyncDebounceTimer) clearTimeout(tabSyncDebounceTimer);
-    tabSyncDebounceTimer = setTimeout(async () => {
-        if (tabSyncRunning) return; // concurrency guard
-        tabSyncRunning = true;
+    tabSyncDebounceTimer = setTimeout(() => {
+        void drainTabSync(requestedGeneration);
+    }, delayMs);
+}
 
-        try {
-            const next = buildTabChangeCommand({
-                activeFile,
-                visibleMd,
-                visibleColumns,
-                previous: lastTabSyncState,
-            });
-            if (next === null) return;
+async function drainTabSync(requestedGeneration: number): Promise<void> {
+    if (requestedGeneration !== latestTabSyncGeneration) return;
+    if (tabSyncRunning) return;
+    tabSyncRunning = true;
 
-            if (next.command.kind === 'focus') {
-                const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
-                await runCli(['focus', rel], cwd);
-            } else {
-                await runCli(next.command.args, root);
+    let startedGeneration = requestedGeneration;
+    try {
+        while (true) {
+            startedGeneration = latestTabSyncGeneration;
+            const execution = planCurrentTabChange();
+            if (execution === null) {
+                if (!shouldReplayQueuedTabChange(startedGeneration, latestTabSyncGeneration)) break;
+                continue;
             }
-            lastTabSyncState = next.nextState;
-        } catch {
-            // Silently ignore tab sync errors
-        } finally {
-            tabSyncRunning = false;
+
+            try {
+                if (execution.planned.command.kind === 'focus') {
+                    const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
+                    await runCli(['focus', rel], cwd);
+                } else {
+                    await runCli(execution.planned.command.args, execution.root);
+                }
+                lastTabSyncState = execution.planned.nextState;
+            } catch {
+                // Silently ignore tab sync errors
+            }
+
+            if (!shouldReplayQueuedTabChange(startedGeneration, latestTabSyncGeneration)) break;
         }
-    }, TAB_SYNC_DEBOUNCE_MS);
+    } finally {
+        tabSyncRunning = false;
+        if (shouldReplayQueuedTabChange(startedGeneration, latestTabSyncGeneration)) {
+            requestTabSync(0);
+        }
+    }
+}
+
+function onTabChanged(): void {
+    if (planCurrentTabChange() === null) return;
+    requestTabSync();
 }
 
 // ---------------------------------------------------------------------------

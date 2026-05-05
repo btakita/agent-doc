@@ -302,7 +302,13 @@ Verification in `src/tsift` passed: `cargo test`, `make check`, `cargo build --r
 Implemented session transcript auto-routing in `src/tsift`. `tsift rewrite` now detects long `cat` / `bat` / `head -n` / `tail -n` / `sed -n` reads over recognized agent-doc markdown sessions and Claude JSONL transcripts, and rewrites them to `tsift session-digest` instead of spilling raw transcript text into context. The routing stays narrow: it only fires for transcript-looking files and only when the requested read is large enough to be token-expensive. I added direct rewrite coverage for markdown/jsonl positives plus passthrough negatives, and a compiled CLI rewrite regression in `tests/exit_code.rs`. Updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, `Cargo.toml`, and `Cargo.lock` for `tsift v0.1.32`.
 
 Verification in `src/tsift` passed: `cargo test`, `cargo clippy -- -D warnings`, `make check`, `cargo build --release`, `cargo install --path . --force`, and `cargo fmt --check`. The installed binary now reports `tsift 0.1.32`. Committed and pushed in `src/tsift` as `3c8de09` (`feat: auto-route session transcript reads`). Top remaining backlog item: `#4bzh`.
-<!-- agent:boundary:7309fd1a -->
+❯ do [#4bzh]
+### Re: #4bzh spec-test-build-install-commit-push — gpt-5
+
+Implemented grouped high-hit rendering in `src/tsift`. Exact literal search now keeps multiple line hits per file and collapses them into file-level rows with hit counts plus representative snippets in the default human output, while JSON/tabular output stays unchanged. `tsift explain` now applies the same file-level grouping to dense same-file caller/callee sets, and I updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, `Cargo.toml`, and `Cargo.lock` for `tsift v0.1.33`.
+
+Verification in `src/tsift` passed: `cargo test`, `cargo clippy -- -D warnings`, `make check`, `cargo build --release`, `cargo install --path . --force`, and `cargo fmt --check`. The installed binary now reports `tsift 0.1.33`. Committed and pushed in `src/tsift` as `b81e9a1` (`feat: collapse dense search and explain output`).
+<!-- agent:boundary:b9188353 -->
 <!-- /agent:exchange -->
 ###
 
@@ -313,7 +319,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#4bzh] searchcollapse=Collapse high-hit tsift search/explain output by file/module counts before snippets so broad exact queries stay useful without RTK-only truncation. #spec-test-build-install-commit-push
 - [ ] [#9aep] revisiondigest=Revision/staged diff digest + rewrite coverage for , commit 6922d9f3927e2cec56d6548de7d9fb0d7a3a9ebf
 Author: Brian Takita <brian.takita@gmail.com>
 Date:   Tue May 5 15:45:36 2026 -0400

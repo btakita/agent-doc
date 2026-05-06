@@ -115,9 +115,12 @@ Later phases may refine caller values without changing the field names.
   matter for diagnostics and explicit repair, but they cannot silently reclaim
   authority away from the actor-backed path.
 - Phase-9 verification must keep explicit regression coverage for generation
-  monotonicity, stale session/pane rejection, blocked mixed-root layout
-  preservation, and plugin operator surfaces that display exact session status,
-  route `session clear` through the actor-backed command path, and preserve
+  monotonicity; phase-4 authoritative route-state handling (`ready` direct
+  dispatch, `starting` / `busy` optimistic queueing, `waiting_input`
+  fresh-restart recovery, and `blocked` / `closed` fail-closed rejection);
+  stale session/pane rejection; blocked mixed-root layout preservation; and
+  plugin operator surfaces that display exact session status, route
+  `session clear` through the actor-backed command path, and preserve
   stage-specific dispatch failures in a durable diagnostics surface.
 - `sessions.json` remains a projection/binding helper during migration, not the
   final actor store.

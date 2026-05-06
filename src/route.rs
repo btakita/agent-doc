@@ -10380,6 +10380,122 @@ Body\n\
     }
 
     #[test]
+    fn resolve_or_create_pane_fails_closed_for_blocked_or_closed_authoritative_actor() {
+        use std::sync::{Arc, Mutex};
+
+        for (actor_state, reason) in [
+            ("blocked", "the authoritative actor is blocked"),
+            ("closed", "the authoritative actor is closed"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let _cwd_guard = ScopedCurrentDir::set(dir.path());
+            let iso = IsolatedTmux::new(&format!(
+                "route-test-authoritative-actor-{}-fail-closed",
+                actor_state
+            ));
+            let session = "codex";
+            let cwd = test_cwd();
+            let stale_pane = iso.auto_start(session, &cwd).unwrap();
+            let _ =
+                wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
+            let actor_pane = iso.auto_start(session, &cwd).unwrap();
+
+            let doc = dir
+                .path()
+                .join(format!("{actor_state}-authoritative-actor.md"));
+            let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+            let current = format!("{snapshot}❯ follow-up question\n");
+            std::fs::write(&doc, &current).unwrap();
+            crate::snapshot::save(&doc, snapshot).unwrap();
+            crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+            crate::cycle_state::mark_committed(
+                &doc,
+                "commit_success",
+                Some(snapshot),
+                Some(snapshot),
+            )
+            .unwrap();
+            let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+            let session_id = format!("route-authoritative-actor-{actor_state}");
+            sessions::register(&session_id, &stale_pane, &file_path).unwrap();
+
+            let actor_window = iso.pane_window(&actor_pane).unwrap();
+            crate::session_actor::project_binding_in(
+                dir.path(),
+                &file_path,
+                &session_id,
+                &actor_pane,
+                &actor_window,
+                "route",
+                "dispatch_bind",
+            )
+            .unwrap();
+
+            let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+            let injects_for_ipc = injects.clone();
+            let mut ipc =
+                SupervisorIpc::start(dir.path(), &session_id, move |method| match method {
+                    IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                        "running": true,
+                        "state": "healthy",
+                        "actor_state": actor_state,
+                        "restart_count": 0
+                    })),
+                    IpcMethod::Inject { bytes } => {
+                        injects_for_ipc.lock().unwrap().push(bytes.clone());
+                        IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+                    }
+                    IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+                    IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+                    IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+                })
+                .unwrap();
+
+            let err = resolve_or_create_pane(
+                &iso,
+                &doc,
+                None,
+                &[],
+                &session_id,
+                &file_path,
+                session,
+                &HarnessConfig::codex(),
+                &mut Vec::new(),
+            )
+            .expect_err("route should fail closed for non-recoverable authoritative actor states");
+            let message = format!("{err:#}");
+            assert!(
+                message.contains(reason),
+                "expected {actor_state} actor failure to mention `{reason}`, got: {message}"
+            );
+            assert!(
+                injects.lock().unwrap().is_empty(),
+                "route must not inject a duplicate reopen while the authoritative actor is {actor_state}"
+            );
+            assert_eq!(
+                sessions::lookup(&session_id).unwrap().as_deref(),
+                Some(actor_pane.as_str()),
+                "route should still refresh the registry projection to the authoritative actor pane for {actor_state}"
+            );
+
+            let trigger = HarnessConfig::codex().trigger_command(&file_path);
+            let actor_after = sessions::capture_pane(&iso, &actor_pane).unwrap_or_default();
+            assert!(
+                !actor_after.contains(&trigger),
+                "route must not type a reopen into the blocked/closed authoritative pane: {actor_after}"
+            );
+            let stale_after = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+            assert!(
+                !stale_after.contains(&trigger),
+                "route must not fall back to the stale registered pane when actor state is {actor_state}: {stale_after}"
+            );
+
+            ipc.stop();
+        }
+    }
+
+    #[test]
     fn load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_identity() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

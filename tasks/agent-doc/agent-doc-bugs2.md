@@ -115,7 +115,22 @@ Commits:
 I reviewed `agent-doc-bugs5.md` and transferred the still-open backlog items into this document in the same priority order: `#oobpmt`, `#staleflt`, `#busychk`, `#chkptcap`, and `#257p`.
 
 I did not transfer `#iceboxpatch` because that fix is already closed there in `src/agent-doc` commit `a2c89a6` (`fix: parse replace icebox patches`). The existing SQLite follow-ups remain below these transferred agent-doc bugs.
-<!-- agent:boundary:929129f0 -->
+❯ do [#oobpmt]. spec-test-build-install-commit-push
+### Re: #oobpmt — gpt-5
+
+`#oobpmt` was already fixed in `src/agent-doc`, so this cycle closed stale backlog drift instead of changing code again. The current tree still contains the status guard in `src/git.rs` (`status_mutation_introduces_prompt_work()` / `is_safe_out_of_band_status_mutation()`), the matching preflight regression `preflight_status_prompt_preset_addition_does_not_swallow_diff()`, and the closeout spec text that plain user prompts must remain uncommitted. The landed fixes are `475269b` (`fix: preserve prompt-bearing status edits`) and `8a1c214` (`fix: preserve prompt-prefixed status guidance`).
+
+Verification:
+- `cargo test preflight_status_prompt_preset_addition_does_not_swallow_diff --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test commit_does_not_absorb_out_of_band_user_prompt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+No additional source/spec/test edits were necessary, so there was nothing new to commit or push this cycle.
+
+`#oobpmt` is complete. Top open backlog item is `#staleflt`.
+<!-- agent:boundary:7df64a94 -->
 <!-- /agent:exchange -->
 ###
 
@@ -126,7 +141,6 @@ I did not transfer `#iceboxpatch` because that fix is already closed there in `s
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
 - [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
 - [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.

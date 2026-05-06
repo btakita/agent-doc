@@ -109,7 +109,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let (fm, _body) = frontmatter::parse(&content)
+    let (fm, _body) = frontmatter::parse_for_file(&content, file)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
 
     let doc_diff = diff::compute(file)?;

@@ -792,6 +792,10 @@ pub fn run(file: &Path) -> Result<()> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let _ = frontmatter::parse_for_file(&content, file)?;
+
     // Step 0a: Auto-GC (at most once per day).
     // Checks .agent-doc/gc.stamp — if missing or >24 hours old, runs lightweight GC.
     {
@@ -2516,6 +2520,22 @@ mod tests {
     }
 
     #[test]
+    fn preflight_fails_closed_when_required_ssh_doc_mapping_resolves_no_targets() {
+        let dir = setup_project();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "[ssh.docs.\"tasks/monsterrodholders.md\"]\nprofile = \"missing\"\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("tasks/monsterrodholders.md");
+        std::fs::write(&doc, "---\nagent: codex\n---\n\n## User\n\nHello\n").unwrap();
+
+        let err = run(&doc).unwrap_err();
+        assert!(err.to_string().contains("requires SSH profile `missing`"));
+    }
+
+    #[test]
     fn preflight_fails_closed_on_uncommitted_closeout_drift_even_without_diff() {
         let dir = setup_project();
         let root = dir.path();
@@ -3273,8 +3293,7 @@ mod tests {
         run(&doc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        let backlog_after = crate::component::parse(&file_after)
-            .unwrap();
+        let backlog_after = crate::component::parse(&file_after).unwrap();
         let backlog_after = backlog_after
             .iter()
             .find(|component| crate::component::is_backlog_component(&component.name))
@@ -3286,8 +3305,7 @@ mod tests {
         assert!(!backlog_after.contains("@@ -1 +1 @@"));
 
         let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
-        let snapshot_backlog = crate::component::parse(&snapshot_after)
-            .unwrap();
+        let snapshot_backlog = crate::component::parse(&snapshot_after).unwrap();
         let snapshot_backlog = snapshot_backlog
             .iter()
             .find(|component| crate::component::is_backlog_component(&component.name))

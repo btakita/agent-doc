@@ -30,6 +30,33 @@ pub struct GuardConfig {
     pub pending_done: Option<crate::frontmatter::PendingCaptureGuardMode>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SshProfileConfig {
+    /// Resolved SSH targets for a named profile.
+    #[serde(default)]
+    pub targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SshDocConfig {
+    /// Optional profile name to resolve for this document path.
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// Optional direct targets for this document path.
+    #[serde(default)]
+    pub targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SshConfig {
+    /// Named SSH profiles that expand to concrete targets.
+    #[serde(default)]
+    pub profiles: BTreeMap<String, SshProfileConfig>,
+    /// Relative document paths that require SSH metadata resolution.
+    #[serde(default)]
+    pub docs: BTreeMap<String, SshDocConfig>,
+}
+
 /// Component patch configuration (mode, timestamps, max entries, hooks).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ComponentConfig {
@@ -80,6 +107,9 @@ pub struct ProjectConfig {
     /// Guard behavior overrides (for example pending-capture enforcement).
     #[serde(default)]
     pub guards: GuardConfig,
+    /// Project-local SSH requirement mappings for known ops documents.
+    #[serde(default)]
+    pub ssh: SshConfig,
     /// Component-specific configuration (patch modes, timestamps, max_entries, hooks).
     #[serde(default)]
     pub components: BTreeMap<String, ComponentConfig>,
@@ -93,19 +123,26 @@ pub fn load_project() -> ProjectConfig {
 
 /// Resolve project config by walking up from a document path to find `.agent-doc/config.toml`.
 pub fn load_project_for_doc(file: &Path) -> ProjectConfig {
+    if let Some(root) = project_root_for_doc(file) {
+        return load_project_from(&root.join(".agent-doc").join("config.toml"));
+    }
+    load_project()
+}
+
+/// Resolve the nearest project root for a document by walking up to `.agent-doc/`.
+pub fn project_root_for_doc(file: &Path) -> Option<PathBuf> {
     let start = file.parent().unwrap_or(file);
     let mut current = start;
     loop {
-        let candidate = current.join(".agent-doc").join("config.toml");
-        if candidate.exists() {
-            return load_project_from(&candidate);
+        if current.join(".agent-doc").is_dir() {
+            return Some(current.to_path_buf());
         }
         match current.parent() {
             Some(p) if p != current => current = p,
             _ => break,
         }
     }
-    load_project()
+    None
 }
 
 /// Load project config from an explicit path. Used by `load_project()` and tests.
@@ -311,6 +348,19 @@ mod tests {
             tmux_session: Some("rt".to_string()),
             ..Default::default()
         };
+        cfg.ssh.profiles.insert(
+            "monsterrodholders".to_string(),
+            SshProfileConfig {
+                targets: vec!["monsterrodholders-server".to_string()],
+            },
+        );
+        cfg.ssh.docs.insert(
+            "tasks/monsterrodholders.md".to_string(),
+            SshDocConfig {
+                profile: Some("monsterrodholders".to_string()),
+                targets: Vec::new(),
+            },
+        );
         cfg.components.insert(
             "status".to_string(),
             ComponentConfig {
@@ -322,6 +372,16 @@ mod tests {
 
         let loaded = load_project_from(&config_path);
         assert_eq!(loaded.tmux_session.as_deref(), Some("rt"));
+        assert_eq!(
+            loaded.ssh.profiles["monsterrodholders"].targets,
+            vec!["monsterrodholders-server".to_string()]
+        );
+        assert_eq!(
+            loaded.ssh.docs["tasks/monsterrodholders.md"]
+                .profile
+                .as_deref(),
+            Some("monsterrodholders")
+        );
         assert_eq!(loaded.components["status"].patch, "replace");
     }
 

@@ -157,11 +157,11 @@ pub fn run(
 
     // Ensure the document has a session UUID (for tmux routing)
     let raw_content = std::fs::read_to_string(file)?;
-    let (content_original, _session_id) = frontmatter::ensure_session(&raw_content)?;
+    let (content_original, _session_id) = frontmatter::ensure_session_for_file(&raw_content, file)?;
     if content_original != raw_content {
         std::fs::write(file, &content_original)?;
     }
-    let (fm, _body) = frontmatter::parse(&content_original)?;
+    let (fm, _body) = frontmatter::parse_for_file(&content_original, file)?;
     let run_mode = RunMode::from_frontmatter(&fm);
 
     // Resolve agent

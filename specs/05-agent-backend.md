@@ -43,7 +43,9 @@ Config overrides `command` and `args` for any agent name.
 
 ## Codex Capability Checks
 
-- Documents may declare `required_ssh_targets` in frontmatter.
+- Documents may declare `required_ssh_targets` or `required_ssh_profile` in frontmatter.
+- Known ops documents may also resolve required SSH targets from project-local `.agent-doc/config.toml` entries under `[ssh.docs."<relative/path.md>"]` and `[ssh.profiles.<name>]`.
+- If a document is configured as SSH-dependent but no targets resolve, preflight/startup must fail closed before the agent launches.
 - For Codex, agent-doc probes those SSH targets before launch.
 - When a resumed Codex session later surfaces a target-specific SSH failure, agent-doc treats that as capability drift: retry once with fresh `codex exec`, then fail closed if the required SSH capability still cannot be proven.
 - That required-SSH drift detector must also catch bare `socket: Operation not permitted` output when the same Codex `command_execution` event proves SSH context for one of the required targets, while still excluding unrelated localhost/CDP `Operation not permitted` failures.

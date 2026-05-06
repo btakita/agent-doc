@@ -3761,7 +3761,23 @@ fn resolve_fresh_dispatch_target_after_ready_wait(
     }
 
     let requested = canonical_dispatch_file(std::path::Path::new(file_path));
+    let handoff_target = registry
+        .values()
+        .find(|entry| {
+            entry.session_id == session_id
+                && !entry.pane.is_empty()
+                && entry.pane != pane
+                && canonical_registered_file(entry) == requested
+        })
+        .map(|entry| entry.pane.clone());
     if let Some(entry) = registry.values().find(|entry| entry.pane == pane) {
+        if let Some(handoff_pane) = handoff_target {
+            eprintln!(
+                "[route] fresh restart re-bound {} away from pane {} and onto authoritative pane {} before retry",
+                file_path, pane, handoff_pane
+            );
+            return Ok(handoff_pane);
+        }
         anyhow::bail!(
             "route dispatch target {} is registered for {}, not {}; refusing cross-file dispatch",
             pane,

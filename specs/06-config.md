@@ -52,7 +52,10 @@ Codex network resolution chain: `frontmatter codex_network_access > config codex
 
 Location: `.agent-doc/config.toml` (relative to project root).
 
-Fields: `tmux_session` — the tmux session name bound to this project.
+Fields:
+- `tmux_session` — the tmux session name bound to this project.
+- `ssh.profiles.<name>.targets = ["alias-or-host", ...]` — named SSH target groups for ops docs.
+- `ssh.docs."<relative/path.md>"` — per-document SSH defaults for known ops docs. Each entry may set `profile = "<name>"`, direct `targets = [...]`, or both. If an entry exists but resolves no targets, preflight/startup must fail closed.
 
 **Auto-sync:** When the configured `tmux_session` is dead (session no longer exists), the route path falls back to `current_tmux_session()` and auto-updates `config.toml` with the new session name. This prevents stale config after session destruction.
 

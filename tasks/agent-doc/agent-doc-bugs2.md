@@ -27,37 +27,19 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260506-071318.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260506-083426.md`*
 
 Active backlog:
-- [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
-- [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing `### Re:` block for inline prompt edits and the immediately previous response for tail prompts, while leaving later-turn expansion on-demand.
-- [ ] [#restoc] [recommended] Add a lightweight live+archive exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent  sections on demand instead of relying only on the fixed recent-turn window.
-- 5 more active item(s)
-❯ do [#257p]. spec-test-build-install-commit-push
-### Re: #257p — gpt-5
-
-Implemented the Codex Stop-hook fix for auth/tool-only interruptions. When `Stop` lands on an open cycle with no replayable `last_assistant_message`, `src/codex_hook.rs` now fails closed, writes a blocked-stop diagnostic record with the tracked prompt, and returns explicit recovery guidance for MCP OAuth / `authenticate` style interruptions instead of a generic "nothing to capture" note.
-
-I aligned the shared instruction surface so MCP auth is treated as a sub-step that still must finish through `agent-doc finalize` / `write --commit` plus `session-check`, and tightened the readiness wording to rely on real harness prompt shapes rather than generic shell `>` echoes. I also added the required regression coverage and the incidental red-suite cleanups needed to keep the full verification suite green (`archive_index.rs`, `prompt_context.rs`, `route.rs`, `plan.rs` formatting, `skill.rs` assertions). `make precommit`, `make build`, and `make install` all passed. Repo commit/push is complete in `src/agent-doc`: `71c0002` on `origin/20260422/codex-agent-backend`.
-
-Plan: tasks/agent-doc/plan-codex-auth-stop-hook-closeout.md
-❯ do [#sshprelude]. spec-test-build-install-commit-push
-### Re: #sshprelude — gpt-5
-
-Implemented the resumed required-SSH streaming fix in `src/agent-doc`. `agent::codex` now buffers early assistant chunks for resumed SSH-gated streams until required SSH is proven safe or the turn completes, retries fresh once even if the resumed thread already emitted prelude text, and drops that buffered stale prelude when the retry fires.
-
-I added the exact regression coverage for the reported shape (`agent_message` prelude, then required-SSH failure) plus the successful-release path, and updated the backend/spec/instruction surfaces that document the required-SSH contract (`specs/05-agent-backend.md`, `README.md`, `SPEC.md`, `CLAUDE.md`, `.claude/skills/agent-doc/SKILL.md`, `VERSIONS.md`). Verification/build/install is complete: focused Codex tests passed, the full cargo test suite passed on rerun after isolating transient route/resync flakes, `cargo clippy -- -D warnings` passed, `cargo run --quiet -- audit-docs` passed, `make build` passed, and `make install` passed.
-
-Repo commit/push is complete in `src/agent-doc`: `df4638b` on `origin/20260422/codex-agent-backend`.
-
-Plan: tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md
-<!-- agent:boundary:01cc0f5c -->
+- [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing
+- [ ] [#restoc] [recommended] Add a lightweight live+archive exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent sections on demand instead of relying only on the fixed recent-turn window.
+- [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
+- 3 more active item(s)
+<!-- agent:boundary:28350ead -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-Please optimize the AGENTS.md + SKILL.md to reduce context usage.
+Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
 ---
 Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/brian/work/btakita/agent-loop/tasks/software/tsift did not respond to `Run Agent Doc` in a previous turn. It seems to run ok now but I'm concerned that `Run Agent Doc` was non-responsive.
 ---

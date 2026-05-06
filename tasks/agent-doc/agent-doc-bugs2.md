@@ -71,7 +71,26 @@ Commits:
 - `agent-loop`: `5079c3883 chore: update agent-doc submodule`
 
 Both commits are pushed. `#sgown3` is complete.
-<!-- agent:boundary:e4358038 -->
+❯ do [#sgown4]. spec-test-build-install-commit-push
+### Re: #sgown4 — gpt-5
+
+Phase 4 was already implemented in `src/agent-doc` in `312851e` (`feat: route through authoritative actor dispatch`), so this cycle closed the remaining proof/spec gap instead of rewriting the route path. I added a tmux-backed regression that proves authoritative `blocked` and `closed` actor states fail closed without injecting a duplicate reopen into either the actor pane or a stale registered pane, and updated the phase-4 session-actor contract plus `VERSIONS.md` to record the full route-state matrix.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test resolve_or_create_pane_fails_closed_for_blocked_or_closed_authoritative_actor --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+  Parallel `cargo test` exposed two existing tmux-suite race failures (`resolve_or_create_pane_restarts_fresh_for_busy_registered_pane_after_noop_fix` and `resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route`), both of which passed on isolated rerun.
+- `cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+- `cargo install --path src/agent-doc --force`
+
+Commits:
+- `src/agent-doc`: `cf7ff25 test: close out phase-4 actor dispatch`
+- `agent-loop`: `7b00a330f chore: update agent-doc submodule`
+
+`#sgown4` is complete.
+<!-- agent:boundary:754d33ed -->
 <!-- /agent:exchange -->
 ###
 
@@ -83,7 +102,7 @@ Both commits are pushed. `#sgown3` is complete.
 
 <!-- agent:backlog -->
 - [ ] [#sshmeta] [recommended] Land `tasks/agent-doc/plan-ssh-required-capability-metadata-guard.md`: make SSH-dependent ops docs resolve `required_ssh_targets` deterministically so blocked SSH fails closed instead of leaking ordinary fallback guidance.
-- [ ] [#sgown4] [recommended] Land phase-4 actor dispatch from tasks/agent-doc/plan-single-owner-session-actor-transition.md: make route dispatch validate actor generation/state and wait on actor acknowledgement instead of normal-path owner election or later document-side inference.
+- [x] [#sgown4] [recommended] Land phase-4 actor dispatch from tasks/agent-doc/plan-single-owner-session-actor-transition.md: make route dispatch validate actor generation/state and wait on actor acknowledgement instead of normal-path owner election or later document-side inference.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 <!-- /agent:backlog -->

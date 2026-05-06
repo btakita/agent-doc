@@ -30,7 +30,7 @@ prompt_presets:
 Context automatically compacted before the next turn because session-accretion heuristics tripped.
 
 Active backlog:
-- [ ] [#ctxpack] [recommended] Add a bounded response-context pack for warn-level sessions so the harness receives prompt targets, session summary, and backlog head instead of the full exchange tail.
+❯ - [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - 3 more active item(s)
@@ -40,20 +40,8 @@ Icebox:
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement:
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the
 
-*2 earlier topic(s) archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260506-051758.md`*
+❯ *1 earlier topic(s) archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260506-054256.md`*
 
-### Re: automatic compact policy for accreting sessions — gpt-5
-
-Implemented `#autocmp`.
-
-`agent-doc preflight` now auto-compacts churn-heavy template exchanges before another large turn when session-accretion signals trip, while preserving any live unresolved prompt tail in the visible file and keeping the snapshot on the compacted committed baseline. The partial compact path now keeps prompt tails that were sitting after the binary-owned boundary, and the session-accretion policy only auto-compacts warn/block states tied to exchange/closeout churn rather than restart-only incidents.
-
-Verification: `cargo test`, `cargo build`, and `cargo install --path . --force` all passed in `src/agent-doc`.
-
-Commits:
-- `src/agent-doc`: `7789330` (`feat: auto-compact accreting sessions`)
-- `agent-loop`: `80f440ff0` (`chore: update agent-doc accretion auto-compact`)
-❯ do [#ctxpack]. spec-test-build-install-commit-push
 ### Re: bounded response-context pack for warn-level sessions — gpt-5
 
 Implemented `#ctxpack`.
@@ -65,20 +53,28 @@ Verification: `cargo test`, `cargo build`, and `cargo install --path . --force` 
 Commits:
 - `src/agent-doc`: `971cad1` (`feat: bound warn-level session prompt context`)
 - `agent-loop`: `113c52eca` (`chore: update agent-doc prompt context pack`)
-<!-- agent:boundary:50413e38 -->
+❯ /home/brian/work/btakita/agent-loop/tasks/software/tsift.md was compacted. The rate of turns should not be a factor. The auto-compaction is too aggressive. I personally have worked with longer documents. The sqlite archive cache does mitigate the problem, but it may make sense to keep the document uncompacted but only send the diff with recent content as context.
+❯ > this document closed 11 cycles in the last 30 minutes
+### Re: compact trigger vs bounded recent context — gpt-5
+
+`tasks/software/tsift.md` was not compacted just because it was long. The current `preflight` path auto-compacts whenever `session_accretion.auto_compact_policy()` returns a policy, and that policy treats warn-level closeout churn as compact-worthy in addition to raw exchange size. In the compacting turn, the triggering reason was the recent no-op closeout signal, not document length by itself.
+
+The `this document closed ... cycles` line is generated prompt context from `session_accretion.rs`, and `prompt_context::build_document_section()` injects the first accretion reason into the bounded prompt pack. So that text was not something the user or harness literally "Entered"; it was synthesized diagnostic context that got surfaced in the binding prompt.
+
+I agree with the policy concern. With `#ctxpack` in place, the better default is to keep the visible document intact for cycle-count-only warn states and send bounded diff plus prompt targets, session summary, and backlog head to the harness. `#ratecmp` is now in backlog to tighten auto-compact so it is reserved for true exchange growth or repeated closeout churn rather than session rate alone.
+
+<!-- agent:boundary:c49934a4 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-/home/brian/work/btakita/agent-loop/tasks/software/tsift.md was compacted. The rate of turns should not be a factor. The auto-compaction is too aggressive. I personally have worked with longer documents. The sqlite archive cache does mitigate the problem, but it may make sense to keep the document uncompacted but only send the diff with recent content as context.
-❯ > this document closed 11 cycles in the last 30 minutes
----
 "Press Enter to restart, or 'q' to exit."
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ratecmp] [recommended] Rework session-accretion auto-compact so recent cycle count alone does not compact otherwise healthy docs; prefer bounded diff/recent-context packs and reserve auto-compact for exchange growth or closeout churn.
 - [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.

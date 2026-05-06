@@ -40,7 +40,17 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:3fa2c53c -->
+❯ do [#5zm8]. spec-test-build-install-commit-push
+### Re: #5zm8 digest guidance — gpt-5
+
+Completed `#5zm8`.
+
+- Expanded the `tsift init` Code Navigation block so Claude/Codex now prefer bounded digest surfaces: `session-digest` / `session-review`, `diff-digest`, `test-digest`, and `log-digest`, while keeping the owning-root/submodule-root guidance.
+- Mirrored that guidance in `SPEC.md`, `CLAUDE.md`, and the generated `AGENTS.md`, and added init regression coverage in `src/init.rs`.
+- `make check` passed after fixing a strict clippy lint in `src/session_review.rs`.
+- Local install completed with `cargo install --path .`.
+- Repo commit + push completed in `src/tsift`: `5c48cff` (`docs: prefer digest surfaces in init guidance`).
+<!-- agent:boundary:e1aa30ce -->
 <!-- /agent:exchange -->
 ###
 
@@ -51,7 +61,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#5zm8] digestpref=Expand tsift init / code-navigation guidance so Claude and Codex prefer session/diff/log/test digest commands over raw transcript, git diff/show, and verbose log reads.
 - [ ] [#0nv1] budgetguard=Add session-cost/session-review budget guardrails for cached-context resend, repeated no-op closeouts, and restart churn, with hook-friendly thresholds and remediation hints.
 <!-- /agent:backlog -->
 

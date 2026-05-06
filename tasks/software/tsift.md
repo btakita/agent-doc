@@ -75,7 +75,19 @@ Verification in `src/tsift`: `cargo test loop_clusters -- --nocapture`, `make ch
 Live check: `tsift session-review --json tasks/software/tsift.md` now includes `loop_clusters`.
 Committed and pushed in `src/tsift` as `6801a6b` (`feat: summarize repeated session loops`).
 Committed and pushed in `agent-loop` as `ef042f5` (`chore: update tsift submodule`).
-<!-- agent:boundary:19f6881d -->
+❯ do [#hookcaps]. spec-test-build-install-commit-push
+### Re: manual bounded rewrite execution — gpt-5
+
+Implemented `#hookcaps` in `src/tsift` and bumped `tsift` to `0.1.37`.
+
+`tsift rewrite` now supports `--run`, which executes the rewritten digest-first tsift command directly instead of only printing it for Claude hook integration. In run mode, verbose human-readable `tsift search`, `explain`, `graph`, `communities`, and `index` output is capped natively, so Codex and other harnesses can reuse the same bounded path without RTK or `PreToolUse` hooks.
+
+Updated the spec, the injected Code Navigation guidance, and the harness docs to point non-Claude harnesses at `tsift rewrite --run '<command>'` as the manual fallback. Regenerated `AGENTS.md` / `CLAUDE.md` from `tsift init .`.
+
+Verification in `src/tsift`: `cargo test rewrite_output_cap -- --nocapture`, `cargo test rewrite_run -- --nocapture`, `make check`, `cargo build --release`, `cargo install --path . --force`, `tsift --version` (`0.1.37`)
+Committed and pushed in `src/tsift` as `fe9220c` (`feat: add manual bounded rewrite execution`).
+Committed and pushed in `agent-loop` as `7754dbb3f` (`chore: update tsift submodule`).
+<!-- agent:boundary:316d211e -->
 <!-- /agent:exchange -->
 ###
 
@@ -88,7 +100,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#hookcaps] Extend digest-first rewrite/output capping beyond the current Claude RTK path so Codex and other harnesses also avoid verbose raw command/transcript context.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

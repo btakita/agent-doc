@@ -85,7 +85,21 @@ Verification:
 Commits:
 - `src/tsift`: `59e21aa` (`feat: add cross-harness session review`) and pushed to `origin/main`
 - `agent-loop`: `531d938a8` (`chore: bump tsift submodule`)
-<!-- agent:boundary:3bc06bb6 -->
+❯ do [#sfilter]. spec-test-build-install-commit-push
+### Re: `[#sfilter]` instruction-ballast filtering — gpt-5
+
+Implemented the `#sfilter` pass in `src/tsift` so `session-digest` stops promoting copied harness instruction ballast as prompt/failure hotspots. The parser now drops markdown headings, placeholder slash-command examples, bold imperative instruction labels, absolute-path false positives, and obvious code-markup lines before prompt-target classification. I also updated `SPEC.md` to document the filtering behavior and added regression coverage for markdown and Codex JSONL blobs that mix instruction text with a real user directive.
+
+Verification:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path . --force`
+- `tsift session-review --compact ../../tasks/software/tsift.md`
+
+Local commits:
+- `src/tsift`: `f75bdc7` (`fix: filter session instruction ballast`)
+- `agent-loop`: `9a5b8be` (`chore: bump tsift submodule`)
+<!-- agent:boundary:91008b6a -->
 <!-- /agent:exchange -->
 ###
 
@@ -96,7 +110,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sfilter] Filter instruction ballast from session-digest/session-cost so prompt targets and hotspots stop treating copied harness instructions as real user work.
 - [ ] [#sbudget] Add token budget and churn guardrails to session-cost: flag turns by prompt size, cached-input ratio, restart loops, and no-op closeout cycles with actionable compact/restart guidance.
 - [ ] [#snoopdedupe] Collapse repeated committed/no-op closeout events in agent-doc log digests so long sessions report unique cycles instead of hundreds of commit_already_current repeats.
 <!-- /agent:backlog -->

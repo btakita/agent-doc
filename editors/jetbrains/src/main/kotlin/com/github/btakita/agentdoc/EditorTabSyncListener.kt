@@ -64,6 +64,20 @@ class EditorTabSyncListener : FileEditorManagerListener {
     )
 
     internal object AutomaticCommandPlanner {
+        fun resolveActiveFilePath(
+            preferredActiveFile: String?,
+            selectedEditorFile: String?,
+            visibleMdFiles: List<String>,
+        ): String? {
+            if (!preferredActiveFile.isNullOrBlank()) {
+                return preferredActiveFile
+            }
+            if (!selectedEditorFile.isNullOrBlank()) {
+                return selectedEditorFile
+            }
+            return visibleMdFiles.firstOrNull()
+        }
+
         fun visibleSignature(
             visibleMdFiles: List<String>,
             editorLayout: EditorLayout? = null,
@@ -145,17 +159,29 @@ class EditorTabSyncListener : FileEditorManagerListener {
         }
     }
 
-    private fun captureSnapshot(project: com.intellij.openapi.project.Project): AutomaticStateSnapshot? {
+    private fun captureSnapshot(
+        project: com.intellij.openapi.project.Project,
+        preferredFile: com.intellij.openapi.vfs.VirtualFile? = null,
+    ): AutomaticStateSnapshot? {
         val manager = FileEditorManager.getInstance(project)
-        val file = manager.selectedTextEditor?.virtualFile
+        val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
+        if (visibleMdFiles.isEmpty()) return null
+        val preferredMarkdownFile = preferredFile?.takeIf { it.name.endsWith(".md") }
+        val selectedEditorFile = manager.selectedTextEditor?.virtualFile
             ?.takeIf { it.name.endsWith(".md") }
-            ?: manager.selectedFiles.firstOrNull { it.name.endsWith(".md") }
-            ?: return null
+        val activeFilePath = AutomaticCommandPlanner.resolveActiveFilePath(
+            preferredActiveFile = preferredMarkdownFile?.path,
+            selectedEditorFile = selectedEditorFile?.path,
+            visibleMdFiles = visibleMdFiles,
+        ) ?: return null
+        val file = sequenceOf(
+            preferredMarkdownFile,
+            selectedEditorFile,
+            manager.selectedFiles.firstOrNull { it.name.endsWith(".md") },
+        ).filterNotNull().firstOrNull { it.path == activeFilePath } ?: return null
 
         val (focusedProjectRoot, focusedRelativePath) = TerminalUtil.resolveProject(project, file)
         val activeFile = file.path
-        val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
-        if (visibleMdFiles.isEmpty()) return null
 
         val detectedEditorLayout = LayoutDetector.detectEditorLayout(project)
         val syncProjectRoot = SyncLayoutAction.chooseSyncProjectRoot(
@@ -274,7 +300,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         log("selectionChanged: newFile=${file.name} mdFiles=$visibleMdFiles")
         if (visibleMdFiles.isEmpty()) return
 
-        val snapshot = captureSnapshot(event.manager.project) ?: return
+        val snapshot = captureSnapshot(event.manager.project, file) ?: return
         requestAutomaticSync(event.manager.project, snapshot)
     }
 }

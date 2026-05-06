@@ -34,6 +34,7 @@ Two strategies for detecting the file's position in the editor split:
 - Visible markdown set changes call `agent-doc sync --no-autostart ...`, reusing the workspace-root chooser for cross-root layouts.
 - Dedup state tracks the visible markdown signature plus the active file so repeated selection churn does not rerun the same command.
 - Automatic tab sync may coalesce a short burst of selection events, but it must not suppress the first deliberate left/right split selection after a prior sync.
+- During `selectionChanged`, JetBrains must treat the event's `newFile` as the authoritative active markdown target for dedup/snapshot planning instead of trusting `selectedTextEditor` to have already switched inside the same callback.
 - If a newer automatic selection/layout request lands while another automatic sync is still running, JetBrains must queue only the latest request and replay it immediately after the running command finishes instead of dropping the event.
 
 ### Auto-Save Before Poll

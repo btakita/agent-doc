@@ -15,6 +15,22 @@ class EditorTabSyncListenerTest {
     )
 
     @Test
+    fun `selection event file wins over stale selected editor file`() {
+        val visibleMdFiles = listOf(
+            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+            "/repo/tasks/professional/equityfundingsource.md",
+        )
+
+        val activeFile = EditorTabSyncListener.AutomaticCommandPlanner.resolveActiveFilePath(
+            preferredActiveFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+            selectedEditorFile = "/repo/tasks/professional/equityfundingsource.md",
+            visibleMdFiles = visibleMdFiles,
+        )
+
+        assertEquals("/repo/tasks/agent-doc/agent-doc-bugs2.md", activeFile)
+    }
+
+    @Test
     fun `selection change keeps split layouts on sync when visible markdown set is unchanged`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",

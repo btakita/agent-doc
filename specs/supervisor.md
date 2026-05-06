@@ -1,7 +1,8 @@
 ---
 name: supervisor
-status: draft
+status: living
 date: 2026-04-13
+updated: 2026-05-05
 ---
 
 # agent-doc Supervisor Spec
@@ -17,18 +18,21 @@ date: 2026-04-13
 
 The supervisor graduates `start.rs` into a process that **owns** claude as a child behind a pty, holds a Unix-domain IPC socket per session, and enforces invariants (CWD, env, auto-restart cadence, external control) that a bare tmux-pane wrapper cannot.
 
-## Phase 1 Implementation Status
+## Implementation Status
 
 | Submodule | Status | Notes |
 |-----------|--------|-------|
-| `supervisor/cwd.rs` | **landed** | Priority chain + 11 unit tests + frontmatter `agent_doc_cwd` field. Design invariants pinned below under Core Invariants / CWD determinism. |
-| `supervisor/pty.rs` | not started | `portable-pty` allocation, stdin→pty and pty→stdout forwarding threads, fake-claude shell-script integration test. |
-| `supervisor/resize.rs` | not started | Unix SIGWINCH path via `signal-hook`; Windows ConPTY path deferred (WSL handles phase 1). |
-| `supervisor/state.rs` | not started | Crash classifier, ring buffer, Healthy→Transient→Flapping→Halted state machine. |
-| `supervisor/ipc.rs` | not started | Unix-domain socket accept loop, length-prefixed JSON frame reuse from `ipc_socket.rs`. |
-| `start.rs` wire-up | not started | Replace existing restart loop with thin wrapper around `supervisor::run`. Last PR in the phase 1 sequence — see Migration from `start.rs`. |
+| `supervisor/cwd.rs` | **landed** | Deterministic CWD resolution and source tagging are active in production. |
+| `supervisor/pty.rs` | **landed** | `agent-doc start` now spawns the harness behind the supervisor-owned pty and forwards stdin/stdout through it. |
+| `supervisor/resize.rs` | **landed** | Terminal resize events are forwarded to the child pty during the supervised session. |
+| `supervisor/state.rs` | **landed** | Crash classification, restart cadence, waiting-input prompts, and halted-state handling are live. |
+| `supervisor/ipc.rs` | **landed** | Per-session supervisor IPC serves `inject`, `restart`, `state`, `pid`, and `stop`. |
+| `start.rs` wire-up | **landed** | The production `agent-doc start` path owns the supervisor lifecycle inline in `start.rs` while delegating focused pieces to `supervisor/*` modules. |
 
-Phase 1 lands in sequential PRs in this order, so each layer can be tested against the real binary before the next lands. `start.rs` is deliberately last: until it switches over, the supervisor module compiles but is not yet consumed in production, and the module-level `#![allow(dead_code)]` in `supervisor/mod.rs` suppresses warnings during the intermediate commits.
+The original rollout plan in this document is retained for architectural context,
+but the supervisor stack is now shipping. Current behavior should be read from
+the "Implementation Status", "Actor state reporting", and the specs referenced
+from the session-actor contract rather than from the old phased rollout notes.
 
 ## Non-Goals
 
@@ -219,14 +223,16 @@ on claude exit with code c:
 
 State is surfaced via `state` IPC method so dashboards / cleanup hooks can observe it.
 
-## Migration from `start.rs`
+## `start.rs` integration
 
-**Decided: `agent-doc start` always runs the supervisor.** No feature flag, no phased rollout.
+`agent-doc start` now always runs through the supervisor-owned start path.
 
-- The existing `start.rs` restart loop is deleted and replaced by a thin wrapper around `supervisor::run`.
-- One PR lands the supervisor + removes the old loop simultaneously.
-- Release notes call this out as a behavior change for in-flight sessions — existing claude processes are unaffected (the supervisor only owns processes it spawned); the behavior change lands the next time the user runs `agent-doc start`.
-- SKILL.md `cd` fix: if already shipped by then, it becomes redundant but harmless. If not yet shipped, it can be skipped — supervisor CWD resolution subsumes it.
+- The production code keeps the orchestration loop in `start.rs` instead of
+  collapsing everything into one `supervisor::run` wrapper.
+- `supervisor/*` owns the bounded helper concerns: pty management, IPC, resize,
+  environment/CWD resolution, and crash-policy primitives.
+- Release behavior is already live for sessions spawned through the current
+  binary; existing pre-supervisor panes are unaffected until they are restarted.
 
 ## Five Hard Parts — Answers
 

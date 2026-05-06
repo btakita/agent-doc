@@ -709,6 +709,63 @@ mod tests {
     }
 
     #[test]
+    fn transition_state_preserves_generation_for_supervisor_lifecycle_updates() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-4b\nagent: codex\n---\nBody\n",
+        );
+
+        record_session_start(&file, "session-4b", "%72", "@8", 1).unwrap();
+
+        let waiting = transition_state(
+            &file,
+            "session-4b",
+            "%72",
+            ActorState::WaitingInput,
+            "supervisor",
+            "clean_exit_prompt",
+        )
+        .unwrap();
+        assert_eq!(waiting.generation, 1);
+        assert_eq!(waiting.state, ActorState::WaitingInput);
+        assert_eq!(waiting.last_transition.prior_generation, 1);
+        assert_eq!(waiting.last_transition.new_generation, 1);
+        assert_eq!(waiting.last_transition.reason, "clean_exit_prompt");
+
+        let blocked = transition_state(
+            &file,
+            "session-4b",
+            "%72",
+            ActorState::Blocked,
+            "supervisor",
+            "supervisor_halted",
+        )
+        .unwrap();
+        assert_eq!(blocked.generation, 1);
+        assert_eq!(blocked.state, ActorState::Blocked);
+        assert_eq!(blocked.last_transition.prior_generation, 1);
+        assert_eq!(blocked.last_transition.new_generation, 1);
+        assert_eq!(blocked.last_transition.reason, "supervisor_halted");
+
+        let closed = transition_state(
+            &file,
+            "session-4b",
+            "%72",
+            ActorState::Closed,
+            "supervisor",
+            "user_quit_clean_exit",
+        )
+        .unwrap();
+        assert_eq!(closed.generation, 1);
+        assert_eq!(closed.state, ActorState::Closed);
+        assert_eq!(closed.last_transition.prior_generation, 1);
+        assert_eq!(closed.last_transition.new_generation, 1);
+        assert_eq!(closed.last_transition.reason, "user_quit_clean_exit");
+    }
+
+    #[test]
     fn transition_state_rejects_stale_pane_updates() {
         let tmp = tempfile::TempDir::new().unwrap();
         let file = seed_project_file(

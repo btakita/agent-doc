@@ -85,11 +85,37 @@ Commits:
 - parent repo committed locally: `47092774a` `chore: update tsift submodule`
 
 Backlog: closed `#ts1b`. Current top remaining item is `#ts1c`.
-<!-- agent:boundary:d879fc06 -->
+### Re: cargo test transcript volume — gpt-5
+
+Not necessarily, but you should assume direct `cargo test` output is risky for context size unless the harness/tool path bounds it first. The UI line like `… +713 lines (ctrl + t to view transcript)` means the harness kept a local transcript, but that does not guarantee the model only saw a tiny summary.
+
+For tsift, the safer answer is to bound the output at the source:
+- use `tsift test-digest --path .` for test runs and `tsift log-digest --path .` for build/install output
+- use `tsift rewrite --run 'cargo test'` or the existing hook/rewrite path so the raw transcript stays out-of-band and the agent-visible payload is the grouped digest instead
+- prefer compact structured summaries for passing runs too, not just failing runs, so a green `cargo test` collapses to counts + a tiny verification record instead of a long runner transcript
+
+So yes, tsift can optimize this further. The new `context-pack` helps on the handoff side, but the next leverage point is still the execution side: make digest-first tool wrapping the default path whenever a harness would otherwise surface hundreds of raw test/log lines. That overlaps with `#ts1c`, since structured/tool-native envelopes would let the harness render drill-down UI without paying prose tokens up front.
+<!-- agent:boundary:d6c13b40 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+When cargo test is run on agent-doc, there are +713 lines. Do all of these lines go into the context? Can tsift optimize this tool call output to save tokens?
+```
+• Ran cargo test
+  └     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.53s
+         Running unittests src/main.rs (target/debug/deps/tsift-d45c97e5b5a39fe6)
+    … +713 lines (ctrl + t to view transcript)
+    test result: ok. 80 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.13s
+```
+```
+• Ran cargo test streaming_required_ssh_
+  └     Finished `test` profile [unoptimized + debuginfo] target(s) in 7.97s
+         Running unittests src/lib.rs (target/debug/deps/agent_doc-84f02f43296e926f)
+    … +47 lines (ctrl + t to view transcript)
+    test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 52 filtered out; finished in 0.00s
+```
+---
 What are #next-steps for tsift to save tokens while maintaining the appropriate amount of context & a good user experience?
 ---
 Can tsift use rtk to compress tool call output in the context?

@@ -70,7 +70,22 @@ Plan: `tasks/agent-doc/plan-context-accretion-guardrails.md`
 Backlog: `#ctxacc` in `tasks/agent-doc/agent-doc-bugs2.md`
 
 That plan scopes the work around four areas: local accretion signals, the tsift/agent-doc responsibility split, turn-time warning/fail-closed policy, and regression coverage for churn-heavy document sessions.
-<!-- agent:boundary:dd6c2659 -->
+❯ do [#srevagg]. spec-test-build-install-commit-push
+### Re: `[#srevagg]` cross-harness session review — gpt-5
+
+Implemented `tsift session-review`, a new cross-harness aggregate review command that auto-discovers related Claude JSONL, Codex JSONL, and `agent-doc` runtime logs for a document or repo path, then reuses the existing `session-digest` and `session-cost` parsers to emit one bounded combined report.
+
+Updated the CLI/spec/docs surface in `src/tsift` and added regression coverage for direct discovery, CLI parsing, and compiled CLI execution through temp-`HOME` fixtures.
+
+Verification:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Commits:
+- `src/tsift`: `59e21aa` (`feat: add cross-harness session review`) and pushed to `origin/main`
+- `agent-loop`: `531d938a8` (`chore: bump tsift submodule`)
+<!-- agent:boundary:3bc06bb6 -->
 <!-- /agent:exchange -->
 ###
 
@@ -81,7 +96,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#srevagg] Build document-scoped cross-harness session review: auto-discover related Claude/Codex/agent-doc logs for a target doc or repo path and emit one aggregated cost + digest report.
 - [ ] [#sfilter] Filter instruction ballast from session-digest/session-cost so prompt targets and hotspots stop treating copied harness instructions as real user work.
 - [ ] [#sbudget] Add token budget and churn guardrails to session-cost: flag turns by prompt size, cached-input ratio, restart loops, and no-op closeout cycles with actionable compact/restart guidance.
 - [ ] [#snoopdedupe] Collapse repeated committed/no-op closeout events in agent-doc log digests so long sessions report unique cycles instead of hundreds of commit_already_current repeats.

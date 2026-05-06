@@ -39,7 +39,16 @@ Icebox:
 - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement:
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the
-<!-- agent:boundary:4866f9f1 -->
+❯ Please plan for a sqlite session archive for fast lookup of compacted turns. Please ensure that the db does not grow unbounted. Perhaps we should treat this as a LRU cache?
+### Re: sqlite archive plan — gpt-5
+Plan: `tasks/agent-doc/plan-sqlite-compacted-turn-archive.md`
+
+I split this from the broader `.agent-doc/state.db` authority discussion. The plan treats sqlite as a bounded, rebuildable retrieval index over compacted markdown archives, not as the new source of truth for live session content.
+
+On the growth question: I would not use pure LRU as the only rule. The better default is a hybrid cache policy: pin archives tied to current documents, active backlog ids, or recent lookups; bias search toward recency; prune only cold unpinned rows when size/age caps are exceeded; and keep the markdown archives themselves as the durable history that the sqlite index can rebuild from.
+
+I added the follow-up to backlog with the same plan path so the next implementation or review turn can open the exact artifact directly.
+<!-- agent:boundary:fe0f0e85 -->
 <!-- /agent:exchange -->
 ###
 
@@ -50,6 +59,7 @@ Icebox:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sqlarcidx] Implement sqlite-backed compacted-turn archive index plan in tasks/agent-doc/plan-sqlite-compacted-turn-archive.md
 - [ ] [#autocmp] [recommended] Promote session-accretion warn/block into an automatic compact policy: auto-run partial exchange compaction or rewrite the exchange to a fresh session summary before another full turn.
 - [ ] [#ctxpack] [recommended] Add a bounded response-context pack for warn-level sessions so the harness receives prompt targets, session summary, and backlog head instead of the full exchange tail.
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.

@@ -188,7 +188,18 @@ Commits:
 - `agent-loop`: `e8adddccd` (`chore: update agent-doc accretion guardrails`)
 
 Both commits are pushed. `#ctxacc` is complete.
-<!-- agent:boundary:2412f360 -->
+❯ What are #next-steps to make agent-doc more token efficient?
+### Re: token efficiency — gpt-5
+
+Immediate step: this document should be compacted before another long turn. Preflight is already warning on a 165-line / 9-response exchange plus 7 recent closeouts with 5 no-op cycles, so the cheapest win is `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit`.
+
+I added three recommended backlog items in priority order:
+- `#autocmp`: make accretion warnings trigger automatic partial compaction or a forced session-summary rewrite instead of allowing another full-turn tail
+- `#ctxpack`: build a bounded prompt pack for warn-level sessions so the harness gets prompt targets, session summary, and backlog head rather than the full exchange
+- `#noopcap`: collapse repeated no-op closeout churn into a compact or restart handoff instead of appending another `### Re:` block
+
+Top open backlog item: `#autocmp`.
+<!-- agent:boundary:c6ff3216 -->
 <!-- /agent:exchange -->
 ###
 
@@ -199,6 +210,9 @@ Both commits are pushed. `#ctxacc` is complete.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#autocmp] [recommended] Promote session-accretion warn/block into an automatic compact policy: auto-run partial exchange compaction or rewrite the exchange to a fresh session summary before another full turn.
+- [ ] [#ctxpack] [recommended] Add a bounded response-context pack for warn-level sessions so the harness receives prompt targets, session summary, and backlog head instead of the full exchange tail.
+- [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

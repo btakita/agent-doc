@@ -95,12 +95,7 @@ For tsift, the safer answer is to bound the output at the source:
 - prefer compact structured summaries for passing runs too, not just failing runs, so a green `cargo test` collapses to counts + a tiny verification record instead of a long runner transcript
 
 So yes, tsift can optimize this further. The new `context-pack` helps on the handoff side, but the next leverage point is still the execution side: make digest-first tool wrapping the default path whenever a harness would otherwise surface hundreds of raw test/log lines. That overlaps with `#ts1c`, since structured/tool-native envelopes would let the harness render drill-down UI without paying prose tokens up front.
-<!-- agent:boundary:d6c13b40 -->
-<!-- /agent:exchange -->
-###
-
-<!--
-When cargo test is run on agent-doc, there are +713 lines. Do all of these lines go into the context? Can tsift optimize this tool call output to save tokens?
+❯ When cargo test is run on agent-doc, there are +713 lines. Do all of these lines go into the context? Can tsift optimize this tool call output to save tokens?
 ```
 • Ran cargo test
   └     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.53s
@@ -115,7 +110,42 @@ When cargo test is run on agent-doc, there are +713 lines. Do all of these lines
     … +47 lines (ctrl + t to view transcript)
     test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 52 filtered out; finished in 0.00s
 ```
----
+### Re: cargo test tool output and context cost — gpt-5
+
+Probably not all 713 raw lines are injected into model context verbatim, but you should not assume they are free. The `… +713 lines (ctrl + t to view transcript)` UI means the harness kept a local transcript and showed you a compact console view; it does not prove the model only received the short summary. Depending on the tool path, some or all of that output may still be present in the turn payload, or may at least be available as expandable transcript state that still costs tokens once pulled back into the conversation.
+
+So yes, tsift can optimize this further, and this is a good target.
+
+The right optimization is to make execution output digest-first at the source instead of relying on the harness UI to collapse it afterward:
+- wrap `cargo test` / `cargo build` / install commands with a tsift runner that captures raw stdout/stderr out-of-band
+- emit a small structured result by default: command, duration, suite counts, failing test names, top warnings/errors, and a stable artifact handle
+- expand only on failure, explicit user request, or when a caller asks for a transcript slice
+- keep green runs especially small: `80 passed, 0 failed, 10.13s` is usually enough
+
+That means the optimization surface is broader than `context-pack`. `context-pack` helps with handoff payloads after the fact; this issue is about tool-call output at execution time. The backlog item that best matches it is still `#ts1c`: structured/tool-native terse envelopes. I would fold a `test-run` / `command-run` envelope into that work rather than add a duplicate item.
+
+If you want a concrete default shape, it should look more like this:
+
+```text
+cargo test
+status: ok
+profile: test
+elapsed: 10.13s
+summary: 80 passed, 0 failed, 0 ignored
+artifacts:
+- transcript: run://abc123
+- failures: none
+- warnings: 0
+```
+
+Then the harness can render a friendly summary and only fetch `run://abc123` when someone explicitly drills in. That is the token-saving path.
+
+Separate note: preflight flagged this session as accreting and suggested `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` before another large turn.
+<!-- agent:boundary:4edc5355 -->
+<!-- /agent:exchange -->
+###
+
+<!--
 What are #next-steps for tsift to save tokens while maintaining the appropriate amount of context & a good user experience?
 ---
 Can tsift use rtk to compress tool call output in the context?

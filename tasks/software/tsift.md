@@ -66,7 +66,26 @@ Commits:
 - parent repo committed submodule pointer: `2bb251f91` `chore: update tsift submodule`
 
 Backlog: closed `#ts1a`. Current top remaining item is `#ts1b`.
-<!-- agent:boundary:a94f4655 -->
+❯ do [#ts1b]. spec-test-build-install-commit-push
+### Re: #ts1b context-pack handoff command — gpt-5
+
+Implemented `#ts1b` in `tsift`:
+- added `tsift context-pack <path>` to compose bounded `session-review --next-context`, worktree `diff-digest`, and optional `test-digest` / `log-digest` inputs into one resumable handoff payload
+- kept the pack bounded by default with preview-style sections plus `--max-items` / `--max-bytes`
+- documented the new command in `SPEC.md`, `CLAUDE.md`, and `VERSIONS.md`
+- added parser/unit coverage plus an end-to-end CLI integration test for the composed JSON payload
+
+Verification:
+- `cargo test`
+- `cargo build`
+- `cargo install --path .`
+
+Commits:
+- `src/tsift` pushed: `59f8194` `feat: add context-pack handoff command`
+- parent repo committed locally: `47092774a` `chore: update tsift submodule`
+
+Backlog: closed `#ts1b`. Current top remaining item is `#ts1c`.
+<!-- agent:boundary:d879fc06 -->
 <!-- /agent:exchange -->
 ###
 
@@ -79,7 +98,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ts1b] Add a single agent-facing context-pack command that composes diff-digest, test-digest, log-digest, and session-review --next-context
 - [ ] [#ts1c] Add MCP/tool-native structured terse envelopes so clients can render summaries and request follow-up expansion without prose-heavy defaults
 - [ ] [#ts1d] Improve tsift lock/degraded-mode UX so active index writers fall back to read-only or exact search with a minimal actionable summary
 <!-- /agent:backlog -->

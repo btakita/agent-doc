@@ -39,7 +39,12 @@ Icebox:
 - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement:
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the
-<!-- agent:boundary:bc8c4d04 -->
+❯ re [#autocmp]: would this degrade context in running a diff if relevant info is auto-compacted in the agent doc?
+### Re: #autocmp context concern — gpt-5
+Short answer: it should not, if compaction keeps the active backlog plus a faithful session summary/archive pointer and the diff engine compares against the committed snapshot instead of relying on raw historical exchange alone.
+
+This cycle is blocked by the session-accretion guard before a larger design or implementation turn. The planner requires `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit` before continuing with more substantial work on `#autocmp`.
+<!-- agent:boundary:9a102dee -->
 <!-- /agent:exchange -->
 ###
 

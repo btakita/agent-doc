@@ -386,6 +386,7 @@ fn shared_doc_security_blockers(
 mod tests {
     use super::*;
     use crate::snapshot;
+    use std::io::Write;
     use tempfile::TempDir;
 
     struct EnvGuard {
@@ -414,6 +415,15 @@ mod tests {
             } else {
                 unsafe { std::env::remove_var(self.key) };
             }
+        }
+    }
+
+    fn write_cycles_log(doc: &std::path::Path, entries: &[crate::ops_log::CycleEntry]) {
+        let log_path = doc.parent().unwrap().join(".agent-doc/logs/cycles.jsonl");
+        std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        let mut file = std::fs::File::create(log_path).unwrap();
+        for entry in entries {
+            writeln!(file, "{}", serde_json::to_string(entry).unwrap()).unwrap();
         }
     }
 
@@ -1310,6 +1320,148 @@ Done.
                 .any(|cmd| cmd.contains("agent-doc compact") && cmd.contains("--commit")),
             "expected compact guidance in required commands, got {:?}",
             plan.required_commands
+        );
+    }
+
+    #[test]
+    fn build_plan_allows_turn_after_recent_compaction_recovery() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Session Summary
+
+Compacted.
+<!-- /agent:exchange -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Session Summary
+
+Compacted.
+do #cmpclr. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+        write_cycles_log(
+            &doc,
+            &[
+                crate::ops_log::CycleEntry {
+                    op: "commit".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(120).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(110).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(100).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(90).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(80).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(70).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(60).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(50).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(40).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(30).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+            ],
+        );
+        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            plan.blockers.is_empty(),
+            "recent exchange compaction should clear closeout-churn blockers: {:?}",
+            plan.blockers
+        );
+        assert_eq!(
+            plan.repo_actions,
+            vec!["do #cmpclr. spec-test-build-install-commit-push".to_string()]
         );
     }
 }

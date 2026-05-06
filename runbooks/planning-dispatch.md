@@ -29,7 +29,10 @@ The command emits a structured planning record as JSON.
 Accretion-specific blockers now come from the binary too: if recent exchange/log
 signals show that the session is churn-heavy enough to launch another expensive
 turn irresponsibly, `blockers` will name the required compact/restart recovery
-step instead of leaving that judgment to free-form agent prose.
+step instead of leaving that judgment to free-form agent prose. Successful
+exchange compaction records a recovery marker, so the follow-up turn measures
+closeout churn only after that compact instead of immediately re-raising the
+same compact-only blocker.
 
 ## Dispatch Rules
 

@@ -15,6 +15,9 @@
 //!   is already taking an explicit compact/recovery path.
 //! - `auto_compact_policy()` derives when warn/block churn should trigger a
 //!   bounded preflight auto-compact rather than only advisory text.
+//! - Successful exchange compaction records a per-document recovery marker so
+//!   closeout-churn metrics only count cycles that happened after the latest
+//!   compact, instead of trapping the same document in a compact-then-block loop.
 //!
 //! ## Agentic Contracts
 //! - Uses only local file state plus `.agent-doc/logs/*` and persisted
@@ -45,6 +48,12 @@ const BLOCK_RECENT_NOOP_CLOSEOUTS: usize = 3;
 const WARN_RESTART_EVENTS: usize = 2;
 const BLOCK_RESTART_EVENTS: usize = 3;
 const RECENT_SESSION_LOSS_WARN: usize = 2;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RecentExchangeCompaction {
+    file: String,
+    timestamp: u64,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AutoCompactPolicy {
@@ -129,6 +138,23 @@ impl SessionAccretionReport {
 pub fn inspect(file: &Path) -> Result<SessionAccretionReport> {
     let content = std::fs::read_to_string(file)?;
     inspect_at(file, &content, current_epoch_secs())
+}
+
+pub fn record_recent_exchange_compaction(file: &Path) -> Result<()> {
+    let Some(path) = recent_exchange_compaction_path(file)? else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let marker = RecentExchangeCompaction {
+        file: canonical.display().to_string(),
+        timestamp: current_epoch_secs(),
+    };
+    let json = serde_json::to_string_pretty(&marker)?;
+    std::fs::write(path, json)?;
+    Ok(())
 }
 
 fn inspect_at(file: &Path, content: &str, now: u64) -> Result<SessionAccretionReport> {
@@ -282,6 +308,9 @@ fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
         return Ok((0, 0));
     };
     let window_start = now.saturating_sub(RECENT_WINDOW_SECS);
+    let recent_compaction_timestamp = load_recent_exchange_compaction(file)?
+        .map(|marker| marker.timestamp)
+        .filter(|timestamp| *timestamp >= window_start);
     let mut committed = 0;
     let mut noops = 0;
 
@@ -296,6 +325,9 @@ fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
             continue;
         };
         if timestamp < window_start {
+            continue;
+        }
+        if recent_compaction_timestamp.is_some_and(|compact_ts| timestamp <= compact_ts) {
             continue;
         }
         match entry.op.as_str() {
@@ -363,6 +395,32 @@ fn cycles_log_path(file: &Path) -> Result<Option<PathBuf>> {
         return Ok(None);
     };
     Ok(Some(root.join(".agent-doc/logs/cycles.jsonl")))
+}
+
+fn recent_exchange_compaction_path(file: &Path) -> Result<Option<PathBuf>> {
+    let canonical = match file.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Ok(None),
+    };
+    let Some(root) = crate::snapshot::find_project_root(&canonical) else {
+        return Ok(None);
+    };
+    let hash = crate::snapshot::doc_hash(&canonical)?;
+    Ok(Some(
+        root.join(".agent-doc/state/session-accretion-compaction")
+            .join(format!("{hash}.json")),
+    ))
+}
+
+fn load_recent_exchange_compaction(file: &Path) -> Result<Option<RecentExchangeCompaction>> {
+    let Some(path) = recent_exchange_compaction_path(file)? else {
+        return Ok(None);
+    };
+    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+        return Ok(None);
+    };
+    let marker: RecentExchangeCompaction = serde_json::from_str(&content)?;
+    Ok(Some(marker))
 }
 
 fn session_log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
@@ -459,7 +517,7 @@ mod tests {
 
     #[test]
     fn inspect_warns_on_repeated_noop_closeouts() {
-        let now = 5_000;
+        let now = current_epoch_secs();
         let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n";
         let (_dir, doc) = setup_doc(content);
         write_cycles_log(
@@ -468,7 +526,7 @@ mod tests {
                 crate::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "session.md".to_string(),
-                    timestamp: (now - 10).to_string(),
+                    timestamp: now.saturating_sub(10).to_string(),
                     commit_hash: None,
                     snapshot_hash: None,
                     file_hash: None,
@@ -476,7 +534,7 @@ mod tests {
                 crate::ops_log::CycleEntry {
                     op: "commit_noop".to_string(),
                     file: "session.md".to_string(),
-                    timestamp: (now - 20).to_string(),
+                    timestamp: now.saturating_sub(20).to_string(),
                     commit_hash: None,
                     snapshot_hash: None,
                     file_hash: None,
@@ -484,7 +542,7 @@ mod tests {
             ],
         );
 
-        let report = inspect_at(&doc, content, now).unwrap();
+        let report = inspect(&doc).unwrap();
 
         assert_eq!(report.level, SessionAccretionLevel::Warn);
         assert_eq!(report.recent_noop_closeouts, 2);
@@ -494,6 +552,111 @@ mod tests {
                 .iter()
                 .any(|reason| reason.contains("no-op closeouts")),
             "expected noop-closeout reason, got {:?}",
+            report.reasons
+        );
+    }
+
+    #[test]
+    fn inspect_ignores_closeout_churn_before_recent_exchange_compaction() {
+        let now = current_epoch_secs();
+        let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\nCompacted.\n<!-- /agent:exchange -->\n";
+        let (_dir, doc) = setup_doc(content);
+        write_cycles_log(
+            &doc,
+            &[
+                crate::ops_log::CycleEntry {
+                    op: "commit".to_string(),
+                    file: "session.md".to_string(),
+                    timestamp: now.saturating_sub(120).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "session.md".to_string(),
+                    timestamp: now.saturating_sub(110).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit".to_string(),
+                    file: "session.md".to_string(),
+                    timestamp: now.saturating_sub(100).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "session.md".to_string(),
+                    timestamp: now.saturating_sub(90).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit".to_string(),
+                    file: "session.md".to_string(),
+                    timestamp: now.saturating_sub(80).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "session.md".to_string(),
+                    timestamp: now.saturating_sub(70).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit".to_string(),
+                    file: "session.md".to_string(),
+                    timestamp: now.saturating_sub(60).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "session.md".to_string(),
+                    timestamp: now.saturating_sub(50).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit".to_string(),
+                    file: "session.md".to_string(),
+                    timestamp: now.saturating_sub(40).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "session.md".to_string(),
+                    timestamp: now.saturating_sub(30).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+            ],
+        );
+
+        record_recent_exchange_compaction(&doc).unwrap();
+
+        let report = inspect(&doc).unwrap();
+
+        assert_eq!(report.level, SessionAccretionLevel::Healthy);
+        assert_eq!(report.recent_committed_cycles, 0);
+        assert_eq!(report.recent_noop_closeouts, 0);
+        assert!(
+            report.reasons.is_empty(),
+            "compaction recovery should clear closeout-churn reasons: {:?}",
             report.reasons
         );
     }

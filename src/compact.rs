@@ -193,6 +193,10 @@ pub fn run(
         );
     }
 
+    if component_name.is_none() || component_name == Some("exchange") {
+        crate::session_accretion::record_recent_exchange_compaction(file)?;
+    }
+
     if commit {
         let updated = std::fs::read_to_string(file)
             .with_context(|| format!("failed to re-read {} after compact", file.display()))?;

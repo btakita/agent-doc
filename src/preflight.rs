@@ -3526,6 +3526,13 @@ mod tests {
             !snapshot_after.contains("do #autocmp. spec-test-build-install-commit-push"),
             "snapshot must keep the compacted baseline without absorbing the live prompt"
         );
+
+        let report = crate::session_accretion::inspect(&doc).unwrap();
+        assert!(
+            !report.blocks_progress(),
+            "auto-compact should satisfy closeout-churn recovery for the next turn: {:?}",
+            report
+        );
     }
 
     #[test]

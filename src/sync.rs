@@ -739,6 +739,12 @@ struct ProtectedRegisteredPaneState {
     last_visible_excerpt: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenCycleProtectedPaneState {
+    file: PathBuf,
+    phase: &'static str,
+}
+
 fn resolve_harness_for_sync(file: &Path) -> crate::harness::HarnessConfig {
     let content = std::fs::read_to_string(file).unwrap_or_default();
     let fm = frontmatter::parse(&content)
@@ -771,6 +777,42 @@ fn protected_registered_pane_state_from_capture(
         reason,
         last_visible_excerpt: last_visible_excerpt(capture),
     })
+}
+
+fn open_cycle_protected_file_state(file: &Path) -> Option<OpenCycleProtectedPaneState> {
+    let state = crate::cycle_state::load(file).ok().flatten()?;
+    let phase = match state.phase {
+        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
+        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+        crate::cycle_state::CyclePhase::Committed => return None,
+    };
+    Some(OpenCycleProtectedPaneState {
+        file: file.to_path_buf(),
+        phase,
+    })
+}
+
+fn registered_file_for_pane(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
+    let project_root = pane_project_root(tmux, pane_id)?;
+    let registry = sessions::load_in(&project_root).ok()?;
+    let entry = registry
+        .values()
+        .find(|entry| entry.pane == pane_id && !entry.file.is_empty())?;
+    let file = Path::new(&entry.file);
+    Some(if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        project_root.join(file)
+    })
+}
+
+fn open_cycle_protected_pane_state(
+    tmux: &Tmux,
+    pane_id: &str,
+) -> Option<OpenCycleProtectedPaneState> {
+    let file = registered_file_for_pane(tmux, pane_id)?;
+    open_cycle_protected_file_state(&file)
 }
 
 fn persist_dead_pane_capture(
@@ -3044,16 +3086,38 @@ fn run_with_options(
         .unwrap_or(registry_path.as_path());
     let allow_unresolved_pane_assignment =
         |path: &Path| !blocked_unresolved_files.borrow().contains(path);
+    let logged_protected_panes: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    let protect_open_cycle_pane = |pane_id: &str| {
+        let Some(protected) = open_cycle_protected_pane_state(tmux, pane_id) else {
+            return false;
+        };
+        if logged_protected_panes
+            .borrow_mut()
+            .insert(pane_id.to_string())
+        {
+            eprintln!(
+                "[sync] preserving pane {} for {} during reconcile because its {} cycle is still open",
+                pane_id,
+                protected.file.display(),
+                protected.phase
+            );
+            sync_log(&format!(
+                "reconcile_protected_open_cycle pane={} file={} phase={}",
+                pane_id,
+                protected.file.display(),
+                protected.phase
+            ));
+        }
+        true
+    };
     let tmux_router_options = tmux_router::SyncOptions {
-        protect_pane: None,
+        protect_pane: Some(&protect_open_cycle_pane),
         allow_unresolved_pane_assignment: Some(&allow_unresolved_pane_assignment),
     };
 
-    // NOTE: The busy pane guard (protect_pane) was removed from DETACH because it caused
-    // 3-pane accumulation when the user switches documents in the same column. The guard
-    // prevented stashing panes with active sessions, but when a new document replaces the
-    // old one in a column, the old pane must give way. Column memory + stash rescue handle
-    // session preservation for the non-agent-file case.
+    // Only open-cycle panes are protected during DETACH. This is narrower than the
+    // older generic busy-process guard and preserves fail-closed closeout state
+    // without broadly blocking same-column layout reconciliation.
     let result = tmux_router::sync_with_options(
         col_args,
         window,
@@ -8159,6 +8223,128 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    fn open_cycle_protected_file_state_detects_open_closeout_cycle() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+
+        let doc = root.join("tasks/open-cycle.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: open-cycle-session\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        assert_eq!(open_cycle_protected_file_state(&doc), None);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let protected =
+            open_cycle_protected_file_state(&doc).expect("preflight_started should protect file");
+        assert_eq!(protected.file, doc);
+        assert_eq!(protected.phase, "preflight_started");
+    }
+
+    #[test]
+    fn sync_preserves_open_cycle_pane_during_reconcile_detach() {
+        let iso = IsolatedTmux::new("sync-open-cycle-protect");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let doc_a = root.join("tasks/a.md");
+        let doc_b = root.join("tasks/b.md");
+        let content_a = concat!(
+            "---\n",
+            "agent_doc_session: sync-open-cycle-a\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_b = concat!(
+            "---\n",
+            "agent_doc_session: sync-open-cycle-b\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc_a, content_a).unwrap();
+        std::fs::write(&doc_b, content_b).unwrap();
+        snapshot::save(&doc_a, content_a).unwrap();
+        snapshot::save(&doc_b, content_b).unwrap();
+
+        let pane_a = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let pane_b = iso.split_window(&pane_a, root, "-dh").unwrap();
+        let window = iso.pane_window(&pane_a).unwrap();
+
+        sessions::register_full_with_cwd(
+            "sync-open-cycle-a",
+            &pane_a,
+            &doc_a.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &pane_a).unwrap(),
+            &window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd(
+            "sync-open-cycle-b",
+            &pane_b,
+            &doc_b.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &pane_b).unwrap(),
+            &window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+
+        crate::cycle_state::start_preflight(&doc_a, Some(content_a), Some(content_a)).unwrap();
+
+        run_with_tmux(
+            &[doc_b.to_string_lossy().to_string()],
+            Some("test:agent-doc"),
+            Some(doc_b.to_string_lossy().as_ref()),
+            &iso,
+        )
+        .unwrap();
+
+        let visible = iso.list_window_panes("test:agent-doc").unwrap();
+        assert!(
+            visible.contains(&pane_a),
+            "open-cycle pane must stay visible instead of being stashed: {visible:?}"
+        );
+        assert!(
+            visible.contains(&pane_b),
+            "requested pane must remain visible after reconcile: {visible:?}"
+        );
+        assert_eq!(
+            crate::cycle_state::load(&doc_a).unwrap().unwrap().phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+    }
+
+    #[test]
     fn safe_passive_sync_preserves_existing_layout_for_vscode_mixed_root_split_replay() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -8206,11 +8392,10 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         let agent_doc_window = iso.pane_window(&bugs_pane).unwrap();
         let dev_pane_pid = pane_pid_from_tmux(&iso, &dev_pane).unwrap();
 
-        let _ipc =
-            crate::supervisor::ipc::SupervisorIpc::start(
-                subroot.as_path(),
-                "claudescore-session",
-                {
+        let _ipc = crate::supervisor::ipc::SupervisorIpc::start(
+            subroot.as_path(),
+            "claudescore-session",
+            {
                 move |method| match method {
                     crate::supervisor::ipc::IpcMethod::Pid => {
                         crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
@@ -8226,8 +8411,8 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
                     _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
                 }
             },
-            )
-            .unwrap();
+        )
+        .unwrap();
 
         sessions::register_full_with_cwd(
             "bugs-session",

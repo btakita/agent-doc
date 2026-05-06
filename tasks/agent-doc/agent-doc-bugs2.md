@@ -39,7 +39,23 @@ Icebox:
 - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement:
 - [ ] [#tmuxcrash] Closed on April 30, 2026 after the
-<!-- agent:boundary:952bf3ee -->
+❯ do [#sgown2]. spec-test-build-install-commit-push
+### Re: #sgown2 — gpt-5
+
+Phase 2 was already implemented in `src/agent-doc` in `3acf5f5` (`feat: add durable session actor store`), so this cycle closed the remaining spec drift instead of rewriting the actor-store code. I updated `specs/08a-session-actor-contract.md` so the opening contract text now matches the shipped `.agent-doc/session-actors.json` phase-2 store.
+
+Verification:
+- `cargo test session_actor --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Commits:
+- `src/agent-doc`: `2b2f801 docs: align session actor phase-2 contract wording`
+- `agent-loop`: `6ca870ed2 chore: update agent-doc submodule`
+
+`#sgown2` is complete. Top open backlog item is `#sgown3`.
+<!-- agent:boundary:eca36a56 -->
 <!-- /agent:exchange -->
 ###
 
@@ -50,7 +66,6 @@ Icebox:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgown2] [recommended] Land phase-2 actor store from tasks/agent-doc/plan-single-owner-session-actor-transition.md: durable per-document authoritative record with monotonic generation CAS, while keeping sessions.json as a projection.
 - [ ] [#sgown3] [recommended] Land phase-3 supervisor integration from tasks/agent-doc/plan-single-owner-session-actor-transition.md: route supervisor startup/readiness/busy/waiting-input/close transitions through the actor record instead of direct registry/session-log ownership writes.
 - [ ] [#sgown4] [recommended] Land phase-4 actor dispatch from tasks/agent-doc/plan-single-owner-session-actor-transition.md: make route dispatch validate actor generation/state and wait on actor acknowledgement instead of normal-path owner election or later document-side inference.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

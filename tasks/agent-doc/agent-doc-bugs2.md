@@ -49,7 +49,7 @@ Active backlog:
     prompt=agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Reopen closeout for this
     turn or let the Stop hook recover it from the final assistant message.
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 • finalize committed the document update and reaped #sshprelude, but the post-commit session-check is still fail-closed
   because the active Codex session tracker considers this turn open. I’m inspecting that closeout state now and will run
@@ -59,14 +59,14 @@ Active backlog:
   │ agent-doc-bugs2.md
   └  M tasks/agent-doc/agent-doc-bugs2.md
 
-• Ran agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+❯ • Ran agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   └ [session-check] INTERRUPTED: cycle `cycle-1778054714028` is `committed` (commit_success), but the active Codex
     session changed this document after the last committed closeout without reopening the binary-owned write/commit
     path: active_session=019dfc51-8989-78d3-ab9e-ced6efb0bdb0 turn=019dfc51-a7aa-7721-950b-d03c6c4ae1b2
     prompt=agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Reopen closeout for this
     turn or let the Stop hook recover it from the final assistant message.
 
-• Explored
+❯ • Explored
   └ Search active Codex session changed this document|Reopen closeout for this turn|let the Stop hook recover it|
            active_session= in agent-doc
     Read codex_hook.rs, session_check.rs
@@ -80,7 +80,7 @@ Active backlog:
       -h, --help     Print help
       -V, --version  Print version
 
-• Explored
+❯ • Explored
   └ Search codex hook|UserPromptSubmit|StopInput|apply_stop|stop-hook|last_assistant_message in main.rs
 
 • Ran agent-doc hook --help
@@ -90,10 +90,10 @@ Active backlog:
     Options:
       -h, --help  Print help
 
-• Explored
+❯ • Explored
   └ Read codex_hook.rs
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 • The built-in recovery path exists for exactly this state: the Codex Stop hook can adopt the already-visible committed
   response and clear the active-session drift even with an empty last_assistant_message. I’m invoking that hook path
@@ -112,7 +112,7 @@ Active backlog:
 • Ran jq --version
   └ jq-1.8.1-dirty
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 • The empty-message Stop path stayed fail-closed, so I’m giving the hook the actual assistant closeout payload next.
   That should let it treat this as an AlreadyApplied/replayable closeout instead of an auth/tool-only stop.
@@ -219,7 +219,8 @@ That line is there because route accepted the `do #ppct. spec-test-build-install
 It was not Entered because the older diagnostic path drafted a literal `echo '[agent-doc] startup-miss: ...'` into the Codex input surface instead of rendering visible output through a binary-owned pane message. The current code has already moved that diagnostic path to `display-message` and includes a regression that it must not leave drafted shell input behind, but the remaining user-facing follow-up is still worth tracking in `tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md`.
 
 If the same warning keeps resurfacing after a later successful bind/start, the adjacent stale-marker follow-up is already documented in `tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md`.
-<!-- agent:boundary:f25c0fe4 -->
+Recovered post-closeout drift.
+<!-- agent:boundary:c4973f59 -->
 <!-- /agent:exchange -->
 ###
 

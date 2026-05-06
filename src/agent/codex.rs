@@ -50,6 +50,7 @@
 //! - send_fork_args: verifies fork (resume --last) command
 
 use anyhow::Result;
+use std::collections::VecDeque;
 use std::io::BufRead;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -226,6 +227,36 @@ fn transcript_has_required_ssh_failure(text: &str, match_terms: &[String]) -> Op
     }
 
     first_required_ssh_failure_line(text, &lowered_terms, true).map(str::to_string)
+}
+
+fn transcript_proves_required_ssh_success(text: &str, match_terms: &[String]) -> bool {
+    if match_terms.is_empty() {
+        return false;
+    }
+    let lowered_terms: Vec<String> = match_terms
+        .iter()
+        .map(|term| term.trim().to_ascii_lowercase())
+        .filter(|term| !term.is_empty())
+        .collect();
+    if lowered_terms.is_empty() {
+        return false;
+    }
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
+        return false;
+    };
+    let Some(item) = json.get("item") else {
+        return false;
+    };
+    if item.get("type").and_then(|v| v.as_str()) != Some("command_execution") {
+        return false;
+    }
+
+    let command = item.get("command").and_then(|v| v.as_str()).unwrap_or("");
+    if !looks_like_ssh_command(command) || !has_required_ssh_match_term(command, &lowered_terms) {
+        return false;
+    }
+
+    item.get("exit_code").and_then(|v| v.as_i64()) == Some(0)
 }
 
 fn format_required_ssh_failure(targets: &[String], detail: &str) -> String {
@@ -811,6 +842,8 @@ impl StreamingAgent for Codex {
             retried_fresh: false,
             yielded_agent_content: false,
             saw_final_chunk: false,
+            buffered_chunks: VecDeque::new(),
+            buffer_required_ssh_chunks: session_id.is_some() && required_ssh.is_some(),
             required_ssh_match_terms: required_ssh
                 .map(|capability| capability.match_terms)
                 .unwrap_or_default(),
@@ -833,11 +866,17 @@ struct CodexStreamIterator {
     retried_fresh: bool,
     yielded_agent_content: bool,
     saw_final_chunk: bool,
+    buffered_chunks: VecDeque<StreamChunk>,
+    buffer_required_ssh_chunks: bool,
     required_ssh_match_terms: Vec<String>,
     required_ssh_targets: Vec<String>,
 }
 
 impl CodexStreamIterator {
+    fn pop_buffered_chunk(&mut self) -> Option<Result<StreamChunk>> {
+        self.buffered_chunks.pop_front().map(Ok)
+    }
+
     fn collect_stderr(&mut self) -> String {
         if let Some(handle) = self.stderr_handle.take() {
             let _ = handle.join();
@@ -868,7 +907,43 @@ impl CodexStreamIterator {
         self.retried_fresh = true;
         self.yielded_agent_content = false;
         self.saw_final_chunk = false;
+        self.buffered_chunks.clear();
+        self.buffer_required_ssh_chunks = false;
         Ok(())
+    }
+
+    fn restart_fresh_after_required_ssh_drift(&mut self, detail: &str) -> Result<()> {
+        eprintln!(
+            "[agent] codex resume session lost required SSH capability for {} ({}); retrying once with a fresh `codex exec` session",
+            self.required_ssh_targets.join(", "),
+            detail
+        );
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = self.collect_stderr();
+        let process = self
+            .backend
+            .spawn_stream_process(&self.prompt, None, self.model.as_deref())
+            .map_err(|e| {
+                anyhow::anyhow!("fresh Codex retry after resume capability drift failed: {e}")
+            })?;
+        self.lines = process.lines;
+        self.child = process.child;
+        self.stderr_handle = process.stderr_handle;
+        self.stderr_buf = process.stderr_buf;
+        self.session_id = None;
+        self.allow_resume_capability_retry = false;
+        self.retried_fresh = true;
+        self.yielded_agent_content = false;
+        self.saw_final_chunk = false;
+        self.buffered_chunks.clear();
+        self.buffer_required_ssh_chunks = false;
+        Ok(())
+    }
+
+    fn release_required_ssh_buffer(&mut self) -> Option<Result<StreamChunk>> {
+        self.buffer_required_ssh_chunks = false;
+        self.pop_buffered_chunk()
     }
 }
 
@@ -878,6 +953,9 @@ impl Iterator for CodexStreamIterator {
     fn next(&mut self) -> Option<Self::Item> {
         if self.done {
             return None;
+        }
+        if let Some(chunk) = self.pop_buffered_chunk() {
+            return Some(chunk);
         }
         loop {
             match self.lines.next() {
@@ -899,16 +977,8 @@ impl Iterator for CodexStreamIterator {
                     if let Some(detail) =
                         transcript_has_required_ssh_failure(&line, &self.required_ssh_match_terms)
                     {
-                        if self.allow_resume_capability_retry
-                            && !self.retried_fresh
-                            && !self.yielded_agent_content
-                        {
-                            eprintln!(
-                                "[agent] codex resume session lost required SSH capability for {} ({}); retrying once with a fresh `codex exec` session",
-                                self.required_ssh_targets.join(", "),
-                                detail
-                            );
-                            if let Err(e) = self.restart_fresh_after_resume_capability_drift() {
+                        if self.allow_resume_capability_retry && !self.retried_fresh {
+                            if let Err(e) = self.restart_fresh_after_required_ssh_drift(&detail) {
                                 self.done = true;
                                 return Some(Err(e));
                             }
@@ -919,6 +989,15 @@ impl Iterator for CodexStreamIterator {
                             &self.required_ssh_targets,
                             &detail
                         ))));
+                    }
+                    if self.buffer_required_ssh_chunks
+                        && transcript_proves_required_ssh_success(
+                            &line,
+                            &self.required_ssh_match_terms,
+                        )
+                        && let Some(chunk) = self.release_required_ssh_buffer()
+                    {
+                        return Some(chunk);
                     }
                     match parse_codex_line(&line) {
                         Ok(mut chunk) => {
@@ -940,6 +1019,17 @@ impl Iterator for CodexStreamIterator {
                                 && (!chunk.text.is_empty() || chunk.thinking.is_some())
                             {
                                 self.yielded_agent_content = true;
+                                if self.buffer_required_ssh_chunks {
+                                    self.buffered_chunks.push_back(chunk);
+                                    continue;
+                                }
+                            }
+                            if chunk.is_final && self.buffer_required_ssh_chunks {
+                                self.buffered_chunks.push_back(chunk);
+                                if let Some(buffered) = self.release_required_ssh_buffer() {
+                                    return Some(buffered);
+                                }
+                                continue;
                             }
                             return Some(Ok(chunk));
                         }
@@ -971,16 +1061,9 @@ impl Iterator for CodexStreamIterator {
                             &stderr,
                             &self.required_ssh_match_terms,
                         ) {
-                            if self.allow_resume_capability_retry
-                                && !self.retried_fresh
-                                && !self.yielded_agent_content
-                            {
-                                eprintln!(
-                                    "[agent] codex resume session lost required SSH capability for {} ({}); retrying once with a fresh `codex exec` session",
-                                    self.required_ssh_targets.join(", "),
-                                    detail
-                                );
-                                if let Err(e) = self.restart_fresh_after_resume_capability_drift() {
+                            if self.allow_resume_capability_retry && !self.retried_fresh {
+                                if let Err(e) = self.restart_fresh_after_required_ssh_drift(&detail)
+                                {
                                     self.done = true;
                                     return Some(Err(e));
                                 }
@@ -1003,6 +1086,18 @@ impl Iterator for CodexStreamIterator {
                     self.done = true;
                     if !stderr.trim().is_empty() {
                         eprintln!("[agent] codex subprocess stderr: {}", stderr.trim());
+                    }
+                    if !self.buffered_chunks.is_empty() {
+                        if self.yielded_agent_content && !self.saw_final_chunk {
+                            self.buffered_chunks.push_back(StreamChunk {
+                                text: String::new(),
+                                thinking: None,
+                                is_final: true,
+                                session_id: self.session_id.take(),
+                            });
+                        }
+                        self.buffer_required_ssh_chunks = false;
+                        return self.pop_buffered_chunk();
                     }
                     if self.yielded_agent_content && !self.saw_final_chunk {
                         return Some(Ok(StreamChunk {
@@ -1718,6 +1813,106 @@ fi
         assert_eq!(
             chunks[1].as_ref().unwrap().session_id.as_deref(),
             Some("fresh-thread")
+        );
+    }
+
+    #[test]
+    fn streaming_required_ssh_retry_discards_buffered_resumed_prelude_text() {
+        let (_ssh_dir, path_dir) = write_fake_ssh_script(
+            r#"#!/bin/sh
+if [ "$1" = "-G" ]; then
+  echo "user root"
+  echo "hostname 50.28.2.199"
+  echo "port 22"
+  echo "identityfile /tmp/id_ed25519"
+  exit 0
+fi
+exit 0
+"#,
+        );
+        let (_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+if [ "$2" = "resume" ]; then
+  printf '%s\n' '{"type":"thread.started","thread_id":"stale-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"I am retrying the SSH step now.\n"}}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"socket: Operation not permitted","exit_code":255,"status":"completed"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+else
+  printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-2","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"","exit_code":0,"status":"completed"}}'
+  printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"fresh response"}}'
+  printf '%s\n' '{"type":"turn.completed","usage":{}}'
+fi
+"#,
+        );
+        let codex = Codex::new(Some(script), None)
+            .with_env(vec![("PATH".to_string(), Some(path_dir))])
+            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+
+        let chunks: Vec<_> = codex
+            .send_streaming("prompt", Some("resume-123"), false, None)
+            .unwrap()
+            .collect();
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].as_ref().unwrap().text, "fresh response");
+        assert!(
+            !chunks[0]
+                .as_ref()
+                .unwrap()
+                .text
+                .contains("I am retrying the SSH step now."),
+            "stale resumed prelude should be discarded"
+        );
+        assert!(chunks[1].as_ref().unwrap().is_final);
+        assert_eq!(
+            chunks[1].as_ref().unwrap().session_id.as_deref(),
+            Some("fresh-thread")
+        );
+    }
+
+    #[test]
+    fn streaming_required_ssh_success_releases_buffered_chunks() {
+        let (_ssh_dir, path_dir) = write_fake_ssh_script(
+            r#"#!/bin/sh
+if [ "$1" = "-G" ]; then
+  echo "user root"
+  echo "hostname 50.28.2.199"
+  echo "port 22"
+  echo "identityfile /tmp/id_ed25519"
+  exit 0
+fi
+exit 0
+"#,
+        );
+        let (_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+printf '%s\n' '{"type":"thread.started","thread_id":"resume-thread"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"I am checking SSH first.\n"}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ssh monsterrodholders-server true","aggregated_output":"","exit_code":0,"status":"completed"}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"SSH worked."}}'
+printf '%s\n' '{"type":"turn.completed","usage":{}}'
+"#,
+        );
+        let codex = Codex::new(Some(script), None)
+            .with_env(vec![("PATH".to_string(), Some(path_dir))])
+            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+
+        let chunks: Vec<_> = codex
+            .send_streaming("prompt", Some("resume-123"), false, None)
+            .unwrap()
+            .collect();
+
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(
+            chunks[0].as_ref().unwrap().text,
+            "I am checking SSH first.\n"
+        );
+        assert_eq!(chunks[1].as_ref().unwrap().text, "SSH worked.");
+        assert!(chunks[2].as_ref().unwrap().is_final);
+        assert_eq!(
+            chunks[2].as_ref().unwrap().session_id.as_deref(),
+            Some("resume-thread")
         );
     }
 }

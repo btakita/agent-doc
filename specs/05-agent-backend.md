@@ -48,4 +48,5 @@ Config overrides `command` and `args` for any agent name.
 - If a document is configured as SSH-dependent but no targets resolve, preflight/startup must fail closed before the agent launches.
 - For Codex, agent-doc probes those SSH targets before launch.
 - When a resumed Codex session later surfaces a target-specific SSH failure, agent-doc treats that as capability drift: retry once with fresh `codex exec`, then fail closed if the required SSH capability still cannot be proven.
+- Resumed Codex streaming turns with required SSH must not leak stale assistant prelude text from the discarded session: buffer early agent chunks until the stream proves required SSH success or completes successfully, then flush them; if required SSH drift forces a fresh retry first, drop that buffered prelude.
 - That required-SSH drift detector must also catch bare `socket: Operation not permitted` output when the same Codex `command_execution` event proves SSH context for one of the required targets, while still excluding unrelated localhost/CDP `Operation not permitted` failures.

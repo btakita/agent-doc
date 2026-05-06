@@ -172,7 +172,23 @@ Commits:
 - `agent-loop`: `adbe26c07` (`chore: update agent-doc submodule`)
 
 Both commits are pushed. `#busychk` is complete.
-<!-- agent:boundary:6356ce1d -->
+❯ do [#ctxacc]. spec-test-build-install-commit-push
+### Re: #ctxacc — gpt-5
+
+Implemented the context-accretion guardrails from `tasks/agent-doc/plan-context-accretion-guardrails.md` in `src/agent-doc`. The new `session_accretion` inspector derives bounded churn signals from the exchange body plus existing cycle/session logs, `preflight` now emits that advisory in JSON, and `plan` now fails closed on the hard-stop tier unless the current diff is already taking the explicit compact path. That gives the binary a deterministic compact-or-restart boundary before another expensive turn launches.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Commits:
+- `src/agent-doc`: `42fb7ed` (`fix: add session accretion guardrails`)
+- `agent-loop`: `e8adddccd` (`chore: update agent-doc accretion guardrails`)
+
+Both commits are pushed. `#ctxacc` is complete.
+<!-- agent:boundary:2412f360 -->
 <!-- /agent:exchange -->
 ###
 
@@ -183,7 +199,6 @@ Both commits are pushed. `#busychk` is complete.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ctxacc] Add agent-doc context accretion guardrails from tasks/agent-doc/plan-context-accretion-guardrails.md: detect churn-heavy session growth, surface compact/restart guidance, and define fail-closed thresholds before another expensive turn launches.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

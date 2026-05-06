@@ -62,7 +62,27 @@ What I ran:
 - `cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
 
 All of them passed, including the previously suspect route handoff test and the full serialized `agent-doc` suite (`1892` main-unit tests plus integration/doc-test follow-ons). I did not make code changes in this turn because the current branch already behaves correctly for the reported repro.
-<!-- agent:boundary:02125ffd -->
+❯ do [#s2sy]. spec-test-build-install-commit-push
+### Re: stale startup-miss supersession — gpt-5
+
+Completed `#s2sy`.
+
+The stale-marker clear path now follows the document's current registered owner instead of the old marker `session_id`, so `start`, `route`, `sync`, and `session-check` clear an old pane's `startup_miss` once the current owner records a newer `session_start` on the registered pane. The implementation is in `src/startup_miss.rs`, with the corresponding log/reporting paths updated in `src/start.rs`, `src/route.rs`, `src/sync.rs`, and `src/session_check.rs`.
+
+I also updated the session/tmux spec plus the bundled docs/instruction surfaces so the documented contract matches the new supersession rule.
+
+Verification/build/install completed:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Commit / push:
+- `5cf5af1` `fix: clear stale startup miss after owner handoff`
+- pushed to `origin/20260422/codex-agent-backend`
+
+Plan: tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md
+<!-- agent:boundary:1d0469b0 -->
 <!-- /agent:exchange -->
 ###
 
@@ -77,7 +97,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#s2sy] smst=Clear stale startup-miss markers after a later session start so session-check and reroute stop surfacing superseded pane failures. Plan: tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md
 - [ ] [#rsxe] instrcap=Trim AGENTS.md + SKILL.md hot-path instruction surface while preserving binary-owned closeout invariants. Plan: tasks/agent-doc/plan-instruction-surface-context-trim.md
 - [ ] [#fye2] snrun=Harden Run Agent Doc reroute auto-remediation so live but non-dispatch-ready panes fail once with a precise reason instead of looking non-responsive. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md
 - [ ] [#grdd] smdq=Make startup-miss diagnostics pane-visible instead of leaving drafted recovery text in the harness input surface. Plan: tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md

@@ -49,8 +49,16 @@ Completed `#5zm8`.
 - Mirrored that guidance in `SPEC.md`, `CLAUDE.md`, and the generated `AGENTS.md`, and added init regression coverage in `src/init.rs`.
 - `make check` passed after fixing a strict clippy lint in `src/session_review.rs`.
 - Local install completed with `cargo install --path .`.
-- Repo commit + push completed in `src/tsift`: `5c48cff` (`docs: prefer digest surfaces in init guidance`).
-<!-- agent:boundary:e1aa30ce -->
+❯ - Repo commit + push completed in `src/tsift`: `5c48cff` (`docs: prefer digest surfaces in init guidance`).
+❯ to [#0nv1]. spec-test-build-install-commit-push
+### Re: #0nv1 budget guardrails — gpt-5
+
+Completed `#0nv1` as a stale backlog closeout. The `session-cost` / `session-review` guardrails for cached-context resend, repeated `commit_already_current` no-op closeouts, and restart churn are already present in `src/tsift` from `accca07` (`feat: add session cost guardrails`), including CLI output, spec coverage, and regression tests.
+
+- `make check` passed on the current `src/tsift` HEAD (`518` unit tests + `75` exit-code tests).
+- `cargo install --path .` succeeded and refreshed the local `tsift` binary.
+- `src/tsift` itself is clean on `main...origin/main`, so there was no repo delta to commit or push in this cycle.
+<!-- agent:boundary:365b17de -->
 <!-- /agent:exchange -->
 ###
 
@@ -61,7 +69,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#0nv1] budgetguard=Add session-cost/session-review budget guardrails for cached-context resend, repeated no-op closeouts, and restart churn, with hook-friendly thresholds and remediation hints.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

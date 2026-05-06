@@ -261,13 +261,40 @@ Repo commits:
 ### Re: closeout guard recovery — gpt-5
 
 Re-opened the binary-owned closeout path for this Codex turn after the prior `#rprdrift` response had already committed. No additional repo, test, or document work was required.
-<!-- agent:boundary:fb82e0b0 -->
+❯ When I just switched the editor from equityfundingsource.md to agent-doc-bugs2.md, `agent-doc sync` did not run. This seems like a recent regression. Please investigate and fix root cause(s). spec-test-build-install-commit-push
+### Re: editor switch passive sync regression — gpt-5
+
+Implemented the passive editor-sync fix.
+
+Root cause:
+- JetBrains `EditorTabSyncListener.selectionChanged(...)` was building the automatic sync snapshot from `FileEditorManager.selectedTextEditor` inside the callback.
+- On the failing switch from `equityfundingsource.md` to `agent-doc-bugs2.md`, `event.newFile` had already advanced but `selectedTextEditor` could still point at the previous editor for that callback turn.
+- That let the dedup planner see the old focused file and suppress `agent-doc sync --no-autostart` as if nothing had changed.
+
+Changes:
+- `EditorTabSyncListener` now treats the selection event file as the authoritative active markdown target for automatic snapshot/dedup planning, then falls back to the selected editor only when no event target exists.
+- Added a JetBrains regression covering the stale-selected-editor shape.
+- Updated `editors/jetbrains/SPEC.md`, added a `VERSIONS.md` entry, and bumped the JetBrains plugin version to `0.2.94`.
+
+Verification:
+- `./gradlew test --tests com.github.btakita.agentdoc.EditorTabSyncListenerTest`
+- `make check`
+- `make install`
+- `/usr/bin/zsh -lc 'GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin'`
+- `agent-doc plugin install --local jetbrains` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+
+Repo commits:
+- `src/agent-doc`: `55fe020` (`fix: honor jetbrains selection event target`)
+- `agent-loop`: `c75c2df0d` (`chore: bump agent-doc for passive editor sync fix`)
+
+Restart IntelliJ IDEA 2026.1 before re-testing the editor-switch repro.
+
+Repo push follows after this closeout commit.
+<!-- agent:boundary:dde7615e -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-When I just switched the editor from equityfundingsource.md to agent-doc-bugs2.md, `agent-doc sync` did not run. This seems like a recent regression. Please investigate and fix root cause(s). spec-test-build-install-commit-push
----
 "Press Enter to restart, or 'q' to exit."
 -->
 

@@ -60,7 +60,19 @@ Verification: `cargo test`, `cargo build`, and `cargo install --path . --force` 
 Commits:
 - `src/agent-doc`: `b8a439b` (`feat: add sqlite archive index for compacted turns`)
 - `agent-loop`: `209c60e87` (`chore: update agent-doc archive index rollout`)
-<!-- agent:boundary:c6870e89 -->
+❯ do [#autocmp]. spec-test-build-install-commit-push
+### Re: automatic compact policy for accreting sessions — gpt-5
+
+Implemented `#autocmp`.
+
+`agent-doc preflight` now auto-compacts churn-heavy template exchanges before another large turn when session-accretion signals trip, while preserving any live unresolved prompt tail in the visible file and keeping the snapshot on the compacted committed baseline. The partial compact path now keeps prompt tails that were sitting after the binary-owned boundary, and the session-accretion policy only auto-compacts warn/block states tied to exchange/closeout churn rather than restart-only incidents.
+
+Verification: `cargo test`, `cargo build`, and `cargo install --path . --force` all passed in `src/agent-doc`.
+
+Commits:
+- `src/agent-doc`: `7789330` (`feat: auto-compact accreting sessions`)
+- `agent-loop`: `80f440ff0` (`chore: update agent-doc accretion auto-compact`)
+<!-- agent:boundary:70d38601 -->
 <!-- /agent:exchange -->
 ###
 
@@ -71,7 +83,6 @@ Commits:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#autocmp] [recommended] Promote session-accretion warn/block into an automatic compact policy: auto-run partial exchange compaction or rewrite the exchange to a fresh session summary before another full turn.
 - [ ] [#ctxpack] [recommended] Add a bounded response-context pack for warn-level sessions so the harness receives prompt targets, session summary, and backlog head instead of the full exchange tail.
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.

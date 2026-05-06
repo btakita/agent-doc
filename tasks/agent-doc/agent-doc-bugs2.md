@@ -29,23 +29,38 @@ prompt_presets:
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260506-055012.md`*
 
-Active backlog:
-- [ ] [#cmpclr] Compaction does not clear the session-accretion guard: `preflight` / `plan` can keep failing closed on the same recent-cycle blocker immediately after a successful `agent-doc compact --commit`, trapping the document in a compact-then-block loop. Plan: `tasks/agent-doc/plan-compact-does-not-clear-accretion-guard.md`
-- [ ] [#ratecmp] [recommended] Rework session-accretion auto-compact so recent cycle count alone does not compact otherwise healthy docs; prefer bounded diff/recent-context packs and reserve auto-compact for exchange growth or closeout churn.
-- [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
-- 5 more active item(s)
-<!-- agent:boundary:d398d7cb -->
+❯ Active backlog:
+❯ - [ ] [#cmpclr] Compaction does not clear the session-accretion guard: `preflight` / `plan` can keep failing closed on the same recent-cycle blocker immediately after a successful `agent-doc compact --commit`, trapping the document in a compact-then-block loop. Plan: `tasks/agent-doc/plan-compact-does-not-clear-accretion-guard.md`
+❯ - [ ] [#ratecmp] [recommended] Rework session-accretion auto-compact so recent cycle count alone does not compact otherwise healthy docs; prefer bounded diff/recent-context packs and reserve auto-compact for exchange growth or closeout churn.
+❯ - [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
+❯ - 5 more active item(s)
+### Re: `#cmpclr` compact recovery — gpt-5
+
+Implemented the compact-recovery fix in `src/agent-doc` so closeout-churn accounting resets at the latest successful exchange compaction instead of immediately re-blocking on the same recent `commit` / `commit_noop` window.
+
+Validation:
+- `cargo test` passed in `src/agent-doc` (`1891` unit tests plus integration/doc tests)
+- `cargo install --path . --force` rebuilt and replaced the local `agent-doc` binary
+- repo commit created in `src/agent-doc`: `0d05e17` (`fix: clear accretion guard after compact`)
+
+Behavior change:
+- `compact` now records a per-document exchange-compaction recovery marker
+- `session_accretion` ignores closeout-churn entries at or before that marker
+- regressions cover explicit `plan` recovery plus `preflight` auto-compact follow-up
+<!-- agent:boundary:0f8515fa -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+The compaction happened in the middle of the turn. I don't like the session-accretion auto-compaction. Let's have agent keep the full length of the document but send the last few turns into the context...allowing the agent to ask for more previous turns if it finds the document content useful for the task.
+spec-test-build-install-commit-push
+---
 "Press Enter to restart, or 'q' to exit."
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cmpclr] Compaction does not clear the session-accretion guard: `preflight` / `plan` can keep failing closed on the same recent-cycle blocker immediately after a successful `agent-doc compact --commit`, trapping the document in a compact-then-block loop. Plan: `tasks/agent-doc/plan-compact-does-not-clear-accretion-guard.md`
 - [ ] [#ratecmp] [recommended] Rework session-accretion auto-compact so recent cycle count alone does not compact otherwise healthy docs; prefer bounded diff/recent-context packs and reserve auto-compact for exchange growth or closeout churn.
 - [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.

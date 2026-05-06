@@ -62,7 +62,20 @@ Updated `SPEC.md`, `VERSIONS.md`, and bumped `tsift` to `0.1.35`. Added unit and
 Verification in `src/tsift`: `cargo test session_review -- --nocapture`, `make check`, `cargo build --release`, `cargo install --path . --force`, `tsift --version` (`0.1.35`)
 Committed and pushed in `src/tsift` as `fe6a7e0` (`fix: tighten session-review transcript matching`).
 Committed in `agent-loop` as `ed95bc1cc` (`chore: update tsift submodule`).
-<!-- agent:boundary:e1232a7a -->
+❯ do [#looprank]. spec-test-build-install-commit-push
+### Re: repeated session-loop summaries — gpt-5
+
+Implemented `#looprank` in `src/tsift` and bumped `tsift` to `0.1.36`.
+
+`tsift session-cost` now emits bounded `loop_clusters` for repeated prompt bodies, repeated command bundles, and repeated closeout churn across Claude JSONL, Codex JSONL, and `agent-doc` runtime logs. `tsift session-review` now aggregates those loop clusters into the cross-session review surface and exposes them in both human and JSON output.
+
+Updated `SPEC.md`, `VERSIONS.md`, the CLI output paths, and added direct + CLI regression coverage for the new loop-cluster summaries.
+
+Verification in `src/tsift`: `cargo test loop_clusters -- --nocapture`, `make check`, `cargo build --release`, `cargo install --path . --force`, `tsift --version` (`0.1.36`)
+Live check: `tsift session-review --json tasks/software/tsift.md` now includes `loop_clusters`.
+Committed and pushed in `src/tsift` as `6801a6b` (`feat: summarize repeated session loops`).
+Committed and pushed in `agent-loop` as `ef042f5` (`chore: update tsift submodule`).
+<!-- agent:boundary:19f6881d -->
 <!-- /agent:exchange -->
 ###
 
@@ -75,7 +88,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#looprank] Add duplicate-turn and loop clustering to session-cost/session-review so repeated prompt bodies, closeout churn, and repeated command bundles are summarized explicitly.
 - [ ] [#hookcaps] Extend digest-first rewrite/output capping beyond the current Claude RTK path so Codex and other harnesses also avoid verbose raw command/transcript context.
 <!-- /agent:backlog -->
 

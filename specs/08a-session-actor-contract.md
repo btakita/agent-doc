@@ -2,9 +2,9 @@
 
 # Session Actor Contract
 
-This file freezes the phase-1 single-owner session actor contract. It does not
-introduce the durable actor store yet; it defines the semantics that later
-phases must preserve.
+This file freezes the phase-1 single-owner session actor contract while
+documenting the phase-2 durable actor store boundary so later phases preserve
+the same semantics.
 
 ## Authoritative intent
 

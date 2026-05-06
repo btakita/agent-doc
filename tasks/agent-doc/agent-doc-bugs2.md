@@ -34,7 +34,22 @@ Active backlog:
 - [ ] [#rsxe] instrcap=Trim AGENTS.md + SKILL.md hot-path instruction surface while preserving binary-owned closeout invariants. Plan: tasks/agent-doc/plan-instruction-surface-context-trim.md
 - [ ] [#fye2] snrun=Harden Run Agent Doc reroute auto-remediation so live but non-dispatch-ready panes fail once with a precise reason instead of looking non-responsive. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md
 - 7 more active item(s)
-<!-- agent:boundary:776dc847 -->
+❯ do [#s2sy]. spec-test-build-install-commit-push
+### Re: stale startup-miss supersession — gpt-5
+
+I updated the stale-marker path for `#s2sy` so startup-miss supersession follows the document's current registered owner instead of the old marker `session_id`. That change landed in `src/agent-doc/src/startup_miss.rs`, with the corresponding `start`/`route`/`sync`/`session-check` logging updated and the session/tmux spec aligned in `src/agent-doc/specs/07-session-tmux-commands.md`.
+
+Regression coverage is in place for both shapes:
+- same-session supersession still clears the stale marker
+- a newer owner on the same file but a different session id now also clears it, including `session-check`
+
+Verification is blocked on the full crate suite, so I did not build/install or commit/push this turn. `cargo test --manifest-path src/agent-doc/Cargo.toml` first hit an `ETXTBSY` launcher race in a Codex fixture, and the serialized rerun failed in `route::tests::resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route` because the test observed `auto_start` winning instead of the expected restart-handoff callback. The targeted regressions for this change passed:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml superseded_by_newer_registered_start`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml session_check_clears_startup_miss_superseded_by_newer_registered_owner`
+
+Plan: tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md
+
+<!-- agent:boundary:ec00f644 -->
 <!-- /agent:exchange -->
 ###
 
@@ -49,6 +64,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#vrhs] [recommended] Investigate serialized full-suite failure in route::tests::resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route; restart handoff assertion missed because auto-start won the retry path.
 - [ ] [#s2sy] smst=Clear stale startup-miss markers after a later session start so session-check and reroute stop surfacing superseded pane failures. Plan: tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md
 - [ ] [#rsxe] instrcap=Trim AGENTS.md + SKILL.md hot-path instruction surface while preserving binary-owned closeout invariants. Plan: tasks/agent-doc/plan-instruction-surface-context-trim.md
 - [ ] [#fye2] snrun=Harden Run Agent Doc reroute auto-remediation so live but non-dispatch-ready panes fail once with a precise reason instead of looking non-responsive. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md

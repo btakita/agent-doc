@@ -22,6 +22,9 @@
 //!   boundary marker when present, otherwise at the end of the exchange
 //!   component. Atomic write only; snapshot/commit remain the subsequent
 //!   lifecycle's responsibility.
+//! - Fresh step prompts use the same bounded warn/block accretion context pack
+//!   as normal edited-session prompts, so orchestration can avoid replaying the
+//!   full exchange tail once compacted sessions start churning.
 //!
 //! ## Agentic Contracts
 //! - Sequential orchestration never resumes prior agent sessions between
@@ -654,7 +657,13 @@ fn run_ordered_task_step(
         .unwrap_or("claude");
     let harness = agent_doc::model_tier::detect_harness();
     let model = model_override.or(fm.resolve_harness_model(&harness));
-    let prompt = build_agent_prompt(mode, preflight.diff.as_deref(), &doc);
+    let session_accretion = crate::session_accretion::inspect(file).ok();
+    let prompt = build_agent_prompt(
+        mode,
+        preflight.diff.as_deref(),
+        &doc,
+        session_accretion.as_ref(),
+    );
     let expanded_env = expand_frontmatter_env(&fm);
 
     let resolved_harness_args = resolve_orchestrate_agent_args(&fm, agent_name, global_config);
@@ -943,7 +952,12 @@ fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<
     }
 }
 
-fn build_agent_prompt(mode: ResolvedMode, diff_text: Option<&str>, doc: &str) -> String {
+fn build_agent_prompt(
+    mode: ResolvedMode,
+    diff_text: Option<&str>,
+    doc: &str,
+    session_accretion: Option<&crate::session_accretion::SessionAccretionReport>,
+) -> String {
     let diff_text = diff_text.unwrap_or_default();
     let prompt_bearing = diff::format_prompt_bearing_changes(diff_text)
         .map(|section| format!("\n\n{}\n", section))
@@ -951,30 +965,30 @@ fn build_agent_prompt(mode: ResolvedMode, diff_text: Option<&str>, doc: &str) ->
     let active_format_requirements = crate::prompt_contract::format_active_format_requirements(doc)
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
+    let document_section =
+        crate::prompt_context::build_document_section(diff_text, doc, session_accretion);
 
     if mode.is_template() {
         format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
-             The full document is now:\n\n\
-             <document>\n{}\n</document>\n\n\
+             {}\
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            diff_text, prompt_bearing, active_format_requirements, doc
+            diff_text, prompt_bearing, active_format_requirements, document_section
         )
     } else {
         format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
-             The full document is now:\n\n\
-             <document>\n{}\n</document>\n\n\
+             {}\
              Respond to the user's new content. Write your response in markdown.\n\
              Do not include a ## Assistant heading — it will be added automatically.\n\
              If the user inserted prompt-bearing edits inline, classify them as prompt targets vs content edits before responding.",
-            diff_text, prompt_bearing, active_format_requirements, doc
+            diff_text, prompt_bearing, active_format_requirements, document_section
         )
     }
 }
@@ -2859,6 +2873,7 @@ mod tests {
             },
             Some("diff"),
             doc,
+            None,
         );
         assert!(
             prompt.contains(
@@ -2868,5 +2883,42 @@ mod tests {
         assert!(prompt.contains(
             "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
         ));
+    }
+
+    #[test]
+    fn build_agent_prompt_uses_bounded_context_pack_for_warn_level_prompt_targets() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+           Done.\n\
+           +do [#ctxpack]. spec-test-build-install-commit-push\n\
+           <!-- /agent:exchange -->\n";
+        let doc = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted earlier turns.\n\n",
+            "### Re: older topic — gpt-5\n\n",
+            "Older response body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#ctxpack] Add bounded context pack\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let report = crate::session_accretion::SessionAccretionReport {
+            level: crate::session_accretion::SessionAccretionLevel::Warn,
+            reasons: vec!["document hit 2 no-op closeouts in the last 30 minutes".to_string()],
+            ..Default::default()
+        };
+
+        let prompt = build_agent_prompt(
+            ResolvedMode {
+                format: crate::frontmatter::AgentDocFormat::Template,
+                write: crate::frontmatter::AgentDocWrite::Crdt,
+            },
+            Some(diff),
+            doc,
+            Some(&report),
+        );
+        assert!(prompt.contains("<response_context level=\"warn\">"));
+        assert!(!prompt.contains("<document>\n## Exchange"));
     }
 }

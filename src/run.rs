@@ -18,7 +18,11 @@
 //!   prompts require `patch:exchange` blocks; append prompts require plain
 //!   markdown without `## Assistant`. Resumed prompts also restate ordered
 //!   request blocks extracted from the diff so the agent does not anchor only
-//!   on the newest question in a changed exchange tail.
+//!   on the newest question in a changed exchange tail. When session accretion
+//!   has already reached warn/block severity and the diff still contains live
+//!   prompt targets, resumed prompts replace the full exchange tail with a
+//!   bounded response-context pack containing prompt targets, session summary,
+//!   backlog head, and available component names.
 //! - In `--dry-run` mode: prints the diff and prompt size to stderr and returns
 //!   without calling the agent, writing files, or touching git.
 //! - Optionally creates a git branch via `git::create_branch` before committing
@@ -186,7 +190,14 @@ pub fn run(
 
     let backend = agent::resolve_for_file(agent_name, agent_config, expanded_env, file, &fm)?;
 
-    let prompt = build_prompt(run_mode, &fm, &the_diff, &content_original);
+    let session_accretion = crate::session_accretion::inspect(file).ok();
+    let prompt = build_prompt(
+        run_mode,
+        &fm,
+        &the_diff,
+        &content_original,
+        session_accretion.as_ref(),
+    );
 
     if dry_run {
         eprintln!("--- Diff ---");
@@ -282,6 +293,7 @@ fn build_prompt(
     fm: &frontmatter::Frontmatter,
     the_diff: &str,
     content: &str,
+    session_accretion: Option<&crate::session_accretion::SessionAccretionReport>,
 ) -> String {
     let prompt_bearing_changes = diff::format_prompt_bearing_changes(the_diff)
         .map(|section| format!("\n\n{}\n", section))
@@ -290,17 +302,18 @@ fn build_prompt(
         crate::prompt_contract::format_active_format_requirements(content)
             .map(|section| format!("\n\n{}\n", section))
             .unwrap_or_default();
+    let document_section =
+        crate::prompt_context::build_document_section(the_diff, content, session_accretion);
     match (run_mode, fm.resume.is_some()) {
         (RunMode::Template, true) => format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
-             The full document is now:\n\n\
-             <document>\n{}\n</document>\n\n\
+             {}\
              Respond to the user's new content. Write your response in markdown.\n\
              Format your response as patch blocks targeting document components.\n\
              Example: <!-- patch:exchange -->\\nYour response\\n<!-- /patch:exchange -->",
-            the_diff, prompt_bearing_changes, active_format_requirements, content
+            the_diff, prompt_bearing_changes, active_format_requirements, document_section
         ),
         (RunMode::Template, false) => format!(
             "The user is starting a session document. Here is the full document:\n\n\
@@ -315,12 +328,11 @@ fn build_prompt(
             "The user edited the session document. Here is the diff since the last run:\n\n\
              <diff>\n{}\n</diff>\n\n\
              {}{}\
-             The full document is now:\n\n\
-             <document>\n{}\n</document>\n\n\
+             {}\
              Respond to the user's new content. Write your response in markdown.\n\
              Do not include a ## Assistant heading — it will be added automatically.\n\
              If the user inserted prompt-bearing edits inline, classify them as prompt targets vs content edits before responding.",
-            the_diff, prompt_bearing_changes, active_format_requirements, content
+            the_diff, prompt_bearing_changes, active_format_requirements, document_section
         ),
         (RunMode::Append, false) => format!(
             "The user is starting a session document. Here is the full document:\n\n\
@@ -478,7 +490,7 @@ mod tests {
     #[test]
     fn build_prompt_defaults_to_template_mode() {
         let fm = frontmatter::Frontmatter::default();
-        let prompt = build_prompt(RunMode::from_frontmatter(&fm), &fm, "diff", "doc");
+        let prompt = build_prompt(RunMode::from_frontmatter(&fm), &fm, "diff", "doc", None);
         assert!(prompt.contains("patch:exchange"));
         assert!(!prompt.contains("## Assistant heading"));
     }
@@ -489,7 +501,7 @@ mod tests {
             format: Some(frontmatter::AgentDocFormat::Append),
             ..Default::default()
         };
-        let prompt = build_prompt(RunMode::from_frontmatter(&fm), &fm, "diff", "doc");
+        let prompt = build_prompt(RunMode::from_frontmatter(&fm), &fm, "diff", "doc", None);
         assert!(prompt.contains("Do not include a ## Assistant heading"));
         assert!(!prompt.contains("patch:exchange"));
     }
@@ -501,11 +513,11 @@ mod tests {
             ..Default::default()
         };
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,5 @@\n\
-            ctx\n\
-            +❯ First unresolved question?\n\
-            +\n\
-            +❯ Second unresolved question?\n";
-        let prompt = build_prompt(RunMode::Template, &fm, diff, "doc");
+           ctx\n\
+           +❯ First unresolved question?\n\
+           +\n\
+           +❯ Second unresolved question?\n";
+        let prompt = build_prompt(RunMode::Template, &fm, diff, "doc", None);
         assert!(prompt.contains("User-authored prompt-bearing changes (oldest first):"));
         assert!(prompt.contains("Do not stop at the newest question"));
         assert!(prompt.contains("kind=\"prompt_target\""));
@@ -527,7 +539,7 @@ mod tests {
             "Done.\n",
         );
 
-        let prompt = build_prompt(RunMode::Template, &fm, "diff", doc);
+        let prompt = build_prompt(RunMode::Template, &fm, "diff", doc, None);
         assert!(
             prompt.contains(
                 "Active document-level formatting / structure requirements carried forward"
@@ -536,6 +548,39 @@ mod tests {
         assert!(prompt.contains(
             "Please organize the backlog into a 2-level list. Place the urgent-security matters at the top. Use a numeric list where appropriate."
         ));
+    }
+
+    #[test]
+    fn build_prompt_uses_bounded_context_pack_for_warn_level_prompt_targets() {
+        let fm = frontmatter::Frontmatter {
+            resume: Some("sess-123".to_string()),
+            ..Default::default()
+        };
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+           Done.\n\
+           +do [#ctxpack]. spec-test-build-install-commit-push\n\
+           <!-- /agent:exchange -->\n";
+        let doc = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted earlier turns.\n\n",
+            "### Re: older topic — gpt-5\n\n",
+            "Older response body.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#ctxpack] Add bounded context pack\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let report = crate::session_accretion::SessionAccretionReport {
+            level: crate::session_accretion::SessionAccretionLevel::Warn,
+            reasons: vec!["document hit 2 no-op closeouts in the last 30 minutes".to_string()],
+            ..Default::default()
+        };
+
+        let prompt = build_prompt(RunMode::Template, &fm, diff, doc, Some(&report));
+        assert!(prompt.contains("<response_context level=\"warn\">"));
+        assert!(!prompt.contains("<document>\n## Exchange"));
     }
 
     #[test]

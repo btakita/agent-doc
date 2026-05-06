@@ -90,7 +90,7 @@ Commits:
 - `agent-loop`: `7b00a330f chore: update agent-doc submodule`
 
 `#sgown4` is complete.
-<!-- agent:boundary:754d33ed -->
+<!-- agent:boundary:56814ed8 -->
 <!-- /agent:exchange -->
 ###
 
@@ -102,7 +102,6 @@ Commits:
 
 <!-- agent:backlog -->
 - [ ] [#sshmeta] [recommended] Land `tasks/agent-doc/plan-ssh-required-capability-metadata-guard.md`: make SSH-dependent ops docs resolve `required_ssh_targets` deterministically so blocked SSH fails closed instead of leaking ordinary fallback guidance.
-- [x] [#sgown4] [recommended] Land phase-4 actor dispatch from tasks/agent-doc/plan-single-owner-session-actor-transition.md: make route dispatch validate actor generation/state and wait on actor acknowledgement instead of normal-path owner election or later document-side inference.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 <!-- /agent:backlog -->

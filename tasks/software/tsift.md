@@ -47,7 +47,26 @@ The highest-leverage next step is to make tsift budget-aware by default rather t
 4. `#ts1d` Improve lock/degraded-mode UX: when a scoped index writer is active, prefer read-only/exact fallback or a minimal actionable summary instead of pushing the user into a noisy retry path.
 
 On the RTK question: yes, it can help if the harness can keep large artifacts out-of-band, but it is a secondary win. The primary win is still source-side shaping: less output, grouped output, and expansion on demand. Backlog top: `#ts1a`.
-<!-- agent:boundary:c03caccb -->
+❯ do [#ts1a]. spec-test-build-install-commit-push
+### Re: #ts1a budget-aware response profiles — gpt-5
+
+Implemented `#ts1a` in `tsift`:
+- added `--max-items` / `--max-bytes` preview-budget flags to `search`, `explain`, and `session-review`
+- preview mode now emits deterministic handles plus concrete follow-up `expand` commands while leaving the default output paths unchanged
+- documented the new preview-budget mode in `src/tsift/SPEC.md`
+- added CLI + helper coverage for the budget preview/report builders
+
+Verification:
+- `cargo test -q`
+- `cargo build`
+- `cargo install --path .`
+
+Commits:
+- `src/tsift` pushed: `adb2e77` `feat: add budgeted preview profiles`
+- parent repo committed submodule pointer: `2bb251f91` `chore: update tsift submodule`
+
+Backlog: closed `#ts1a`. Current top remaining item is `#ts1b`.
+<!-- agent:boundary:a94f4655 -->
 <!-- /agent:exchange -->
 ###
 
@@ -60,7 +79,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ts1a] Add budget-aware response profiles for tsift search/explain/session-review with max-items or max-bytes limits and stable expansion handles
 - [ ] [#ts1b] Add a single agent-facing context-pack command that composes diff-digest, test-digest, log-digest, and session-review --next-context
 - [ ] [#ts1c] Add MCP/tool-native structured terse envelopes so clients can render summaries and request follow-up expansion without prose-heavy defaults
 - [ ] [#ts1d] Improve tsift lock/degraded-mode UX so active index writers fall back to read-only or exact search with a minimal actionable summary

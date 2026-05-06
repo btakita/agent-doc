@@ -2973,6 +2973,49 @@ fn resolve_or_create_pane_with_auto_fix_retry(
     }
 
     // Strategy 3: Auto-start
+    // Re-check associated panes after the earlier recovery branches. A stale
+    // registered pane can be deregistered while a live legacy owner becomes
+    // provable a little later in the turn; the normal path must still fail
+    // closed instead of silently re-electing that pane via auto-start.
+    let late_associated_resolution = crate::sync::resolve_associated_panes(
+        crate::sync::find_associated_panes(tmux, file, session_id),
+        tmux.active_window(target_session).as_deref(),
+    );
+    if let crate::sync::AssociatedPaneResolution::Ambiguous(candidates) =
+        &late_associated_resolution
+    {
+        let error = format_associated_pane_resolution_error(
+            file,
+            candidates,
+            tmux.active_window(target_session).as_deref(),
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_associated_pane_ambiguous_late file={} count={}",
+                file_path,
+                candidates.len()
+            ),
+        );
+        anyhow::bail!(error);
+    }
+    if let crate::sync::AssociatedPaneResolution::Selected { winner, redundant } =
+        &late_associated_resolution
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_associated_pane_requires_manual_claim_late file={} pane={} sources={}",
+                file_path,
+                winner.pane_id,
+                winner.source_summary()
+            ),
+        );
+        anyhow::bail!(format_associated_pane_selected_error(
+            file, winner, redundant
+        ));
+    }
+
     eprintln!("[route] No active pane found, auto-starting...");
     if std::env::var("AGENT_DOC_NO_AUTOSTART").is_ok() {
         anyhow::bail!("auto-start skipped (AGENT_DOC_NO_AUTOSTART set)");

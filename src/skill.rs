@@ -643,6 +643,31 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_hot_path_stays_compact() {
+        assert!(
+            line_count(SKILL_TEMPLATE) <= 150,
+            "SKILL.md hot path grew to {} lines",
+            line_count(SKILL_TEMPLATE)
+        );
+    }
+
+    #[test]
+    fn rendered_harness_content_stays_compact() {
+        for env in [
+            Environment::ClaudeCode,
+            Environment::Codex,
+            Environment::Generic,
+        ] {
+            let content = super::content_for_env(env);
+            assert!(
+                line_count(&content) <= 160,
+                "{env:?} rendered instruction surface grew to {} lines",
+                line_count(&content)
+            );
+        }
+    }
+
+    #[test]
     fn bundled_skill_template_contains_auto_update_line() {
         assert!(SKILL_TEMPLATE.contains(AUTO_UPDATE_LINE));
     }
@@ -680,6 +705,10 @@ mod tests {
 
     fn install_test(root: Option<&std::path::Path>) -> anyhow::Result<()> {
         test_config().install(root)
+    }
+
+    fn line_count(content: &str) -> usize {
+        content.lines().count()
     }
 
     #[test]
@@ -1055,17 +1084,17 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains(
             "Harness-native `agent-doc` entrypoints start the binary-owned response cycle"
         ));
-        assert!(SKILL_TEMPLATE.contains(
-            "treat that as an executable workflow entry rather than a generic document-editing request"
-        ));
+        assert!(SKILL_TEMPLATE.contains("executable workflow start"));
+        assert!(SKILL_TEMPLATE.contains("generic document-editing request"));
         assert!(
             SKILL_TEMPLATE
                 .contains("Do not manually patch the final assistant response into the document")
         );
         assert!(SKILL_TEMPLATE.contains("agent-doc write --commit <FILE>` completes"));
         assert!(SKILL_TEMPLATE.contains(
-            "do not stage or commit the active session document in that manual git commit"
+            "stage and commit only the intended non-session repo files first"
         ));
+        assert!(SKILL_TEMPLATE.contains("code-enforced-directives.md"));
     }
 
     #[test]
@@ -1131,9 +1160,8 @@ mod tests {
         assert!(content.contains("final document-mutation boundary for the cycle"));
         assert!(content.contains("do not start more long-running task work for that same turn"));
         assert!(content.contains(".codex/hooks.json"));
-        assert!(content.contains("UserPromptSubmit"));
-        assert!(content.contains("last_assistant_message"));
-        assert!(content.contains("tool-only/authentication step"));
+        assert!(content.contains(".codex/config.toml"));
+        assert!(content.contains("fail-closed backstop"));
         assert!(content.contains("MCP auth / OAuth steps are sub-steps"));
         assert!(content.contains("### Re: topic — gpt-5"));
         assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
@@ -1455,6 +1483,6 @@ mod tests {
         }
         assert!(claude.contains("final document-mutation boundary for the cycle"));
         assert!(codex.contains(".codex/hooks.json"));
-        assert!(codex.contains("last_assistant_message"));
+        assert!(codex.contains("fail-closed backstop"));
     }
 }

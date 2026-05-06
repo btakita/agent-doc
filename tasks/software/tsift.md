@@ -52,7 +52,17 @@ Updated the spec, command docs, and versioned guidance to cover the new surface,
 Verification in `src/tsift`: `cargo test session_review -- --nocapture`, `make check`, `cargo build --release`, `cargo install --path . --force`
 Committed and pushed in `src/tsift` as `9016c12` (`feat: add session-review next-context pack`).
 Committed in `agent-loop` as `a315688a7` (`chore: update tsift submodule`).
-<!-- agent:boundary:a8a2f8e8 -->
+❯ do [#shmatch]. spec-test-build-install-commit-push
+### Re: cross-harness session-review matching — gpt-5
+
+Tightened `tsift session-review` so file-target matching now learns historical `file=` and `session=` aliases from the matching `agent-doc` log, matches Claude/Codex transcripts against structured user/tool-input snippets instead of arbitrary transcript stdout, and skips malformed JSONL plus Claude attachment-only records without failing or overmatching the review. This removes the noisy filename-only `tsift.md` matches and keeps renamed task/session history comparable across Claude and Codex.
+
+Updated `SPEC.md`, `VERSIONS.md`, and bumped `tsift` to `0.1.35`. Added unit and CLI integration coverage for historical alias matching, noisy hook/function-output false positives, and malformed-line tolerance.
+
+Verification in `src/tsift`: `cargo test session_review -- --nocapture`, `make check`, `cargo build --release`, `cargo install --path . --force`, `tsift --version` (`0.1.35`)
+Committed and pushed in `src/tsift` as `fe6a7e0` (`fix: tighten session-review transcript matching`).
+Committed in `agent-loop` as `ed95bc1cc` (`chore: update tsift submodule`).
+<!-- agent:boundary:e1232a7a -->
 <!-- /agent:exchange -->
 ###
 
@@ -65,7 +75,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#shmatch] Tighten cross-harness session-review matching/parsing for Claude JSONL path/session aliases and malformed-content lines so Claude + Codex history is comparable.
 - [ ] [#looprank] Add duplicate-turn and loop clustering to session-cost/session-review so repeated prompt bodies, closeout churn, and repeated command bundles are summarized explicitly.
 - [ ] [#hookcaps] Extend digest-first rewrite/output capping beyond the current Claude RTK path so Codex and other harnesses also avoid verbose raw command/transcript context.
 <!-- /agent:backlog -->

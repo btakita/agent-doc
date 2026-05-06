@@ -102,11 +102,32 @@ Verification completed in `src/tsift`:
 - `cargo install --path . --force`
 
 Committed and pushed in `src/tsift` as `e1075b0` (`feat: scope harness digests to owning repo root`). Recorded the parent `agent-loop` submodule pointer as `5eb7d04ff` (`chore: bump tsift submodule`); I will push `agent-loop` after this response finalizes so the document closeout commit is included.
-<!-- agent:boundary:2b0d018d -->
+❯ Do I need to run `tsift init` on all the submodules with tsift configured in agent-loop and in agent-loop itself? If yes, please do it.
+### Re: tsift init coverage — gpt-5
+
+Yes, but only on the roots whose Code Navigation block was stale.
+
+- `agent-loop` itself was already current at `v0.1.33`, so it did not need another `tsift init`.
+- `src/tsift` was stale (`pre-versioned`), so I ran `tsift init src/tsift`.
+- `src/session-share` was stale (`pre-versioned`), so I ran `tsift init src/session-share`.
+
+Verified afterward with `tsift status`:
+- `src/tsift`: `instructions: current (v0.1.33)`
+- `src/session-share`: `instructions: current (v0.1.33)`
+
+Files updated by the run:
+- `src/tsift/AGENTS.md`
+- `src/tsift/CLAUDE.md`
+- `src/session-share/AGENTS.md`
+
+`src/session-share/CLAUDE.md` did not need changes. I also avoided `tsift init --workspace` from inside the submodules because that would have promoted the target back to the parent `agent-loop` root instead of refreshing the submodule-local instructions.
+<!-- agent:boundary:709e6cce -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+do [#rchurn]. spec-test-build-install-commit-push
+---
 Can tsift use rtk to compress tool call output in the context?
 -->
 

@@ -22,6 +22,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 `agent-doc compact <FILE> [--component NAME] [--message TEXT] [--tag NAME] [--commit]`
 
 - Rewrites exchange or another component into a compacted summary/archive-pointer state.
+- After writing the archive markdown, compact best-effort upserts that archive into `.agent-doc/archive-index.db`; indexing failure warns but must not roll back archive creation.
 - For exchange compaction without an explicit message, the default summary must preserve live backlog/queue/icebox context.
 - `--commit` proves only that the compacted document state itself crossed the commit boundary; it does not also persist any later human explanation.
 

@@ -301,6 +301,58 @@ fn test_compact_commit_explains_commit_scope() {
 }
 
 #[test]
+fn test_archive_index_and_search_commands() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("tasks/session.md");
+    fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+    fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: current-session\nagent_doc_format: template\n---\n\nbody\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agent-doc/archives/hash-20260506-000000.md"),
+        concat!(
+            "---\n",
+            "archived_from: compact\n",
+            "archived_at: 20260506-000000\n",
+            "component: exchange\n",
+            "document: tasks/session.md\n",
+            "session: current-session\n",
+            "---\n\n",
+            "## User\n\nDo #sqlarcidx.\n\n",
+            "## Assistant\n\nPlan: tasks/agent-doc/plan-sqlite-compacted-turn-archive.md\n"
+        ),
+    )
+    .unwrap();
+
+    let mut index_cmd = agent_doc_cmd();
+    index_cmd.current_dir(root);
+    index_cmd.args(["archive-index", doc.to_str().unwrap(), "--rebuild"]);
+    index_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 archive(s) indexed"));
+
+    let mut search_cmd = agent_doc_cmd();
+    search_cmd.current_dir(root);
+    search_cmd.args([
+        "archive-search",
+        doc.to_str().unwrap(),
+        "--id",
+        "sqlarcidx",
+        "--json",
+    ]);
+    search_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"archive_path\""))
+        .stdout(predicate::str::contains("#sqlarcidx"));
+}
+
+#[test]
 fn test_cli_repair_aliases_legacy_recover() {
     let tmp = tempfile::TempDir::new().unwrap();
     let missing = tmp.path().join("missing.md");

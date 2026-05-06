@@ -66,7 +66,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-use crate::{component, frontmatter, pending, queue, snapshot};
+use crate::{archive_index, component, frontmatter, pending, queue, snapshot};
 
 /// A parsed exchange pair (User prompt + Assistant response).
 #[derive(Debug)]
@@ -167,7 +167,7 @@ pub fn run(
         let to_keep = &exchanges[exchanges.len() - keep_n..];
 
         // Build archive content
-        let archive_content = build_archive(&content, to_archive);
+        let archive_content = build_archive(file, &content, to_archive);
 
         // Save archive
         let archive_path = save_archive(file, &archive_content)?;
@@ -244,7 +244,10 @@ fn run_component_compact(
     }
 
     // Archive old content
-    let archive_path = save_archive(file, &build_component_archive(content, target, old_content))?;
+    let archive_path = save_archive(
+        file,
+        &build_component_archive(file, content, target, old_content),
+    )?;
 
     // Build summary marker
     let summary = match message {
@@ -330,7 +333,7 @@ fn run_component_compact_partial(
 
     let archive_path = save_archive(
         file,
-        &build_component_archive(content, target, &archive_body),
+        &build_component_archive(file, content, target, &archive_body),
     )?;
 
     // Build new component content
@@ -434,13 +437,21 @@ pub fn parse_topic_sections(content: &str) -> (String, Vec<String>) {
 }
 
 /// Build archive content from a component.
-fn build_component_archive(original: &str, component_name: &str, content: &str) -> String {
+fn build_component_archive(
+    doc: &Path,
+    original: &str,
+    component_name: &str,
+    content: &str,
+) -> String {
     let mut archive = String::new();
 
     archive.push_str("---\n");
     archive.push_str("archived_from: compact\n");
     archive.push_str(&format!("archived_at: {}\n", chrono_timestamp()));
     archive.push_str(&format!("component: {}\n", component_name));
+    if let Ok(document) = archive_document_value(doc) {
+        archive.push_str(&format!("document: {}\n", document));
+    }
 
     if let Ok((fm, _)) = frontmatter::parse(original)
         && let Some(session) = &fm.session
@@ -685,14 +696,18 @@ fn parse_exchanges(body: &str) -> Vec<Exchange> {
 }
 
 /// Build archive file content from exchanges.
-fn build_archive(original_header: &str, exchanges: &[Exchange]) -> String {
+fn build_archive(doc: &Path, original_header: &str, exchanges: &[Exchange]) -> String {
     let mut archive = String::new();
 
     // Add a header noting the source
     archive.push_str("---\n");
     archive.push_str("archived_from: compact\n");
     archive.push_str(&format!("archived_at: {}\n", chrono_timestamp()));
+    archive.push_str("component: exchange\n");
     archive.push_str(&format!("exchange_count: {}\n", exchanges.len()));
+    if let Ok(document) = archive_document_value(doc) {
+        archive.push_str(&format!("document: {}\n", document));
+    }
 
     // Preserve original frontmatter session ID if present
     if let Ok((fm, _)) = frontmatter::parse(original_header)
@@ -738,8 +753,27 @@ fn save_archive(doc: &Path, content: &str) -> Result<std::path::PathBuf> {
 
     std::fs::write(&archive_path, content)
         .with_context(|| format!("failed to write {}", archive_path.display()))?;
+    if let Err(err) = archive_index::index_archive(doc, &archive_path) {
+        eprintln!(
+            "[compact] warning: archive index update failed for {}: {}",
+            archive_path.display(),
+            err
+        );
+    }
 
     Ok(archive_path)
+}
+
+fn archive_document_value(doc: &Path) -> Result<String> {
+    let project_root = find_project_root(doc)?;
+    let canonical = doc
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", doc.display()))?;
+    Ok(canonical
+        .strip_prefix(&project_root)
+        .unwrap_or(&canonical)
+        .to_string_lossy()
+        .replace('\\', "/"))
 }
 
 /// Build the compacted document content.
@@ -952,12 +986,17 @@ mod tests {
 
     #[test]
     fn build_archive_format() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc_path = dir.path().join("session.md");
+        std::fs::write(&doc_path, "---\nsession: test\n---\n").unwrap();
         let exchanges = vec![Exchange {
             user: "Hello".to_string(),
             assistant: "Hi there".to_string(),
         }];
-        let archive = build_archive("---\nsession: test\n---\n", &exchanges);
+        let archive = build_archive(&doc_path, "---\nsession: test\n---\n", &exchanges);
         assert!(archive.contains("archived_from: compact"));
+        assert!(archive.contains("component: exchange"));
         assert!(archive.contains("session: test"));
         assert!(archive.contains("## User\n\nHello"));
         assert!(archive.contains("## Assistant\n\nHi there"));
@@ -993,9 +1032,15 @@ mod tests {
     #[test]
     fn build_component_archive_format() {
         let doc = "---\nagent_doc_session: abc-123\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\nOld conversation\n<!-- /agent:exchange -->\n";
-        let archive = build_component_archive(doc, "exchange", "\nOld conversation\n");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc_path = dir.path().join("docs/session.md");
+        std::fs::create_dir_all(doc_path.parent().unwrap()).unwrap();
+        std::fs::write(&doc_path, doc).unwrap();
+        let archive = build_component_archive(&doc_path, doc, "exchange", "\nOld conversation\n");
         assert!(archive.contains("archived_from: compact"));
         assert!(archive.contains("component: exchange"));
+        assert!(archive.contains("document: docs/session.md"));
         assert!(archive.contains("session: abc-123"));
         assert!(archive.contains("Old conversation"));
     }

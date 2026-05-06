@@ -33,6 +33,23 @@ Two modes:
 
 `agent-doc diff <FILE>` prints the unified diff between the saved snapshot and the current document.
 
+## archive-index
+
+`agent-doc archive-index <FILE> [--rebuild]`
+
+- Builds or refreshes the derived sqlite compacted-turn index at `.agent-doc/archive-index.db`.
+- The index is rebuildable from `.agent-doc/archives/*.md`; archive markdown remains the canonical history artifact.
+- `--rebuild` drops all derived rows and recreates them from the archive corpus.
+
+## archive-search
+
+`agent-doc archive-search <FILE> [--query TEXT] [--id BACKLOG_ID] [--session SESSION_ID] [--limit N] [--json] [--rebuild]`
+
+- Queries indexed compacted-turn chunks rather than rereading archive markdown manually.
+- Results are ranked to prefer the current document, exact `#id` matches, and recent archives.
+- `--id` accepts either `sqlarcidx` or `#sqlarcidx`.
+- `--rebuild` refreshes the derived index before search.
+
 ## reset
 
 `agent-doc reset <FILE>` clears the saved session id and deletes the snapshot for the document.

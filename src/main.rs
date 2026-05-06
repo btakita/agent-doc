@@ -41,6 +41,7 @@
 
 mod agent;
 mod annotate;
+mod archive_index;
 mod audit_docs;
 mod autoclaim;
 mod boundary;
@@ -624,6 +625,37 @@ enum Commands {
         /// If omitted, the full file is printed.
         #[arg(long)]
         component: Option<String>,
+    },
+    /// Build or refresh the sqlite archive index for compacted turns
+    ArchiveIndex {
+        /// Path to a session document in the target project
+        file: PathBuf,
+        /// Drop and rebuild the derived index from archive markdown
+        #[arg(long)]
+        rebuild: bool,
+    },
+    /// Search the sqlite archive index for compacted turns
+    ArchiveSearch {
+        /// Path to a session document in the target project
+        file: PathBuf,
+        /// Free-text query over indexed archive chunks
+        #[arg(long)]
+        query: Option<String>,
+        /// Exact backlog / prompt id to match (with or without leading #)
+        #[arg(long = "id")]
+        backlog_id: Option<String>,
+        /// Restrict to a specific archived session id
+        #[arg(long)]
+        session: Option<String>,
+        /// Max results to print
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+        /// Rebuild the derived index before searching
+        #[arg(long)]
+        rebuild: bool,
     },
     /// Archive old exchanges / compact component content
     Compact {
@@ -1546,6 +1578,24 @@ fn main() -> anyhow::Result<()> {
         Commands::Plan { file } => plan::run(&file),
         Commands::SessionCheck { file } => session_check::run(&file),
         Commands::Read { file, component } => read::run(&file, component.as_deref()),
+        Commands::ArchiveIndex { file, rebuild } => archive_index::run_index(&file, rebuild),
+        Commands::ArchiveSearch {
+            file,
+            query,
+            backlog_id,
+            session,
+            limit,
+            json,
+            rebuild,
+        } => archive_index::run_search(
+            &file,
+            query.as_deref(),
+            backlog_id.as_deref(),
+            session.as_deref(),
+            limit,
+            json,
+            rebuild,
+        ),
         Commands::Compact {
             file,
             keep,

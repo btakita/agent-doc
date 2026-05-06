@@ -80,10 +80,6 @@ impl SessionAccretionReport {
     pub fn is_healthy(&self) -> bool {
         self.level == SessionAccretionLevel::Healthy
     }
-
-    pub fn blocks_progress(&self) -> bool {
-        self.level == SessionAccretionLevel::Block
-    }
 }
 
 pub fn inspect(file: &Path) -> Result<SessionAccretionReport> {

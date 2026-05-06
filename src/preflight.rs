@@ -902,11 +902,8 @@ pub fn run(file: &Path) -> Result<()> {
             }
         };
 
-    // Step 2b/2c: Auto-compact before diffing when the document carries an
-    // explicit threshold or the session-accretion heuristics say another full
-    // turn would mostly replay stale context. Save the baseline after any local
-    // compact so response merges start from the actual visible document.
-    maybe_auto_compact_exchange(file);
+    // Step 2b/2c: Save the baseline after commit so response merges start from
+    // the actual visible document. Preflight no longer auto-compacts exchanges.
     let baseline_file = save_baseline_file(file);
 
     // Step 2d: Cross-document sweep (Fix 5) — commit any other tracked docs in the same
@@ -2411,41 +2408,6 @@ fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) -> S
     }
 }
 
-fn maybe_auto_compact_exchange(file: &Path) {
-    let Ok(content) = std::fs::read_to_string(file) else {
-        return;
-    };
-    let live_tail = live_exchange_tail_after_boundary(&content);
-    let Ok((fm, _)) = frontmatter::parse(&content) else {
-        return;
-    };
-    if !fm.resolve_mode().is_template() {
-        return;
-    }
-
-    if let Some(threshold) = fm.auto_compact
-        && threshold > 0
-        && let Some(comp) = crate::component::parse(&content)
-            .ok()
-            .and_then(|comps| comps.into_iter().find(|c| c.name == "exchange"))
-    {
-        let comp_content = &content[comp.open_end..comp.close_start];
-        let line_count = comp_content.lines().count();
-        if line_count > threshold {
-            eprintln!(
-                "[preflight] step 2c: auto-compact (exchange={} lines > threshold={})",
-                line_count, threshold
-            );
-            match crate::compact::run(file, None, Some("exchange"), None, None, false) {
-                Ok(()) => {
-                    preserve_live_exchange_tail_after_auto_compact(file, live_tail.as_deref())
-                }
-                Err(e) => eprintln!("[preflight] auto-compact warning: {}", e),
-            }
-        }
-    }
-}
-
 fn save_baseline_file(file: &Path) -> Option<String> {
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let hash = snapshot::doc_hash(&canonical).unwrap_or_else(|_| "unknown".to_string());
@@ -2465,77 +2427,6 @@ fn save_baseline_file(file: &Path) -> Option<String> {
             None
         }
     }
-}
-
-fn live_exchange_tail_after_boundary(content: &str) -> Option<String> {
-    let exchange = crate::component::parse(content)
-        .ok()?
-        .into_iter()
-        .find(|component| component.name == "exchange")?;
-    let exchange_content = exchange.content(content);
-    let (_, tail) = exchange_content.split_once("<!-- agent:boundary:")?;
-    let (_, after_boundary_line) = tail.split_once("-->")?;
-    let preserved = after_boundary_line
-        .lines()
-        .map(str::trim_end)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if preserved.is_empty() {
-        None
-    } else {
-        Some(format!("{preserved}\n"))
-    }
-}
-
-fn preserve_live_exchange_tail_after_auto_compact(file: &Path, tail: Option<&str>) {
-    let Some(tail) = tail else {
-        return;
-    };
-    let Ok(content) = std::fs::read_to_string(file) else {
-        return;
-    };
-    let Ok(components) = crate::component::parse(&content) else {
-        return;
-    };
-    let Some(exchange) = components
-        .into_iter()
-        .find(|component| component.name == "exchange")
-    else {
-        return;
-    };
-    let exchange_content = exchange.content(&content);
-    let normalized_tail = tail.trim_end();
-    let with_tail_exchange = if exchange_content.trim_end().ends_with(normalized_tail) {
-        exchange_content.to_string()
-    } else {
-        let mut updated = exchange_content.trim_end().to_string();
-        if !updated.is_empty() {
-            updated.push('\n');
-        }
-        updated.push_str(normalized_tail);
-        updated.push('\n');
-        updated
-    };
-    let with_tail = exchange.replace_content(&content, &with_tail_exchange);
-    if crate::write::atomic_write_pub(file, &with_tail).is_err() {
-        return;
-    }
-    if let Ok((fm, _)) = frontmatter::parse(&with_tail)
-        && fm.resolve_mode().is_crdt()
-    {
-        let state = crate::crdt::CrdtDoc::from_text(&with_tail).encode_state();
-        let _ = snapshot::save_crdt(file, &state);
-    }
-
-    let stripped_exchange = with_tail_exchange
-        .trim_end_matches('\n')
-        .strip_suffix(normalized_tail)
-        .map(str::trim_end)
-        .unwrap_or(with_tail_exchange.trim_end())
-        .to_string();
-    let without_tail = exchange.replace_content(&with_tail, &format!("{stripped_exchange}\n"));
-    let _ = snapshot::save(file, &without_tail);
 }
 
 #[cfg(test)]

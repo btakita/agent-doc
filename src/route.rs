@@ -6476,9 +6476,9 @@ done
                 &format!("exec {} {}", script.display(), file.display()),
             );
         }
-        let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(10));
+        let content = wait_for_pane_contains(iso, pane, "❯ ", std::time::Duration::from_secs(10));
         assert!(
-            content.contains("\n>"),
+            content.contains("❯ "),
             "mock agent-doc session should present a prompt, got: {content}"
         );
     }
@@ -6492,9 +6492,9 @@ done
             );
             send_keys_with_retry(iso, pane, &format!("exec {}", script.display()));
         }
-        let content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(10));
+        let content = wait_for_pane_contains(iso, pane, "❯ ", std::time::Duration::from_secs(10));
         assert!(
-            content.contains("\n>"),
+            content.contains("❯ "),
             "mock agent-doc session should present a prompt, got: {content}"
         );
     }

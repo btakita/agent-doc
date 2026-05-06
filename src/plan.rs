@@ -1290,11 +1290,7 @@ Done.
 
         let plan = build(&doc).unwrap();
 
-        assert!(
-            plan.blockers.is_empty(),
-            "unexpected blockers: {:?}",
-            plan
-        );
+        assert!(plan.blockers.is_empty(), "unexpected blockers: {:?}", plan);
         assert_eq!(
             plan.repo_actions,
             vec!["do #ctxacc. spec-test-build-install-commit-push".to_string()]

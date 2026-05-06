@@ -183,11 +183,9 @@ fn collect_recent_exchange_turn_sections(exchange_body: &str) -> Vec<String> {
         if trimmed.starts_with("<!-- agent:boundary:") {
             break;
         }
-        if trimmed.starts_with("### Re:") {
-            if !current.is_empty() {
-                sections.push(current.join("\n").trim().to_string());
-                current.clear();
-            }
+        if trimmed.starts_with("### Re:") && !current.is_empty() {
+            sections.push(current.join("\n").trim().to_string());
+            current.clear();
         }
         if !current.is_empty() || trimmed.starts_with("### Re:") {
             current.push(line);

@@ -255,10 +255,12 @@ fn search_results(file: &Path, options: &SearchOptions<'_>) -> Result<Vec<Search
             session_id.as_deref(),
             &normalized_text,
             query_norm.as_deref(),
-            backlog_id.is_some(),
-            !ref_hits.is_empty(),
-            &current_doc,
-            current_session.as_deref(),
+            SearchScoreContext {
+                has_backlog_filter: backlog_id.is_some(),
+                has_ref_hit: !ref_hits.is_empty(),
+                current_doc: &current_doc,
+                current_session: current_session.as_deref(),
+            },
         );
         results.push(SearchResult {
             archive_path,
@@ -283,15 +285,19 @@ fn search_results(file: &Path, options: &SearchOptions<'_>) -> Result<Vec<Search
     Ok(results)
 }
 
+struct SearchScoreContext<'a> {
+    has_backlog_filter: bool,
+    has_ref_hit: bool,
+    current_doc: &'a str,
+    current_session: Option<&'a str>,
+}
+
 fn score_result(
     document_path: &str,
     session_id: Option<&str>,
     normalized_text: &str,
     query_norm: Option<&str>,
-    has_backlog_filter: bool,
-    has_ref_hit: bool,
-    current_doc: &str,
-    current_session: Option<&str>,
+    context: SearchScoreContext<'_>,
 ) -> i64 {
     let mut score = 0;
     if let Some(query) = query_norm
@@ -299,13 +305,13 @@ fn score_result(
     {
         score += 40;
     }
-    if has_backlog_filter && has_ref_hit {
+    if context.has_backlog_filter && context.has_ref_hit {
         score += 100;
     }
-    if document_path == current_doc {
+    if document_path == context.current_doc {
         score += 30;
     }
-    if session_id.is_some() && session_id == current_session {
+    if session_id.is_some() && session_id == context.current_session {
         score += 15;
     }
     score

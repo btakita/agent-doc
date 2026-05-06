@@ -110,9 +110,13 @@ enum StopCloseAttempt {
 struct BlockedStopPayloadRecord<'a> {
     captured_at: u64,
     file: String,
+    kind: &'a str,
     reason: &'a str,
     payload_sha256: String,
-    last_assistant_message: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_assistant_message: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_prompt: Option<&'a str>,
 }
 
 pub fn handle_user_prompt_submit() -> Result<()> {
@@ -201,7 +205,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         }
         crate::session_check::SessionCheckStatus::Interrupted(reason) => {
             if !input.stop_hook_active {
-                match attempt_stop_closeout(&file, input)? {
+                match attempt_stop_closeout(&file, &state, input)? {
                     StopCloseAttempt::Closed => {
                         clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
                         return Ok(StopResponse::Continue { continue_: true });
@@ -226,7 +230,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             let capture_note = if input.stop_hook_active {
                 String::new()
             } else {
-                capture_assistant_text(&file, input)
+                capture_assistant_text(&file, &state, input)
             };
             let display = file.display();
             if input.stop_hook_active {
@@ -247,7 +251,11 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
     }
 }
 
-fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAttempt> {
+fn attempt_stop_closeout(
+    file: &Path,
+    state: &SessionState,
+    input: &StopInput,
+) -> Result<StopCloseAttempt> {
     let payload = crate::replay_guard::classify_replay_payload(&input.last_assistant_message);
     let has_response = matches!(
         payload,
@@ -256,12 +264,26 @@ fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAtte
     let has_bypassed_patchback =
         crate::session_check::detect_bypassed_response_write(file)?.is_some();
     if !has_response && !has_bypassed_patchback {
-        if let crate::replay_guard::ReplayPayloadClassification::Blocked(reason) = payload {
-            return Ok(StopCloseAttempt::StillOpen {
-                note: capture_blocked_stop_payload(file, &input.last_assistant_message, &reason),
-            });
-        }
-        return Ok(StopCloseAttempt::NotPossible);
+        return Ok(match payload {
+            crate::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+                StopCloseAttempt::StillOpen {
+                    note: capture_blocked_stop_payload(
+                        file,
+                        &input.last_assistant_message,
+                        &reason,
+                        Some(state.last_prompt.as_str()),
+                    ),
+                }
+            }
+            crate::replay_guard::ReplayPayloadClassification::Empty => {
+                StopCloseAttempt::StillOpen {
+                    note: capture_missing_stop_response(file, Some(state.last_prompt.as_str())),
+                }
+            }
+            crate::replay_guard::ReplayPayloadClassification::Replayable(_) => {
+                StopCloseAttempt::NotPossible
+            }
+        });
     }
 
     let mut note = String::new();
@@ -278,6 +300,7 @@ fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAtte
                 file,
                 &input.last_assistant_message,
                 &reason,
+                Some(state.last_prompt.as_str()),
             ));
         }
         crate::replay_guard::ReplayPayloadClassification::Empty => {}
@@ -304,28 +327,68 @@ fn attempt_stop_closeout(file: &Path, input: &StopInput) -> Result<StopCloseAtte
     Ok(StopCloseAttempt::Closed)
 }
 
-fn capture_assistant_text(file: &Path, input: &StopInput) -> String {
+fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) -> String {
     match crate::replay_guard::classify_replay_payload(&input.last_assistant_message) {
         crate::replay_guard::ReplayPayloadClassification::Empty => {
-            " The hook did not receive a non-empty `last_assistant_message`, so there was nothing to capture before blocking the turn.".to_string()
+            capture_missing_stop_response(file, Some(state.last_prompt.as_str()))
         }
-        crate::replay_guard::ReplayPayloadClassification::Replayable(response) => match crate::repair::save_pending(file, response.as_ref()) {
-            Ok(()) => {
-                crate::ops_log::log_op(file, "codex_stop_capture_saved");
-                " The latest assistant text was captured into the pending/capture ledger before the turn stopped.".to_string()
+        crate::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+            match crate::repair::save_pending(file, response.as_ref()) {
+                Ok(()) => {
+                    crate::ops_log::log_op(file, "codex_stop_capture_saved");
+                    " The latest assistant text was captured into the pending/capture ledger before the turn stopped.".to_string()
+                }
+                Err(err) => format!(
+                    " The hook could not capture the final assistant text before blocking the turn: {err}."
+                ),
             }
-            Err(err) => format!(
-                " The hook could not capture the final assistant text before blocking the turn: {err}."
-            ),
-        },
+        }
         crate::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
-            capture_blocked_stop_payload(file, &input.last_assistant_message, &reason)
+            capture_blocked_stop_payload(
+                file,
+                &input.last_assistant_message,
+                &reason,
+                Some(state.last_prompt.as_str()),
+            )
         }
     }
 }
 
-fn capture_blocked_stop_payload(file: &Path, payload: &str, reason: &str) -> String {
-    match save_blocked_stop_payload(file, payload, reason) {
+fn capture_missing_stop_response(file: &Path, last_prompt: Option<&str>) -> String {
+    let reason = "the Stop hook received no final assistant closeout; this can happen when Codex stops after a tool-only or authentication step before the assistant emits the final response";
+    match save_blocked_stop_payload(
+        file,
+        "",
+        reason,
+        "missing_last_assistant_message",
+        last_prompt,
+    ) {
+        Ok(path) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "codex_stop_capture_missing_response path={} reason={reason}",
+                    path.display()
+                ),
+            );
+            format!(
+                " The hook did not receive a non-empty `last_assistant_message`; this can happen when Codex stops after a tool-only or authentication step such as an MCP OAuth/authenticate flow before the final closeout is emitted. It saved a diagnostic record at `{}` with the tracked prompt so you can resume the turn, respond in the document, and still finish with `agent-doc finalize` / `agent-doc session-check`.",
+                path.display()
+            )
+        }
+        Err(err) => format!(
+            " The hook did not receive a non-empty `last_assistant_message`; this can happen when Codex stops after a tool-only or authentication step such as an MCP OAuth/authenticate flow before the final closeout is emitted, and it could not save the diagnostic record: {err}.",
+        ),
+    }
+}
+
+fn capture_blocked_stop_payload(
+    file: &Path,
+    payload: &str,
+    reason: &str,
+    last_prompt: Option<&str>,
+) -> String {
+    match save_blocked_stop_payload(file, payload, reason, "blocked_replay_payload", last_prompt) {
         Ok(path) => {
             crate::ops_log::log_op(
                 file,
@@ -348,7 +411,13 @@ fn capture_blocked_stop_payload(file: &Path, payload: &str, reason: &str) -> Str
     }
 }
 
-fn save_blocked_stop_payload(file: &Path, payload: &str, reason: &str) -> Result<PathBuf> {
+fn save_blocked_stop_payload(
+    file: &Path,
+    payload: &str,
+    reason: &str,
+    kind: &str,
+    last_prompt: Option<&str>,
+) -> Result<PathBuf> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let root = crate::snapshot::find_project_root(&canonical)
         .or_else(|| canonical.parent().map(Path::to_path_buf))
@@ -365,9 +434,11 @@ fn save_blocked_stop_payload(file: &Path, payload: &str, reason: &str) -> Result
     let record = BlockedStopPayloadRecord {
         captured_at: now_secs(),
         file: canonical.display().to_string(),
+        kind,
         reason,
         payload_sha256: crate::ops_log::content_hash(payload),
-        last_assistant_message: payload,
+        last_assistant_message: (!payload.trim().is_empty()).then_some(payload),
+        last_prompt: last_prompt.filter(|prompt| !prompt.trim().is_empty()),
     };
     let json = serde_json::to_string_pretty(&record)?;
     std::fs::write(&path, json)
@@ -1280,9 +1351,21 @@ agent-doc {}\n",
             StopResponse::Block { reason, .. } => {
                 assert!(reason.contains("unfinished document cycle"));
                 assert!(reason.contains("agent-doc repair"));
+                assert!(reason.contains("tool-only or authentication step"));
+                assert!(reason.contains("blocked-stop"));
             }
             other => panic!("expected block response, got {other:?}"),
         }
+
+        let blocked_dir = dir.path().join(".agent-doc/codex-hooks/blocked-stop");
+        let captures: Vec<_> = fs::read_dir(&blocked_dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .collect();
+        assert_eq!(captures.len(), 1, "expected one blocked-stop capture");
+        let blocked_payload = fs::read_to_string(captures[0].path()).unwrap();
+        assert!(blocked_payload.contains("\"kind\": \"missing_last_assistant_message\""));
+        assert!(blocked_payload.contains(&format!("agent-doc {}", doc.display())));
     }
 
     #[test]

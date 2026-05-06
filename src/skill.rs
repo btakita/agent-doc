@@ -1041,6 +1041,10 @@ mod tests {
         assert!(
             SKILL_TEMPLATE.contains("Do not require the same instruction to be repeated in chat")
         );
+        assert!(
+            SKILL_TEMPLATE
+                .contains("MCP auth / OAuth steps are sub-steps, not closeout boundaries")
+        );
         assert!(SKILL_TEMPLATE.contains(
             "Do not keep appending \"starting/continuing\" status prose while the requested work remains undone"
         ));
@@ -1129,6 +1133,8 @@ mod tests {
         assert!(content.contains(".codex/hooks.json"));
         assert!(content.contains("UserPromptSubmit"));
         assert!(content.contains("last_assistant_message"));
+        assert!(content.contains("tool-only/authentication step"));
+        assert!(content.contains("MCP auth / OAuth steps are sub-steps"));
         assert!(content.contains("### Re: topic — gpt-5"));
         assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
         assert!(content.contains("Imperative edits are executable directives"));

@@ -58,17 +58,38 @@ Completed `#0nv1` as a stale backlog closeout. The `session-cost` / `session-rev
 - `make check` passed on the current `src/tsift` HEAD (`518` unit tests + `75` exit-code tests).
 - `cargo install --path .` succeeded and refreshed the local `tsift` binary.
 - `src/tsift` itself is clean on `main...origin/main`, so there was no repo delta to commit or push in this cycle.
-<!-- agent:boundary:365b17de -->
+❯ Look at the Claude Code + Codex session history. What are #next-steps for tsift to save tokens while maintaining the appropriate amount of context & a good user experience?
+### Re: #next-steps for token-efficient context — gpt-5
+
+The session history points to resend cost, not answer cost. `tsift session-review tasks/software/tsift.md` reported a `96.77%` cached-input ratio across `5.80B` total tokens, `2403` `commit_already_current` no-op closeouts, and restart churn on the document side. `tsift session-review src/tsift` showed the same repo pattern with a `96.86%` cached-input ratio and repeated `220K`-token turns with very small outputs. For this target, the matched history is effectively Codex-only; Claude transcripts were considered, but they did not match cleanly, which is itself a product gap.
+
+What I’d put in the backlog, in priority order:
+
+1. `#ctxpack` Add a resumable `context-pack` or `session-review --next-context` surface that emits the minimum carry-forward bundle: active prompt targets, last verified diff/test/install state, touched files/symbols, unresolved failures, and the recommended next digest commands. This is the most direct fix for the repeated `200K+` cached resend pattern.
+2. `#shmatch` Tighten cross-harness session matching/parsing, especially Claude JSONL path/session alias detection and the noisy `did not contain message content or tool_use blocks` cases. Right now the cross-harness review is skewed because the `src/tsift` history matched `803` Codex sessions and `0` Claude sessions.
+3. `#looprank` Add duplicate-turn and loop clustering to `session-cost` and `session-review`: identify repeated prompt bodies, repeated closeout cycles, and repeated command bundles like `cargo build`, `cargo install`, and `agent-doc finalize`, so the tool can say exactly what should be compacted or summarized away.
+4. `#hookcaps` Extend digest-first rewriting/output capping beyond the current Claude `PreToolUse` RTK path. RTK already caps verbose `tsift` output for Claude, but the heavy-token sessions are still dominated by Codex prompt resend and repeated verbose command workflows.
+
+Top backlog item: `#ctxpack`.
+
+Operator note: this document already hit the session-accretion warning, so `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` is the right next session move before another long turn.
+<!-- agent:boundary:fc8ee70c -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+What are #next-steps for tsift to save tokens while maintaining the appropriate amount of context & a good user experience?
+---
 Can tsift use rtk to compress tool call output in the context?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ctxpack] Add a resumable context-pack / session-review next-context output that carries only active prompt targets, last verification state, touched files/symbols, unresolved failures, and next digest commands.
+- [ ] [#shmatch] Tighten cross-harness session-review matching/parsing for Claude JSONL path/session aliases and malformed-content lines so Claude + Codex history is comparable.
+- [ ] [#looprank] Add duplicate-turn and loop clustering to session-cost/session-review so repeated prompt bodies, closeout churn, and repeated command bundles are summarized explicitly.
+- [ ] [#hookcaps] Extend digest-first rewrite/output capping beyond the current Claude RTK path so Codex and other harnesses also avoid verbose raw command/transcript context.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

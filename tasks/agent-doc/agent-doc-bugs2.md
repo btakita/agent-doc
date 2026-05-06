@@ -108,7 +108,34 @@ Blocked by the planning contract for this cycle.
 `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit`
 
 I am stopping here instead of answering around that guard, per the binary-owned planning contract.
-<!-- agent:boundary:baf8e585 -->
+❯ Should there be a Table of Contents for the current document that is passed into the context instead of the last response?
+❯ Inline responses should include the response that the inline response is responding to.
+### Re: context pack shape — gpt-5
+
+Not instead of the last response.
+
+A Table of Contents or response index would be useful, but as a retrieval aid layered on top of the context pack, not as a replacement for the immediately relevant response block.
+
+What I would do:
+
+1. For inline prompts, always include the enclosing `### Re:` block directly in the bounded pack.
+2. For prompts appended at the end, always include the immediately previous `### Re:` block directly.
+3. Add a lightweight exchange TOC / response manifest so the model can request older or adjacent `### Re:` blocks by section id, position, or heading when needed.
+
+Why:
+
+- The current fixed "last two responses" window is too blunt. It misses the exact enclosing response for older inline edits.
+- A TOC alone is not enough to answer the prompt; it helps discovery, but the model still needs the actual response text for the local reasoning step.
+- Replacing the previous response with only a TOC would likely make tail prompts worse, because the previous response is usually the minimum useful context.
+
+So the right shape is:
+
+- mandatory local context: exact enclosing or immediately previous response
+- optional retrieval scaffold: TOC / index with efficient fetch for older adjacent responses
+- fallback behavior: ask for more only when the targeted fetch still is not enough
+
+That also matches your second note: inline responses should include the response they are responding to. I think that is the default behavior we want, and the TOC/retrieval layer should solve the broader "what else nearby should I fetch?" problem rather than replace that default.
+<!-- agent:boundary:be7ba09c -->
 <!-- /agent:exchange -->
 ###
 
@@ -119,6 +146,7 @@ I am stopping here instead of answering around that guard, per the binary-owned 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#restoc] [recommended] Add a lightweight exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent  sections on demand instead of relying only on the fixed recent-turn window.
 - [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing `### Re:` block for inline prompt edits and the immediately previous response for tail prompts, while leaving later-turn expansion on-demand.
 - [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.

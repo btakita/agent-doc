@@ -57,7 +57,20 @@ I added these next steps to backlog in priority order:
 4. `#snoopdedupe` Collapse repeated no-op closeout events in `agent-doc` log summaries so long sessions report unique cycles instead of commit noise.
 
 Top backlog item: `#srevagg`.
-<!-- agent:boundary:f09c2ce4 -->
+❯ Should  context accretion be implemented into agent-doc? If yes, please follow the #agent-doc-bug protocol.
+### Re: context accretion in agent-doc — gpt-5
+
+Yes, but with a scoped split.
+
+`agent-doc` should own the session/document-layer guardrails for context accretion: detecting churn-heavy sessions, surfacing compact/restart guidance, and deciding when the orchestration layer should warn or fail closed before another expensive turn. `tsift` should remain the bounded analysis backend for transcript/cost evidence instead of `agent-doc` reimplementing raw session-digest math itself.
+
+Because this turn is `plan_backlog_only`, I did not implement code. I created the bug plan and captured it in the agent-doc bug backlog:
+
+Plan: `tasks/agent-doc/plan-context-accretion-guardrails.md`
+Backlog: `#ctxacc` in `tasks/agent-doc/agent-doc-bugs2.md`
+
+That plan scopes the work around four areas: local accretion signals, the tsift/agent-doc responsibility split, turn-time warning/fail-closed policy, and regression coverage for churn-heavy document sessions.
+<!-- agent:boundary:dd6c2659 -->
 <!-- /agent:exchange -->
 ###
 

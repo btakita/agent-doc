@@ -42,7 +42,17 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:fb413f10 -->
+❯ do [#ctxpack]. spec-test-build-install-commit-push
+### Re: next-context pack — gpt-5
+
+Added `tsift session-review --next-context`, which emits a bounded resumable handoff pack with active prompt targets, last verification state, touched files/symbols, unresolved failures, and the next digest commands. The full JSON `session-review` report now also carries `next_context`, and the human-readable `--next-context` mode prints only that pack.
+
+Updated the spec, command docs, and versioned guidance to cover the new surface, and bumped `tsift` to `0.1.34`. Added unit and CLI integration coverage for both the aggregate JSON report and the dedicated `--next-context` output.
+
+Verification in `src/tsift`: `cargo test session_review -- --nocapture`, `make check`, `cargo build --release`, `cargo install --path . --force`
+Committed and pushed in `src/tsift` as `9016c12` (`feat: add session-review next-context pack`).
+Committed in `agent-loop` as `a315688a7` (`chore: update tsift submodule`).
+<!-- agent:boundary:a8a2f8e8 -->
 <!-- /agent:exchange -->
 ###
 
@@ -55,7 +65,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ctxpack] Add a resumable context-pack / session-review next-context output that carries only active prompt targets, last verification state, touched files/symbols, unresolved failures, and next digest commands.
 - [ ] [#shmatch] Tighten cross-harness session-review matching/parsing for Claude JSONL path/session aliases and malformed-content lines so Claude + Codex history is comparable.
 - [ ] [#looprank] Add duplicate-turn and loop clustering to session-cost/session-review so repeated prompt bodies, closeout churn, and repeated command bundles are summarized explicitly.
 - [ ] [#hookcaps] Extend digest-first rewrite/output capping beyond the current Claude RTK path so Codex and other harnesses also avoid verbose raw command/transcript context.

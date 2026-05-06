@@ -82,7 +82,30 @@ Commit / push:
 - pushed to `origin/20260422/codex-agent-backend`
 
 Plan: tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md
-<!-- agent:boundary:1d0469b0 -->
+❯ do [#rsxe]. spec-test-build-install-commit-push
+### Re: #rsxe instruction surface trim + route fail-closed guard — gpt-5
+
+Completed.
+
+Plan: `tasks/agent-doc/plan-instruction-surface-context-trim.md`
+
+- Trimmed the shared hot-path instruction surface in `src/agent-doc/SKILL.md` and regenerated the installed Claude/Codex/OpenCode/Cursor surfaces plus root `AGENTS.md`.
+- Added instruction-surface budget coverage in `src/agent-doc/src/skill.rs`.
+- Fixed the normal-route late-owner gap in `src/agent-doc/src/route.rs`: after stale registered-pane cleanup, route now re-checks associated-pane evidence before auto-start and fails closed with manual-claim guidance instead of silently cold-starting around a provable legacy owner.
+- Synced `CLAUDE.md`, `README.md`, and `SPEC.md` to the same invariant.
+
+Verification:
+- `cargo clippy -- -D warnings`
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test -- --test-threads=1`
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Repo work:
+- committed `src/agent-doc` on `20260422/codex-agent-backend`: `47fc9ef`
+- committed workspace instruction-surface sync on `main`: `9747b6bb3`
+- pushing after this closeout commit so the session response commit is included
+<!-- agent:boundary:17b65b81 -->
 <!-- /agent:exchange -->
 ###
 
@@ -97,7 +120,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rsxe] instrcap=Trim AGENTS.md + SKILL.md hot-path instruction surface while preserving binary-owned closeout invariants. Plan: tasks/agent-doc/plan-instruction-surface-context-trim.md
 - [ ] [#fye2] snrun=Harden Run Agent Doc reroute auto-remediation so live but non-dispatch-ready panes fail once with a precise reason instead of looking non-responsive. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md
 - [ ] [#grdd] smdq=Make startup-miss diagnostics pane-visible instead of leaving drafted recovery text in the harness input surface. Plan: tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md
 - [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing

@@ -23,7 +23,7 @@
 //! - `log_cycle_writes_jsonl`: cycle entry → valid JSON line in cycles.jsonl
 //! - `log_cycle_appends_multiple`: multiple entries → multiple lines
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::Path;
@@ -37,7 +37,7 @@ pub fn log_op(file: &Path, message: &str) {
 }
 
 /// Structured cycle log entry for reproducible operation tracking.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CycleEntry {
     /// Operation type (e.g., "write_inline", "write_template", "write_stream", "commit").
     pub op: String,

@@ -26,6 +26,11 @@ The command emits a structured planning record as JSON.
 - `handoff` — `none | orchestrate | compact | claim | other`
 - `blockers` — concrete blockers that mean the cycle should fail closed
 
+Accretion-specific blockers now come from the binary too: if recent exchange/log
+signals show that the session is churn-heavy enough to launch another expensive
+turn irresponsibly, `blockers` will name the required compact/restart recovery
+step instead of leaving that judgment to free-form agent prose.
+
 ## Dispatch Rules
 
 1. Run the planning phase after preflight and before repo work.

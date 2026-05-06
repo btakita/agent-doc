@@ -8,6 +8,8 @@
 //! - Produces an ordered record with prompt targets, execution scope, repo
 //!   actions, required binary commands, pending mutations that must be
 //!   resolved this cycle, a handoff target, and concrete blockers.
+//! - Fails closed on `session_accretion=block` so churn-heavy sessions do not
+//!   silently launch another expensive implementation turn.
 //! - Uses the same deterministic diff classifiers as preflight (`prompt_bearing_changes`,
 //!   imperative-directive extraction, slash-command parsing, orchestration detection)
 //!   so the planning record is binary-owned rather than free-form skill prose.
@@ -155,6 +157,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let pending_mutations =
         pending_mutations_for_doc(&content, &repo_actions, &prompt_targets, &added_diff_lines)?;
     let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
+    let session_accretion = crate::session_accretion::inspect(file)?;
 
     let mut required_commands = Vec::new();
     let mut handoff = HandoffTarget::None;
@@ -205,6 +208,19 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         if matches!(handoff, HandoffTarget::None) {
             handoff = HandoffTarget::Other;
         }
+    }
+
+    if session_accretion.blocks_progress() && !exchange_compaction_requested {
+        let mut blocker = format!(
+            "Context accretion guard tripped: {}.",
+            session_accretion.reasons.join("; ")
+        );
+        if !session_accretion.guidance.is_empty() {
+            blocker.push(' ');
+            blocker.push_str(&session_accretion.guidance.join(" "));
+        }
+        blockers.push(blocker);
+        required_commands.extend(session_accretion.guidance.iter().cloned());
     }
 
     if !exchange_compaction_requested {
@@ -1242,6 +1258,58 @@ do #pbct. spec-test-build-install-commit-push
         assert_eq!(
             plan.repo_actions,
             vec!["do #pbct. spec-test-build-install-commit-push".to_string()]
+        );
+    }
+
+    #[test]
+    fn build_plan_blocks_on_session_accretion_guard() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let long_exchange = (0..260)
+            .map(|idx| format!("context line {idx}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+"#;
+
+        let current = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{long_exchange}\ndo #ctxacc. spec-test-build-install-commit-push\n<!-- /agent:exchange -->\n"
+        );
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            !plan.blockers.is_empty(),
+            "expected accretion blocker, got {:?}",
+            plan
+        );
+        assert!(
+            plan.blockers[0].contains("Context accretion guard tripped"),
+            "unexpected blockers: {:?}",
+            plan.blockers
+        );
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|cmd| cmd.contains("agent-doc compact") && cmd.contains("--commit")),
+            "expected compact guidance in required commands, got {:?}",
+            plan.required_commands
         );
     }
 }

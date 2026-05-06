@@ -33,6 +33,8 @@
 //!   comparing against the cached content.
 //! - Step 4 — diff: calls `diff::compute(file)` to compare the current
 //!   document against the last snapshot; `no_changes=true` when they match.
+//! - Also emits a bounded `session_accretion` advisory when local exchange/log
+//!   heuristics detect churn-heavy growth or restart-heavy reopen patterns.
 //! - Serializes `PreflightOutput` as pretty JSON to stdout; all diagnostic
 //!   messages go to stderr.
 //! - `check_layout()`: inspects the current tmux session for structural issues:
@@ -259,6 +261,10 @@ pub struct PreflightOutput {
     /// When halted, `queue_prompts` is empty and `queue_active` is `false`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_halted: Option<String>,
+    /// Bounded session-growth / churn advisory derived from local exchange and
+    /// per-document cycle/session logs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_accretion: Option<crate::session_accretion::SessionAccretionReport>,
 }
 
 fn is_zero_usize(n: &usize) -> bool {
@@ -1416,6 +1422,9 @@ pub fn run(file: &Path) -> Result<()> {
     }
 
     let agent_model = resolve_agent_model(frontmatter_model.as_deref());
+    let session_accretion = crate::session_accretion::inspect(file)
+        .ok()
+        .filter(|report| !report.is_healthy());
     let output = PreflightOutput {
         layout_issues,
         recovered,
@@ -1450,6 +1459,7 @@ pub fn run(file: &Path) -> Result<()> {
         queue_start_at: queue_state.queue_start_at,
         queue_trigger: queue_state.queue_trigger,
         queue_halted: queue_state.queue_halted,
+        session_accretion,
     };
 
     let json =
@@ -4140,6 +4150,40 @@ mod tests {
         assert!(
             parsed.get("prompt_bearing_changes").is_none(),
             "prompt_bearing_changes should be omitted when empty"
+        );
+    }
+
+    #[test]
+    fn preflight_output_includes_session_accretion_when_present() {
+        let output = PreflightOutput {
+            session_accretion: Some(crate::session_accretion::SessionAccretionReport {
+                level: crate::session_accretion::SessionAccretionLevel::Warn,
+                exchange_lines: 220,
+                response_sections: 9,
+                recent_committed_cycles: 7,
+                recent_noop_closeouts: 2,
+                recent_restart_count: 0,
+                recent_session_loss_count: 0,
+                startup_miss_active: false,
+                reasons: vec!["exchange has grown".to_string()],
+                guidance: vec!["Run `agent-doc compact session.md --commit`.".to_string()],
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["session_accretion"]["level"], "warn");
+        assert_eq!(parsed["session_accretion"]["exchange_lines"], 220);
+    }
+
+    #[test]
+    fn preflight_output_omits_session_accretion_when_absent() {
+        let output = PreflightOutput::default();
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("session_accretion").is_none(),
+            "session_accretion should be omitted when absent"
         );
     }
 

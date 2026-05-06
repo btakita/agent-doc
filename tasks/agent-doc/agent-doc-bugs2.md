@@ -154,7 +154,25 @@ Commits:
 - `agent-loop`: `c76b63d96` (`chore: update agent-doc submodule`)
 
 `#staleflt` is complete. Top open backlog item is `#busychk`.
-<!-- agent:boundary:66d2acdb -->
+❯ do [#busychk]. spec-test-build-install-commit-push
+### Re: #busychk — gpt-5
+
+Implemented the sync reconcile guard for open closeout panes instead of relying on a generic busy-process check. `sync.rs` now resolves a pane's registered document, checks for open `preflight_started` / `response_captured` / `write_applied` cycle state, and uses tmux-router's `protect_pane` hook to leave that pane visible with a warning when DETACH would otherwise stash it. I also added regressions for the open-cycle detector and the reconcile replay, and updated the sync contract in `README.md`, `SPEC.md`, `specs/07-session-tmux-commands.md`, and `VERSIONS.md`.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test open_cycle_protected_file_state_detects_open_closeout_cycle --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test sync_preserves_open_cycle_pane_during_reconcile_detach --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Commits:
+- `src/agent-doc`: `5ea0283` (`fix: protect open closeout panes during sync`)
+- `agent-loop`: `adbe26c07` (`chore: update agent-doc submodule`)
+
+Both commits are pushed. `#busychk` is complete.
+<!-- agent:boundary:6356ce1d -->
 <!-- /agent:exchange -->
 ###
 
@@ -165,7 +183,7 @@ Commits:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
+- [ ] [#ctxacc] Add agent-doc context accretion guardrails from tasks/agent-doc/plan-context-accretion-guardrails.md: detect churn-heavy session growth, surface compact/restart guidance, and define fail-closed thresholds before another expensive turn launches.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

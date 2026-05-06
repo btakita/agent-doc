@@ -98,7 +98,17 @@ If we want this to work cleanly in prompts, I would add a dedicated retrieval co
 - JSON output with exact `### Re:` blocks, provenance, and adjacency metadata
 
 That would let the bounded recent-context pack stay small while giving the model an explicit way to ask for more prior turns only when needed. The current `#wv7g` backlog item still describes that direction correctly.
-<!-- agent:boundary:09c2111d -->
+❯ Should there be a Table of Contents for the current document that is passed into the context? With efficient retrieval?
+### Re: context accretion guard — gpt-5
+
+Blocked by the planning contract for this cycle.
+
+`agent-doc plan` returned a context-accretion blocker for this document: it has closed 13 cycles in the last 30 minutes, including 8 no-op closeouts. The required next step is:
+
+`agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit`
+
+I am stopping here instead of answering around that guard, per the binary-owned planning contract.
+<!-- agent:boundary:baf8e585 -->
 <!-- /agent:exchange -->
 ###
 

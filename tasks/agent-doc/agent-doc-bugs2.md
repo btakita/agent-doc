@@ -105,7 +105,26 @@ Repo work:
 - committed `src/agent-doc` on `20260422/codex-agent-backend`: `47fc9ef`
 - committed workspace instruction-surface sync on `main`: `9747b6bb3`
 - pushing after this closeout commit so the session response commit is included
-<!-- agent:boundary:17b65b81 -->
+❯ do [#fye2]. spec-test-build-install-commit-push
+❯ do [#fye2]. spec-test-build-install-commit-push
+### Re: Run Agent Doc reroute auto-remediation — gpt-5
+
+Completed .
+
+Plan: 
+
+ now fails closed instead of looking non-responsive when a live Codex pane accepts a dispatch-only reopen but never proves the routed submit. The route path now reuses the live tmux submit helper for dispatch-only Codex reroutes, treats the clean-exit  prompt as a concrete dispatch blocker, and requires hook-visible routed-submit proof before reporting success.
+
+Verification/build/install completed:
+- === instruction-files: clippy + test ===
+- 
+- 
+- 
+
+Repo work:
+- committed  on :  
+- pushed to
+<!-- agent:boundary:f7ea7784 -->
 <!-- /agent:exchange -->
 ###
 
@@ -120,7 +139,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#fye2] snrun=Harden Run Agent Doc reroute auto-remediation so live but non-dispatch-ready panes fail once with a precise reason instead of looking non-responsive. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md
 - [ ] [#grdd] smdq=Make startup-miss diagnostics pane-visible instead of leaving drafted recovery text in the harness input surface. Plan: tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md
 - [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing
   `### Re:` block for inline prompt edits and the immediately previous response for tail prompts, while leaving later-turn expansion on-demand.

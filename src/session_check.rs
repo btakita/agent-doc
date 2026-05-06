@@ -169,11 +169,11 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "session_check_startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} latest_open_timestamp={}",
+                        "session_check_startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} latest_start_timestamp={}",
                         file.display(),
                         miss.pane_id,
                         supersession.registered_pane,
-                        supersession.latest_open_timestamp
+                        supersession.latest_start_timestamp
                     ),
                 );
             } else {
@@ -2784,13 +2784,13 @@ Body\n\
         fs::write(&miss_path, serde_json::to_string_pretty(&miss).unwrap()).unwrap();
         let mut registry = crate::sessions::SessionRegistry::new();
         registry.insert(
-            "session-123".to_string(),
+            doc.display().to_string(),
             crate::sessions::SessionEntry {
                 pane: "%408".to_string(),
                 pid: 1,
                 cwd: tmp.path().display().to_string(),
                 started: "2026-04-29T00:00:00Z".to_string(),
-                session_id: "session-123".to_string(),
+                session_id: "session-456".to_string(),
                 file: doc.display().to_string(),
                 window: "@1".to_string(),
                 supervisor_instance_id: String::new(),
@@ -2798,11 +2798,9 @@ Body\n\
         );
         crate::sessions::save_in(tmp.path(), &registry).unwrap();
         fs::write(
-            tmp.path().join(".agent-doc/logs/session-123.log"),
+            tmp.path().join(".agent-doc/logs/session-456.log"),
             concat!(
-                "[1] session_start file=doc.md pane=%401 session=session-123\n",
-                "[2] codex_start mode=fresh restart_count=0\n",
-                "[10] session_start file=doc.md pane=%408 session=session-123\n",
+                "[10] session_start file=doc.md pane=%408 session=session-456\n",
                 "[11] codex_start mode=fresh restart_count=0\n",
             ),
         )

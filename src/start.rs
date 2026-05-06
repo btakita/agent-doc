@@ -1667,12 +1667,12 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         crate::ops_log::log_op(
             file,
             &format!(
-                "start_startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} miss_timestamp={} latest_open_timestamp={}",
+                "start_startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} miss_timestamp={} latest_start_timestamp={}",
                 file.display(),
                 miss.pane_id,
                 supersession.registered_pane,
                 miss_ts,
-                supersession.latest_open_timestamp
+                supersession.latest_start_timestamp
             ),
         );
     }

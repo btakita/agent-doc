@@ -65,7 +65,7 @@ pub struct SessionLogStatus {
 pub struct StartupMissSupersession {
     pub registered_pane: String,
     pub latest_start_pane: String,
-    pub latest_open_timestamp: u64,
+    pub latest_start_timestamp: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -419,34 +419,34 @@ pub fn superseded_by_newer_registered_start(
     let Some(root) = project_root(file) else {
         return Ok(None);
     };
-    let Some(registered_pane) = crate::sessions::load_in(&root)?
-        .values()
-        .find(|entry| entry.session_id == miss.session_id)
-        .map(|entry| entry.pane.clone())
-    else {
+    let registry = crate::sessions::load_in(&root)?;
+    let registry_key =
+        crate::sessions::canonical_registry_key_in(&root, &file.display().to_string());
+    let Some(registered_entry) = registry.get(&registry_key) else {
         return Ok(None);
     };
+    let registered_pane = registered_entry.pane.clone();
     if registered_pane == miss.pane_id {
         return Ok(None);
     }
 
-    let Some(status) = session_log_status(file, &miss.session_id)? else {
+    let Some(status) = session_log_status(file, &registered_entry.session_id)? else {
         return Ok(None);
     };
-    let Some(latest_open_timestamp) = latest_open_run_timestamp(&status) else {
+    let Some(latest_start_timestamp) = status.latest_start_timestamp else {
         return Ok(None);
     };
     let Some(latest_start_pane) = status.latest_start_pane.clone() else {
         return Ok(None);
     };
-    if latest_start_pane != registered_pane || latest_open_timestamp <= miss.timestamp {
+    if latest_start_pane != registered_pane || latest_start_timestamp <= miss.timestamp {
         return Ok(None);
     }
 
     Ok(Some(StartupMissSupersession {
         registered_pane,
         latest_start_pane,
-        latest_open_timestamp,
+        latest_start_timestamp,
     }))
 }
 
@@ -907,7 +907,55 @@ mod tests {
             .expect("stale marker should be superseded");
         assert_eq!(supersession.registered_pane, "%408");
         assert_eq!(supersession.latest_start_pane, "%408");
-        assert_eq!(supersession.latest_open_timestamp, 11);
+        assert_eq!(supersession.latest_start_timestamp, 10);
+    }
+
+    #[test]
+    fn superseded_by_newer_registered_start_uses_current_file_owner_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let mut registry = crate::sessions::SessionRegistry::new();
+        registry.insert(
+            doc.display().to_string(),
+            crate::sessions::SessionEntry {
+                pane: "%408".to_string(),
+                pid: 1,
+                cwd: tmp.path().display().to_string(),
+                started: "2026-04-29T00:00:00Z".to_string(),
+                session_id: "session-456".to_string(),
+                file: doc.display().to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        crate::sessions::save_in(tmp.path(), &registry).unwrap();
+        fs::write(
+            tmp.path().join(".agent-doc/logs/session-456.log"),
+            concat!(
+                "[10] session_start file=test.md pane=%408 session=session-456\n",
+                "[11] codex_start mode=fresh restart_count=0\n",
+            ),
+        )
+        .unwrap();
+        let miss = StartupMiss {
+            file: doc.display().to_string(),
+            pane_id: "%401".to_string(),
+            session_id: "session-123".to_string(),
+            harness: "codex".to_string(),
+            timestamp: 5,
+            origin: StartupMissOrigin::RoutedTrigger,
+            cycle_baseline_id: None,
+        };
+
+        let supersession = superseded_by_newer_registered_start(&doc, &miss)
+            .unwrap()
+            .expect(
+                "current file owner should supersede stale marker even after session id rollover",
+            );
+        assert_eq!(supersession.registered_pane, "%408");
+        assert_eq!(supersession.latest_start_pane, "%408");
+        assert_eq!(supersession.latest_start_timestamp, 10);
     }
 
     #[test]

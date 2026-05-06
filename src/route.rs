@@ -2484,12 +2484,12 @@ fn resolve_or_create_pane_with_auto_fix_retry(
         crate::ops_log::log_op(
             file,
             &format!(
-                "route_startup_miss_cleared_superseded_owner file={} stale_pane={} registered_pane={} miss_timestamp={} latest_open_timestamp={}",
+                "route_startup_miss_cleared_superseded_owner file={} stale_pane={} registered_pane={} miss_timestamp={} latest_start_timestamp={}",
                 file_path,
                 miss.pane_id,
                 supersession.registered_pane,
                 miss_ts,
-                supersession.latest_open_timestamp
+                supersession.latest_start_timestamp
             ),
         );
         let _ = crate::startup_miss::clear(file);

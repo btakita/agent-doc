@@ -2365,12 +2365,12 @@ fn run_with_options(
                     supersession.registered_pane
                 );
                 sync_log(&format!(
-                    "startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} miss_timestamp={} latest_open_timestamp={}",
+                    "startup_miss_cleared_superseded file={} stale_pane={} registered_pane={} miss_timestamp={} latest_start_timestamp={}",
                     file_path.display(),
                     miss.pane_id,
                     supersession.registered_pane,
                     miss_ts,
-                    supersession.latest_open_timestamp
+                    supersession.latest_start_timestamp
                 ));
             }
             let unresolved_startup_miss = crate::startup_miss::load(file_path).ok().flatten();

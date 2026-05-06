@@ -90,7 +90,26 @@ Commits:
 - `agent-loop`: `7b00a330f chore: update agent-doc submodule`
 
 `#sgown4` is complete.
-<!-- agent:boundary:56814ed8 -->
+❯ do [#sshmeta]. spec-test-build-install-commit-push
+### Re: #sshmeta — gpt-5
+
+Implemented the SSH metadata guard in `src/agent-doc` instead of relying on prompt inference. `parse_for_file()` now resolves `required_ssh_targets` from frontmatter or project-local `.agent-doc/config.toml` mappings (`[ssh.docs."..."]`, `[ssh.profiles.<name>]`), and `preflight`, `plan`, and `run` all fail closed when an SSH-dependent doc resolves no targets. The full suite exposed one route handoff regression in the busy-pane fresh-restart path; I fixed that too so a restart handoff now follows the authoritative replacement pane instead of tripping the cross-file dispatch guard.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test parse_for_file_resolves_required_ssh_targets_from_project_doc_mapping --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test preflight_fails_closed_when_required_ssh_doc_mapping_resolves_no_targets --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test resolve_or_create_pane_restarts_fresh_for_busy_registered_pane_after_noop_fix --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Commits:
+- `src/agent-doc`: `16bed91` (`feat: resolve required ssh metadata from project config`)
+- `agent-loop`: `0edc1877f` (`chore: update agent-doc submodule`)
+
+`#sshmeta` is complete.
+<!-- agent:boundary:4cd4d225 -->
 <!-- /agent:exchange -->
 ###
 
@@ -101,7 +120,6 @@ Commits:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sshmeta] [recommended] Land `tasks/agent-doc/plan-ssh-required-capability-metadata-guard.md`: make SSH-dependent ops docs resolve `required_ssh_targets` deterministically so blocked SSH fails closed instead of leaking ordinary fallback guidance.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 <!-- /agent:backlog -->

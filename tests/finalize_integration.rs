@@ -540,6 +540,37 @@ fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
 }
 
 #[test]
+fn finalize_accepts_hash_prefixed_pending_done_id() {
+    let (tmp, doc) = setup_session_template_doc();
+    insert_pending_item(&doc, "- [ ] [#done1] Close the loop\n");
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--pending-done",
+            "#done1",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(!content.contains("- [ ] [#done1] Close the loop"));
+    assert!(content.contains("### Re: #done1 close the loop — gpt-5"));
+
+    let head_text = head_blob(tmp.path());
+    assert!(
+        !head_text.contains("- [ ] [#done1] Close the loop"),
+        "HEAD backlog should not keep the completed item open when --pending-done uses #id"
+    );
+}
+
+#[test]
 fn finalize_stream_rejects_empty_exchange_shell_before_commit() {
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);

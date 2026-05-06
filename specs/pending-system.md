@@ -142,6 +142,11 @@ The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch
 | `--pending-clear` | Remove all items. |
 | `--pending-reorder <id1,id2,...>` | Reorder items by ID. Missing IDs keep their relative order after the listed prefix. |
 
+For every id-based pending flag except `--pending-add`, the binary normalizes
+the id by trimming whitespace, stripping one optional leading `#`, and
+lowercasing before lookup. `--pending-done 4qja` and `--pending-done #4QJA`
+must therefore resolve the same tracked item.
+
 **Plan-backed item rule:** when a pending bullet depends on a dedicated plan
 document, the operator must create that plan file before adding the pending
 item, and the pending text must include the concrete plan-file path. The

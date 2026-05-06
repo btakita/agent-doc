@@ -581,6 +581,24 @@ fn write_pending_done_marks_checked() {
     assert!(content.contains("- [x] [#abcd]"));
 }
 
+#[test]
+fn write_pending_done_accepts_hash_prefixed_id() {
+    let (_tmp, doc) = setup_doc("- [ ] [#abcd] task");
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-done",
+            "#abcd",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [x] [#abcd]"));
+}
+
 // ---- Phase 2: gate / ungate ----
 
 #[test]

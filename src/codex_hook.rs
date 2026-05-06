@@ -1203,7 +1203,11 @@ agent-doc {}\n",
             Some(&original),
         )
         .unwrap();
-        fs::write(&doc, format!("{original}\nVisible drift after committed closeout.\n")).unwrap();
+        fs::write(
+            &doc,
+            format!("{original}\nVisible drift after committed closeout.\n"),
+        )
+        .unwrap();
 
         apply_user_prompt_submit(&UserPromptSubmitInput {
             session_id: "codex-session".to_string(),

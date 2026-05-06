@@ -61,6 +61,7 @@ fn find_component_containing_open_id(
     file: &Path,
     id: &str,
 ) -> Result<(String, component::Component)> {
+    let id = pending::normalize_pending_id(id);
     let content = std::fs::read_to_string(file).context("failed to read document")?;
     let components = component::parse(&content).context("failed to parse components")?;
     let comp = components

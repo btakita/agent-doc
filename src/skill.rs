@@ -1262,9 +1262,9 @@ mod tests {
                 "Do not patch the document early and then keep working for the same turn"
             )
         );
-        assert!(content.contains(
-            "the manual repo commit must exclude the active session document"
-        ));
+        assert!(
+            content.contains("the manual repo commit must exclude the active session document")
+        );
         assert!(content.contains("Resolve the intended non-session path set first"));
         assert!(content.contains("stop immediately on any stage failure"));
         assert!(content.contains("verify the staged diff still matches the intended set"));
@@ -1283,12 +1283,12 @@ mod tests {
         assert!(content.contains("agent-doc finalize <FILE>"));
         assert!(content.contains("agent-doc write --commit <FILE>"));
         assert!(content.contains("bare `agent-doc write`"));
-        assert!(content.contains(
-            "keep the active session document out of that manual git commit"
-        ));
+        assert!(content.contains("keep the active session document out of that manual git commit"));
         assert!(content.contains("Resolve the exact intended non-session path set first"));
         assert!(content.contains("verify `git diff --cached --name-only`"));
-        assert!(content.contains("Do **not** continue to `git commit` after a narrowed `git add` / stage failure"));
+        assert!(content.contains(
+            "Do **not** continue to `git commit` after a narrowed `git add` / stage failure"
+        ));
         assert!(content.contains(
             "Do **not** stage the active session document into an ordinary repo `git commit`"
         ));

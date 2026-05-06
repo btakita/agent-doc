@@ -573,6 +573,10 @@ pub(crate) fn is_valid_pending_id(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
+pub(crate) fn normalize_pending_id(id: &str) -> String {
+    id.trim().trim_start_matches('#').to_ascii_lowercase()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LeadingCustomIdPrefix {
     Explicit,
@@ -1475,7 +1479,7 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
 /// Mark an item `[x]` by id. Phase 1: state-machine validation lives in
 /// the upcoming `pending_cmd` layer; this primitive forces Done unconditionally.
 pub fn op_done(body: &str, id: &str) -> Result<String> {
-    let id = id.trim().to_lowercase();
+    let id = normalize_pending_id(id);
     let mut found = false;
     let layout = PendingLayout::parse(body).replace_items(|item| {
         if item.id == id {
@@ -1500,7 +1504,7 @@ pub fn op_done(body: &str, id: &str) -> Result<String> {
 /// - `Gated → Gated`: idempotent no-op (returns body unchanged).
 /// - `Done → *`: error (cannot re-gate a completed item).
 pub fn op_gate(body: &str, id: &str) -> Result<String> {
-    let id = id.trim().to_lowercase();
+    let id = normalize_pending_id(id);
     let layout = PendingLayout::parse(body);
     let current = layout
         .items()
@@ -1539,7 +1543,7 @@ pub fn op_gate(body: &str, id: &str) -> Result<String> {
 /// - `Open → *`: error (no source `[/]`).
 /// - `Done → *`: error (cannot ungate a completed item).
 pub fn op_ungate(body: &str, id: &str) -> Result<String> {
-    let id = id.trim().to_lowercase();
+    let id = normalize_pending_id(id);
     let layout = PendingLayout::parse(body);
     let current = layout
         .items()
@@ -1580,7 +1584,7 @@ pub fn op_edit(body: &str, id: &str, new_text: &str) -> Result<String> {
         bail!("pending edit: text must be non-empty");
     }
     let (parsed_text, parsed_continuation) = parse_pending_edit_payload(new_text)?;
-    let id = id.trim().to_lowercase();
+    let id = normalize_pending_id(id);
     let mut found = false;
     let layout = PendingLayout::parse(body).replace_items(|item| {
         if item.id == id {
@@ -1610,7 +1614,7 @@ pub fn op_clear(body: &str) -> Result<String> {
 pub fn op_reorder(body: &str, ids: &[String]) -> Result<String> {
     let layout = PendingLayout::parse(body);
     let items = layout.items();
-    let requested: Vec<String> = ids.iter().map(|s| s.trim().to_lowercase()).collect();
+    let requested: Vec<String> = ids.iter().map(|s| normalize_pending_id(s)).collect();
     for id in &requested {
         if !items.iter().any(|i| i.id == *id) {
             bail!("pending reorder: no item with id [#{}]", id);
@@ -1653,7 +1657,7 @@ pub fn op_resolve_gate(body: &str, gate_type: &str) -> (String, Vec<String>) {
 /// Set a typed gate on a gated item. The item must already be in `[/]` state.
 /// Transitions `[/] → [/<gate_type>]`. Errors if the item is not gated.
 pub fn op_set_gate_type(body: &str, id: &str, gate_type: &str) -> Result<String> {
-    let id = id.trim().to_lowercase();
+    let id = normalize_pending_id(id);
     let gt = gate_type.trim().to_lowercase();
     if gt.is_empty()
         || !gt
@@ -2076,6 +2080,22 @@ mod tests {
     }
 
     #[test]
+    fn reap_with_items_archives_malformed_flush_left_spill_with_parent() {
+        let body = concat!(
+            "- [x] [#b1c4] drop\n",
+            "Commands:\n",
+            "  cargo test -p agent-doc pending::\n"
+        );
+        let (_new_body, removed) = reap_with_items(body).unwrap();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].id, "b1c4");
+        assert_eq!(
+            removed[0].continuation,
+            "Commands:\n  cargo test -p agent-doc pending::\n"
+        );
+    }
+
+    #[test]
     fn detect_reorder_same_set_different_order() {
         let snap = "- [ ] [#a1b2] one\n- [ ] [#c3d4] two\n";
         let cur = "- [ ] [#c3d4] two\n- [ ] [#a1b2] one\n";
@@ -2406,6 +2426,13 @@ mod tests {
         let body = "- [ ] [#a1b2] task\n";
         let new_body = op_done(body, "a1b2").unwrap();
         assert!(new_body.contains("[x]"));
+    }
+
+    #[test]
+    fn op_done_accepts_hash_prefixed_id() {
+        let body = "- [ ] [#a1b2] task\n";
+        let new_body = op_done(body, "#a1b2").unwrap();
+        assert!(new_body.contains("- [x] [#a1b2] task"));
     }
 
     #[test]

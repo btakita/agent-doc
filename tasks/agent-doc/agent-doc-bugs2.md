@@ -62,8 +62,7 @@ Commits:
 The `this document closed ... cycles` line is generated prompt context from `session_accretion.rs`, and `prompt_context::build_document_section()` injects the first accretion reason into the bounded prompt pack. So that text was not something the user or harness literally "Entered"; it was synthesized diagnostic context that got surfaced in the binding prompt.
 
 I agree with the policy concern. With `#ctxpack` in place, the better default is to keep the visible document intact for cycle-count-only warn states and send bounded diff plus prompt targets, session summary, and backlog head to the harness. `#ratecmp` is now in backlog to tighten auto-compact so it is reserved for true exchange growth or repeated closeout churn rather than session rate alone.
-
-<!-- agent:boundary:c49934a4 -->
+<!-- agent:boundary:6adeb5e3 -->
 <!-- /agent:exchange -->
 ###
 
@@ -74,6 +73,7 @@ I agree with the policy concern. With `#ctxpack` in place, the better default is
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#cmpclr] Compaction does not clear the session-accretion guard: `preflight` / `plan` can keep failing closed on the same recent-cycle blocker immediately after a successful `agent-doc compact --commit`, trapping the document in a compact-then-block loop. Plan: `tasks/agent-doc/plan-compact-does-not-clear-accretion-guard.md`
 - [ ] [#ratecmp] [recommended] Rework session-accretion auto-compact so recent cycle count alone does not compact otherwise healthy docs; prefer bounded diff/recent-context packs and reserve auto-compact for exchange growth or closeout churn.
 - [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.

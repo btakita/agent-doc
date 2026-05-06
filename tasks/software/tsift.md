@@ -41,17 +41,18 @@ Icebox:
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 
-*2 earlier topic(s) archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260506-053455.md`*
-❯ do [#5zm8]. spec-test-build-install-commit-push
-### Re: #5zm8 digestpref — gpt-5
+*1 earlier topic(s) archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260506-053750.md`*
+❯ This document was compacted. The rate of turns should not be a factor.
+❯ > this document closed 11 cycles in the last 30 minutes
+### Re: session accretion guard — gpt-5
 
-Blocked by the binary planning guard before implementation.
+Compaction did happen, but the planner is still failing closed because this guard is keyed to recent committed-cycle history, not only the current exchange size.
 
-`agent-doc plan` returned a fail-closed blocker for session accretion: this document closed 11 cycles in the last 30 minutes, including 6 no-op closeouts. Its required command is:
-- `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit`
+This turn's `agent-doc plan` blocker is still:
+- `Context accretion guard tripped: document closed 13 cycles in the last 30 minutes (7 no-op closeouts). Run agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit before another large turn.`
 
-So I did not start the `#5zm8` spec/test/build/install/commit/push work in this cycle. `#5zm8` stays open in backlog until the compacted session is resumed on a fresh turn.
-<!-- agent:boundary:93dfa01a -->
+So the current binary behavior is: compacting the document reduces exchange state, but it does not by itself clear the recent-turn-rate counter. Until that planner contract changes, I still cannot start `#5zm8` from this session.
+<!-- agent:boundary:c4436aba -->
 <!-- /agent:exchange -->
 ###
 

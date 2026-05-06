@@ -1,6 +1,7 @@
 use crate::{component, diff, pending, session_accretion};
 
 const BACKLOG_HEAD_LIMIT: usize = 3;
+const RECENT_EXCHANGE_TURNS_LIMIT: usize = 2;
 
 pub(crate) fn build_document_section(
     diff_text: &str,
@@ -23,10 +24,14 @@ pub(crate) fn build_document_section(
         .unwrap_or_else(|| "No explicit `### Session Summary` block is present yet.".to_string());
     let backlog_head = render_backlog_head(&components, doc)
         .unwrap_or_else(|| "No active backlog items found.".to_string());
+    let recent_exchange_turns =
+        render_recent_exchange_turns(&components, doc).unwrap_or_else(|| {
+            "No earlier `### Re:` turns are available in the current exchange.".to_string()
+        });
     let available_components = render_available_components(&components);
 
     let mut rendered = format!(
-        "The session is showing {}-level context accretion, so the full exchange tail is omitted. Use this bounded response-context pack instead:\n\n\
+        "The session is showing {}-level context accretion, so the on-disk document stays full length while this prompt uses a bounded recent-context pack instead. If older history becomes necessary, ask for more previous turns instead of assuming hidden context.\n\n\
          <response_context level=\"{}\">\n\
          <prompt_targets oldest_first=\"true\">\n{}\n\
          </prompt_targets>\n\n\
@@ -34,6 +39,8 @@ pub(crate) fn build_document_section(
          </session_summary>\n\n\
          <backlog_head>\n{}\n\
          </backlog_head>\n\n\
+         <recent_exchange_turns limit=\"{}\">\n{}\n\
+         </recent_exchange_turns>\n\n\
          <available_components>\n{}\n\
          </available_components>\n\
          </response_context>\n\n",
@@ -42,6 +49,8 @@ pub(crate) fn build_document_section(
         render_prompt_targets(&prompt_targets),
         session_summary.trim_end(),
         backlog_head.trim_end(),
+        RECENT_EXCHANGE_TURNS_LIMIT,
+        recent_exchange_turns.trim_end(),
         available_components.trim_end(),
     );
     if let Some(reason) = report.reasons.first() {
@@ -155,6 +164,48 @@ fn render_available_components(components: &[component::Component]) -> String {
         .join("\n")
 }
 
+fn render_recent_exchange_turns(components: &[component::Component], doc: &str) -> Option<String> {
+    let exchange = components.iter().find(|comp| comp.name == "exchange")?;
+    let sections = collect_recent_exchange_turn_sections(exchange.content(doc));
+    if sections.is_empty() {
+        return None;
+    }
+    Some(sections.join("\n\n"))
+}
+
+fn collect_recent_exchange_turn_sections(exchange_body: &str) -> Vec<String> {
+    let lines: Vec<&str> = exchange_body.lines().collect();
+    let mut sections = Vec::new();
+    let mut current = Vec::new();
+
+    for line in lines {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("<!-- agent:boundary:") {
+            break;
+        }
+        if trimmed.starts_with("### Re:") {
+            if !current.is_empty() {
+                sections.push(current.join("\n").trim().to_string());
+                current.clear();
+            }
+        }
+        if !current.is_empty() || trimmed.starts_with("### Re:") {
+            current.push(line);
+        }
+    }
+
+    if !current.is_empty() {
+        sections.push(current.join("\n").trim().to_string());
+    }
+
+    let keep_from = sections.len().saturating_sub(RECENT_EXCHANGE_TURNS_LIMIT);
+    sections
+        .into_iter()
+        .skip(keep_from)
+        .filter(|section| !section.is_empty())
+        .collect()
+}
+
 fn level_name(level: session_accretion::SessionAccretionLevel) -> &'static str {
     match level {
         session_accretion::SessionAccretionLevel::Healthy => "healthy",
@@ -217,8 +268,11 @@ mod tests {
         assert!(section.contains("### Session Summary\n\nCompacted earlier turns."));
         assert!(section.contains("- [ ] [#ctxpack] Add bounded context pack"));
         assert!(section.contains("- 1 more active item(s)"));
+        assert!(section.contains("<recent_exchange_turns limit=\"2\">"));
+        assert!(section.contains("### Re: current topic — gpt-5"));
+        assert!(section.contains("Older response body."));
+        assert!(section.contains("ask for more previous turns"));
         assert!(section.contains("available_components"));
-        assert!(!section.contains("Older response body."));
     }
 
     #[test]

@@ -13,8 +13,6 @@
 //!   or restart guidance before another expensive turn.
 //! - `block` means the orchestration layer should fail closed unless the user
 //!   is already taking an explicit compact/recovery path.
-//! - `auto_compact_policy()` derives when warn/block churn should trigger a
-//!   bounded preflight auto-compact rather than only advisory text.
 //! - Successful exchange compaction records a per-document recovery marker so
 //!   closeout-churn metrics only count cycles that happened after the latest
 //!   compact, instead of trapping the same document in a compact-then-block loop.
@@ -30,8 +28,6 @@
 //! - `inspect_warns_on_large_exchange`
 //! - `inspect_warns_on_repeated_noop_closeouts`
 //! - `inspect_blocks_on_restart_heavy_churn_with_active_startup_miss`
-//! - `auto_compact_policy_warns_on_noop_churn`
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -53,13 +49,6 @@ const RECENT_SESSION_LOSS_WARN: usize = 2;
 struct RecentExchangeCompaction {
     file: String,
     timestamp: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AutoCompactPolicy {
-    pub keep: usize,
-    pub rewrite_summary: bool,
-    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -94,44 +83,6 @@ impl SessionAccretionReport {
 
     pub fn blocks_progress(&self) -> bool {
         self.level == SessionAccretionLevel::Block
-    }
-
-    pub fn auto_compact_policy(&self) -> Option<AutoCompactPolicy> {
-        let compact_worthy = self.exchange_lines >= WARN_EXCHANGE_LINES
-            || self.response_sections >= WARN_RESPONSE_SECTIONS
-            || self.recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES
-            || self.recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS;
-        if !compact_worthy || matches!(self.level, SessionAccretionLevel::Healthy) {
-            return None;
-        }
-        let (keep, rewrite_summary) = match self.level {
-            SessionAccretionLevel::Warn => {
-                (1, self.recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS)
-            }
-            SessionAccretionLevel::Block => (0, true),
-            SessionAccretionLevel::Healthy => return None,
-        };
-        let reason = if self.recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS {
-            format!(
-                "session accretion auto-compact due to {} recent no-op closeouts",
-                self.recent_noop_closeouts
-            )
-        } else if self.recent_committed_cycles >= WARN_RECENT_COMMITTED_CYCLES {
-            format!(
-                "session accretion auto-compact due to {} recent committed cycles",
-                self.recent_committed_cycles
-            )
-        } else {
-            format!(
-                "session accretion auto-compact due to {} exchange lines across {} response sections",
-                self.exchange_lines, self.response_sections
-            )
-        };
-        Some(AutoCompactPolicy {
-            keep,
-            rewrite_summary,
-            reason,
-        })
     }
 }
 
@@ -711,43 +662,5 @@ mod tests {
             "expected restart guidance, got {:?}",
             report.guidance
         );
-    }
-
-    #[test]
-    fn auto_compact_policy_warns_on_noop_churn() {
-        let report = SessionAccretionReport {
-            level: SessionAccretionLevel::Warn,
-            exchange_lines: 40,
-            response_sections: 2,
-            recent_committed_cycles: 3,
-            recent_noop_closeouts: 2,
-            recent_restart_count: 0,
-            recent_session_loss_count: 0,
-            startup_miss_active: false,
-            reasons: vec![],
-            guidance: vec![],
-        };
-
-        let policy = report.auto_compact_policy().unwrap();
-        assert_eq!(policy.keep, 1);
-        assert!(policy.rewrite_summary);
-    }
-
-    #[test]
-    fn auto_compact_policy_ignores_restart_only_warns() {
-        let report = SessionAccretionReport {
-            level: SessionAccretionLevel::Warn,
-            exchange_lines: 20,
-            response_sections: 1,
-            recent_committed_cycles: 1,
-            recent_noop_closeouts: 0,
-            recent_restart_count: 2,
-            recent_session_loss_count: 2,
-            startup_miss_active: true,
-            reasons: vec![],
-            guidance: vec![],
-        };
-
-        assert!(report.auto_compact_policy().is_none());
     }
 }

@@ -580,6 +580,7 @@ mod tests {
 
         let prompt = build_prompt(RunMode::Template, &fm, diff, doc, Some(&report));
         assert!(prompt.contains("<response_context level=\"warn\">"));
+        assert!(prompt.contains("<recent_exchange_turns limit=\"2\">"));
         assert!(!prompt.contains("<document>\n## Exchange"));
     }
 

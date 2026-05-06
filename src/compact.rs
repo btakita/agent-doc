@@ -526,26 +526,6 @@ fn build_exchange_compact_summary(content: &str, archive_path: &Path) -> String 
     summary
 }
 
-pub fn build_exchange_refresh_summary(content: &str, note: &str) -> String {
-    let mut summary = String::from("### Session Summary\n\n");
-    summary.push_str(note.trim_end());
-    summary.push('\n');
-
-    let Ok(components) = component::parse(content) else {
-        return summary;
-    };
-
-    let backlog = summarize_backlog_component(&components, content);
-    let queued = summarize_queue_component(&components, content);
-    let icebox = summarize_icebox_component(&components, content);
-
-    append_compact_summary_section(&mut summary, "Active backlog", &backlog);
-    append_compact_summary_section(&mut summary, "Queue", &queued);
-    append_compact_summary_section(&mut summary, "Icebox", &icebox);
-
-    summary
-}
-
 fn append_compact_summary_section(summary: &mut String, title: &str, items: &[String]) {
     if items.is_empty() {
         return;

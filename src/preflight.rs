@@ -2423,7 +2423,6 @@ fn maybe_auto_compact_exchange(file: &Path) {
         return;
     }
 
-    let mut compacted = false;
     if let Some(threshold) = fm.auto_compact
         && threshold > 0
         && let Some(comp) = crate::component::parse(&content)
@@ -2439,48 +2438,11 @@ fn maybe_auto_compact_exchange(file: &Path) {
             );
             match crate::compact::run(file, None, Some("exchange"), None, None, false) {
                 Ok(()) => {
-                    preserve_live_exchange_tail_after_auto_compact(file, live_tail.as_deref());
-                    compacted = true;
+                    preserve_live_exchange_tail_after_auto_compact(file, live_tail.as_deref())
                 }
                 Err(e) => eprintln!("[preflight] auto-compact warning: {}", e),
             }
         }
-    }
-
-    if compacted {
-        return;
-    }
-
-    let Ok(report) = crate::session_accretion::inspect(file) else {
-        return;
-    };
-    let Some(policy) = report.auto_compact_policy() else {
-        return;
-    };
-
-    let message = if policy.rewrite_summary {
-        Some(crate::compact::build_exchange_refresh_summary(
-            &content,
-            "Context automatically compacted before the next turn because session-accretion heuristics tripped.",
-        ))
-    } else {
-        None
-    };
-
-    eprintln!(
-        "[preflight] step 2c: session accretion auto-compact (keep={}): {}",
-        policy.keep, policy.reason
-    );
-    match crate::compact::run(
-        file,
-        Some(policy.keep),
-        Some("exchange"),
-        message.as_deref(),
-        None,
-        false,
-    ) {
-        Ok(()) => preserve_live_exchange_tail_after_auto_compact(file, live_tail.as_deref()),
-        Err(e) => eprintln!("[preflight] session accretion auto-compact warning: {}", e),
     }
 }
 
@@ -3443,7 +3405,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_session_accretion_auto_compacts_and_preserves_live_prompt() {
+    fn preflight_session_accretion_does_not_auto_compact_exchange() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("session.md");
@@ -3515,24 +3477,13 @@ mod tests {
         run(&doc).unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        assert!(file_after.contains("1 earlier topic(s) archived"));
+        assert!(!file_after.contains("1 earlier topic(s) archived"));
         assert!(file_after.contains("### Re: second topic — gpt-5"));
-        assert!(!file_after.contains("### Re: first topic — gpt-5"));
+        assert!(file_after.contains("### Re: first topic — gpt-5"));
         assert!(file_after.contains("do #autocmp. spec-test-build-install-commit-push"));
 
         let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
-        assert!(snapshot_after.contains("1 earlier topic(s) archived"));
-        assert!(
-            !snapshot_after.contains("do #autocmp. spec-test-build-install-commit-push"),
-            "snapshot must keep the compacted baseline without absorbing the live prompt"
-        );
-
-        let report = crate::session_accretion::inspect(&doc).unwrap();
-        assert!(
-            !report.blocks_progress(),
-            "auto-compact should satisfy closeout-churn recovery for the next turn: {:?}",
-            report
-        );
+        assert_eq!(snapshot_after, snapshot);
     }
 
     #[test]

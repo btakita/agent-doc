@@ -220,7 +220,11 @@ It was not Entered because the older diagnostic path drafted a literal `echo '[a
 
 If the same warning keeps resurfacing after a later successful bind/start, the adjacent stale-marker follow-up is already documented in `tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md`.
 Recovered post-closeout drift.
-<!-- agent:boundary:c4973f59 -->
+No backlog item references `tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md`. Please add to the backlog.
+### Re: stale startup-miss backlog capture — gpt-5
+
+Added. The backlog now includes the missing follow-up for `tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md`.
+<!-- agent:boundary:46857684 -->
 <!-- /agent:exchange -->
 ###
 
@@ -235,6 +239,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#s2sy] smst=Clear stale startup-miss markers after a later session start so session-check and reroute stop surfacing superseded pane failures. Plan: tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md
 - [ ] [#rsxe] instrcap=Trim AGENTS.md + SKILL.md hot-path instruction surface while preserving binary-owned closeout invariants. Plan: tasks/agent-doc/plan-instruction-surface-context-trim.md
 - [ ] [#fye2] snrun=Harden Run Agent Doc reroute auto-remediation so live but non-dispatch-ready panes fail once with a precise reason instead of looking non-responsive. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md
 - [ ] [#grdd] smdq=Make startup-miss diagnostics pane-visible instead of leaving drafted recovery text in the harness input surface. Plan: tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md

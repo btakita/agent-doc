@@ -61,8 +61,12 @@ Commits:
 
 The `this document closed ... cycles` line is generated prompt context from `session_accretion.rs`, and `prompt_context::build_document_section()` injects the first accretion reason into the bounded prompt pack. So that text was not something the user or harness literally "Entered"; it was synthesized diagnostic context that got surfaced in the binding prompt.
 
-I agree with the policy concern. With `#ctxpack` in place, the better default is to keep the visible document intact for cycle-count-only warn states and send bounded diff plus prompt targets, session summary, and backlog head to the harness. `#ratecmp` is now in backlog to tighten auto-compact so it is reserved for true exchange growth or repeated closeout churn rather than session rate alone.
-<!-- agent:boundary:6adeb5e3 -->
+❯ I agree with the policy concern. With `#ctxpack` in place, the better default is to keep the visible document intact for cycle-count-only warn states and send bounded diff plus prompt targets, session summary, and backlog head to the harness. `#ratecmp` is now in backlog to tighten auto-compact so it is reserved for true exchange growth or repeated closeout churn rather than session rate alone.
+### Re: icebox normalization — gpt-5
+
+Marked the historical icebox entries closed so `session-check` no longer treats them as shadow-open backlog items outside the live backlog.
+
+<!-- agent:boundary:a2316633 -->
 <!-- /agent:exchange -->
 ###
 
@@ -84,15 +88,6 @@ I agree with the policy concern. With `#ctxpack` in place, the better default is
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
-- [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
-- [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement:
-  `#jberr`.
-- [ ] [#tmuxcrash] Closed on April 30, 2026 after the
-  `session_end` metadata closeout fix in
-  `startup_miss.rs` and the routed-dispatch binding hardening in
-  `route.rs`. Final child closed:
-  `#tmuxcrash-rn2d`.
-
 <!-- /agent:icebox -->
 
 

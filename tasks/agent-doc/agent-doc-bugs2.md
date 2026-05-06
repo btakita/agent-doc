@@ -135,7 +135,20 @@ So the right shape is:
 - fallback behavior: ask for more only when the targeted fetch still is not enough
 
 That also matches your second note: inline responses should include the response they are responding to. I think that is the default behavior we want, and the TOC/retrieval layer should solve the broader "what else nearby should I fetch?" problem rather than replace that default.
-<!-- agent:boundary:be7ba09c -->
+❯ Should we also offer a ToC for archive documents?
+### Re: archive ToC scope — gpt-5
+
+Yes, but I would keep it secondary to the live-document path.
+
+The live document still needs direct inclusion of the enclosing or immediately previous `### Re:` block. For archives, a TOC/index is more valuable because the model usually does not want the whole archived markdown blob; it wants efficient discovery plus a precise fetch path.
+
+So I would scope it this way:
+
+- live doc: direct targeted response inclusion first, TOC second
+- archives: TOC/index first, then exact section fetch by heading, adjacency, or response id
+
+That keeps the default prompt small while making older context discoverable without forcing search-by-free-text every time.
+<!-- agent:boundary:f8bb375a -->
 <!-- /agent:exchange -->
 ###
 
@@ -146,7 +159,7 @@ That also matches your second note: inline responses should include the response
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#restoc] [recommended] Add a lightweight exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent  sections on demand instead of relying only on the fixed recent-turn window.
+- [ ] [#restoc] [recommended] Add a lightweight live+archive exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent  sections on demand instead of relying only on the fixed recent-turn window.
 - [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing `### Re:` block for inline prompt edits and the immediately previous response for tail prompts, while leaving later-turn expansion on-demand.
 - [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.

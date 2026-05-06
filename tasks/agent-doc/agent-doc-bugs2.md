@@ -49,7 +49,20 @@ Verification is blocked on the full crate suite, so I did not build/install or c
 
 Plan: tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md
 
-<!-- agent:boundary:ec00f644 -->
+❯ do [#vrhs]
+### Re: serialized full-suite route failure check — gpt-5
+
+I treated `do [#vrhs]` as an investigation/verification turn for the previously reported serialized failure in `route::tests::resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route`.
+
+Current result: I could not reproduce that failure on the present tree.
+
+What I ran:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route -- --exact --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml route::tests:: -- --test-threads=1`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml -- --test-threads=1`
+
+All of them passed, including the previously suspect route handoff test and the full serialized `agent-doc` suite (`1892` main-unit tests plus integration/doc-test follow-ons). I did not make code changes in this turn because the current branch already behaves correctly for the reported repro.
+<!-- agent:boundary:02125ffd -->
 <!-- /agent:exchange -->
 ###
 
@@ -64,7 +77,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#vrhs] [recommended] Investigate serialized full-suite failure in route::tests::resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route; restart handoff assertion missed because auto-start won the retry path.
 - [ ] [#s2sy] smst=Clear stale startup-miss markers after a later session start so session-check and reroute stop surfacing superseded pane failures. Plan: tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md
 - [ ] [#rsxe] instrcap=Trim AGENTS.md + SKILL.md hot-path instruction surface while preserving binary-owned closeout invariants. Plan: tasks/agent-doc/plan-instruction-surface-context-trim.md
 - [ ] [#fye2] snrun=Harden Run Agent Doc reroute auto-remediation so live but non-dispatch-ready panes fail once with a precise reason instead of looking non-responsive. Plan: tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md

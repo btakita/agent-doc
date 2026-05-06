@@ -36,7 +36,18 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:ce70c4a9 -->
+❯ What are #next-steps for tsift to save tokens while maintaining the appropriate amount of context & a good user experience?
+### Re: next steps for tsift token efficiency — gpt-5
+
+The highest-leverage next step is to make tsift budget-aware by default rather than relying on callers to remember `--compact`, `--terse`, `--tabular`, `diff-digest`, or `session-review --next-context` manually.
+
+1. `#ts1a` Add budget-aware response profiles for `search`, `explain`, and `session-review`: explicit max-items/max-bytes modes with stable ids for follow-up expansion.
+2. `#ts1b` Add a single agent-facing context-pack command that composes existing bounded surfaces (`diff-digest`, `test-digest`, `log-digest`, `session-review --next-context`) into one resumable handoff payload.
+3. `#ts1c` Add MCP/tool-native structured envelopes for terse results so clients can render summaries and request expansion without paying prose tokens up front.
+4. `#ts1d` Improve lock/degraded-mode UX: when a scoped index writer is active, prefer read-only/exact fallback or a minimal actionable summary instead of pushing the user into a noisy retry path.
+
+On the RTK question: yes, it can help if the harness can keep large artifacts out-of-band, but it is a secondary win. The primary win is still source-side shaping: less output, grouped output, and expansion on demand. Backlog top: `#ts1a`.
+<!-- agent:boundary:c03caccb -->
 <!-- /agent:exchange -->
 ###
 
@@ -49,6 +60,10 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ts1a] Add budget-aware response profiles for tsift search/explain/session-review with max-items or max-bytes limits and stable expansion handles
+- [ ] [#ts1b] Add a single agent-facing context-pack command that composes diff-digest, test-digest, log-digest, and session-review --next-context
+- [ ] [#ts1c] Add MCP/tool-native structured terse envelopes so clients can render summaries and request follow-up expansion without prose-heavy defaults
+- [ ] [#ts1d] Improve tsift lock/degraded-mode UX so active index writers fall back to read-only or exact search with a minimal actionable summary
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

@@ -55,7 +55,23 @@ Commits:
 - `agent-loop`: `6ca870ed2 chore: update agent-doc submodule`
 
 `#sgown2` is complete. Top open backlog item is `#sgown3`.
-<!-- agent:boundary:eca36a56 -->
+❯ do [#sgown3]. spec-test-build-install-commit-push
+### Re: #sgown3 — gpt-5
+
+Phase 3 was already implemented in `src/agent-doc` across the shipped supervisor/actor commits (`f89ddaa`, `312851e`, and follow-up fixes), so this cycle closed the remaining spec/test drift instead of inventing new ownership logic. I updated `specs/supervisor.md` to reflect the live supervisor stack and added `session_actor` regression coverage that pins same-generation `waiting_input`, `blocked`, and `closed` lifecycle transitions.
+
+Verification:
+- `cargo test session_actor --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Commits:
+- `src/agent-doc`: `ad64d12 docs: align phase-3 supervisor actor status`
+- `agent-loop`: `5079c3883 chore: update agent-doc submodule`
+
+Both commits are pushed. `#sgown3` is complete.
+<!-- agent:boundary:e4358038 -->
 <!-- /agent:exchange -->
 ###
 
@@ -66,7 +82,7 @@ Commits:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sgown3] [recommended] Land phase-3 supervisor integration from tasks/agent-doc/plan-single-owner-session-actor-transition.md: route supervisor startup/readiness/busy/waiting-input/close transitions through the actor record instead of direct registry/session-log ownership writes.
+- [ ] [#sshmeta] [recommended] Land `tasks/agent-doc/plan-ssh-required-capability-metadata-guard.md`: make SSH-dependent ops docs resolve `required_ssh_targets` deterministically so blocked SSH fails closed instead of leaking ordinary fallback guidance.
 - [ ] [#sgown4] [recommended] Land phase-4 actor dispatch from tasks/agent-doc/plan-single-owner-session-actor-transition.md: make route dispatch validate actor generation/state and wait on actor acknowledgement instead of normal-path owner election or later document-side inference.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.

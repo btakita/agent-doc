@@ -147,8 +147,24 @@ So I would scope it this way:
 - live doc: direct targeted response inclusion first, TOC second
 - archives: TOC/index first, then exact section fetch by heading, adjacency, or response id
 
-That keeps the default prompt small while making older context discoverable without forcing search-by-free-text every time.
-<!-- agent:boundary:f8bb375a -->
+❯ That keeps the default prompt small while making older context discoverable without forcing search-by-free-text every time.
+❯ Please order the backlog by priority order
+### Re: backlog priority — gpt-5
+
+Reordered the backlog by priority.
+
+Current top-to-bottom order:
+- `#257p`
+- `#wv7g`
+- `#restoc`
+- `#noopcap`
+- `#sshprelude`
+- `#chkptcap`
+- `#sqliterepros`
+- `#sqliteeval`
+
+I put response-loss / finalize correctness first, then the context-pack work under discussion, then closeout/recovery durability, and left the SQLite investigation items last because they are exploratory rather than immediate fixes.
+<!-- agent:boundary:d3197ced -->
 <!-- /agent:exchange -->
 ###
 
@@ -159,12 +175,12 @@ That keeps the default prompt small while making older context discoverable with
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#restoc] [recommended] Add a lightweight live+archive exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent  sections on demand instead of relying only on the fixed recent-turn window.
-- [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing `### Re:` block for inline prompt edits and the immediately previous response for tail prompts, while leaving later-turn expansion on-demand.
-- [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
-- [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
-- [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
+- [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing `### Re:` block for inline prompt edits and the immediately previous response for tail prompts, while leaving later-turn expansion on-demand.
+- [ ] [#restoc] [recommended] Add a lightweight live+archive exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent  sections on demand instead of relying only on the fixed recent-turn window.
+- [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
+- [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
+- [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 <!-- /agent:backlog -->

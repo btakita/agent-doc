@@ -30,7 +30,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-Context automatically compacted before the next turn because session-accretion heuristics tripped.
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260506-055406.md`*
 
 Active backlog:
 - [ ] [#5zm8] digestpref=Expand tsift init / code-navigation guidance so Claude and Codex prefer session/diff/log/test digest commands over raw transcript, git diff/show, and verbose log reads.
@@ -40,14 +40,7 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-
-*1 earlier topic(s) archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260506-054642.md`*
-❯ do [#5zm8]. spec-test-build-install-commit-push
-### Re: #5zm8 — gpt-5
-Blocked by the planning guard for this session: `agent-doc plan` returned a context-accretion blocker and explicitly requires `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` before another large turn.
-
-I did not start the `#5zm8` spec/test/build/install/commit/push work in this cycle. The backlog item remains open.
-<!-- agent:boundary:5d69fdf9 -->
+<!-- agent:boundary:3fa2c53c -->
 <!-- /agent:exchange -->
 ###
 

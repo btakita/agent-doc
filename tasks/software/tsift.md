@@ -41,40 +41,17 @@ Icebox:
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 
-*1 earlier topic(s) archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260506-053003.md`*
-
-### Re: #9m98 srevmatch — gpt-5
-
-Implemented `#9m98` in `src/tsift`.
-
-- File-target `session-review` no longer counts Claude/Codex transcripts on a shared workspace `cwd` alone. A document path alias or `agent_doc_session` signal is now required, and `cwd` is kept only as supporting evidence when that file-specific match exists.
-- Added unit and compiled CLI regression coverage for cwd-only false positives.
-- Updated `SPEC.md`, `CLAUDE.md`, and `VERSIONS.md` to document the fail-closed matching rule for document targets.
-
-Verification:
-- `cargo test`
-- `cargo build --release`
-- `cargo install --path . --force`
-
-Local commits:
-- `src/tsift`: `d19e88e` (`fix: tighten session-review doc matching`)
-- workspace: `4c3ac97ef` (`chore: update tsift submodule`)
-
-Pushing after this closeout so the session document commit stays on the binary-owned finalize path.
-❯ re [#5zm8]: Since digests are lossy, how can we ensure data is not missed if it was not in the digest? Would the preference be advisory?
+*2 earlier topic(s) archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260506-053455.md`*
+❯ do [#5zm8]. spec-test-build-install-commit-push
 ### Re: #5zm8 digestpref — gpt-5
 
-Yes. The preference should be advisory, not authoritative.
+Blocked by the binary planning guard before implementation.
 
-Digests are a default triage surface, not a completeness guarantee. The safe contract is:
-- prefer session/diff/log/test digests first for cost and focus
-- escalate to raw transcript, full diff, or verbose logs when the digest is truncated, uncertain, filtered, contradictory, or the user asks for exact detail
-- keep the underlying artifact discoverable so the agent can verify instead of assuming the digest captured everything
+`agent-doc plan` returned a fail-closed blocker for session accretion: this document closed 11 cycles in the last 30 minutes, including 6 no-op closeouts. Its required command is:
+- `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit`
 
-So for `tsift init` and the code-navigation guidance, I would phrase it as: start with the digest, then fall through to raw artifacts on ambiguity, mismatch, or verification needs. That preserves the efficiency win without creating false confidence.
-
-I’m keeping `#5zm8` open with that explicit fail-open framing.
-<!-- agent:boundary:dc19845c -->
+So I did not start the `#5zm8` spec/test/build/install/commit/push work in this cycle. `#5zm8` stays open in backlog until the compacted session is resumed on a fresh turn.
+<!-- agent:boundary:93dfa01a -->
 <!-- /agent:exchange -->
 ###
 

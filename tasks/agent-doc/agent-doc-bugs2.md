@@ -27,14 +27,14 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260506-054856.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260506-055012.md`*
 
 Active backlog:
 - [ ] [#cmpclr] Compaction does not clear the session-accretion guard: `preflight` / `plan` can keep failing closed on the same recent-cycle blocker immediately after a successful `agent-doc compact --commit`, trapping the document in a compact-then-block loop. Plan: `tasks/agent-doc/plan-compact-does-not-clear-accretion-guard.md`
 - [ ] [#ratecmp] [recommended] Rework session-accretion auto-compact so recent cycle count alone does not compact otherwise healthy docs; prefer bounded diff/recent-context packs and reserve auto-compact for exchange growth or closeout churn.
 - [ ] [#sshprelude] [recommended] Resumed Codex streaming turns with `required_ssh_targets` can get stuck on stale SSH state if the thread emits assistant prelude text before the failing SSH command. Add fresh-retry recovery for that sequence without leaking stale prelude text into the final response. Plan: `tasks/agent-doc/plan-codex-required-ssh-retry-after-prelude.md`
 - 5 more active item(s)
-<!-- agent:boundary:0d317537 -->
+<!-- agent:boundary:d398d7cb -->
 <!-- /agent:exchange -->
 ###
 

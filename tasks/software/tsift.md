@@ -141,7 +141,21 @@ artifacts:
 Then the harness can render a friendly summary and only fetch `run://abc123` when someone explicitly drills in. That is the token-saving path.
 
 Separate note: preflight flagged this session as accreting and suggested `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` before another large turn.
-<!-- agent:boundary:4edc5355 -->
+❯ Add #next-steps to implement
+### Re: next steps to implement — gpt-5
+
+Added the concrete next implementation steps behind the tool-output discussion.
+
+Priority order now:
+1. `#ts1c` Add MCP/tool-native structured terse envelopes so clients can render summaries and request follow-up expansion without prose-heavy defaults.
+2. `#ts1e` Add a `command-run` / `test-run` envelope schema with transcript artifact handles so green runs stay summary-first by default.
+3. `#ts1f` Add tsift runner/rewrite integration for `cargo test` / `cargo build` / install so agent-doc can opt into digest-first execution output.
+4. `#ts1d` Improve degraded-mode UX for active index writers.
+
+Backlog top: `#ts1c`.
+
+The sequence matters: `#ts1c` defines the structured envelope surface, `#ts1e` nails down the execution-time payload shape, and `#ts1f` wires it into the actual command path where token savings happen.
+<!-- agent:boundary:e04d6949 -->
 <!-- /agent:exchange -->
 ###
 
@@ -155,6 +169,8 @@ Can tsift use rtk to compress tool call output in the context?
 
 <!-- agent:backlog -->
 - [ ] [#ts1c] Add MCP/tool-native structured terse envelopes so clients can render summaries and request follow-up expansion without prose-heavy defaults
+- [ ] [#ts1e] Add a command/test-run envelope schema with transcript artifact handles so green runs stay summary-first by default
+- [ ] [#ts1f] Add tsift runner/rewrite integration for cargo test/build/install so agent-doc can opt into digest-first execution output
 - [ ] [#ts1d] Improve tsift lock/degraded-mode UX so active index writers fall back to read-only or exact search with a minimal actionable summary
 <!-- /agent:backlog -->
 

@@ -902,54 +902,12 @@ pub fn run(file: &Path) -> Result<()> {
             }
         };
 
-    // Step 2b: Save baseline after commit (post-boundary-reposition).
-    // This baseline matches the snapshot exactly, eliminating staleness.
-    let baseline_file = {
-        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-        let hash = snapshot::doc_hash(&canonical).unwrap_or_else(|_| "unknown".to_string());
-        let baseline_dir = snapshot::find_project_root(&canonical)
-            .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf())
-            .join(".agent-doc/baselines");
-        let _ = std::fs::create_dir_all(&baseline_dir);
-        let baseline_path = baseline_dir.join(format!("{}.md", hash));
-        match std::fs::read_to_string(file) {
-            Ok(content) => {
-                let _ = std::fs::write(&baseline_path, &content);
-                eprintln!("[preflight] baseline saved: {}", baseline_path.display());
-                Some(baseline_path.to_string_lossy().to_string())
-            }
-            Err(e) => {
-                eprintln!("[preflight] failed to save baseline: {}", e);
-                None
-            }
-        }
-    };
-
-    // Step 2c: Auto-compact if exchange component exceeds threshold.
-    {
-        if let Ok(content) = std::fs::read_to_string(file)
-            && let Ok((fm, _)) = frontmatter::parse(&content)
-            && let Some(threshold) = fm.auto_compact
-            && threshold > 0
-            && fm.resolve_mode().is_template()
-            && let Some(comp) = crate::component::parse(&content)
-                .ok()
-                .and_then(|comps| comps.into_iter().find(|c| c.name == "exchange"))
-        {
-            let comp_content = &content[comp.open_end..comp.close_start];
-            let line_count = comp_content.lines().count();
-            if line_count > threshold {
-                eprintln!(
-                    "[preflight] step 2c: auto-compact (exchange={} lines > threshold={})",
-                    line_count, threshold
-                );
-                if let Err(e) = crate::compact::run(file, None, Some("exchange"), None, None, false)
-                {
-                    eprintln!("[preflight] auto-compact warning: {}", e);
-                }
-            }
-        }
-    }
+    // Step 2b/2c: Auto-compact before diffing when the document carries an
+    // explicit threshold or the session-accretion heuristics say another full
+    // turn would mostly replay stale context. Save the baseline after any local
+    // compact so response merges start from the actual visible document.
+    maybe_auto_compact_exchange(file);
+    let baseline_file = save_baseline_file(file);
 
     // Step 2d: Cross-document sweep (Fix 5) — commit any other tracked docs in the same
     // project that have uncommitted snapshot content. Turns preflight into a catch-all
@@ -2453,9 +2411,175 @@ fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) -> S
     }
 }
 
+fn maybe_auto_compact_exchange(file: &Path) {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return;
+    };
+    let live_tail = live_exchange_tail_after_boundary(&content);
+    let Ok((fm, _)) = frontmatter::parse(&content) else {
+        return;
+    };
+    if !fm.resolve_mode().is_template() {
+        return;
+    }
+
+    let mut compacted = false;
+    if let Some(threshold) = fm.auto_compact
+        && threshold > 0
+        && let Some(comp) = crate::component::parse(&content)
+            .ok()
+            .and_then(|comps| comps.into_iter().find(|c| c.name == "exchange"))
+    {
+        let comp_content = &content[comp.open_end..comp.close_start];
+        let line_count = comp_content.lines().count();
+        if line_count > threshold {
+            eprintln!(
+                "[preflight] step 2c: auto-compact (exchange={} lines > threshold={})",
+                line_count, threshold
+            );
+            match crate::compact::run(file, None, Some("exchange"), None, None, false) {
+                Ok(()) => {
+                    preserve_live_exchange_tail_after_auto_compact(file, live_tail.as_deref());
+                    compacted = true;
+                }
+                Err(e) => eprintln!("[preflight] auto-compact warning: {}", e),
+            }
+        }
+    }
+
+    if compacted {
+        return;
+    }
+
+    let Ok(report) = crate::session_accretion::inspect(file) else {
+        return;
+    };
+    let Some(policy) = report.auto_compact_policy() else {
+        return;
+    };
+
+    let message = if policy.rewrite_summary {
+        Some(crate::compact::build_exchange_refresh_summary(
+            &content,
+            "Context automatically compacted before the next turn because session-accretion heuristics tripped.",
+        ))
+    } else {
+        None
+    };
+
+    eprintln!(
+        "[preflight] step 2c: session accretion auto-compact (keep={}): {}",
+        policy.keep, policy.reason
+    );
+    match crate::compact::run(
+        file,
+        Some(policy.keep),
+        Some("exchange"),
+        message.as_deref(),
+        None,
+        false,
+    ) {
+        Ok(()) => preserve_live_exchange_tail_after_auto_compact(file, live_tail.as_deref()),
+        Err(e) => eprintln!("[preflight] session accretion auto-compact warning: {}", e),
+    }
+}
+
+fn save_baseline_file(file: &Path) -> Option<String> {
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let hash = snapshot::doc_hash(&canonical).unwrap_or_else(|_| "unknown".to_string());
+    let baseline_dir = snapshot::find_project_root(&canonical)
+        .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf())
+        .join(".agent-doc/baselines");
+    let _ = std::fs::create_dir_all(&baseline_dir);
+    let baseline_path = baseline_dir.join(format!("{}.md", hash));
+    match std::fs::read_to_string(file) {
+        Ok(content) => {
+            let _ = std::fs::write(&baseline_path, &content);
+            eprintln!("[preflight] baseline saved: {}", baseline_path.display());
+            Some(baseline_path.to_string_lossy().to_string())
+        }
+        Err(e) => {
+            eprintln!("[preflight] failed to save baseline: {}", e);
+            None
+        }
+    }
+}
+
+fn live_exchange_tail_after_boundary(content: &str) -> Option<String> {
+    let exchange = crate::component::parse(content)
+        .ok()?
+        .into_iter()
+        .find(|component| component.name == "exchange")?;
+    let exchange_content = exchange.content(content);
+    let (_, tail) = exchange_content.split_once("<!-- agent:boundary:")?;
+    let (_, after_boundary_line) = tail.split_once("-->")?;
+    let preserved = after_boundary_line
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if preserved.is_empty() {
+        None
+    } else {
+        Some(format!("{preserved}\n"))
+    }
+}
+
+fn preserve_live_exchange_tail_after_auto_compact(file: &Path, tail: Option<&str>) {
+    let Some(tail) = tail else {
+        return;
+    };
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return;
+    };
+    let Ok(components) = crate::component::parse(&content) else {
+        return;
+    };
+    let Some(exchange) = components
+        .into_iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return;
+    };
+    let exchange_content = exchange.content(&content);
+    let normalized_tail = tail.trim_end();
+    let with_tail_exchange = if exchange_content.trim_end().ends_with(normalized_tail) {
+        exchange_content.to_string()
+    } else {
+        let mut updated = exchange_content.trim_end().to_string();
+        if !updated.is_empty() {
+            updated.push('\n');
+        }
+        updated.push_str(normalized_tail);
+        updated.push('\n');
+        updated
+    };
+    let with_tail = exchange.replace_content(&content, &with_tail_exchange);
+    if crate::write::atomic_write_pub(file, &with_tail).is_err() {
+        return;
+    }
+    if let Ok((fm, _)) = frontmatter::parse(&with_tail)
+        && fm.resolve_mode().is_crdt()
+    {
+        let state = crate::crdt::CrdtDoc::from_text(&with_tail).encode_state();
+        let _ = snapshot::save_crdt(file, &state);
+    }
+
+    let stripped_exchange = with_tail_exchange
+        .trim_end_matches('\n')
+        .strip_suffix(normalized_tail)
+        .map(str::trim_end)
+        .unwrap_or(with_tail_exchange.trim_end())
+        .to_string();
+    let without_tail = exchange.replace_content(&with_tail, &format!("{stripped_exchange}\n"));
+    let _ = snapshot::save(file, &without_tail);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -2527,6 +2651,15 @@ mod tests {
         state.started_at = state.started_at.saturating_sub(age_secs);
         state.updated_at = state.updated_at.saturating_sub(age_secs);
         std::fs::write(path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+    }
+
+    fn write_cycles_log(doc: &Path, entries: &[crate::ops_log::CycleEntry]) {
+        let log_path = doc.parent().unwrap().join(".agent-doc/logs/cycles.jsonl");
+        std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        let mut file = std::fs::File::create(log_path).unwrap();
+        for entry in entries {
+            writeln!(file, "{}", serde_json::to_string(entry).unwrap()).unwrap();
+        }
     }
 
     #[test]
@@ -3306,6 +3439,92 @@ mod tests {
         assert!(
             !head_text.contains("do #statusws. spec-test-build-install-commit-push"),
             "repair/commit must not silently commit the live prompt:\n{head_text}"
+        );
+    }
+
+    #[test]
+    fn preflight_session_accretion_auto_compacts_and_preserves_live_prompt() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\nExisting summary.\n\n",
+            "### Re: first topic — gpt-5\n\nFirst response.\n\n",
+            "### Re: second topic — gpt-5\n\nSecond response.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let relative = doc
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        write_cycles_log(
+            &doc,
+            &[
+                crate::ops_log::CycleEntry {
+                    timestamp: now.saturating_sub(10).to_string(),
+                    file: relative.clone(),
+                    op: "commit_noop".to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    timestamp: now.saturating_sub(5).to_string(),
+                    file: relative,
+                    op: "commit_noop".to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+            ],
+        );
+
+        let live = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\nExisting summary.\n\n",
+            "### Re: first topic — gpt-5\n\nFirst response.\n\n",
+            "### Re: second topic — gpt-5\n\nSecond response.\n",
+            "<!-- agent:boundary:head -->\n",
+            "do #autocmp. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(file_after.contains("1 earlier topic(s) archived"));
+        assert!(file_after.contains("### Re: second topic — gpt-5"));
+        assert!(!file_after.contains("### Re: first topic — gpt-5"));
+        assert!(file_after.contains("do #autocmp. spec-test-build-install-commit-push"));
+
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(snapshot_after.contains("1 earlier topic(s) archived"));
+        assert!(
+            !snapshot_after.contains("do #autocmp. spec-test-build-install-commit-push"),
+            "snapshot must keep the compacted baseline without absorbing the live prompt"
         );
     }
 

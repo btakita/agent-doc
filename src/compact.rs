@@ -306,7 +306,10 @@ fn run_component_compact_partial(
 
     let old_content = comp.content(content);
 
-    let (preamble, sections) = parse_topic_sections(old_content);
+    let parsed = parse_topic_sections_with_tail(old_content);
+    let preamble = parsed.preamble;
+    let sections = parsed.sections;
+    let trailing = parsed.trailing;
 
     if sections.len() <= keep {
         eprintln!(
@@ -366,6 +369,13 @@ fn run_component_compact_partial(
         new_content.push_str(section.trim_end());
         new_content.push('\n');
     }
+    if !trailing.trim().is_empty() {
+        if !new_content.ends_with('\n') {
+            new_content.push('\n');
+        }
+        new_content.push_str(trailing.trim_end());
+        new_content.push('\n');
+    }
 
     let compacted = comp.replace_content(content, &new_content);
     let compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
@@ -401,14 +411,34 @@ fn run_component_compact_partial(
 /// Boundary markers (`<!-- agent:boundary:... -->`) are stripped from the final section
 /// so they are not archived.
 pub fn parse_topic_sections(content: &str) -> (String, Vec<String>) {
+    let parsed = parse_topic_sections_with_tail(content);
+    (parsed.preamble, parsed.sections)
+}
+
+#[derive(Debug, Default)]
+struct TopicSections {
+    preamble: String,
+    sections: Vec<String>,
+    trailing: String,
+}
+
+fn parse_topic_sections_with_tail(content: &str) -> TopicSections {
     let mut preamble = String::new();
     let mut sections: Vec<String> = Vec::new();
     let mut current: Option<String> = None;
     let mut found_first = false;
+    let mut after_boundary = false;
+    let mut trailing = String::new();
 
     for line in content.lines() {
         // Strip boundary markers — they are managed by the binary, not archived
         if line.starts_with("<!-- agent:boundary:") {
+            after_boundary = true;
+            continue;
+        }
+        if after_boundary {
+            trailing.push_str(line);
+            trailing.push('\n');
             continue;
         }
 
@@ -433,7 +463,11 @@ pub fn parse_topic_sections(content: &str) -> (String, Vec<String>) {
         sections.push(last);
     }
 
-    (preamble, sections)
+    TopicSections {
+        preamble,
+        sections,
+        trailing,
+    }
 }
 
 /// Build archive content from a component.
@@ -472,6 +506,26 @@ fn build_exchange_compact_summary(content: &str, archive_path: &Path) -> String 
         "*Compacted. Content archived to `{}`*\n",
         archive_path.display()
     ));
+
+    let Ok(components) = component::parse(content) else {
+        return summary;
+    };
+
+    let backlog = summarize_backlog_component(&components, content);
+    let queued = summarize_queue_component(&components, content);
+    let icebox = summarize_icebox_component(&components, content);
+
+    append_compact_summary_section(&mut summary, "Active backlog", &backlog);
+    append_compact_summary_section(&mut summary, "Queue", &queued);
+    append_compact_summary_section(&mut summary, "Icebox", &icebox);
+
+    summary
+}
+
+pub fn build_exchange_refresh_summary(content: &str, note: &str) -> String {
+    let mut summary = String::from("### Session Summary\n\n");
+    summary.push_str(note.trim_end());
+    summary.push('\n');
 
     let Ok(components) = component::parse(content) else {
         return summary;
@@ -1080,6 +1134,44 @@ mod tests {
         let (preamble, sections) = parse_topic_sections(content);
         assert!(preamble.contains("Just preamble text."));
         assert_eq!(sections.len(), 0);
+    }
+
+    #[test]
+    fn partial_compact_preserves_trailing_prompt_after_boundary() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-tail\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\nExisting summary.\n\n",
+            "### Re: first topic\n\nResponse one.\n\n",
+            "### Re: second topic\n\nResponse two.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "do #autocmp. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        run_component_compact_partial(&file, doc, "exchange", 1, None, false).unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        let exchange = crate::component::parse(&result)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&result)
+            .to_string();
+
+        assert!(exchange.contains("### Re: second topic"));
+        assert!(!exchange.contains("### Re: first topic"));
+        assert!(exchange.contains("do #autocmp. spec-test-build-install-commit-push"));
     }
 
     #[test]

@@ -82,6 +82,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 `agent-doc preflight <FILE>`
 
 - Runs interrupted-cycle recovery, repair, commit, claims-log drain, linked-doc inspection, diff computation, and HEAD read in one binary-owned step.
+- Before diffing, preflight may automatically compact a template exchange when either explicit `auto_compact` frontmatter trips or the session-accretion policy says another full turn would mostly replay stale context; that auto-compact must preserve any live unresolved prompt tail.
 - Open cycle states are `preflight_started`, `response_captured`, and `write_applied`.
 - Boundary-only / `(HEAD)`-only churn is normalized back to `no_changes`.
 - If the file diff is empty but the active harness prompt still contains body text after `agent-doc <FILE>`, preflight synthesizes an in-memory diff from that prompt body.

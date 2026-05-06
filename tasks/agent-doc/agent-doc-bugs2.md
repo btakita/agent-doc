@@ -121,10 +121,27 @@ Verification/build/install completed:
 - 
 - 
 
+❯ Repo work:
+❯ - committed  on :  
+❯ - pushed to
+### Re: Run Agent Doc reroute auto-remediation correction — gpt-5
+
+The previous closeout block was mangled by shell quoting during `finalize`. The completed result for `#fye2` is:
+
+Plan: `tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md`
+
+`Run Agent Doc` now fails closed instead of looking non-responsive when a live Codex pane accepts a dispatch-only reopen but never proves the routed submit. The route path now reuses the live tmux submit helper for dispatch-only Codex reroutes, treats the clean-exit `Press Enter to restart, or 'q' to exit.` prompt as a concrete dispatch blocker, and requires hook-visible routed-submit proof before reporting success.
+
+Verification/build/install completed:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
 Repo work:
-- committed  on :  
-- pushed to
-<!-- agent:boundary:f7ea7784 -->
+- committed `src/agent-doc` on `20260422/codex-agent-backend`: `ca8778b` `fix: fail closed on unproven Codex dispatch-only reroutes`
+- pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:ddf36797 -->
 <!-- /agent:exchange -->
 ###
 

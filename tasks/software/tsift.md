@@ -61,13 +61,24 @@ Local commits:
 - workspace: `4c3ac97ef` (`chore: update tsift submodule`)
 
 Pushing after this closeout so the session document commit stays on the binary-owned finalize path.
-<!-- agent:boundary:beccda7e -->
+❯ re [#5zm8]: Since digests are lossy, how can we ensure data is not missed if it was not in the digest? Would the preference be advisory?
+### Re: #5zm8 digestpref — gpt-5
+
+Yes. The preference should be advisory, not authoritative.
+
+Digests are a default triage surface, not a completeness guarantee. The safe contract is:
+- prefer session/diff/log/test digests first for cost and focus
+- escalate to raw transcript, full diff, or verbose logs when the digest is truncated, uncertain, filtered, contradictory, or the user asks for exact detail
+- keep the underlying artifact discoverable so the agent can verify instead of assuming the digest captured everything
+
+So for `tsift init` and the code-navigation guidance, I would phrase it as: start with the digest, then fall through to raw artifacts on ambiguity, mismatch, or verification needs. That preserves the efficiency win without creating false confidence.
+
+I’m keeping `#5zm8` open with that explicit fail-open framing.
+<!-- agent:boundary:dc19845c -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-re [#5zm8]: Since digests are lossy, how can we ensure data is not missed if it was not in the digest? Would the preference be advisory?
----
 Can tsift use rtk to compress tool call output in the context?
 -->
 

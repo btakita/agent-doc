@@ -130,7 +130,31 @@ Verification:
 No additional source/spec/test edits were necessary, so there was nothing new to commit or push this cycle.
 
 `#oobpmt` is complete. Top open backlog item is `#staleflt`.
-<!-- agent:boundary:7df64a94 -->
+❯ do [#staleflt]. spec-test-build-install-commit-push
+### Re: #staleflt — gpt-5
+Implemented in `src/agent-doc` and pushed as `d65498b` (`fix: auto-close stale empty preflight cycles`).
+
+What changed:
+- `repair::repair_stale_preflight_started_cycle()` now has a bounded stale-empty-cycle fallback: if a cycle is still `preflight_started`, has no capture for that cycle, shows no visible response patchback, and is older than 60 seconds, repair closes it as a no-op instead of leaving the next preflight stuck behind a fail-closed open cycle.
+- Added regressions in `src/repair.rs` and `src/preflight.rs` for both sides of the new contract: stale empty cycles now auto-close, recent empty cycles still stay open.
+- Updated the closeout/spec/skill surfaces (`SPEC.md`, `specs/07-closeout-commands.md`, `SKILL.md`, `.claude/skills/agent-doc/SKILL.md`, `CLAUDE.md`, `VERSIONS.md`) so the stale-empty timeout behavior is explicit.
+
+About the startup-miss line you called out: the retry text is the startup-miss diagnostic payload that route constructs when a routed trigger times out before any new document cycle starts. In current `agent-doc`, that diagnostic is emitted via tmux `display-message` in `src/route.rs`, not by pressing Enter on a drafted shell command, so if you saw a literal `echo '[agent-doc] startup-miss: ...'` in the bound Codex pane it was stale prompt text from the earlier pane state rather than something the current route path intentionally left unsubmitted.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test recover_repairs_stale_empty_preflight_started_cycle_without_hash_proof --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test preflight_closes_stale_empty_preflight_started_cycle_without_hash_proof --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `cargo install --path src/agent-doc --force`
+
+Commits:
+- `src/agent-doc`: `d65498b` (`fix: auto-close stale empty preflight cycles`)
+- `agent-loop`: `c76b63d96` (`chore: update agent-doc submodule`)
+
+`#staleflt` is complete. Top open backlog item is `#busychk`.
+<!-- agent:boundary:66d2acdb -->
 <!-- /agent:exchange -->
 ###
 
@@ -141,7 +165,6 @@ No additional source/spec/test edits were necessary, so there was nothing new to
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
 - [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.

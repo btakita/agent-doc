@@ -44,7 +44,14 @@ Icebox:
 Short answer: it should not, if compaction keeps the active backlog plus a faithful session summary/archive pointer and the diff engine compares against the committed snapshot instead of relying on raw historical exchange alone.
 
 This cycle is blocked by the session-accretion guard before a larger design or implementation turn. The planner requires `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit` before continuing with more substantial work on `#autocmp`.
-<!-- agent:boundary:9a102dee -->
+❯ Does agent-doc lookup compacted details in the archive from the compaction summary?
+### Re: #autocmp archive lookup — gpt-5
+No. Today `agent-doc` writes the archive file during compaction and leaves the path in `### Session Summary`, but the normal `preflight` / `plan` / `read` cycle does not automatically reopen that archive and pull details back into context. The summary is the live handoff; the archive is a pointer for explicit/manual recovery or future tooling, not an automatic rehydration source.
+
+The current code path is one-way: `src/agent-doc/src/compact.rs` builds the summary from the live document and backlog state, saves `.agent-doc/archives/...`, and keeps only the pointer in the exchange. I did not find a corresponding runtime path that reads that archive back during ordinary session diffing or prompt assembly.
+
+The planner is still tripping the session-accretion blocker for any larger follow-up turn here, so the next substantial pass should start with `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit`.
+<!-- agent:boundary:c19fa331 -->
 <!-- /agent:exchange -->
 ###
 

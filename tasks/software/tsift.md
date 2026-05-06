@@ -40,7 +40,16 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:57b67f01 -->
+❯ do [#5zm8]. spec-test-build-install-commit-push
+### Re: #5zm8 digestpref — gpt-5
+
+Still blocked by the binary planner, so I did not start the spec/test/build/install/commit/push work.
+
+Current planner blocker:
+- `Context accretion guard tripped: document closed 16 cycles in the last 30 minutes (8 no-op closeouts). Run agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit before another large turn.`
+
+This means repeated retries in the same session are increasing the recent-cycle counter faster than compaction clears it. `#5zm8` stays open until the planner stops failing closed for this document.
+<!-- agent:boundary:05615d0a -->
 <!-- /agent:exchange -->
 ###
 

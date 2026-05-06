@@ -245,6 +245,13 @@ fn dispatch_only_reopen_submit_mode(delivery: DispatchOnlyReopenDelivery) -> &'s
     }
 }
 
+fn dispatch_only_delivery_label(delivery: DispatchOnlyReopenDelivery) -> &'static str {
+    match delivery {
+        DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_ipc_once",
+        DispatchOnlyReopenDelivery::DirectPaneSubmit => "direct_pane_submit",
+    }
+}
+
 impl RoutedDispatchStartProof {
     fn dispatch_stage_label(self) -> &'static str {
         match self {
@@ -1421,46 +1428,91 @@ fn dispatch_only_send_reopen(
     }
 
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
-    match delivery {
-        DispatchOnlyReopenDelivery::SupervisorIpcOnce => {
-            let _ = dispatch_via_supervisor_ipc_once(
-                tmux,
-                file,
-                &dispatch_pane,
-                session_id,
-                file_path,
-                harness,
-            )?;
-        }
+    let dispatch_start = match delivery {
+        DispatchOnlyReopenDelivery::SupervisorIpcOnce => dispatch_via_supervisor_ipc_with_mode(
+            tmux,
+            file,
+            &dispatch_pane,
+            session_id,
+            file_path,
+            harness,
+            true,
+        )?,
         DispatchOnlyReopenDelivery::DirectPaneSubmit => {
-            let _ = send_command_once_unchecked(tmux, &dispatch_pane, file_path, harness)?;
+            dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness)?
         }
-    }
-    let delivery_label = match delivery {
-        DispatchOnlyReopenDelivery::SupervisorIpcOnce => "supervisor_ipc_once",
-        DispatchOnlyReopenDelivery::DirectPaneSubmit => "direct_pane_submit",
     };
+    require_dispatch_only_codex_submit_proof(
+        file,
+        &dispatch_pane,
+        harness,
+        delivery,
+        dispatch_start,
+    )?;
+    let delivery_label = dispatch_only_delivery_label(delivery);
     let submit_mode = dispatch_only_reopen_submit_mode(delivery);
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_dispatch_only_sent file={} pane={} harness={} delivery={} submit_mode={}",
+            "route_dispatch_only_sent file={} pane={} harness={} delivery={} submit_mode={} proof={}",
             file.display(),
             dispatch_pane,
             harness.binary,
             delivery_label,
-            submit_mode
+            submit_mode,
+            dispatch_start.dispatch_stage_label()
         ),
     );
     eprintln!(
-        "[route] dispatch-only {} reopen for {} was sent to pane {} via {} ({}) without acceptance polling",
+        "[route] dispatch-only {} reopen for {} was sent to pane {} via {} ({}) with {} proof",
         harness.binary,
         file.display(),
         dispatch_pane,
         delivery_label,
-        submit_mode
+        submit_mode,
+        dispatch_start.dispatch_stage_label()
     );
     Ok(dispatch_pane)
+}
+
+fn require_dispatch_only_codex_submit_proof(
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    delivery: DispatchOnlyReopenDelivery,
+    dispatch_start: RoutedDispatchStartProof,
+) -> Result<()> {
+    if harness.binary != "codex"
+        || dispatch_start != RoutedDispatchStartProof::CommandAcceptedOnly
+        || !codex_dispatch_start_tracking_enabled(file)
+    {
+        return Ok(());
+    }
+
+    let delivery_label = dispatch_only_delivery_label(delivery);
+    let submit_mode = dispatch_only_reopen_submit_mode(delivery);
+    let timeout = routed_dispatch_start_timeout().as_secs();
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_submit_unproven file={} pane={} harness={} delivery={} submit_mode={} timeout_secs={}",
+            file.display(),
+            pane,
+            harness.binary,
+            delivery_label,
+            submit_mode,
+            timeout
+        ),
+    );
+    anyhow::bail!(
+        "dispatch-only {} reopen for {} was accepted in pane {} via {} ({}), but Codex never recorded a routed submission proof after waiting {}s; the pane is live but not dispatch-ready enough to confirm the reopen. Restore an idle Codex prompt or restart the session and reroute again",
+        harness.binary,
+        file.display(),
+        pane,
+        delivery_label,
+        submit_mode,
+        timeout
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1990,7 +2042,15 @@ fn route_via_authoritative_actor(
     }
 
     if dispatch_only {
-        send_command_once_unchecked(tmux, &dispatch_pane, file_path, harness)?;
+        dispatch_only_send_reopen(
+            tmux,
+            file,
+            session_id,
+            &dispatch_pane,
+            file_path,
+            harness,
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+        )?;
         crate::ops_log::log_op(
             file,
             &format!(
@@ -3588,17 +3648,6 @@ fn dispatch_via_supervisor_ipc(
     harness: &HarnessConfig,
 ) -> Result<RoutedDispatchStartProof> {
     dispatch_via_supervisor_ipc_with_mode(tmux, file, pane, session_id, file_path, harness, true)
-}
-
-fn dispatch_via_supervisor_ipc_once(
-    tmux: &Tmux,
-    file: &Path,
-    pane: &str,
-    session_id: &str,
-    file_path: &str,
-    harness: &HarnessConfig,
-) -> Result<RoutedDispatchStartProof> {
-    dispatch_via_supervisor_ipc_with_mode(tmux, file, pane, session_id, file_path, harness, false)
 }
 
 fn authoritative_actor_dispatch_blocker_reason(
@@ -10329,6 +10378,108 @@ Body\n\
         assert!(
             !stale_content.contains("STALE:agent-doc "),
             "dispatch-only reroute should still avoid the stale registered pane after session clear: {stale_content}"
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn resolve_or_create_pane_dispatch_only_fails_closed_when_live_submit_has_no_codex_hook_proof()
+    {
+        use std::sync::{Arc, Mutex};
+
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        std::fs::write(dir.path().join(".codex/hooks.json"), "{}\n").unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-authoritative-actor-dispatch-only-unproven");
+        let session = "codex";
+        let cwd = test_cwd();
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &actor_pane, "> ", std::time::Duration::from_secs(3));
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &stale_pane,
+            r#"exec /bin/sh -c 'printf "STALE\n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(
+            &iso,
+            &stale_pane,
+            "STALE",
+            std::time::Duration::from_secs(3),
+        );
+
+        let doc = dir.path().join("dispatch-only-authoritative-unproven.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-dispatch-only-authoritative-unproven";
+        sessions::register(session_id, &stale_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "ready",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let err = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err("dispatch-only reroute must fail closed when hooks are visible but Codex never proves consumption");
+        assert!(
+            err.to_string()
+                .contains("never recorded a routed submission proof"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            injects.lock().unwrap().is_empty(),
+            "ready authoritative dispatch-only path should stay on direct pane submit even when it later fails closed"
         );
 
         ipc.stop();

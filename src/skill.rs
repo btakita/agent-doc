@@ -1091,9 +1091,10 @@ mod tests {
                 .contains("Do not manually patch the final assistant response into the document")
         );
         assert!(SKILL_TEMPLATE.contains("agent-doc write --commit <FILE>` completes"));
-        assert!(SKILL_TEMPLATE.contains(
-            "stage and commit only the intended non-session repo files first"
-        ));
+        assert!(
+            SKILL_TEMPLATE
+                .contains("stage and commit only the intended non-session repo files first")
+        );
         assert!(SKILL_TEMPLATE.contains("code-enforced-directives.md"));
     }
 

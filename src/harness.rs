@@ -223,6 +223,8 @@ impl HarnessConfig {
                 && line.contains("cancel")
             {
                 Some("interactive shell history search".to_string())
+            } else if line.contains("press enter to restart") && line.contains("to exit") {
+                Some("clean-exit restart prompt".to_string())
             } else {
                 None
             }
@@ -695,6 +697,18 @@ reverse-i-search: bugs enter accept · esc cancel
         assert_eq!(
             h.dispatch_blocker_reason(output).as_deref(),
             Some("interactive shell reverse-i-search")
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_detects_codex_clean_exit_restart_prompt() {
+        let h = HarnessConfig::codex();
+        let output = "\
+Press Enter to restart, or 'q' to exit.
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("clean-exit restart prompt")
         );
     }
 

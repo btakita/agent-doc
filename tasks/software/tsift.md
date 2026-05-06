@@ -30,53 +30,13 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260506-034301.md`*
-
-Active backlog:
-- [ ] [#sbudget] Add token budget and churn guardrails to session-cost: flag turns by prompt size, cached-input ratio, restart loops, and no-op closeout cycles with actionable compact/restart guidance.
-- [ ] [#snoopdedupe] Collapse repeated committed/no-op closeout events in agent-doc log digests so long sessions report unique cycles instead of hundreds of commit_already_current repeats.
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260506-051802.md`*
 
 Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-❯ do [#sbudget]. spec-test-build-install-commit-push
-### Re: `[#sbudget]` session-cost guardrails — gpt-5
-
-Implemented `#sbudget` in `src/tsift` by adding structured `guardrails` to `session-cost` and aggregate `session-review` output. The new guardrails explicitly flag oversized prompt turns, very high cached-input resend ratios, restart-loop churn, and repeated `commit_already_current` no-op closeouts, each with actionable compact/restart guidance. I also surfaced those guardrails in both compact and normal CLI output, updated `SPEC.md`, and added unit plus CLI JSON regression coverage.
-
-Verification:
-- `cargo test`
-- `cargo build --release`
-- `cargo install --path . --force`
-- `tsift session-review --compact ../../tasks/software/tsift.md`
-
-Local commits:
-- `src/tsift`: `accca07` (`feat: add session cost guardrails`)
-- `agent-loop`: `a18d69557` (`chore: bump tsift submodule`)
-
-Note: preflight warned that this document has recent closeout churn and suggested `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` before another large turn.
-❯ do [#snoopdedupe]. spec-test-build-install-commit-push
-### Re: `[#snoopdedupe]` session digest closeout dedupe — gpt-5
-
-Implemented `#snoopdedupe` in `src/tsift` by normalizing newer `agent-doc` `document_cycle event=...` log lines into distinct runtime events and counting them once per `(cycle, event)` instead of replaying every repeated `commit_already_current` closeout line. `session-cost` now reports deduped `commit_success` / `commit_already_current` runtime events directly, and `session-digest` collapses closeout evidence to bounded `document_cycle phase=committed event=...` entries instead of one entry per `cycle=` / `capture_id=` string.
-
-I also updated the `Session Cost` / `Session Review` spec text and added regression coverage for the new `document_cycle` log shape.
-
-Verification:
-- `cargo test`
-- `cargo build --release`
-- `cargo install --path . --force`
-- `tsift session-cost --json --source agent-doc-log --input /home/brian/work/btakita/agent-loop/.agent-doc/logs/tsift-v0.1.log`
-- `tsift session-digest --json --source agent-doc-log --path /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --input /home/brian/work/btakita/agent-loop/.agent-doc/logs/tsift-v0.1.log`
-- `tsift session-review --json /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
-
-Live check: the real `tsift-v0.1` agent-doc log now reports `commit_success` and `commit_already_current` as separate runtime events, and the closeout digest for that log is bounded to normalized event types (`closeout_groups: 9`) instead of hundreds of raw per-cycle no-op entries.
-
-Local commits:
-- `src/tsift`: `1a8b763` (`fix: dedupe agent-doc closeout cycles in session digests`)
-- `agent-loop`: `df4ca2779` (`chore: bump tsift submodule`)
-<!-- agent:boundary:e4191b93 -->
+<!-- agent:boundary:a4202a45 -->
 <!-- /agent:exchange -->
 ###
 

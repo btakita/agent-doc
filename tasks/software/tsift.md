@@ -86,7 +86,23 @@ Verification completed in `src/tsift`:
 - smoke tests with the installed `tsift session-digest` against a real Codex rollout JSONL and `/home/brian/work/btakita/agent-loop/.agent-doc/logs/tsift-v0.1.log`
 
 Committed and pushed in `src/tsift` as `4620758` (`feat: extend session digest to codex and agent-doc logs`). Recorded the parent `agent-loop` submodule pointer as `17b9f9729` (`chore: bump tsift submodule`); I will push `agent-loop` after this response finalizes so the document closeout commit is included.
-<!-- agent:boundary:32b7bf7b -->
+❯ do [#ctxscope]. spec-test-build-install-commit-push
+### Re: #ctxscope owning-root harness scoping — gpt-5
+
+Implemented the owning-root harness scoping path in `src/tsift`.
+
+- `tsift init` now injects Code Navigation guidance that tells the harness to switch to the owning repo or submodule root before running `tsift`, build, or test commands.
+- `session-digest`, `log-digest`, and `test-digest` now prefer the nearest owning git root over the outer workspace `.gitmodules` root, so `src/tsift` work stays scoped to the submodule instead of inheriting the wider `agent-loop` context.
+- `tsift rewrite` now anchors long session/log reads to that owning repo/submodule root before routing them into `tsift session-digest`.
+- Updated `SPEC.md`, `CLAUDE.md`, `AGENTS.md`, `VERSIONS.md`, plus unit and compiled CLI regression coverage for the new root-selection behavior.
+
+Verification completed in `src/tsift`:
+- `make check`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Committed and pushed in `src/tsift` as `e1075b0` (`feat: scope harness digests to owning repo root`). Recorded the parent `agent-loop` submodule pointer as `5eb7d04ff` (`chore: bump tsift submodule`); I will push `agent-loop` after this response finalizes so the document closeout commit is included.
+<!-- agent:boundary:2b0d018d -->
 <!-- /agent:exchange -->
 ###
 
@@ -97,7 +113,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ctxscope] [recommended] Add tsift harness integration that scopes context to the owning repo/submodule root when the work is in src/tsift, avoiding repeated agent-loop-wide instruction and workspace payload
 - [ ] [#rchurn] [recommended] Teach tsift log/session digests to detect and summarize restart churn patterns such as fresh_restart, auto_trigger_timeout, ctrl_d restart loops, and quit-after-eof cycles
 <!-- /agent:backlog -->
 

@@ -51,7 +51,16 @@ No. Today `agent-doc` writes the archive file during compaction and leaves the p
 The current code path is one-way: `src/agent-doc/src/compact.rs` builds the summary from the live document and backlog state, saves `.agent-doc/archives/...`, and keeps only the pointer in the exchange. I did not find a corresponding runtime path that reads that archive back during ordinary session diffing or prompt assembly.
 
 The planner is still tripping the session-accretion blocker for any larger follow-up turn here, so the next substantial pass should start with `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit`.
-<!-- agent:boundary:c19fa331 -->
+❯ Would it be beneficial to have an archive database using sqlite? With quick lookups of past turns? Would a graphdb help to identify related concepts? One concern I have is documents have temporal and semi-ephemeral data, so the information may be stale. But recent info is more likely to be useful.
+### Re: #autocmp archive indexing — gpt-5
+Yes, a SQLite-backed archive index could be useful. I would treat it as an indexed retrieval layer over archived turns, not as the new source of truth. The main win is cheap lookup by document, session, turn time, backlog ids, prompt text, and recency, with FTS/BM25-style text search plus recency weighting so recent material ranks above stale history.
+
+A graph database is probably too much too early. The hard part here is not graph traversal, it is trustworthy retrieval under temporal drift: knowing what was true in this document at a specific moment, and avoiding old semi-ephemeral state outranking current session state. SQLite fits that better because you can keep explicit timestamps, archive/session ids, document paths, response boundaries, and maybe simple derived tags/links without adding another operational system.
+
+So the useful shape is: live document remains authoritative, compaction archive remains immutable history, and SQLite becomes a query index over that history with strong recency/authority filters. If later you prove you need concept links, add them as derived edges or extracted relation tables inside SQLite first; reach for a graph store only if those queries become the dominant workload.
+
+This file is still under the session-accretion block for larger follow-up work, so any deeper design or implementation turn here should begin with `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit`.
+<!-- agent:boundary:b0fd35c7 -->
 <!-- /agent:exchange -->
 ###
 

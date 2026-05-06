@@ -52,7 +52,26 @@ Current priority order:
 Lower priority after those: dogfood `tsift summarize` on `src/tsift` and re-measure. The earlier “~78% savings” claim was still theoretical at the time of the archive because summaries had not actually been populated.
 
 Top backlog item: `#srevmatch`.
-<!-- agent:boundary:ac1365ed -->
+❯ do [#9m98]. spec-test-build-install-commit-push
+### Re: #9m98 srevmatch — gpt-5
+
+Implemented `#9m98` in `src/tsift`.
+
+- File-target `session-review` no longer counts Claude/Codex transcripts on a shared workspace `cwd` alone. A document path alias or `agent_doc_session` signal is now required, and `cwd` is kept only as supporting evidence when that file-specific match exists.
+- Added unit and compiled CLI regression coverage for cwd-only false positives.
+- Updated `SPEC.md`, `CLAUDE.md`, and `VERSIONS.md` to document the fail-closed matching rule for document targets.
+
+Verification:
+- `cargo test`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Local commits:
+- `src/tsift`: `d19e88e` (`fix: tighten session-review doc matching`)
+- workspace: `4c3ac97ef` (`chore: update tsift submodule`)
+
+Pushing after this closeout so the session document commit stays on the binary-owned finalize path.
+<!-- agent:boundary:586e2e4e -->
 <!-- /agent:exchange -->
 ###
 
@@ -63,7 +82,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#9m98] srevmatch=Tighten tsift session-review matching for document-targeted reviews so shared cwd matches do not overcount unrelated Claude/Codex sessions.
 - [ ] [#5zm8] digestpref=Expand tsift init / code-navigation guidance so Claude and Codex prefer session/diff/log/test digest commands over raw transcript, git diff/show, and verbose log reads.
 - [ ] [#0nv1] budgetguard=Add session-cost/session-review budget guardrails for cached-context resend, repeated no-op closeouts, and restart churn, with hook-friendly thresholds and remediation hints.
 <!-- /agent:backlog -->

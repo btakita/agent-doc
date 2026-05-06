@@ -27,14 +27,14 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260506-083426.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260506-083452.md`*
 
 Active backlog:
 - [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing
 - [ ] [#restoc] [recommended] Add a lightweight live+archive exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent sections on demand instead of relying only on the fixed recent-turn window.
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - 3 more active item(s)
-<!-- agent:boundary:28350ead -->
+<!-- agent:boundary:08ad074a -->
 <!-- /agent:exchange -->
 ###
 

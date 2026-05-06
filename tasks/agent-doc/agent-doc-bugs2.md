@@ -333,7 +333,33 @@ Verification:
 - No code changed in this cycle; this was an architectural assessment against `tasks/agent-doc/plan-sqlite-session-store-concurrency.md` and `tasks/agent-doc/plan-single-owner-session-actor-transition.md`.
 
 I captured one recommended follow-up backlog item to force that decision through concrete repro evidence before any sqlite prototype starts.
-<!-- agent:boundary:ca3e0cab -->
+❯ What are the #next-steps for the single-owner actor rollout?
+### Re: single-owner actor next steps — gpt-5
+
+The next steps are narrower than the original plan suggests, because parts of that rollout are already done.
+
+What is already landed:
+- Phase 1 is done: the actor contract and generation semantics are pinned in spec/logging.
+- Phases 6-9 are also already reflected in `src/agent-doc/VERSIONS.md`: operator commands, repair-only isolation, legacy owner-election removal, and verification/plugin diagnostics have all been advanced or closed.
+
+So the next real implementation steps are:
+1. **Phase 2: actor store**. Add the durable per-document authoritative store with monotonic generation compare-and-swap, while keeping `sessions.json` as a projection. This is the storage/control-plane boundary that the later phases should read from.
+2. **Phase 3: supervisor -> actor ownership**. Make supervisor lifecycle changes write actor transitions directly (`start`, `ready`, `busy`, `waiting_input`, `close`) instead of letting ownership still leak through registry/session-log side effects.
+3. **Phase 4: route -> actor dispatch**. Make `route` validate actor generation/state and wait on actor acknowledgement instead of relying on normal-path owner election, same-file rebind heuristics, or later document-side cycle inference.
+
+Why this order:
+- Phase 2 gives one authoritative state surface.
+- Phase 3 makes the supervisor the producer of that state.
+- Phase 4 lets routing consume that state deterministically.
+- After those three are solid, the sqlite question becomes much easier to judge because we will know whether the remaining reliability problems are still ownership/control-plane issues or have become true store/projection-atomicity issues.
+
+Top backlog item: `#sgown2`
+
+Verification:
+- No code changed in this cycle; this was a rollout assessment against `tasks/agent-doc/plan-single-owner-session-actor-transition.md` plus the already-landed entries in `src/agent-doc/VERSIONS.md`.
+
+I captured the three recommended rollout steps in backlog priority order.
+<!-- agent:boundary:3f8e381c -->
 <!-- /agent:exchange -->
 ###
 
@@ -344,6 +370,9 @@ I captured one recommended follow-up backlog item to force that decision through
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sgown2] [recommended] Land phase-2 actor store from tasks/agent-doc/plan-single-owner-session-actor-transition.md: durable per-document authoritative record with monotonic generation CAS, while keeping sessions.json as a projection.
+- [ ] [#sgown3] [recommended] Land phase-3 supervisor integration from tasks/agent-doc/plan-single-owner-session-actor-transition.md: route supervisor startup/readiness/busy/waiting-input/close transitions through the actor record instead of direct registry/session-log ownership writes.
+- [ ] [#sgown4] [recommended] Land phase-4 actor dispatch from tasks/agent-doc/plan-single-owner-session-actor-transition.md: make route dispatch validate actor generation/state and wait on actor acknowledgement instead of normal-path owner election or later document-side inference.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 <!-- /agent:backlog -->

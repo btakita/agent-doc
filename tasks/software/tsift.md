@@ -42,7 +42,15 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:6000f774 -->
+❯ do [#ts1c]. spec-test-build-install-commit-push
+### Re: structured envelopes — gpt-5
+
+Implemented `#ts1c` in `src/tsift` with a new global `--envelope` flag for `search`, `explain`, `session-review`, and `context-pack`. Envelope JSON now adds `tool`, `view`, `summary`, `truncated`, `follow_up`, and `report`, while preview reports keep their item-level `handle` + `expand` fields for narrow reruns.
+
+Updated `src/tsift/SPEC.md` and `src/tsift/VERSIONS.md`, added CLI plus end-to-end regression coverage, and ran `cargo fmt --manifest-path src/tsift/Cargo.toml`, `cargo test --manifest-path src/tsift/Cargo.toml`, `cargo build --manifest-path src/tsift/Cargo.toml`, and `cargo install --path src/tsift --force`.
+
+Committed and pushed the `tsift` repo change as `c1d816c` (`feat: add structured output envelopes`). I left the parent `agent-loop` submodule pointer uncommitted because the superproject `main` branch is already ahead with unrelated work, so a root push would not have been path-isolated to this task.
+<!-- agent:boundary:7f5d0d0e -->
 <!-- /agent:exchange -->
 ###
 
@@ -55,7 +63,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ts1c] Add MCP/tool-native structured terse envelopes so clients can render summaries and request follow-up expansion without prose-heavy defaults
 - [ ] [#ts1e] Add a command/test-run envelope schema with transcript artifact handles so green runs stay summary-first by default
 - [ ] [#ts1f] Add tsift runner/rewrite integration for cargo test/build/install so agent-doc can opt into digest-first execution output
 - [ ] [#ts1d] Improve tsift lock/degraded-mode UX so active index writers fall back to read-only or exact search with a minimal actionable summary

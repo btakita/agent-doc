@@ -2505,6 +2505,20 @@ mod tests {
         dir
     }
 
+    fn age_cycle_state(file: &Path, age_secs: u64) {
+        let canonical = file.canonicalize().unwrap();
+        let root = crate::snapshot::find_project_root(&canonical).unwrap();
+        let hash = crate::snapshot::doc_hash(&canonical).unwrap();
+        let path = root
+            .join(".agent-doc/state/cycles")
+            .join(format!("{hash}.json"));
+        let mut state: crate::cycle_state::CycleState =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        state.started_at = state.started_at.saturating_sub(age_secs);
+        state.updated_at = state.updated_at.saturating_sub(age_secs);
+        std::fs::write(path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+    }
+
     #[test]
     fn preflight_produces_valid_json() {
         let dir = setup_project();
@@ -3055,6 +3069,56 @@ mod tests {
         assert!(
             log.contains("commit_already_current file="),
             "rerun should close the previous preflight via the no-op commit path:\n{log}"
+        );
+    }
+
+    #[test]
+    fn preflight_closes_stale_empty_preflight_started_cycle_without_hash_proof() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n",
+            "old body\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+
+        let live = snapshot.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            "do [#staleflt]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
+        );
+        std::fs::write(&doc, &live).unwrap();
+        age_cycle_state(&doc, crate::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+        assert_ne!(state.last_event, "repair_preflight_stale_empty_cycle");
+
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("repair_preflight_stale_empty_cycle file="),
+            "preflight should auto-close the stale empty cycle before reopening:\n{log}"
         );
     }
 

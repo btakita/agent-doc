@@ -306,9 +306,14 @@ fn visible_response_patch_from_document(file: &Path, doc_content: &str) -> Resul
 
 pub(crate) const AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR: &str =
     "ambiguous preflight_started patchback";
+pub(crate) const STALE_EMPTY_PREFLIGHT_TTL_SECS: u64 = 60;
 
 fn normalized_content_hash(content: &str) -> String {
     crate::ops_log::content_hash(&crate::git::normalize_transient_agent_doc_markers(content))
+}
+
+fn preflight_cycle_age_secs(state: &crate::cycle_state::CycleState) -> u64 {
+    now_secs().saturating_sub(state.updated_at.max(state.started_at))
 }
 
 pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
@@ -395,6 +400,34 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
             AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR,
             file.display(),
         );
+    }
+
+    let age_secs = preflight_cycle_age_secs(&state);
+    if age_secs >= STALE_EMPTY_PREFLIGHT_TTL_SECS
+        && crate::capture::load_by_id(file, &state.cycle_id)?.is_none()
+    {
+        crate::cycle_state::mark_committed(
+            file,
+            "repair_preflight_stale_empty_cycle",
+            snapshot_content.as_deref(),
+            Some(&file_content),
+        )?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "repair_preflight_stale_empty_cycle file={} cycle_id={} age_secs={}",
+                file.display(),
+                state.cycle_id,
+                age_secs
+            ),
+        );
+        eprintln!(
+            "[repair] closed stale empty preflight_started cycle {} for {} after {}s without a capture",
+            state.cycle_id,
+            file.display(),
+            age_secs
+        );
+        return Ok(RepairOutcome::StalePreflightLockRepaired);
     }
 
     Ok(RepairOutcome::Noop)
@@ -1167,6 +1200,20 @@ mod tests {
             .unwrap();
     }
 
+    fn age_cycle_state(file: &Path, age_secs: u64) {
+        let canonical = file.canonicalize().unwrap();
+        let root = crate::snapshot::find_project_root(&canonical).unwrap();
+        let hash = crate::snapshot::doc_hash(&canonical).unwrap();
+        let path = root
+            .join(".agent-doc/state/cycles")
+            .join(format!("{hash}.json"));
+        let mut state: crate::cycle_state::CycleState =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        state.started_at = state.started_at.saturating_sub(age_secs);
+        state.updated_at = state.updated_at.saturating_sub(age_secs);
+        std::fs::write(path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+    }
+
     #[test]
     fn no_pending_returns_false() {
         let dir = setup_project();
@@ -1849,6 +1896,73 @@ mod tests {
     }
 
     #[test]
+    fn recover_repairs_stale_empty_preflight_started_cycle_without_hash_proof() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "done\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        init_git_repo(root, &doc);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+
+        let live = base.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            "do [#staleflt]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
+        );
+        std::fs::write(&doc, &live).unwrap();
+        age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+
+        let repaired = run(&doc).unwrap();
+        assert_eq!(repaired, RepairOutcome::StalePreflightLockRepaired);
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+        assert_eq!(state.last_event, "repair_preflight_stale_empty_cycle");
+        assert_eq!(snapshot::load(&doc).unwrap().as_deref(), Some(base));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), live);
+    }
+
+    #[test]
+    fn recover_does_not_close_recent_empty_preflight_started_cycle_without_hash_proof() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "done\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+
+        let live = base.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            "do [#staleflt]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
+        );
+        std::fs::write(&doc, &live).unwrap();
+
+        let repaired = run(&doc).unwrap();
+        assert_eq!(repaired, RepairOutcome::Noop);
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+    }
+
+    #[test]
     fn recover_repairs_preflight_started_cycle_when_committed_patchback_is_visible() {
         let dir = setup_project();
         let root = dir.path();
@@ -2380,8 +2494,7 @@ mod tests {
 
         snapshot::save(&doc, base).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base))
-            .unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(base), Some(base)).unwrap();
 
         let current = committed_patchback.replace(
             "<!-- /agent:exchange -->\n",

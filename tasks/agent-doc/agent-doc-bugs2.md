@@ -290,7 +290,24 @@ Repo commits:
 Restart IntelliJ IDEA 2026.1 before re-testing the editor-switch repro.
 
 Repo push follows after this closeout commit.
-<!-- agent:boundary:dde7615e -->
+❯ do [#2dkn]. spec-test-commit-push
+### Re: #2dkn — gpt-5
+
+Created the sqlite session-store plan and resolved the icebox planning item. Plan: `tasks/agent-doc/plan-sqlite-session-store-concurrency.md`
+
+What the plan covers:
+- why the current `sessions.json` + `session-actors.json` + sidecar topology still leaves cross-file coordination gaps even with the existing lock hardening
+- a phased sqlite migration that starts narrow around authoritative actor/session state, dual-writes projections during migration, and only retires JSON authority once projection drift checks are proven
+- the concrete schema, migration phases, verification strategy, and design questions that need to be answered before this becomes implementation work
+
+Verification:
+- No code or runtime behavior changed in this cycle; I created and reviewed the plan document only.
+
+Repo commit:
+- `agent-loop`: `87a42ec48` (`docs: add sqlite session-store plan`)
+
+I also captured one recommended follow-up backlog item to review this plan against the single-owner actor rollout before turning it into implementation work.
+<!-- agent:boundary:21ae43b3 -->
 <!-- /agent:exchange -->
 ###
 
@@ -301,10 +318,10 @@ Repo push follows after this closeout commit.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
-- [ ] [#2dkn] Create a plan for a sqlite db store to manage sessions for better concurrency/parallelism support
 - [ ] [#dyvw] Empty placeholder item — moved to icebox to unblock preflight.
 - [ ] [#xthm] Historical malformed duplicate backlog id retained for guard continuity. Canonical replacement:
   `#jberr`.

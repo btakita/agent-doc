@@ -121,20 +121,35 @@ Files updated by the run:
 - `src/session-share/AGENTS.md`
 
 `src/session-share/CLAUDE.md` did not need changes. I also avoided `tsift init --workspace` from inside the submodules because that would have promoted the target back to the parent `agent-loop` root instead of refreshing the submodule-local instructions.
-<!-- agent:boundary:709e6cce -->
+❯ do [#rchurn]. spec-test-build-install-commit-push
+### Re: #rchurn restart-churn digests — gpt-5
+
+Implemented bounded restart-churn summaries for `agent-doc` logs in both `tsift session-cost` and `tsift session-digest`.
+
+- Added a shared classifier for the requested families: `fresh_restart`, `auto_trigger_timeout`, `ctrl_d_restart_loop`, and `quit_after_eof`.
+- Wired the derived summaries into JSON, compact, and human-readable output while keeping the raw runtime-event counters.
+- Updated `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, plus direct/unit and compiled CLI coverage for the new summaries.
+
+Verification completed in `src/tsift`:
+- `make check`
+- `cargo build --release`
+- `cargo install --path . --force`
+- smoke tests with the installed `tsift session-cost` and `tsift session-digest` against `/home/brian/work/btakita/agent-loop/.agent-doc/logs/tsift-v0.1.log`
+
+Committed and pushed in `src/tsift` as `52fb280` (`feat: summarize restart churn in digests`). Recorded the parent `agent-loop` submodule pointer as `3d4a21c44` (`chore: bump tsift submodule`); I will push `agent-loop` after this response finalizes so the document closeout commit is included.
+
+Note: `src/tsift/AGENTS.md` still has the separate local `tsift init` update from the earlier instruction refresh, and I left that out of the `#rchurn` commit on purpose.
+<!-- agent:boundary:2ebe931b -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-do [#rchurn]. spec-test-build-install-commit-push
----
 Can tsift use rtk to compress tool call output in the context?
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rchurn] [recommended] Teach tsift log/session digests to detect and summarize restart churn patterns such as fresh_restart, auto_trigger_timeout, ctrl_d restart loops, and quit-after-eof cycles
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

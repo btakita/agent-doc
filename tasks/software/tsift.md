@@ -30,7 +30,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-Context automatically compacted before the next turn because session-accretion heuristics tripped.
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260506-054027.md`*
 
 Active backlog:
 - [ ] [#5zm8] digestpref=Expand tsift init / code-navigation guidance so Claude and Codex prefer session/diff/log/test digest commands over raw transcript, git diff/show, and verbose log reads.
@@ -40,19 +40,7 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-
-*1 earlier topic(s) archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260506-053750.md`*
-❯ This document was compacted. The rate of turns should not be a factor.
-❯ > this document closed 11 cycles in the last 30 minutes
-### Re: session accretion guard — gpt-5
-
-Compaction did happen, but the planner is still failing closed because this guard is keyed to recent committed-cycle history, not only the current exchange size.
-
-This turn's `agent-doc plan` blocker is still:
-- `Context accretion guard tripped: document closed 13 cycles in the last 30 minutes (7 no-op closeouts). Run agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit before another large turn.`
-
-So the current binary behavior is: compacting the document reduces exchange state, but it does not by itself clear the recent-turn-rate counter. Until that planner contract changes, I still cannot start `#5zm8` from this session.
-<!-- agent:boundary:c4436aba -->
+<!-- agent:boundary:57b67f01 -->
 <!-- /agent:exchange -->
 ###
 

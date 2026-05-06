@@ -48,7 +48,19 @@ I split this from the broader `.agent-doc/state.db` authority discussion. The pl
 On the growth question: I would not use pure LRU as the only rule. The better default is a hybrid cache policy: pin archives tied to current documents, active backlog ids, or recent lookups; bias search toward recency; prune only cold unpinned rows when size/age caps are exceeded; and keep the markdown archives themselves as the durable history that the sqlite index can rebuild from.
 
 I added the follow-up to backlog with the same plan path so the next implementation or review turn can open the exact artifact directly.
-<!-- agent:boundary:fe0f0e85 -->
+❯ do [#sqlarcidx]. spec-test-build-install-commit-push
+### Re: sqlite compacted-turn archive rollout — gpt-5
+
+Implemented `#sqlarcidx` from `tasks/agent-doc/plan-sqlite-compacted-turn-archive.md`.
+
+Added a derived sqlite archive index at `.agent-doc/archive-index.db`, new `agent-doc archive-index` and `agent-doc archive-search` commands, and compact-time best-effort indexing for new archives. Archive markdown remains canonical; the DB rebuilds from `.agent-doc/archives/*.md`.
+
+Verification: `cargo test`, `cargo build`, and `cargo install --path . --force` all passed in `src/agent-doc`.
+
+Commits:
+- `src/agent-doc`: `b8a439b` (`feat: add sqlite archive index for compacted turns`)
+- `agent-loop`: `209c60e87` (`chore: update agent-doc archive index rollout`)
+<!-- agent:boundary:c6870e89 -->
 <!-- /agent:exchange -->
 ###
 
@@ -59,7 +71,6 @@ I added the follow-up to backlog with the same plan path so the next implementat
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sqlarcidx] Implement sqlite-backed compacted-turn archive index plan in tasks/agent-doc/plan-sqlite-compacted-turn-archive.md
 - [ ] [#autocmp] [recommended] Promote session-accretion warn/block into an automatic compact policy: auto-run partial exchange compaction or rewrite the exchange to a fresh session summary before another full turn.
 - [ ] [#ctxpack] [recommended] Add a bounded response-context pack for warn-level sessions so the harness receives prompt targets, session summary, and backlog head instead of the full exchange tail.
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.

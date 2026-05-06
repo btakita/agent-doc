@@ -307,7 +307,33 @@ Repo commit:
 - `agent-loop`: `87a42ec48` (`docs: add sqlite session-store plan`)
 
 I also captured one recommended follow-up backlog item to review this plan against the single-owner actor rollout before turning it into implementation work.
-<!-- agent:boundary:21ae43b3 -->
+❯ Please assess tasks/agent-doc/plan-sqlite-session-store-concurrency.md. Would implementing the plan be useful for agent-doc? Would the reoccurring issues more likely be fixed? Moving to the supervisor actor helped with stability. Would sqlite help with reliability?
+### Re: sqlite session-store assessment — gpt-5
+
+Short answer: the plan is useful, but I would not treat sqlite as the main fix for the recurring `agent-doc-bugs2.md` failures.
+
+My assessment:
+- The supervisor actor and the broader single-owner actor direction are more likely to fix the failures we have actually been seeing. Most of the repeated regressions here have been ownership, dispatch, restart, acknowledgment, or cross-surface coordination bugs, not simple persistence corruption.
+- sqlite would help a narrower but still real class of reliability problems: atomic multi-record updates, compare-and-swap generation changes, authoritative history/querying, and reducing the number of places where cross-file projection drift can accumulate.
+- sqlite would **not** by itself fix wrong route decisions, stale ownership heuristics, prompt-readiness gaps, supervisor restart semantics, Enter/newline submission bugs, or plugin-trigger timing problems. Those are control-plane problems first.
+
+So my recommendation is:
+1. Keep the sqlite plan as a serious follow-up, not as the next primary stabilization project.
+2. Continue prioritizing the single-owner actor rollout, because that is the architectural change most aligned with the recurring bug family.
+3. Only move sqlite from plan to implementation once we can point to specific remaining failures where the actor/supervisor model is already correct but the file-backed state layout is still the limiting factor.
+
+If that threshold is met, I would support a **minimal** sqlite slice first:
+- authoritative actor/session state only
+- dual-write `session-actors.json` and `sessions.json` as projections
+- no broad sidecar/database migration in the first pass
+
+Would sqlite help reliability? Yes, but mostly as a second-layer reliability improvement after the ownership/dispatch model is made authoritative. I would expect it to reduce some drift and recovery edge cases, but not to be the main reason the current recurring issues stop happening.
+
+Verification:
+- No code changed in this cycle; this was an architectural assessment against `tasks/agent-doc/plan-sqlite-session-store-concurrency.md` and `tasks/agent-doc/plan-single-owner-session-actor-transition.md`.
+
+I captured one recommended follow-up backlog item to force that decision through concrete repro evidence before any sqlite prototype starts.
+<!-- agent:boundary:ca3e0cab -->
 <!-- /agent:exchange -->
 ###
 
@@ -318,6 +344,7 @@ I also captured one recommended follow-up backlog item to review this plan again
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 <!-- /agent:backlog -->
 

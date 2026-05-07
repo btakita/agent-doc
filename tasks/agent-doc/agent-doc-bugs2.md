@@ -27,69 +27,14 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-225020.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-231807.md`*
 
 Active backlog:
+- [ ] [#commenttail] Preserve user edits inside the plain HTML comment directly below `agent:exchange` during closeout; plan: tasks/agent-doc/plan-comment-tail-edit-loss.md
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
-- [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
-- 2 more active item(s)
-❯ An agent-doc turn had an error for dev.md:
-```
-● Bash(agent-doc session-check
-      /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md 2>&1)
-  ⎿  Error: Exit code 1
-     [session-check] INTERRUPTED: cycle `cycle-1778181134648` is `committed` (commit_success), but the document still
-     has unresolved prompt-bearing user changes with no new agent-doc cycle started: prompt_target: ❯ **Verification:**
-      Both redirects confirmed via `curl`. All 519 assertions pass (6 suites). Specs + news updated. Committed + pushed
-      buildparty-investor-demo and session-share.
-```
-### Re: dev.md `session-check` false prompt target — gpt-5
-
-
-This is a real agent-doc bug, and it lines up with the existing prompt-prefix leak family.
-
-The pasted failure shows `session-check` treating assistant closeout prose as unresolved user work:
-
-```text
-prompt_target: ❯ **Verification:** Both redirects confirmed via `curl`.
-```
-
-I could not rerun the exact check because `src/session-share/tasks/buildparty-investor-demo/dev.md` is not present in this checkout, but source inspection points to a concrete classifier ordering bug. In Rust, `text_line_looks_like_prompt_target()` treats any line beginning with `❯` as a prompt before `line_looks_like_plain_response_after_prompt()` can recognize response labels like `Verification`, `What changed:`, `Follow-up:`, or `Commit / push:`. The JetBrains prefix-repair helper has the same hazard: it checks for fresh prompts before normalizing prefixed response labels.
-
-I created and committed the fix plan here:
-
-`tasks/agent-doc/plan-response-label-prefix-false-prompt.md`
-
-I also added backlog item `#respfx` for the implementation. The fix should normalize optional `❯`, list markers, and markdown emphasis before testing known assistant response labels, then add Rust and JetBrains regressions so `❯ **Verification:** ...` does not reopen a committed cycle while real prefixed user follow-ups still do.
-❯ do [#respfx]. spec-test-build-install-commit-push
-### Re: #respfx — gpt-5
-
-Implemented and pushed `#respfx`.
-
-What changed:
-- Rust prompt-target classification now normalizes optional `❯`, markdown list markers, and markdown emphasis before recognizing assistant response labels. `❯ **Verification:** ...` and `❯ **Commit / push:**` no longer reopen committed cycles, while real prefixed follow-ups like `❯ verify deploy status` and `❯ do [#id]...` still classify as prompts.
-- `session-check` now shares that behavior through the prompt-bearing diff path, including exchange-tail additions that sit right before `&lt;!-- /agent:exchange --&gt;`.
-- JetBrains prefix repair mirrors the same ordering and normalization, and the plugin spec documents the response-label rule.
-- Bumped the JetBrains plugin build version to `0.2.98` and recorded the fix in `VERSIONS.md`.
-
-Verification:
-- `cargo test --manifest-path src/agent-doc/Cargo.toml prefixed_markdown_response_labels_are_not_prompt_targets`
-- `cargo test --manifest-path src/agent-doc/Cargo.toml prefixed_user_followup_after_response_still_starts_prompt`
-- `cargo test --manifest-path src/agent-doc/Cargo.toml classify_prompt_bearing_changes_ignores_prefixed_markdown_response_label`
-- `cargo test --manifest-path src/agent-doc/Cargo.toml first_unstarted_prompt_bearing_change_ignores_prefixed_response_label_noise`
-- `./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest`
-- `make check` passed: `1934` Rust unit tests plus integration suites; `0` failed.
-- `./gradlew test buildPlugin` passed.
-- `make install` installed the updated `agent-doc` binary and `libagent_doc-0.33.16.so`.
-- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.98` into `/home/brian/.config/JetBrains/IntelliJIdea2026.1`; restart IntelliJ IDEA to activate it.
-
-Commit / push:
-- `src/agent-doc`: `8146947` pushed to `origin/20260422/codex-agent-backend`.
-- parent repo: `c66fc5ec1` pushed to `origin/main` with the updated `src/agent-doc` gitlink.
-
-I marked backlog item `#respfx` done.
-<!-- agent:boundary:391f662c -->
+- 3 more active item(s)
+<!-- agent:boundary:b3c13f9e -->
 <!-- /agent:exchange -->
 ###
 
@@ -106,6 +51,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#commenttail] Preserve user edits inside the plain HTML comment directly below `agent:exchange` during closeout; plan: tasks/agent-doc/plan-comment-tail-edit-loss.md
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.

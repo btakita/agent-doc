@@ -1437,10 +1437,16 @@ fn dispatch_only_send_reopen(
             file_path,
             harness,
             true,
+            should_print_dispatch_only_unproven_progress(file, harness),
         )?,
-        DispatchOnlyReopenDelivery::DirectPaneSubmit => {
-            dispatch_routed_reopen(tmux, file, &dispatch_pane, file_path, harness)?
-        }
+        DispatchOnlyReopenDelivery::DirectPaneSubmit => dispatch_routed_reopen_with_mode(
+            tmux,
+            file,
+            &dispatch_pane,
+            file_path,
+            harness,
+            should_print_dispatch_only_unproven_progress(file, harness),
+        )?,
     };
     require_dispatch_only_codex_submit_proof(
         file,
@@ -1473,6 +1479,10 @@ fn dispatch_only_send_reopen(
         dispatch_start.dispatch_stage_label()
     );
     Ok(dispatch_pane)
+}
+
+fn should_print_dispatch_only_unproven_progress(file: &Path, harness: &HarnessConfig) -> bool {
+    harness.binary != "codex" || !codex_dispatch_start_tracking_enabled(file)
 }
 
 fn require_dispatch_only_codex_submit_proof(
@@ -3541,6 +3551,7 @@ fn dispatch_via_supervisor_ipc_with_mode(
     file_path: &str,
     harness: &HarnessConfig,
     await_start_proof: bool,
+    print_unproven_progress: bool,
 ) -> Result<RoutedDispatchStartProof> {
     let Some(sock) = supervisor_socket_path(file, session_id) else {
         anyhow::bail!(
@@ -3629,13 +3640,15 @@ fn dispatch_via_supervisor_ipc_with_mode(
             timeout.as_secs()
         ),
     );
-    eprintln!(
-        "[route] authoritative actor accepted the {} reopen for {} in pane {}, but no routed submission proof appeared after {}s — keeping the dispatch optimistic",
-        harness.binary,
-        file.display(),
-        pane,
-        timeout.as_secs()
-    );
+    if print_unproven_progress {
+        eprintln!(
+            "[route] authoritative actor accepted the {} reopen for {} in pane {}, but no routed submission proof appeared after {}s",
+            harness.binary,
+            file.display(),
+            pane,
+            timeout.as_secs()
+        );
+    }
     Ok(RoutedDispatchStartProof::CommandAcceptedOnly)
 }
 
@@ -3647,7 +3660,9 @@ fn dispatch_via_supervisor_ipc(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<RoutedDispatchStartProof> {
-    dispatch_via_supervisor_ipc_with_mode(tmux, file, pane, session_id, file_path, harness, true)
+    dispatch_via_supervisor_ipc_with_mode(
+        tmux, file, pane, session_id, file_path, harness, true, true,
+    )
 }
 
 fn authoritative_actor_dispatch_blocker_reason(
@@ -3914,6 +3929,17 @@ fn dispatch_routed_reopen(
     file_path: &str,
     harness: &HarnessConfig,
 ) -> Result<RoutedDispatchStartProof> {
+    dispatch_routed_reopen_with_mode(tmux, file, pane, file_path, harness, true)
+}
+
+fn dispatch_routed_reopen_with_mode(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    print_unproven_progress: bool,
+) -> Result<RoutedDispatchStartProof> {
     let tracker = build_routed_dispatch_start_tracker(file, file_path, harness)?;
     let status = send_command_checked(tmux, pane, file_path, harness)?;
     let Some(tracker) = tracker else {
@@ -3948,13 +3974,15 @@ fn dispatch_routed_reopen(
                     timeout.as_secs()
                 ),
             );
-            eprintln!(
-                "[route] bare {} reopen for {} was accepted in pane {}, but no routed submission proof appeared after {}s — keeping the dispatch optimistic",
-                harness.binary,
-                file.display(),
-                pane,
-                timeout.as_secs()
-            );
+            if print_unproven_progress {
+                eprintln!(
+                    "[route] bare {} reopen for {} was accepted in pane {}, but no routed submission proof appeared after {}s",
+                    harness.binary,
+                    file.display(),
+                    pane,
+                    timeout.as_secs()
+                );
+            }
             Ok(RoutedDispatchStartProof::CommandAcceptedOnly)
         }
         CommandDispatchStatus::TimedOut => anyhow::bail!(
@@ -6977,6 +7005,27 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         assert!(
             !codex_dispatch_start_tracking_enabled(&doc),
             "route should not require hook-backed submission proof when a nearer `.codex` path shadows the workspace install"
+        );
+    }
+
+    #[test]
+    fn dispatch_only_codex_with_visible_hooks_suppresses_optimistic_unproven_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
+
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        assert!(
+            !should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::codex()),
+            "dispatch-only Codex reroutes with visible hooks should let the final accepted-but-unproven error own the user-facing output"
+        );
+        assert!(
+            should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::claude()),
+            "non-Codex reroutes still may report command-accepted fallback progress"
         );
     }
 

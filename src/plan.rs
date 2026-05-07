@@ -1621,4 +1621,83 @@ do #cmpclr. spec-test-build-install-commit-push
             vec!["do #cmpclr. spec-test-build-install-commit-push".to_string()]
         );
     }
+
+    #[test]
+    fn build_plan_allows_post_compaction_rerun_noop_closeouts() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Session Summary
+
+Compacted.
+<!-- /agent:exchange -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Session Summary
+
+Compacted.
+do #aftercmp. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+"#;
+
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+        crate::session_accretion::record_recent_exchange_compaction(&doc).unwrap();
+        write_cycles_log(
+            &doc,
+            &[
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(5).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(4).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+            ],
+        );
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(
+            plan.handoff,
+            HandoffTarget::None,
+            "preflight no-op closeouts immediately after compact must not trap the rerun in another compact handoff"
+        );
+        assert_eq!(
+            plan.repo_actions,
+            vec!["do #aftercmp. spec-test-build-install-commit-push".to_string()]
+        );
+    }
 }

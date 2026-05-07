@@ -44,6 +44,7 @@ const BLOCK_RECENT_NOOP_CLOSEOUTS: usize = 3;
 const WARN_RESTART_EVENTS: usize = 2;
 const BLOCK_RESTART_EVENTS: usize = 3;
 const RECENT_SESSION_LOSS_WARN: usize = 2;
+const POST_COMPACTION_NOOP_GRACE_SECS: u64 = RECENT_WINDOW_SECS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RecentExchangeCompaction {
@@ -262,6 +263,9 @@ fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
     let recent_compaction_timestamp = load_recent_exchange_compaction(file)?
         .map(|marker| marker.timestamp)
         .filter(|timestamp| *timestamp >= window_start);
+    let post_compaction_noop_grace_until = recent_compaction_timestamp
+        .filter(|timestamp| now.saturating_sub(*timestamp) <= POST_COMPACTION_NOOP_GRACE_SECS)
+        .map(|timestamp| timestamp.saturating_add(POST_COMPACTION_NOOP_GRACE_SECS));
     let mut committed = 0;
     let mut noops = 0;
 
@@ -279,6 +283,11 @@ fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
             continue;
         }
         if recent_compaction_timestamp.is_some_and(|compact_ts| timestamp <= compact_ts) {
+            continue;
+        }
+        if entry.op == "commit_noop"
+            && post_compaction_noop_grace_until.is_some_and(|grace_until| timestamp <= grace_until)
+        {
             continue;
         }
         match entry.op.as_str() {

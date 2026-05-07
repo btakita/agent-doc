@@ -55,6 +55,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 - A live `agent-doc` child or healthy supervisor is not itself proof that the rerouted prompt started a new cycle.
 - For Codex reroutes, hook-backed submission proof is preferred before the later cycle-start health check.
+- For dispatch-only Codex reroutes with visible hook tracking, accepted tmux delivery without routed submission proof is a terminal accepted-but-unproven error. The command output must not also print an optimistic fallback/success line before that error.
 - Frontmatter-only metadata churn must not count as prompt-bearing work that blocks or requires reroute acknowledgment.
 
 ## claim

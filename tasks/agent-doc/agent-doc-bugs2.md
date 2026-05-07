@@ -96,7 +96,24 @@ Verification passed:
 Committed and pushed `btakita/agent-doc` `3df8b90` and `btakita/agent-loop` `2679f1abc`.
 
 No new follow-up work to track.
-<!-- agent:boundary:0f728e87 -->
+❯ There are 2 editor panes open at 1 time. Yet `Sync Tmux Layout` caused 3-4 tmux panes in the agent-doc tmux window.
+❯ I had to call `Sync Tmux Layout` when I landed the editor on monsterrodholders.md because the auto sync did not cause the right tmux pane to switch.
+
+❯ Please plan #next-steps to fix both issues.
+### Re: sync layout cardinality and focus handoff — gpt-5
+
+Planned `#next-steps` for both symptoms in `tasks/agent-doc/plan-sync-layout-cardinality-focus-handoff.md`.
+
+The combined plan treats the manual-sync over-expansion and the missed `monsterrodholders.md` auto-focus as one projection/focus bug: the editor-visible layout should be the complete desired tmux projection, and preserve-layout results must not be marked as synchronized unless the selected pane is actually active.
+
+I added the follow-up at the top of the backlog as `#syncfocuscard`:
+
+- Fix Sync Tmux Layout pane cardinality and passive focus handoff for two-editor-pane JetBrains layouts. Plan: `tasks/agent-doc/plan-sync-layout-cardinality-focus-handoff.md`
+
+Top backlog item: `#syncfocuscard`.
+
+No test/build run was needed for this cycle because this was a plan/backlog capture only.
+<!-- agent:boundary:7a2df678 -->
 <!-- /agent:exchange -->
 ###
 
@@ -126,6 +143,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#syncfocuscard] Fix Sync Tmux Layout pane cardinality and passive focus handoff for two-editor-pane JetBrains layouts. Plan: tasks/agent-doc/plan-sync-layout-cardinality-focus-handoff.md
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

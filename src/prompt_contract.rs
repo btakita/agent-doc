@@ -186,6 +186,11 @@ fn effective_prompt_texts(
     let mut texts = Vec::new();
 
     while let Some(text) = queue.pop_front() {
+        let text = without_prompt_preset_definition_lines(&text, prompt_presets);
+        if text.trim().is_empty() {
+            continue;
+        }
+
         texts.push(text.clone());
         for preset in referenced_presets_in_text(&text, prompt_presets) {
             if seen_presets.insert(preset.clone())
@@ -336,23 +341,69 @@ fn referenced_presets_in_text(
 ) -> Vec<String> {
     let mut referenced = Vec::new();
 
-    for preset in crate::diff::extract_prompt_preset_requests_from_text(text) {
-        if prompt_presets.contains_key(preset.as_str())
-            && !referenced.iter().any(|existing| existing == &preset)
-        {
-            referenced.push(preset);
+    for line in text.lines() {
+        if line_defines_prompt_preset(line, prompt_presets) {
+            continue;
         }
-    }
 
-    for token in extract_hashtag_tokens(text) {
-        if prompt_presets.contains_key(token.as_str())
-            && !referenced.iter().any(|existing| existing == &token)
-        {
-            referenced.push(token);
+        for preset in crate::diff::extract_prompt_preset_requests_from_text(line) {
+            if prompt_presets.contains_key(preset.as_str())
+                && !referenced.iter().any(|existing| existing == &preset)
+            {
+                referenced.push(preset);
+            }
+        }
+
+        for token in extract_hashtag_tokens(line) {
+            if prompt_presets.contains_key(token.as_str())
+                && !referenced.iter().any(|existing| existing == &token)
+            {
+                referenced.push(token);
+            }
         }
     }
 
     referenced
+}
+
+fn without_prompt_preset_definition_lines(
+    text: &str,
+    prompt_presets: &IndexMap<String, String>,
+) -> String {
+    text.lines()
+        .filter(|line| !line_defines_prompt_preset(line, prompt_presets))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn line_defines_prompt_preset(line: &str, prompt_presets: &IndexMap<String, String>) -> bool {
+    let trimmed = line.trim_start();
+    prompt_presets
+        .keys()
+        .any(|preset| line_starts_with_yaml_key(trimmed, preset))
+}
+
+fn line_starts_with_yaml_key(line: &str, key: &str) -> bool {
+    if let Some(rest) = line.strip_prefix(key) {
+        return rest.trim_start().starts_with(':');
+    }
+
+    for quote in ['\'', '"'] {
+        let Some(rest) = line.strip_prefix(quote) else {
+            continue;
+        };
+        let Some(rest) = rest.strip_prefix(key) else {
+            continue;
+        };
+        let Some(rest) = rest.strip_prefix(quote) else {
+            continue;
+        };
+        if rest.trim_start().starts_with(':') {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn extract_hashtag_tokens(text: &str) -> Vec<String> {
@@ -551,6 +602,34 @@ mod tests {
         assert!(prompt_requests_plan_work(
             &["Please report this agent-doc missing feature. #agent-doc-bug".to_string()],
             &[],
+            &presets
+        ));
+    }
+
+    #[test]
+    fn plan_request_ignores_copied_prompt_preset_definitions() {
+        let presets = IndexMap::from([(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md"
+                .to_string(),
+        )]);
+
+        assert!(!prompt_requests_plan_work(
+            &["do #tmuxplanscope. spec-test-build-install-commit-push".to_string()],
+            &[
+                "prompt_presets:".to_string(),
+                "  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md"
+                    .to_string(),
+            ],
+            &presets
+        ));
+        assert!(!prompt_requests_backlog_work(
+            &["do #tmuxplanscope. spec-test-build-install-commit-push".to_string()],
+            &[
+                "prompt_presets:".to_string(),
+                "  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md"
+                    .to_string(),
+            ],
             &presets
         ));
     }

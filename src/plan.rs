@@ -1258,6 +1258,76 @@ do #pbct. spec-test-build-install-commit-push
     }
 
     #[test]
+    fn build_plan_keeps_copied_prompt_preset_definitions_out_of_prompt_scope() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("tmux-router.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+
+do #tmuxreprocmd. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#tmuxreprocmd] Capture the exact command, crate root, and tooling context that produced the tmux-router diagnostic.
+<!-- /agent:backlog -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.execution_scope, ExecutionScope::Normal);
+        assert_eq!(
+            plan.repo_actions,
+            vec!["do #tmuxreprocmd. spec-test-build-install-commit-push".to_string()]
+        );
+        assert!(
+            !plan
+                .pending_mutations
+                .iter()
+                .any(|mutation| mutation.kind == PendingMutationKind::ExpectAdd),
+            "copied preset definitions must not require agent-doc-bug backlog capture: {:?}",
+            plan.pending_mutations
+        );
+    }
+
+    #[test]
     fn build_plan_does_not_block_on_session_accretion_guard() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("plan.md");

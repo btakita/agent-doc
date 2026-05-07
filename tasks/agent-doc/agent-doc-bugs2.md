@@ -47,7 +47,14 @@ The regression was in the new safe-passive preserve-layout exits added for the 3
 `sync.rs` now reselects the requested pane before either preserve-layout return whenever that file is already visible in the kept window. I added tmux-backed regressions for both preserve-layout paths, and updated the passive-sync spec/docs to lock the focus-handoff contract.
 
 Verification passed in `src/agent-doc`: `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force`. The repo work is committed and pushed in `src/agent-doc` as `10f9e04` on `origin/20260422/codex-agent-backend`.
-<!-- agent:boundary:14a59191 -->
+❯ do [#sshcut]. spec-test-build-install-commit-push
+### Re: #sshcut — gpt-5
+I isolated the required-SSH prelaunch probes in `agent::codex` so they now force `ControlMaster=no`, `ControlPath=none`, `ClearAllForwardings=yes`, and `PermitLocalCommand=no` on both alias and direct-host checks. That keeps `agent-doc` from creating or reusing shared SSH multiplexing state before a managed session starts, and the failure text now explicitly calls out the isolated pre-launch probe scope.
+
+I added unit coverage for the no-shared-socket contract, updated the README/spec/version surfaces, and fixed the deterministic `sync::tests::register_synced_files_prunes_cross_root_duplicate_pane_binding` suite blocker that surfaced during full verification by preserving the true root-owner registry entry when duplicate cross-root pane claims share one pane.
+
+Verification passed in `src/agent-doc`: `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force`. The repo work is committed and pushed in `src/agent-doc` as `91ec80c` on `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:7cc3c32e -->
 <!-- /agent:exchange -->
 ###
 
@@ -62,7 +69,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sshcut] `agent-doc` appears to prevent later SSH connections after SSH-dependent sessions. Prove whether the breakage is child-local capability drift or a wider environment leak/mutation, then fail closed and preserve later SSH usability. Plan: tasks/agent-doc/plan-agent-doc-prevents-ssh-connections.md
 - [ ] [#oobprompt] Out-of-exchange prompt relocation — preflight does not relocate user prompts typed after the exchange close tag; response lands correctly inside exchange but orphaned prompt text remains outside. Plan: tasks/agent-doc/plan-out-of-exchange-prompt-relocation.md
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.

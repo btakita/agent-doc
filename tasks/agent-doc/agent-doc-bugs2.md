@@ -106,7 +106,6 @@ Repo work:
 - committed workspace instruction-surface sync on `main`: `9747b6bb3`
 - pushing after this closeout commit so the session response commit is included
 ❯ do [#fye2]. spec-test-build-install-commit-push
-❯ do [#fye2]. spec-test-build-install-commit-push
 ### Re: Run Agent Doc reroute auto-remediation — gpt-5
 
 Completed .
@@ -117,8 +116,6 @@ Plan:
 
 Verification/build/install completed:
 - === instruction-files: clippy + test ===
-- 
-- 
 - 
 
 ❯ Repo work:
@@ -141,7 +138,26 @@ Verification/build/install completed:
 Repo work:
 - committed `src/agent-doc` on `20260422/codex-agent-backend`: `ca8778b` `fix: fail closed on unproven Codex dispatch-only reroutes`
 - pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:ddf36797 -->
+❯ do [#grdd]. spec-test-build-install-commit-push
+### Re: startup-miss diagnostic dispatch — gpt-5
+
+Completed `#grdd` as a verification/closeout turn rather than a new code-edit turn.
+
+The startup-miss diagnostic fix is already present in `src/agent-doc`: commit `2c6b284` (`fix: surface startup miss diagnostics visibly`) replaced the old drafted `echo ...` path with `tmux display-message`, so the retry hint is surfaced by tmux instead of being left as unsent Codex composer input. Current `HEAD` `ca8778b` still contains that implementation and its regression coverage, including `startup_miss_diagnostic_message_includes_retry_command` and `startup_miss_diagnostic_does_not_queue_shell_echo_in_pane`.
+
+Verification/build/install completed on the current branch:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Repo work:
+- no new code changes were needed for `#grdd`
+- `src/agent-doc` is clean at `ca8778b` on `20260422/codex-agent-backend`
+- branch is already aligned with `origin/20260422/codex-agent-backend`, so there was nothing new to commit or push
+
+Plan: `tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md`
+<!-- agent:boundary:fee892e0 -->
 <!-- /agent:exchange -->
 ###
 
@@ -156,7 +172,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#grdd] smdq=Make startup-miss diagnostics pane-visible instead of leaving drafted recovery text in the harness input surface. Plan: tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md
 - [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing
   `### Re:` block for inline prompt edits and the immediately previous response for tail prompts, while leaving later-turn expansion on-demand.
 - [ ] [#restoc] [recommended] Add a lightweight live+archive exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent sections on demand instead of relying only on the fixed recent-turn window.

@@ -52,21 +52,38 @@ Verification + install:
 - `cargo build` passed.
 - `cargo install --path . --force` passed; installed binary now reports `tsift 0.1.38`.
 
-Commit + push:
-- `6e4ed3a feat: degrade search when index writer is active`
-<!-- agent:boundary:53759e8f -->
+❯ Commit + push:
+❯ - `6e4ed3a feat: degrade search when index writer is active`
+❯ What are #next-steps for tsift to save tokens while maintaining the appropriate amount of context & a good user experience?
+❯ ---
+❯ Can tsift use rtk to compress tool call output in the context?
+❯ -->
+❯ With the latest tagpath updates, what are #next-steps to save tokens?
+### Re: token-saving next steps — gpt-5
+The top backlog item is `#tctx`.
+
+With the latest tagpath work, tsift already has the right primitive for semantic compression: search preview can collapse repeated symbol surfaces into one canonical `tag_alias` family, emit stable handles, and give an expansion command instead of dumping every hit. The next savings should come from making those bounded surfaces the default agent path rather than optional flags.
+
+Priority order:
+
+1. `#tctx` — Make the token-saving surfaces automatic in agent workflows. `tsift init`, Code Navigation guidance, hooks, and `tsift rewrite` should steer agent-facing calls toward `tsift --envelope ... --max-items ... --max-bytes ...` for `search`, `explain`, `session-review`, and `context-pack`, and toward digest-runner artifacts for build/test/log output.
+2. `#trtk` — Yes, tsift can use RTK, but the clean boundary is interop rather than replacing tsift's own envelopes. RTK is installed here and already compresses cargo, tests, grep, JSON, logs, and similar command families. tsift should detect RTK when available, delegate generic command-output filtering to it where RTK is stronger, then wrap the result in tsift's summary/artifact/envelope shape so callers still get stable handles and expansion commands.
+3. `#tbud` — Add budget presets. A caller should be able to say small/normal/deep, or let tsift recommend `max-items` / `max-bytes` for the current task shape, instead of hand-tuning every command.
+4. `#tsum` — Extend context packs with cached summaries behind handles. For touched files, failure anchors, and tag_alias families, include short current summaries when available and expose expansion commands when not.
+
+The main UX principle is summary-first, expand-on-demand. The user should see enough context to decide what to inspect next, while raw transcripts, full hit lists, and verbose logs stay behind artifacts or expansion commands.
+<!-- agent:boundary:1e42554a -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-What are #next-steps for tsift to save tokens while maintaining the appropriate amount of context & a good user experience?
----
-Can tsift use rtk to compress tool call output in the context?
--->
-
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tsum] Extend context-pack/digest surfaces to surface cached symbol/file summaries behind stable handles for touched files, failures, and tag_alias families
+- [ ] [#tbud] Add budget presets and adaptive defaults for agent-facing tsift surfaces, including small/normal/deep budgets and context-window-aware max-items/max-bytes recommendations
+- [ ] [#trtk] Prototype RTK interop for generic tool-call output compression: detect installed rtk, delegate supported command families to rtk filters, and wrap results in tsift artifact/envelope metadata
+- [ ] [#tctx] Make tsift token-saving surfaces automatic for agent workflows: update rewrite/init/hook guidance to prefer --envelope plus preview budgets for search/explain/session-review/context-pack and digest-runner artifacts for build/test/log output
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

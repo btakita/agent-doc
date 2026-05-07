@@ -74,7 +74,29 @@ The logs show that exact shape here, not a missing-pane case. `/tmp/agent-doc-sy
 So the supervisor actor was not losing track of the tmux panes in this specific case. The pane could still be alive and Codex/Claude could still be running, while the sync guard intentionally refused to replace it because the document was mid-closeout. The protection keys off persisted document-cycle state plus the pane-to-file registration, not off whether the pane process disappeared.
 
 Logging is good enough to reconstruct the root cause, but not good enough to make the decision obvious in one place. The evidence exists across `/tmp/agent-doc-sync.log`, `.agent-doc/logs/ops.log`, and the per-session log, and that was enough to prove what happened. The weak part is correlation: the user-facing sync warning does not include the cycle id, session id, or generation, so it can read like a supervisor/pane-tracking failure even when it is only the open-cycle detach guard doing the safe thing.
-<!-- agent:boundary:bb4fa300 -->
+❯ Why does running `Sync Tmux Pane` work consistently but switching editor documents not work here? If switching editor documents run the equivalent of `Sync Tmux Pane`, would switching tmux panes work reliably?
+### Re: automatic tab sync vs manual sync — gpt-5
+`Sync Tmux Layout` is a different command path from the automatic editor-switch path here.
+
+In the JetBrains plugin, the manual action runs `SyncLayoutAction.syncLayout(..., noAutostart = false)`, so it issues `agent-doc sync ...` without `--no-autostart`. The automatic tab listener does two different things depending on the editor state:
+
+- single visible markdown doc: `agent-doc focus <file>`
+- split or multi-doc visible layout: `agent-doc sync ... --no-autostart`
+
+Your repro was the second case. That passive `--no-autostart` path is intentionally fail-safe: if satisfying the requested layout would require detaching a still-protected pane or otherwise reconciling around ambiguous ownership, it preserves the current tmux layout instead of forcing the change. That is why the editor switch could leave tmux unchanged while the later manual sync succeeded.
+
+So if editor switching always ran the manual sync path, tmux pane changes would be more eager, but not more safely reliable. It would also reopen the class of bugs that `--no-autostart` was added to prevent: replacing a live owner, cold-starting around ambiguous ownership, or collapsing/expanding the shared `agent-doc` window during ordinary tab churn.
+
+If by `Sync Tmux Pane` you mean a hypothetical direct `agent-doc focus <file>` style command, that only helps when the target pane already exists and just needs selection. It would not fix the split-layout case where the selected document may need layout reconciliation or stash rescue to become visible again.
+
+So the right model is:
+
+- single-doc tab switch: `focus`
+- split-layout tab switch: passive `sync --no-autostart`
+- explicit operator repair/reconcile: manual `sync` with autostart still available
+
+That means the durable fix is not "make tab switching behave like manual sync every time." The durable fix is to make the passive path retry, reselect already-visible requested panes, and surface preserve-layout deferrals clearly, which is the direction of the recent fixes.
+<!-- agent:boundary:302524ee -->
 <!-- /agent:exchange -->
 ###
 

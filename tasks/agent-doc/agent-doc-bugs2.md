@@ -120,7 +120,25 @@ Top backlog item: `#tmuxfocus`.
 Updated [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md) with a `#next-steps` response, added the plan at [plan-passive-sync-existing-pane-handoff.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-passive-sync-existing-pane-handoff.md), and captured the new top backlog item as `#tmuxfocus`.
 
 The response was committed through `agent-doc finalize`, and the follow-up `agent-doc session-check` passed.
-<!-- agent:boundary:0193a80c -->
+❯ Do we still need `sync --no-autostart` since we now have the supervisor actor? Was `sync --no-autostart` a fix for the old 3-way race condition on the sessions.json file?
+### Re: `sync --no-autostart` after the supervisor actor — gpt-5
+I think we still need the `--no-autostart` concept even with the supervisor actor, but for a narrower reason.
+
+The supervisor actor answers "who is authoritative for this document generation?" It does not by itself answer "should passive editor activity be allowed to create, replace, detach, or reconcile panes aggressively?" `sync --no-autostart` is the non-destructive policy boundary for that second question. It keeps ordinary tab/layout churn from turning into pane replacement churn.
+
+So my answer is:
+
+- no, `--no-autostart` is not just a workaround for the old `sessions.json` race era
+- yes, it was partly motivated by ownership ambiguity and registry drift that often showed up through `sessions.json`
+- but its deeper role is to keep passive sync fail-safe even when ownership is uncertain or a visible layout cannot be safely mutated
+
+That matches the current transition plan too. The actor migration plan does not say "delete passive sync." It says `sync --no-autostart` should stop doing tmux/process-owner inference itself and instead reconcile layout around the actor's authoritative answer. In other words: keep the passive/non-destructive mode, replace the old heuristic internals.
+
+So if the single-owner actor rollout finishes cleanly, I would expect `--no-autostart` to survive as a behavior contract, while `sessions.json`-driven and process-heuristic logic inside it shrinks substantially because `sessions.json` becomes a projection rather than the authority.
+
+There are no new actionable backlog items from this question alone.
+
+<!-- agent:boundary:d695525b -->
 <!-- /agent:exchange -->
 ###
 
@@ -136,7 +154,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 - [ ] [#tmuxfocus] Fix passive sync visible-pane handoff so --no-autostart preserves layout without skipping focus reselect. Plan: tasks/agent-doc/plan-passive-sync-existing-pane-handoff.md
-- [__________________c ] [#verfpfx] Stop `❯ ` prompt-prefix repair from leaking into assistant list items after `Verification:`. Plan: tasks/agent-doc/plan-verification-list-prompt-prefix-leak.md
+- [ ] [#verfpfx] Stop `❯ ` prompt-prefix repair from leaking into assistant list items after `Verification:`. Plan: tasks/agent-doc/plan-verification-list-prompt-prefix-leak.md
 - [ ] [#tmuxreprocmd] Capture the exact command, crate root, and tooling context that produced the non-reproducing tmux-router RegistryEntry field mismatch. Plan: tasks/software/plan-tmux-router-repro-command-capture.md
 - [ ] [#tmuxpresetpath] Normalize repo-local #agent-doc-bug backlog target paths so copied agent-loop/tasks/... presets do not resolve to doubled paths. Plan: tasks/agent-doc/plan-tmux-router-preset-backlog-target-path-normalization.md
 - [ ] [#tmuxplanscope] Narrow prompt-contract escalation so copied prompt_presets definitions do not force unrelated software-task turns into plan_backlog_only. Plan: tasks/agent-doc/plan-tmux-router-preset-trigger-scope.md

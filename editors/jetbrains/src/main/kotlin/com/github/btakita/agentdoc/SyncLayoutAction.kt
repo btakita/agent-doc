@@ -20,6 +20,19 @@ class SyncLayoutAction : AnAction() {
 
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(SyncLayoutAction::class.java)
+        private const val PRESERVED_LAYOUT_MARKER =
+            "[sync] sync preserved the current tmux layout because"
+        private const val SAFE_PASSIVE_PRESERVED_LAYOUT_MARKER =
+            "[sync] safe passive sync preserved the current tmux layout because"
+
+        internal fun preservedLayoutWarning(output: String): String? =
+            output
+                .lineSequence()
+                .map { it.trim() }
+                .firstOrNull {
+                    it.contains(PRESERVED_LAYOUT_MARKER) ||
+                        it.contains(SAFE_PASSIVE_PRESERVED_LAYOUT_MARKER)
+                }
 
         internal fun collectVisibleMarkdownFiles(
             files: Array<out com.intellij.openapi.vfs.VirtualFile>,
@@ -201,6 +214,11 @@ class SyncLayoutAction : AnAction() {
                     }
                     if (notify && exitCode != 0) {
                         TerminalUtil.notifyError(project, "Sync failed (exit $exitCode):\n$output")
+                    } else if (notify) {
+                        val warning = preservedLayoutWarning(output)
+                        if (warning != null) {
+                            TerminalUtil.notifyWarning(project, warning)
+                        }
                     }
                 } catch (ex: Exception) {
                     if (notify) TerminalUtil.notifyError(project, "Failed to sync layout: ${ex.message}")

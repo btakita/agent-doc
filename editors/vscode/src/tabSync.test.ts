@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
+    analyzeTabSyncCommandResult,
     buildSyncCommandArgs,
     buildTabChangeCommand,
     shouldReplayQueuedTabChange,
@@ -218,5 +219,44 @@ describe('buildTabChangeCommand', () => {
     it('replays the latest queued tab change after a running sync finishes', () => {
         assert.strictEqual(shouldReplayQueuedTabChange(3, 4), true);
         assert.strictEqual(shouldReplayQueuedTabChange(4, 4), false);
+    });
+
+    it('keeps passive preserve-layout sync pending for retry', () => {
+        const result = analyzeTabSyncCommandResult(
+            {
+                kind: 'sync',
+                args: ['sync', '--col', 'tasks/software/tsift.md', '--focus', 'tasks/software/tsift.md', '--no-autostart'],
+            },
+            0,
+            '[sync] safe passive sync preserved the current tmux layout because missing requested pane(s) tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely',
+        );
+
+        assert.deepStrictEqual(result, { applied: false, shouldRetry: true });
+    });
+
+    it('treats preserve-layout sync as applied when the focused pane was reselected', () => {
+        const result = analyzeTabSyncCommandResult(
+            {
+                kind: 'sync',
+                args: ['sync', '--col', 'tasks/software/tsift.md', '--focus', 'tasks/software/tsift.md', '--no-autostart'],
+            },
+            0,
+            [
+                '[sync] safe passive sync preserved the current tmux layout because unresolved files remain blocked: tasks/software/tsift.md',
+                '[sync] safe_passive_layout_preserved_reselected_focus pane=%202 reason=blocked_files',
+            ].join('\n'),
+        );
+
+        assert.deepStrictEqual(result, { applied: true, shouldRetry: false });
+    });
+
+    it('treats focus success as applied', () => {
+        const result = analyzeTabSyncCommandResult(
+            { kind: 'focus', args: ['focus', 'tasks/software/tsift.md'] },
+            0,
+            '',
+        );
+
+        assert.deepStrictEqual(result, { applied: true, shouldRetry: false });
     });
 });

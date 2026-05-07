@@ -19,9 +19,11 @@ import {
     buildPrimaryPopupMenuItems,
 } from './popupMenu';
 import {
+    analyzeTabSyncCommandResult,
     buildSyncCommandArgs,
     buildTabChangeCommand,
     flattenVisibleColumns,
+    isPreservedLayoutOutput,
     shouldReplayQueuedTabChange,
     type TabSyncState,
 } from './tabSync';
@@ -766,7 +768,15 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
         const args = buildSyncLayoutCommand(visibleColumns, focusFile, noAutostart);
         const output = await runCli(args, root);
         if (notify) {
-            showHint(formatSyncLayoutSummary(visibleColumns, focusFile));
+            if (isPreservedLayoutOutput(output)) {
+                const warning = output
+                    .split(/\r?\n/)
+                    .find((line) => isPreservedLayoutOutput(line))
+                    ?? output.trim();
+                vscode.window.showWarningMessage(warning);
+            } else {
+                showHint(formatSyncLayoutSummary(visibleColumns, focusFile));
+            }
         }
     } catch (err: any) {
         if (notify) showError(`sync failed: ${err.message}`);
@@ -781,7 +791,12 @@ let tabSyncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 let tabSyncRunning = false;
 let lastTabSyncState: TabSyncState | undefined;
 const TAB_SYNC_DEBOUNCE_MS = 100;
+const TAB_SYNC_DEFERRED_RETRY_BASE_MS = 750;
+const TAB_SYNC_DEFERRED_RETRY_MAX_MS = 5_000;
+const TAB_SYNC_MAX_DEFERRED_RETRIES = 8;
 let latestTabSyncGeneration = 0;
+let tabSyncDeferredRetryKey: string | undefined;
+let tabSyncDeferredRetryCount = 0;
 
 interface PlannedTabSyncExecution {
     root: string;
@@ -818,12 +833,38 @@ function requestTabSync(delayMs = TAB_SYNC_DEBOUNCE_MS): void {
     }, delayMs);
 }
 
+function resetTabSyncDeferredRetry(): void {
+    tabSyncDeferredRetryKey = undefined;
+    tabSyncDeferredRetryCount = 0;
+}
+
+function nextTabSyncDeferredRetryDelay(retryCount: number): number {
+    const step = Math.max(retryCount - 1, 0);
+    const delay = TAB_SYNC_DEFERRED_RETRY_BASE_MS * (2 ** Math.min(step, 3));
+    return Math.min(delay, TAB_SYNC_DEFERRED_RETRY_MAX_MS);
+}
+
+function registerTabSyncDeferredRetry(execution: PlannedTabSyncExecution): number | null {
+    const retryKey = `${execution.planned.nextState.visibleSignature}\u0000${execution.planned.nextState.activeFile}`;
+    if (tabSyncDeferredRetryKey === retryKey) {
+        tabSyncDeferredRetryCount += 1;
+    } else {
+        tabSyncDeferredRetryKey = retryKey;
+        tabSyncDeferredRetryCount = 1;
+    }
+    if (tabSyncDeferredRetryCount > TAB_SYNC_MAX_DEFERRED_RETRIES) {
+        return null;
+    }
+    return nextTabSyncDeferredRetryDelay(tabSyncDeferredRetryCount);
+}
+
 async function drainTabSync(requestedGeneration: number): Promise<void> {
     if (requestedGeneration !== latestTabSyncGeneration) return;
     if (tabSyncRunning) return;
     tabSyncRunning = true;
 
     let startedGeneration = requestedGeneration;
+    let retryAlreadyScheduled = false;
     try {
         while (true) {
             startedGeneration = latestTabSyncGeneration;
@@ -834,14 +875,31 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
             }
 
             try {
+                let output = '';
                 if (execution.planned.command.kind === 'focus') {
                     const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
-                    await runCli(['focus', rel], cwd);
+                    output = await runCli(['focus', rel], cwd);
                 } else {
-                    await runCli(execution.planned.command.args, execution.root);
+                    output = await runCli(execution.planned.command.args, execution.root);
                 }
-                lastTabSyncState = execution.planned.nextState;
+                const result = analyzeTabSyncCommandResult(
+                    execution.planned.command,
+                    0,
+                    output,
+                );
+                if (result.applied) {
+                    lastTabSyncState = execution.planned.nextState;
+                    resetTabSyncDeferredRetry();
+                } else if (result.shouldRetry) {
+                    const delayMs = registerTabSyncDeferredRetry(execution);
+                    if (delayMs !== null) {
+                        requestTabSync(delayMs);
+                        retryAlreadyScheduled = true;
+                    }
+                    break;
+                }
             } catch {
+                resetTabSyncDeferredRetry();
                 // Silently ignore tab sync errors
             }
 
@@ -849,7 +907,7 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
         }
     } finally {
         tabSyncRunning = false;
-        if (shouldReplayQueuedTabChange(startedGeneration, latestTabSyncGeneration)) {
+        if (!retryAlreadyScheduled && shouldReplayQueuedTabChange(startedGeneration, latestTabSyncGeneration)) {
             requestTabSync(0);
         }
     }

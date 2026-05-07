@@ -476,10 +476,18 @@ object TerminalUtil {
     }
 
     fun notifyError(project: Project, content: String) {
+        notify(project, content, NotificationType.ERROR)
+    }
+
+    fun notifyWarning(project: Project, content: String) {
+        notify(project, content, NotificationType.WARNING)
+    }
+
+    private fun notify(project: Project, content: String, type: NotificationType) {
         try {
             NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
-                .createNotification(content, NotificationType.ERROR)
+                .createNotification(content, type)
                 .notify(project)
         } catch (_: Exception) {
             System.err.println("[agent-doc] $content")

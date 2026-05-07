@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -55,6 +56,33 @@ class SyncLayoutActionTest {
         )
 
         assertFalse(cmd.contains("--window"))
+    }
+
+    @Test
+    fun `manual sync preserves layout warning is extracted for notification`() {
+        val warning = SyncLayoutAction.preservedLayoutWarning(
+            """
+                [sync] resolved target window after repair: 4:agent-doc -> @128
+                [sync] sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:/repo/tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            "[sync] sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:/repo/tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely",
+            warning,
+        )
+    }
+
+    @Test
+    fun `manual sync warning extraction ignores ordinary sync output`() {
+        assertNull(
+            SyncLayoutAction.preservedLayoutWarning(
+                """
+                    [sync] resolve_file: /repo/tasks/one.md -> Registered
+                    [sync] reconcile path: 1 columns
+                """.trimIndent(),
+            )
+        )
     }
 
     @Test

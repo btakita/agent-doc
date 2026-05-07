@@ -19,8 +19,39 @@ export interface PlannedTabChange {
     nextState: TabSyncState;
 }
 
+export interface TabSyncCommandResult {
+    applied: boolean;
+    shouldRetry: boolean;
+}
+
+const SAFE_PASSIVE_LAYOUT_PRESERVED_MARKER =
+    '[sync] safe passive sync preserved the current tmux layout because';
+const SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER =
+    '[sync] safe_passive_layout_preserved_reselected_focus';
+
 export function shouldReplayQueuedTabChange(startedGeneration: number, latestGeneration: number): boolean {
     return latestGeneration > startedGeneration;
+}
+
+export function isPreservedLayoutOutput(output: string): boolean {
+    return output.includes(SAFE_PASSIVE_LAYOUT_PRESERVED_MARKER);
+}
+
+export function analyzeTabSyncCommandResult(
+    command: TabChangeCommand,
+    exitCode: number,
+    output: string,
+): TabSyncCommandResult {
+    if (exitCode !== 0) {
+        return { applied: false, shouldRetry: false };
+    }
+    if (command.kind === 'sync' && isPreservedLayoutOutput(output)) {
+        if (output.includes(SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER)) {
+            return { applied: true, shouldRetry: false };
+        }
+        return { applied: false, shouldRetry: true };
+    }
+    return { applied: true, shouldRetry: false };
 }
 
 function normalizeVisibleMd(visibleMd: string[]): string[] {

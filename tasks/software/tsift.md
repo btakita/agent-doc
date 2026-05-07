@@ -50,7 +50,16 @@ Implemented `#ts1c` in `src/tsift` with a new global `--envelope` flag for `sear
 Updated `src/tsift/SPEC.md` and `src/tsift/VERSIONS.md`, added CLI plus end-to-end regression coverage, and ran `cargo fmt --manifest-path src/tsift/Cargo.toml`, `cargo test --manifest-path src/tsift/Cargo.toml`, `cargo build --manifest-path src/tsift/Cargo.toml`, and `cargo install --path src/tsift --force`.
 
 Committed and pushed the `tsift` repo change as `c1d816c` (`feat: add structured output envelopes`). I left the parent `agent-loop` submodule pointer uncommitted because the superproject `main` branch is already ahead with unrelated work, so a root push would not have been path-isolated to this task.
-<!-- agent:boundary:7f5d0d0e -->
+❯ do [#ts1e]. spec-test-build-install-commit-push
+### Re: #ts1e digest-runner envelope + handles — gpt-5
+Implemented `#ts1e` in `src/tsift` with a new `digest-runner` structured envelope path for `tsift --envelope __digest-runner ... --json`. Green runs now stay summary-first by default while the full stdout/stderr transcript is persisted under `.tsift/artifacts/` and returned through a stable artifact handle with `handle`, `path`, `bytes`, `lines`, and `expand`. The envelope reports command metadata, exit status, success, the artifact reference, and the existing digest payload for both test and log runs.
+
+I updated `src/tsift/SPEC.md` and `src/tsift/VERSIONS.md`, added regression coverage in `src/tsift/tests/exit_code.rs`, and tightened `rewrite --run` so already-`tsift search` commands default to `--timeout 0` unless the caller set an explicit timeout.
+
+Verification completed with `cargo fmt --manifest-path src/tsift/Cargo.toml`, targeted digest-runner and rewrite regression tests, `TMPDIR=/home/brian/.tmp/tsift-tests cargo test --manifest-path src/tsift/Cargo.toml`, `TMPDIR=/home/brian/.tmp/tsift-tests cargo build --manifest-path src/tsift/Cargo.toml`, and `TMPDIR=/home/brian/.tmp/tsift-tests cargo install --path src/tsift --force`. The `tsift` repo change is committed and pushed as `5d5aef5` on `main` with message `feat: add digest runner transcript envelopes`.
+
+I left the parent `agent-loop` submodule pointer uncommitted so this cycle only shipped the path-isolated `src/tsift` change and did not mix in unrelated root-repo state.
+<!-- agent:boundary:9fee9948 -->
 <!-- /agent:exchange -->
 ###
 
@@ -63,7 +72,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ts1e] Add a command/test-run envelope schema with transcript artifact handles so green runs stay summary-first by default
 - [ ] [#ts1f] Add tsift runner/rewrite integration for cargo test/build/install so agent-doc can opt into digest-first execution output
 - [ ] [#ts1d] Improve tsift lock/degraded-mode UX so active index writers fall back to read-only or exact search with a minimal actionable summary
 <!-- /agent:backlog -->

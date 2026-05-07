@@ -122,28 +122,11 @@ v0.6.0 published to crates.io
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-015728.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-032835.md`*
 
 Active backlog:
-- [ ] [#xrfe] tsift integration: add tagpath as path dep, store canonical tags in symbols table tags column at index time
 - [ ] [#rbxy] tsift integration: tag-based search ranking in tsift search — exact tag match > partial > BM25 fallback
-❯ Is [#xrfe] and [#rbxy] complete?
-### Re: release — sonnet-4-6
-
-Bumped to v0.6.0 (minor — new library API), ran 80 tests + clippy clean, tagged and pushed, published to [crates.io/crates/tagpath](https://crates.io/crates/tagpath).
-❯ do [#xrfe]. spec-test-build-install-commit-push
-### Re: #xrfe closeout — gpt-5
-
-`#xrfe` is already complete in `tsift` and already pushed on `main`; I did not create a second repo commit around unrelated staged work.
-
-Evidence:
-- `tsift` commit `10a9b61` is `feat: wire tagpath + symbol search into tsift` and its message explicitly closes `#xrfe`.
-- `src/tsift/Cargo.toml` already has `tagpath = { version = "0.6.0", path = "../tagpath", default-features = false }`.
-- `src/tsift/src/index.rs` already inserts into `symbols (..., tags)` and computes canonical tags via `tagpath::parser` before writing symbol rows.
-- `tsift` is on `main` and up to date with `origin/main`.
-
-I left the currently staged `tsift` changes alone because they are for a different digest-runner envelope task (`SPEC.md`, `VERSIONS.md`, `src/main.rs`, `tests/exit_code.rs`) and should not be folded into an `#xrfe` closeout.
-<!-- agent:boundary:2ee81367 -->
+<!-- agent:boundary:d9f63377 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

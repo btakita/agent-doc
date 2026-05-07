@@ -30,64 +30,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260507-210623.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260507-225624.md`*
 
 Active backlog:
-- [ ] [#tont] [recommended] Load tagpath ontology refs in tsift context-pack and summary-ref surfaces so stable domain tag docs can be referenced by handle/path instead of repeated prose.
-- [ ] [#tfam] Replace tsift's local tag alias/query normalization helpers with tagpath v0.6.1 family/query APIs so search, explain, session-review, and context-pack share one canonical family model.
 - [ ] [#tfxt] Add a tsift-side fixture-backed token-savings regression test using tagpath's fixtures/tsift-token-savings.json for search, explain, and session-review previews before expanding the contract to context-pack.
 
 Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-❯ do [#tont]. spec-test-build-install-commit-push
-### Re: do #tont — gpt-5
-
-Completed `#tont`.
-
-Implemented tagpath ontology references in `tsift context-pack`: the command now loads `.naming/tags/*.md` once, attaches compact `ontology_refs` to visible context-pack symbol refs and summary refs, and emits a deduplicated top-level ontology ref list. The refs include stable handles plus tag/path/title/domain metadata and intentionally omit ontology prose so domain docs can be expanded by path only when needed.
-
-Updated `SPEC.md` and `VERSIONS.md`, added preview-builder coverage, and extended the compiled `context-pack --json` integration test.
-
-Verification:
-- `cargo test context_pack`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- `tsift --version` -> `tsift 0.1.41`
-
-Commits:
-- `src/tsift`: `473dcfe feat: add ontology refs to context packs` pushed to `btakita/tsift main`
-- parent repo submodule pointer: `1930283fa chore: update tsift submodule`
-
-After this agent-doc closeout commit, I will push the parent repo branch so the session document and submodule pointer are on `origin/main` as well.
-❯ do [#tfam]. spec-test-build-install-commit-push
-### Re: do #tfam — gpt-5
-
-Completed `#tfam`.
-
-Replaced tsift's local tag normalization helpers with `tagpath` v0.6.1 APIs. `src/index.rs` now uses `tagpath::query::normalize_query_tags` for free-text search queries and `tagpath::family::generate_family` for canonical symbol tags. `src/main.rs` now derives preview `tag_alias` values and search family grouping keys from `tagpath::family`, so search, explain, session-review, and context-pack share one canonical family model.
-
-Updated `SPEC.md`, `VERSIONS.md`, and the `tagpath` dependency requirement to `0.6.1`.
-
-Verification:
-- `cargo test compute_tags_splits_agent_style_phrase_queries`
-- `cargo test symbol_search_matches_agent_style_phrase_queries`
-- `cargo test search_budget_report_groups_repeated_symbols_by_canonical_tag_family`
-- `cargo test explain_budget_report_limits_edges_and_members`
-- `cargo test session_review_next_context_budget_limits_lists`
-- `cargo test context_pack_diff_preview_limits_files_and_symbols`
-- `cargo test context_pack_diff_preview_attaches_tag_ontology_refs`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- `tsift --version` -> `tsift 0.1.41`
-
-Commits:
-- `src/tsift`: `c69c57f feat: use tagpath family APIs for previews` pushed to `btakita/tsift main`
-- parent repo submodule pointer: `8f81ce9bd chore: update tsift submodule` pushed to `btakita/agent-loop main`
-<!-- agent:boundary:6cb88eb0 -->
+<!-- agent:boundary:ec8ab788 -->
 <!-- /agent:exchange -->
 ###
 

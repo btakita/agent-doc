@@ -167,12 +167,29 @@ Verification:
   - `tests::path_cmd_no_index_errors`
   - `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`
   - `context_pack_json_composes_next_context_and_optional_digests`
-<!-- agent:boundary:d5a40565 -->
+❯ do [#tgqn]. spec-test-build-install-commit-push
+### Re: #tgqn — gpt-5
+
+Implemented in  and pushed on  as .
+
+Changes:
+-  now splits free-text agent queries into -style tags when the raw parse collapses to one whitespace-delimited phrase, normalizes role words like  /  / , and hoists trailing role tags before symbol matching.
+- Queries such as  and  now resolve against identifiers like  /  before lexical or hybrid fallback.
+-  documents the new search behavior, and regression coverage was added in .
+
+Verification:
+- Passed: 
+- Passed focused tests:
+  - 
+- Passed: 
+- === instruction-files: clippy + test === is still red on the same eight pre-existing failures already present in this session context:
+  - 
+  -
+<!-- agent:boundary:cef61fb2 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tgqn] tsift: normalize agent search queries through tagpath so cross-convention intent resolves before lexical fallback
 - [ ] [#tgcl] tsift: cluster repeated symbol results by canonical tag family with one summary row + expand handle
 <!-- /agent:backlog -->

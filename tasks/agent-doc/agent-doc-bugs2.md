@@ -70,7 +70,10 @@ Commits pushed:
 
 On the architecture question: smaller files would help readability, but they will not solve this class of bug by themselves. The real pressure is multiple actors projecting and mutating shared state: editor plugins, `sync`, `route`, registry files, session logs, tmux layout, and supervisor lifecycle state. A single-owner daemon/actor model would help more than file splitting because it can serialize those transitions and make `sessions.json`, tmux layout, and editor UI state derived projections instead of competing sources of truth. I would still keep modules smaller as part of that work, but the daemon/actor boundary is the architectural fix.
 
-<!-- agent:boundary:97434771 -->
+### Re: prompt prefix stripped on finalize — opus-4-6
+
+Filed `#bppfxstrip`. Root cause: when `verify_sidecar_normalization()` detects missing `❯ ` prefixes in the IPC sidecar content and falls back to `content_ours`, that fallback content was captured before prefix normalization ran, so the prefixes are lost. Fix: apply `normalize_user_prompts_in_exchange()` to `content_ours` before using it as fallback (write.rs ~4599). Plan: `tasks/agent-doc/plan-prompt-prefix-stripped-on-finalize.md`.
+<!-- agent:boundary:2e7cb030 -->
 <!-- /agent:exchange -->
 ###
 
@@ -100,6 +103,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#bppfxstrip] `❯ ` prompt prefix stripped during finalize when sidecar normalization diverges to content_ours fallback — plan: tasks/agent-doc/plan-prompt-prefix-stripped-on-finalize.md
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

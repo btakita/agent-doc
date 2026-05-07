@@ -122,34 +122,12 @@ v0.6.0 published to crates.io
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-173537.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-174957.md`*
 
 Active backlog:
-- [ ] [#tp03] [recommended] Add tagpath query-normalization helpers for free-text agent prompts, returning ordered/weighted tags that tsift can use before lexical or hybrid fallback.
 - [ ] [#tp04] [recommended] Add .naming/tags ontology loading and validation so tsift summaries can reference stable domain tags instead of re-explaining domain vocabulary in prose.
 - [ ] [#tp05] [recommended] Add a tsift-facing token-savings benchmark fixture comparing raw symbol output against tagpath family/alias output for search, explain, and session-review previews.
-❯ do [#tp03]. spec-test-build-install-commit-push
-### Re: #tp03 — gpt-5
-
-Completed `#tp03`.
-
-Implemented free-text query normalization in tagpath:
-- Added `tagpath::query::{normalize_query, normalize_query_tags}` with ordered weighted `QueryTag` output for agent prompts.
-- Added `tagpath normalize-query <QUERY> [--format text|json]`.
-- Updated `SPEC.md`, `README.md`, and library API tests.
-
-Verification:
-- `cargo fmt`
-- `cargo test`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo build`
-- `cargo install --path .`
-- CLI smoke test: `tagpath normalize-query "Find session-review previews for raw_symbol output"`
-
-Committed and pushed:
-- `btakita/tagpath@314f503` (`feat: normalize free-text query tags`)
-- `btakita/agent-loop@528fac90d` (`chore: update tagpath submodule`)
-<!-- agent:boundary:b12eff50 -->
+<!-- agent:boundary:adad00bd -->
 <!-- /agent:exchange -->
 ###
 

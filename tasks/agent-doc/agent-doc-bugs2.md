@@ -138,7 +138,12 @@ So if the single-owner actor rollout finishes cleanly, I would expect `--no-auto
 
 There are no new actionable backlog items from this question alone.
 
-<!-- agent:boundary:d695525b -->
+❯ do [#tmuxfocus]. spec-test-build-install-commit-push
+### Re: #tmuxfocus — gpt-5
+The passive `sync --no-autostart` visible-pane handoff work is already implemented in `src/agent-doc`: commit `10f9e04` added the preserve-layout focus reselect path plus the blocked/protected tmux regressions in `src/sync.rs`, and commit `e8d01c6` completed the JetBrains deferred-retry side so preserved-layout syncs are treated as deferred instead of complete.
+
+I re-ran the requested verification/build/install path in `src/agent-doc`: `cargo test`, `cargo build`, `cargo install --path . --force`, `./gradlew test buildPlugin`, and `agent-doc plugin install --local jetbrains` to `~/.config/JetBrains/IntelliJIdea2026.1`. All passed. Because the fix was already committed and pushed before this cycle, there was no new repo diff to commit or push here; I’m closing `#tmuxfocus` as completed.
+<!-- agent:boundary:e7f5f0bf -->
 <!-- /agent:exchange -->
 ###
 
@@ -153,7 +158,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxfocus] Fix passive sync visible-pane handoff so --no-autostart preserves layout without skipping focus reselect. Plan: tasks/agent-doc/plan-passive-sync-existing-pane-handoff.md
 - [ ] [#verfpfx] Stop `❯ ` prompt-prefix repair from leaking into assistant list items after `Verification:`. Plan: tasks/agent-doc/plan-verification-list-prompt-prefix-leak.md
 - [ ] [#tmuxreprocmd] Capture the exact command, crate root, and tooling context that produced the non-reproducing tmux-router RegistryEntry field mismatch. Plan: tasks/software/plan-tmux-router-repro-command-capture.md
 - [ ] [#tmuxpresetpath] Normalize repo-local #agent-doc-bug backlog target paths so copied agent-loop/tasks/... presets do not resolve to doubled paths. Plan: tasks/agent-doc/plan-tmux-router-preset-backlog-target-path-normalization.md

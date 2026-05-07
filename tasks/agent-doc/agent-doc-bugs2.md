@@ -194,7 +194,33 @@ For a project whose coordinator can work with standard local IPC, that is a mean
 So the Windows install story reinforces the earlier recommendation: avoid ZeroMQ until there is a specific messaging topology that justifies the dependency. If we later need it, vcpkg makes it feasible; it just is not free enough to choose by default.
 
 Reference checked: vcpkg's `zeromq` package page lists `vcpkg install zeromq` and Windows support.
-<!-- agent:boundary:67a311a0 -->
+❯ Does Rust have a reliable equivalent of 0mq?
+### Re: Rust equivalent of ZeroMQ — gpt-5
+
+Rust has options, but I would not treat any Rust-native ZeroMQ equivalent as the obvious reliability choice for this coordinator.
+
+The choices roughly split into four groups:
+
+- `zmq`: Rust bindings to native `libzmq`; mature path, but keeps the C dependency and Windows packaging concerns.
+- `zeromq` / `zmq.rs`: Rust-native ZeroMQ work; the ZeroMQ project page still labels it WIP/not production-ready.
+- NNG/nanomsg-style crates: similar messaging patterns, but still introduce a messaging library and protocol semantics that agent-doc would need to validate.
+- ordinary Rust async IPC: Tokio tasks/channels inside the coordinator plus Unix sockets, Windows named pipes, or loopback TCP for supervisor clients.
+
+For agent-doc, the last option is the best baseline. The hard problem is not finding a message queue abstraction; it is defining the coordination contract: singleton coordinator identity, idempotent commands, leases, recovery, tmux reconciliation, and durable SQLite state. Rust already has enough primitives to implement that directly without adopting a ZeroMQ-like dependency.
+
+A good Rust shape would be:
+
+- Tokio event loop for the coordinator
+- bounded `mpsc`/`oneshot` channels internally
+- one serialized state owner task
+- framed JSON or postcard/bincode messages over local IPC
+- SQLite as the durable journal/state store
+- explicit watch streams for UI/status updates if needed
+
+If the project later needs a broader brokerless messaging fabric, then revisit `zmq`, NNG, or newer Rust-native ZMTP crates. But for the first coordinator, a small Tokio-based actor plus local IPC is likely more reliable because it has fewer moving parts and the correctness properties stay in agent-doc code.
+
+References checked: ZeroMQ's Rust page lists `zmq` bindings and labels native `zeromq`/`zmq.rs` as WIP; current Rust crate search also shows newer native options, but they do not remove the need for application-level reliability semantics.
+<!-- agent:boundary:12989872 -->
 <!-- /agent:exchange -->
 ###
 

@@ -59,7 +59,16 @@ I updated `src/tsift/SPEC.md` and `src/tsift/VERSIONS.md`, added regression cove
 Verification completed with `cargo fmt --manifest-path src/tsift/Cargo.toml`, targeted digest-runner and rewrite regression tests, `TMPDIR=/home/brian/.tmp/tsift-tests cargo test --manifest-path src/tsift/Cargo.toml`, `TMPDIR=/home/brian/.tmp/tsift-tests cargo build --manifest-path src/tsift/Cargo.toml`, and `TMPDIR=/home/brian/.tmp/tsift-tests cargo install --path src/tsift --force`. The `tsift` repo change is committed and pushed as `5d5aef5` on `main` with message `feat: add digest runner transcript envelopes`.
 
 I left the parent `agent-loop` submodule pointer uncommitted so this cycle only shipped the path-isolated `src/tsift` change and did not mix in unrelated root-repo state.
-<!-- agent:boundary:9fee9948 -->
+❯ do [#ts1f]. spec-test-build-install-commit-push
+### Re: #ts1f rewrite-run digest envelopes — gpt-5
+Implemented `#ts1f` in `src/tsift` by wiring global structured-output flags through `tsift rewrite` so agent-facing callers can opt into digest-first execution output for cargo rewrites instead of falling back to prose-only output. `tsift --envelope rewrite --run 'cargo test ...'`, `cargo build ...`, and `cargo install ...` now forward the structured mode into the rewritten `__digest-runner` command, which means agent-doc can request the same summary-first `digest-runner` envelope that the hidden runner already emits directly.
+
+I also fixed the adjacent cap bug so rewritten `--envelope` tsift commands are treated as structured output and do not get line-capped like human text. Spec/version docs were updated, unit coverage now locks the forwarded rewrite shape for `cargo install` plus structured flag forwarding, and integration coverage exercises real `rewrite --run` envelope execution for `cargo test` and `cargo build` on a temp crate.
+
+Verification completed with `cargo fmt --manifest-path src/tsift/Cargo.toml`, focused rewrite regressions, `TMPDIR=/home/brian/.tmp/tsift-tests cargo test --manifest-path src/tsift/Cargo.toml`, `TMPDIR=/home/brian/.tmp/tsift-tests cargo build --manifest-path src/tsift/Cargo.toml`, and `TMPDIR=/home/brian/.tmp/tsift-tests cargo install --path src/tsift --force`. The `tsift` repo change is committed and pushed as `717c61d` on `main` with message `feat: forward rewrite digest envelopes`.
+
+I left the parent `agent-loop` submodule pointer uncommitted so this turn only shipped the path-isolated `src/tsift` change. Preflight also flagged recent no-op closeout accretion on this document, so `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --commit` is the right move before another large turn.
+<!-- agent:boundary:72fdbcf1 -->
 <!-- /agent:exchange -->
 ###
 
@@ -72,7 +81,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ts1f] Add tsift runner/rewrite integration for cargo test/build/install so agent-doc can opt into digest-first execution output
 - [ ] [#ts1d] Improve tsift lock/degraded-mode UX so active index writers fall back to read-only or exact search with a minimal actionable summary
 <!-- /agent:backlog -->
 

@@ -123,49 +123,8 @@ v0.6.1 published to crates.io
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-175711.md`*
-
-Active backlog:
-- [ ] [#tp05] [recommended] Add a tsift-facing token-savings benchmark fixture comparing raw symbol output against tagpath family/alias output for search, explain, and session-review previews.
-❯ do [#tp05]. spec-test-build-install-commit-push
-### Re: #tp05 — gpt-5
-
-Completed `#tp05`.
-
-Added a tsift-facing token-savings benchmark fixture at `fixtures/tsift-token-savings.json` covering search, explain, and session-review previews. The fixture compares raw symbol rows against compact tagpath family/alias previews, records deterministic `ceil(utf8_bytes / 4)` savings thresholds, and includes generated aliases for all six naming conventions.
-
-Updated `SPEC.md` with the fixture contract and added `tests/tsift_token_savings_fixture.rs` to verify raw symbols parse back to the expected family counts, fixture aliases match tagpath-generated aliases, and every preview surface meets its savings threshold.
-
-Verification completed:
-- `cargo fmt`
-- `cargo test`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo build --release`
-- `cargo install --path . --force`
-
-Commits pushed:
-- `btakita/tagpath`: `5182594` (`test: add tsift token savings fixture`)
-- `btakita/agent-loop`: `b69d14cde` (`chore: update tagpath submodule`)
-❯ release + publish
-### Re: release + publish — gpt-5
-
-Released and published `tagpath` `v0.6.1`.
-
-Release work completed:
-- Bumped `Cargo.toml` and `Cargo.lock` from `0.6.0` to `0.6.1`.
-- Verified with `cargo fmt`, `cargo test`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo publish --dry-run`.
-- Tagged `v0.6.1` and pushed `btakita/tagpath` `main` plus the tag.
-- Published `tagpath v0.6.1` to crates.io.
-- Reinstalled the local binary with `cargo install --path . --force`.
-- Updated and pushed the `agent-loop` `src/tagpath` submodule pointer.
-
-❯ Commits:
-❯ - `btakita/tagpath`: `fa5225f` (`chore: release v0.6.1`)
-❯ - `btakita/agent-loop`: `7e361a2ed` (`chore: update tagpath to v0.6.1`)
-### Re: closeout repair — gpt-5
-
-Closeout repair completed. The `v0.6.1` release result above remains current: the crate was published, the tagpath release commit and tag were pushed, the local binary was reinstalled, and the agent-loop submodule pointer was updated.
-<!-- agent:boundary:a839c780 -->
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-225642.md`*
+<!-- agent:boundary:80f6414e -->
 <!-- /agent:exchange -->
 ###
 

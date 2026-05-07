@@ -37,6 +37,12 @@ A turn is not complete until each `prompt_target` item is answered or explicitly
 
 That section must preserve the diff encounter order across mixed kinds. If a `content_edit` or artifact appears before a later prompt in the changed tail, the prompt payload must keep that ordering instead of moving all `prompt_target` items to the front.
 
+## Streaming Checkpoints
+
+- Streaming agent paths save the first non-empty partial response immediately, then save changed partial output at most once every 30 seconds.
+- Partial checkpoints live beside final response captures at `.agent-doc/captures/<doc-hash>/<cycle-id>.partial.json`.
+- Partial checkpoints are recovery evidence only: they must not advance the document cycle to `response_captured`, and automatic replay still requires a final validated response capture or an already-visible response in the document.
+
 ## Custom Backends
 
 Config overrides `command` and `args` for any agent name.

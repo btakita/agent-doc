@@ -65,6 +65,7 @@ Additional rules:
 
 - Sequential orchestration requires normal git-backed finalize; `--no-git` is invalid.
 - CRDT streaming is provisional only until the final `finalize -> session-check` closeout succeeds.
+- While a CRDT streaming step is still generating, partial output is checkpointed through the shared partial-response capture ledger so pane death does not discard all in-progress assistant text.
 - Child template responses must already contain a real `patch:exchange` block; orchestration must not rely on write-path synthesis to salvage malformed transcript output.
 
 ## `--mode parallel`

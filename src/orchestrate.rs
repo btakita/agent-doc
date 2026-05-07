@@ -828,11 +828,15 @@ fn stream_step_response(
 ) -> Result<StreamStepResult> {
     let mut response = String::new();
     let mut last_streamed_response = None;
+    let mut checkpoint_writer = crate::capture::PartialCheckpointWriter::new(file);
 
     for chunk_result in chunks {
         let chunk = chunk_result.context("stream chunk error")?;
         if !chunk.text.is_empty() {
             response = chunk.text;
+            if !chunk.is_final {
+                checkpoint_writer.maybe_checkpoint(&response)?;
+            }
             if !chunk.is_final && should_stream_exchange_patch(&response) {
                 let exchange = render_streamed_exchange(seed, &response);
                 crate::stream::flush_to_document(file, &exchange, "exchange", "")?;

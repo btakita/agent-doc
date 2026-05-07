@@ -13,6 +13,9 @@
 //!   the document on a configurable interval (default 2 s). Flush uses **replace** mode
 //!   for the target component regardless of component default, because the buffer is
 //!   cumulative (full text so far, not a delta).
+//! - While streaming, the first non-empty partial response and then changed
+//!   partial responses at most once every 30 seconds are saved as durable
+//!   `.partial.json` checkpoints next to the final response capture ledger.
 //! - Thinking content (`chunk.thinking`) is routed to a separate component when
 //!   `thinking_target` is set, or interleaved as `<details>` when unset.
 //! - On stream completion: saves crash-recovery pending file, writes final content, saves
@@ -49,6 +52,8 @@
 //! - flush_cumulative_does_not_duplicate: two flushes with "Hello" then "Hello world" → exactly one "Hello" in doc
 //! - flush_preserves_other_components: flush to `output` → `status` component untouched
 //! - stream_loop_processes_chunks: three chunks ending with is_final → session_id captured, final text in doc
+//! - stream_loop_captures_partial_checkpoints: non-final streamed text persists
+//!   in the partial checkpoint ledger without waiting for final closeout
 //! - stream_loop_empty_chunks: empty-text chunks → session_id None, doc unchanged
 //! - build_prompt_first_submit: no resume → prompt says "starting a session", no diff included
 //! - build_prompt_resume: resume ID set → prompt includes diff and full document
@@ -331,6 +336,7 @@ fn stream_loop(
     // Main thread: consume chunks and accumulate in buffer
     let mut session_id = None;
     let mut chunk_count = 0;
+    let mut checkpoint_writer = crate::capture::PartialCheckpointWriter::new(file);
 
     for chunk_result in chunks {
         let chunk = chunk_result.context("stream chunk error")?;
@@ -344,22 +350,28 @@ fn stream_loop(
         }
 
         if !chunk.text.is_empty() {
-            let mut buf = buffer.lock().unwrap();
-            // For assistant messages, the text is cumulative (full text so far)
-            // For result messages, it's the final full text
-            if thinking_cfg.is_some() && thinking_cfg.unwrap().target.is_none() {
-                // Interleave: prepend thinking as collapsible details
-                let thinking_text = thinking_buffer.lock().unwrap().clone();
-                if !thinking_text.is_empty() {
-                    *buf = format!(
-                        "<details>\n<summary>Thinking</summary>\n\n{}\n</details>\n\n{}",
-                        thinking_text, chunk.text
-                    );
+            let checkpoint_text = {
+                let mut buf = buffer.lock().unwrap();
+                // For assistant messages, the text is cumulative (full text so far)
+                // For result messages, it's the final full text
+                if thinking_cfg.is_some() && thinking_cfg.unwrap().target.is_none() {
+                    // Interleave: prepend thinking as collapsible details
+                    let thinking_text = thinking_buffer.lock().unwrap().clone();
+                    if !thinking_text.is_empty() {
+                        *buf = format!(
+                            "<details>\n<summary>Thinking</summary>\n\n{}\n</details>\n\n{}",
+                            thinking_text, chunk.text
+                        );
+                    } else {
+                        *buf = chunk.text.clone();
+                    }
                 } else {
                     *buf = chunk.text.clone();
                 }
-            } else {
-                *buf = chunk.text.clone();
+                buf.clone()
+            };
+            if !chunk.is_final {
+                checkpoint_writer.maybe_checkpoint(&checkpoint_text)?;
             }
             chunk_count += 1;
         }
@@ -718,6 +730,48 @@ mod tests {
             "final text should be in document: {}",
             final_doc
         );
+    }
+
+    #[test]
+    fn stream_loop_captures_partial_checkpoints() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("locks")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("pending")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("captures")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let content = "---\nagent_doc_session: sid\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let chunks = mock_chunks(vec![
+            StreamChunk {
+                text: "Partial checkpoint".to_string(),
+                thinking: None,
+                is_final: false,
+                session_id: None,
+            },
+            StreamChunk {
+                text: "Final response".to_string(),
+                thinking: None,
+                is_final: true,
+                session_id: Some("sess-1".to_string()),
+            },
+        ]);
+
+        stream_loop(&doc, chunks, 100, "exchange", content, None).unwrap();
+
+        let checkpoint = crate::capture::latest_partial_checkpoint(&doc)
+            .unwrap()
+            .expect("partial checkpoint should be persisted");
+        assert_eq!(checkpoint.response_body, "Partial checkpoint");
+        assert_eq!(checkpoint.checkpoint_count, 1);
+        let active_capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        assert_eq!(active_capture.response_body, "Final response");
     }
 
     #[test]

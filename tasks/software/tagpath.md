@@ -138,13 +138,41 @@ If an agent asks for `getUserProfile`, `user profile getter`, or `profile user g
 When many hits differ only by convention, prefix, or namespace suffix, `tsift` can emit one family summary row first, with counts and an expand command. That preserves recall while spending tokens only when the caller actually drills in.
 
 Recommended next steps are now in backlog priority order. Top item: `#tgfh`.
-<!-- agent:boundary:b251cc92 -->
+❯ do [#tgfh]. spec-test-build-install-commit-push
+### Re: #tgfh preview tag aliases — gpt-5
+
+Implemented in `src/tsift` and pushed on `main` as `2acd1b1`.
+
+Changes:
+- `tsift search` preview symbols now emit canonical `tag_alias` values derived from `tagpath` alongside the existing stable handles.
+- `tsift explain` preview definitions/call edges now emit the same canonical aliases, and the human preview format surfaces them.
+- `tsift context-pack` now carries compact symbol-ref objects for `next_context`, diff previews, and log symbol refs while keeping raw `touched_symbols` for compatibility.
+- `SPEC.md` documents the new preview fields and handoff behavior.
+- Regression coverage was added in `src/main.rs` and `tests/exit_code.rs`.
+
+Verification:
+- Passed: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo build`, `cargo install --path . --force`.
+- Passed focused tests:
+  - `cargo test tests::search_budget_report_truncates_symbol_preview_and_emits_stable_handle -- --exact`
+  - `cargo test tests::explain_budget_report_limits_edges_and_members -- --exact`
+  - `cargo test tests::session_review_next_context_budget_limits_lists -- --exact`
+  - `cargo test tests::context_pack_diff_preview_limits_files_and_symbols -- --exact`
+- `cargo test` is still red on pre-existing repo failures unrelated to this patch. Current failing tests in this environment:
+  - `diff_digest::tests::diff_digest_cached_uses_index_snapshot_instead_of_working_tree`
+  - `diff_digest::tests::diff_digest_revision_uses_commit_snapshots`
+  - `tests::community_cmd_no_index_errors`
+  - `tests::explain_cmd_no_index_errors`
+  - `tests::graph_cmd_no_index_errors`
+  - `tests::lint_finds_entities_from_project_root_index_db`
+  - `tests::path_cmd_no_index_errors`
+  - `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`
+  - `context_pack_json_composes_next_context_and_optional_digests`
+<!-- agent:boundary:d5a40565 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tgfh] tsift: add tagpath-backed compact symbol handles and tag aliases for search/explain/context-pack outputs
 - [ ] [#tgqn] tsift: normalize agent search queries through tagpath so cross-convention intent resolves before lexical fallback
 - [ ] [#tgcl] tsift: cluster repeated symbol results by canonical tag family with one summary row + expand handle
 <!-- /agent:backlog -->

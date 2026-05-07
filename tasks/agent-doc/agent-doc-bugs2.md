@@ -57,7 +57,23 @@ Committed and pushed the `src/agent-doc` submodule change:
 - pushed to `origin/20260422/codex-agent-backend`
 
 No follow-up backlog item is needed for this task.
-<!-- agent:boundary:93dee23a -->
+❯ Running agent-doc on tsift.md put the agent-doc tmux window into a 3 tmux pane state even though there are 2 editor panes. Would a single agent-doc coordinator daemon help to manage state?
+### Re: tmux coordinator daemon — gpt-5
+
+Yes, a single coordinator daemon could help, but only if it becomes the authority for session and pane ownership. If it is just another watcher layered on top of tmux state, it can make this class of bug harder to reason about.
+
+The failure you saw sounds like an ownership/reconciliation bug: agent-doc believed it needed or owned one more tmux pane than the editor layout actually required. A coordinator daemon would be useful if it centralizes these decisions:
+
+- one active agent-doc session per document unless explicitly split
+- one authoritative mapping from document path/session id to tmux pane id
+- pane create/reuse/retire as a transactional operation
+- recovery when tmux state and agent-doc state disagree
+- startup-miss handling without independent callers racing to create panes
+
+That said, I would not jump straight to a long-lived daemon as the first fix. The smaller architectural target is a single-owner actor for routing/session state, even if it is initially process-local or file-lock-backed. If the tsift case came from multiple entrypoints independently reconciling tmux panes, then a daemon is one implementation of the right principle. The principle is more important: there should be one writer deciding the desired tmux topology, and every CLI/editor/harness trigger should submit intent to that writer instead of mutating pane state directly.
+
+I added a follow-up backlog item to investigate the `tsift.md` three-pane state specifically and decide whether the repair belongs in tmux-router pane reconciliation, agent-doc session ownership, or a coordinator/actor model.
+<!-- agent:boundary:51033f91 -->
 <!-- /agent:exchange -->
 ###
 
@@ -85,6 +101,9 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
+- [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
+- [ ] [#pfxcours] content_ours fallback strips ❯ prefix from user prompts — plan: tasks/agent-doc/plan-content-ours-prefix-strip.md
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 

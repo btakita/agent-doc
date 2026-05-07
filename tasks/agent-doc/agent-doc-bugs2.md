@@ -34,7 +34,19 @@ Active backlog:
 - [ ] [#tmuxpresetpath] Normalize repo-local #agent-doc-bug backlog target paths so copied agent-loop/tasks/... presets do not resolve to doubled paths. Plan: tasks/agent-doc/plan-tmux-router-preset-backlog-target-path-normalization.md
 - [ ] [#tmuxplanscope] Narrow prompt-contract escalation so copied prompt_presets definitions do not force unrelated software-task turns into plan_backlog_only. Plan: tasks/agent-doc/plan-tmux-router-preset-trigger-scope.md
 - 4 more active item(s)
+do [#tmuxreprocmd]. spec-test-build-install-commit-push
 <!-- agent:boundary:cb022b75 -->
+### Re: #tmuxreprocmd — gpt-5
+
+Completed `#tmuxreprocmd`.
+
+Captured the available reproduction context in `tasks/software/plan-tmux-router-repro-command-capture.md`. The original report came from the `tasks/software/tmux-router.md` exchange as an editor-observed `main.rs` diagnostic, not a captured shell command. The checked crate root is `/home/brian/work/btakita/agent-loop/src/tmux-router`, branch `main`, commit `d6d7a4f` at the start of the turn, with `cargo 1.94.0` and `rustc 1.94.0`.
+
+The current source does not reproduce the mismatch: `RegistryEntry` defines `session_id` and `supervisor_instance_id`, and `src/main.rs` constructs entries with both fields. The local `target/flycheck*` records show older successful flycheck runs against prior package versions (`0.3.2`, `0.2.7`), which points to stale editor/rust-analyzer state or an older checkout/index rather than the current crate.
+
+Updated tmux-router docs/tests so the current registry shape is explicit. Verification passed: `cargo check --all-targets`, `cargo test` (98 unit tests plus doctests), `cargo build --release`, and `cargo install --path . --force`.
+
+Committed and pushed `btakita/tmux-router` `a5f1b53` and `btakita/agent-loop` `cf96accce`.
 <!-- /agent:exchange -->
 ###
 

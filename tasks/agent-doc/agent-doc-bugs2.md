@@ -71,15 +71,41 @@ Verification:
 - `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`.
 - `agent-doc --version` -> `agent-doc 0.33.16`.
 
+❯ Commit / push:
+❯ - `src/agent-doc` had no new local code changes to commit for this cycle.
+❯ - `git -C src/agent-doc push origin 20260422/codex-agent-backend` returned `Everything up-to-date`.
+❯ - Marked `#pfxleak` done in this session closeout.
+### Re: #pfxleak follow-up — gpt-5
+Implemented and verified the remaining leak exposed by this closeout.
+
+Root cause:
+- `Commit / push:` was already listed as assistant response prose, but the classifier checked the broader `commit ...` prompt heuristic before that evidence-label exception.
+- A historical bad `❯ Commit / push:` line in committed assistant content therefore became a post-commit prefix-repair target and the editor-side repair added `❯ ` to the later assistant `Commit / push:` label.
+
+What changed:
+- `diff.rs` now classifies `Commit / push:` as plain assistant response prose before checking generic prompt-target shape.
+- `write.rs` has a regression proving `extract_post_commit_normalization_targets` does not propagate a historical prefixed assistant `Commit / push:` label into later assistant content.
+- `SPEC.md` and `VERSIONS.md` document that post-commit prefix repair must not propagate historical bad prefixes from assistant evidence labels.
+- Cleaned the transient `❯ Commit / push:` and `(HEAD)` marker from the live session document while preserving the hidden note that reported the issue.
+
+Verification:
+- `cargo test extract_post_commit_targets_ignores_prefixed_assistant_commit_label`
+- `cargo test normalize_safe_preserves`
+- `cargo test` passed: 1921 unit tests, integration suites passed, 3 debounce timing tests ignored.
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`.
+
 Commit / push:
-- `src/agent-doc` had no new local code changes to commit for this cycle.
-- `git -C src/agent-doc push origin 20260422/codex-agent-backend` returned `Everything up-to-date`.
-- Marked `#pfxleak` done in this session closeout.
-<!-- agent:boundary:2d0b393e -->
+- `src/agent-doc`: `2fe95ea` (`fix: ignore assistant commit labels in prefix repair`) pushed to `origin/20260422/codex-agent-backend`.
+- `agent-loop`: submodule pointer commit `eca7ad4e4` created locally; root push will run after this binary-owned session closeout.
+<!-- agent:boundary:4aa0ac18 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+"❯ Commit / push:" should not have the `❯ ` prefix since this was the agent response. #agent-doc-bug
+---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
 ---
 Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/brian/work/btakita/agent-loop/tasks/software/tsift did not respond to `Run Agent Doc` in a previous turn. It seems to run ok now but I'm concerned that `Run Agent Doc` was non-responsive.

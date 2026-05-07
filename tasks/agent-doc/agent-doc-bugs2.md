@@ -35,85 +35,12 @@ Active backlog:
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 1 more active item(s)
 ❯ do [#noopcap]. spec-test-build-install-commit-push
-### Re: #noopcap — gpt-5
 
-Implemented `#noopcap`.
+*3 earlier topic(s) archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-164331.md`*
 
-`agent-doc plan` now treats repeated `commit_noop` closeout churn as a `compact` handoff: it suppresses normal repo work/finalize for that pass and emits compact/restart guidance before another low-signal `### Re:` block can be appended. Partial exchange compact now leaves unresolved trailing prompts in the working tree while omitting them from the committed snapshot, so compacting old response history does not mark the current prompt as answered.
-
-Verification:
-- `cargo test plan::tests::build_plan_hands_off_repeated_noop_closeout_churn`
-- `cargo test compact::tests::partial_compact_preserves_trailing_prompt_after_boundary`
-- `cargo test`
-- `cargo build`
-- `cargo install --path . --force`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Committed and pushed:
-- `src/agent-doc` `897e2f9` (`fix: hand off no-op closeout churn`) to `origin/20260422/codex-agent-backend`
-- `agent-loop` `84e88440f` (`agent-doc: hand off no-op closeout churn`) to `origin/main`
-❯ After I canceled an agent-doc run on Codex, this error surfaced in the JB plugin:
-```
-resync: stash pane %220 is registered in its own project root — skipping kill
-resync: stash pane %206 is registered in its own project root — skipping kill
-resync: stash pane %222 is registered in its own project root — skipping kill
-resync: stash pane %238 is registered in its own project root — skipping kill
-resync: stash pane %221 is registered in its own project root — skipping kill
-resync: stash pane %214 is registered in its own project root — skipping kill
-[route] target tmux session: 4
-[route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %210
-[route] Command accepted after single submit (0.3s)
-[route] bare codex reopen for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %210, but no routed submission proof appeared after 10s — keeping the dispatch optimistic
-Error: dispatch-only codex reopen for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %210 via direct_pane_submit (tmux_literal_enter_delayed), but Codex never recorded a routed submission proof after waiting 10s; the pane is live but not dispatch-ready enough to confirm the reopen. Restore an idle Codex prompt or restart the session and reroute again
-```
-❯ spec-test-build-install-commit-push
-### Re: dispatch-only Codex accepted-but-unproven route — gpt-5
-
-Fixed the JetBrains `Run Agent Doc` dispatch-only failure shape.
-
-`route.rs` now suppresses the old `keeping the dispatch optimistic` progress line when the reroute is dispatch-only Codex and hook tracking is visible. In that accepted-but-unproven case, the final routed-submission-proof error is the single user-facing outcome instead of a contradictory optimistic line followed by an error.
-
-I also fixed the compact handoff loop that surfaced during this cycle: after `agent-doc compact`, post-compact preflight no-op closeouts are ignored for the same recent-cycle window, so the rerun can proceed instead of immediately re-entering the same compact handoff.
-
-Updated specs/docs:
-- `src/agent-doc/specs/07-session-tmux-commands.md`
-- `src/agent-doc/editors/jetbrains/SPEC.md`
-- `src/agent-doc/README.md`
-- `src/agent-doc/VERSIONS.md`
-
-Verification:
-- `cargo test plan::tests::build_plan_allows_post_compaction_rerun_noop_closeouts`
-- `cargo test route::tests::dispatch_only_codex_with_visible_hooks_suppresses_optimistic_unproven_progress`
-- `cargo test`
-- `cargo build`
-- `cargo install --path . --force`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Committed and pushed:
-- `src/agent-doc` `ee74eb7` (`fix: clarify dispatch-only unproven failures`) to `origin/20260422/codex-agent-backend`
-- `agent-loop` `f3760ec10` (`agent-doc: clarify dispatch-only unproven failures`) to `origin/main`
-
-No actionable follow-up backlog items.
-❯ #commit-push
-### Re: #commit-push — gpt-5
-
-Committed and pushed the pending workspace changes while keeping this session document out of the manual commit.
-
-Nested repositories committed and pushed:
-- `mail` `947820c` (`docs: add equity funding source progress draft`) to `origin/main`
-- `src/session-share/buildparty-investor-demo` `12d466f` (`fix: stabilize overlay review controls`) to `origin/main`
-- `src/session-share/claudescore.com` `688e051` (`chore: update deepeval telemetry id`) to `origin/main`
-- `src/session-share` `dfe344e0` (`agent-doc(dev): capture buildparty overlay fixes`) to `origin/main`
-- `src/boost-client` `a1b7e51` (`agent-doc: update monsterrodholders pointer`) to `origin/main`
-
-Parent repo committed and pushed:
-- `agent-loop` `3b6ec9772` (`chore: commit pending workspace changes`) to `origin/main`
-
-❯ I did not run a verification suite for this turn; the request was commit/push of existing uncommitted work, and I did not modify code as part of the commit aggregation.
 ### Re: post-commit boundary normalization — gpt-5
 
 Closed the post-commit boundary normalization drift from the previous `#commit-push` closeout. No additional repository changes were needed beyond the commits and pushes already listed above.
-<!-- agent:boundary:6623483b -->
 <!-- /agent:exchange -->
 ###
 
@@ -126,7 +53,7 @@ This seems to happen when dev.md is in an active turn. When the turn is over, th
 Why can't dev.md be detached safely? I like the visibility into the error.
 spec-test-build-install-commit-push
 ---
-The agent-doc changes the agent:boundary id, a separate:
+The agent-doc changes the agent:boundary id, drift noise occurs:
 ```
 • Ran agent-doc repair /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   └ Error: [session-check] INTERRUPTED: cycle `cycle-1778171646764` is `committed` (commit_success), but the active
@@ -135,7 +62,27 @@ The agent-doc changes the agent:boundary id, a separate:
     home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Reopen closeout for this turn or let the Stop
     hook recover it from the final assistant message.
 ```
+```
+• Ran agent-doc repair /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  └ Error: [session-check] INTERRUPTED: cycle `cycle-1778171646764` is `committed` (commit_success), but the active
+    Codex session changed this document after the last committed closeout without reopening the binary-owned write/
+    … +2 lines (ctrl + t to view transcript)
+    home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Reopen closeout for this turn or let the Stop
+    hook recover it from the final assistant message.
+```
+```
+• The interruption is from post-commit normalization drift: the committed response is present, but the live editor/IPC
+  copy changed the boundary marker and prompt prefix after the commit. I’m rerunning preflight so the binary can repair/
+  commit that drift through its normal path.
 
+• Ran agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  └ [commit] staged snapshot already matches HEAD for /home/brian/work/btakita/agent-loop/tasks/professional/
+    equityfundingsource.md — closing cycle as already committed
+    … +41 lines (ctrl + t to view transcript)
+      ]
+    }
+```
+spec-test-build-install-commit-push
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
 ---

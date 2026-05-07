@@ -110,7 +110,14 @@ So the precise answer is:
 - for already-visible pane focus handoff: yes, the path previously behaved as if the guards were too broad, and that was a bug
 
 After that fix, `sync --no-autostart` should still be able to focus an already-existing visible pane reliably even when it refuses to mutate the surrounding layout. If you still see a missed handoff after that change, I would treat it as a concrete regression in the "reselect visible focus pane" path or in the plugin's retry/dedup logic, not as evidence that the passive safety model itself is wrong.
-<!-- agent:boundary:a7d88537 -->
+❯ Plan #next-steps to fix the already present tmux pane handoff.
+### Re: #next-steps — gpt-5
+Added a focused follow-up plan in [tasks/agent-doc/plan-passive-sync-existing-pane-handoff.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-passive-sync-existing-pane-handoff.md) for the already-visible tmux pane handoff regression.
+
+I also added the implementation item to backlog and put it at the top by inserting it as the newest pending item.
+
+Top backlog item: `#tmuxfocus`.
+<!-- agent:boundary:8086930d -->
 <!-- /agent:exchange -->
 ###
 
@@ -125,6 +132,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tmuxfocus] Fix passive sync visible-pane handoff so --no-autostart preserves layout without skipping focus reselect. Plan: tasks/agent-doc/plan-passive-sync-existing-pane-handoff.md
 - [ ] [#verfpfx] Stop `❯ ` prompt-prefix repair from leaking into assistant list items after `Verification:`. Plan: tasks/agent-doc/plan-verification-list-prompt-prefix-leak.md
 - [ ] [#tmuxreprocmd] Capture the exact command, crate root, and tooling context that produced the non-reproducing tmux-router RegistryEntry field mismatch. Plan: tasks/software/plan-tmux-router-repro-command-capture.md
 - [ ] [#tmuxpresetpath] Normalize repo-local #agent-doc-bug backlog target paths so copied agent-loop/tasks/... presets do not resolve to doubled paths. Plan: tasks/agent-doc/plan-tmux-router-preset-backlog-target-path-normalization.md

@@ -122,24 +122,8 @@ v0.6.0 published to crates.io
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-032835.md`*
-
-Active backlog:
-- [ ] [#rbxy] tsift integration: tag-based search ranking in tsift search — exact tag match > partial > BM25 fallback
-❯ do [#rbxy]. spec-test-build-install-commit-push
-### Re: #rbxy closeout — gpt-5
-
-`#rbxy` is already complete in `tsift` and already pushed on `main`; I did not create a second spec/build/install/commit/push cycle because there is no remaining `#rbxy` repo delta to carry.
-
-Evidence:
-- `tsift` commit `10a9b61` is `feat: wire tagpath + symbol search into tsift`, and its commit message explicitly closes `#rbxy`.
-- `src/tsift/src/index.rs` already implements the ranking tiers and emits `exact_name`, `all_tags`, and `partial_tags` matches before BM25 fallback.
-- `src/tsift/src/index.rs` already has regression coverage for `symbol_search_exact_name`, `symbol_search_cross_convention`, and `symbol_search_partial_tags`.
-- `src/tsift/SPEC.md` already documents symbol-match ranking first with BM25 fallback.
-- `tsift` is on `main`, the worktree is clean, and the branch is up to date with `origin/main`.
-
-So the correct closeout here was to reap `#rbxy`, not to manufacture another repo commit around already-shipped work.
-<!-- agent:boundary:bb71dd50 -->
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-034315.md`*
+<!-- agent:boundary:7b18c0b4 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

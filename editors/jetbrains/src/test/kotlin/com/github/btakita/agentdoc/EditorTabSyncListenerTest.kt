@@ -179,6 +179,21 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `safe passive preserve output with reselected focus is treated as applied`() {
+        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
+            kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
+            exitCode = 0,
+            output = """
+                [sync] safe passive sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tmux-router.md while visible protected pane(s) %241:preflight_started:/repo/tasks/software/tagpath.md cannot be detached safely
+                [sync] safe_passive_layout_preserved_reselected_focus pane=%202 reason=protected_visible
+            """.trimIndent(),
+        )
+
+        assertEquals(true, result.applied)
+        assertEquals(false, result.shouldRetry)
+    }
+
+    @Test
     fun `successful sync output without preserve marker applies immediately`() {
         val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
             kind = EditorTabSyncListener.AutomaticCommandKind.Sync,

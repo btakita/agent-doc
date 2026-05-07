@@ -838,6 +838,20 @@ fn canonical_managed_sync_files(col_args: &[String]) -> HashSet<PathBuf> {
     managed
 }
 
+fn projected_sync_pane_count(col_args: &[String]) -> usize {
+    col_args
+        .iter()
+        .flat_map(|arg| arg.split(','))
+        .map(str::trim)
+        .filter(|file| !file.is_empty())
+        .map(|file| {
+            let path = PathBuf::from(file);
+            path.canonicalize().unwrap_or(path)
+        })
+        .collect::<HashSet<_>>()
+        .len()
+}
+
 fn visible_registered_files_in_window(tmux: &Tmux, window: &str) -> HashSet<PathBuf> {
     tmux.list_window_panes(window)
         .unwrap_or_default()
@@ -880,6 +894,15 @@ fn select_visible_focus_pane_if_present(
         return Some(pane);
     }
     None
+}
+
+fn emit_preserved_layout_focus_marker(pane: &str, reason: &str) {
+    let marker = format!(
+        "[sync] safe_passive_layout_preserved_reselected_focus pane={} reason={}",
+        pane, reason
+    );
+    eprintln!("{}", marker);
+    sync_log(&marker);
 }
 
 fn safe_passive_visible_layout_blockers(
@@ -931,6 +954,47 @@ fn safe_passive_visible_layout_blockers(
         missing_requested.join(", "),
         protected_unwanted.join(", ")
     ))
+}
+
+fn preserve_visible_layout_if_protected_attach_would_expand(
+    tmux: &Tmux,
+    window: Option<&str>,
+    focus: Option<&str>,
+    col_args: &[String],
+    auto_start_mode: AutoStartMode,
+) -> bool {
+    let Some(target_window) = window else {
+        return false;
+    };
+    let requested_files = canonical_managed_sync_files(col_args);
+    let Some(reason) = safe_passive_visible_layout_blockers(tmux, target_window, &requested_files)
+    else {
+        return false;
+    };
+    let mode_label = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        "safe passive sync"
+    } else {
+        "sync"
+    };
+    eprintln!(
+        "[sync] {} preserved the current tmux layout because {}",
+        mode_label, reason
+    );
+    let focus_reselected = select_visible_focus_pane_if_present(tmux, target_window, focus)
+        .inspect(|pane| {
+            emit_preserved_layout_focus_marker(pane, "protected_visible");
+        });
+    sync_log(&format!(
+        "layout_preserved_protected_visible mode={} desired_panes={} actual_visible_panes={} reason={} focus_reselected={}",
+        auto_start_mode.log_label(),
+        projected_sync_pane_count(col_args),
+        tmux.list_window_panes(target_window)
+            .map(|panes| panes.len())
+            .unwrap_or(0),
+        reason,
+        focus_reselected.as_deref().unwrap_or("<none>")
+    ));
+    true
 }
 
 fn persist_dead_pane_capture(
@@ -2319,6 +2383,16 @@ fn run_with_options(
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
     let blocked_unresolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
 
+    if preserve_visible_layout_if_protected_attach_would_expand(
+        tmux,
+        window,
+        focus,
+        col_args,
+        auto_start_mode,
+    ) {
+        return Ok(());
+    }
+
     let resolve_file = |path: &Path| -> Option<FileResolution> {
         // Step 1: Auto-scaffold empty .md files BEFORE ensure_initialized().
         // Must run first because ensure_initialized() writes minimal frontmatter
@@ -3194,10 +3268,7 @@ fn run_with_options(
             if let Some(target_window) = window
                 && let Some(pane) = select_visible_focus_pane_if_present(tmux, target_window, focus)
             {
-                sync_log(&format!(
-                    "safe_passive_layout_preserved_reselected_focus pane={} reason=blocked_files",
-                    pane
-                ));
+                emit_preserved_layout_focus_marker(&pane, "blocked_files");
             }
             sync_log(&format!(
                 "safe_passive_layout_preserved blocked_files={}",
@@ -3241,29 +3312,14 @@ fn run_with_options(
         allow_unresolved_pane_assignment: Some(&allow_unresolved_pane_assignment),
     };
 
-    if matches!(auto_start_mode, AutoStartMode::SafePassive)
-        && let Some(target_window) = window
-    {
-        let requested_files = canonical_managed_sync_files(col_args);
-        if let Some(reason) =
-            safe_passive_visible_layout_blockers(tmux, target_window, &requested_files)
-        {
-            eprintln!(
-                "[sync] safe passive sync preserved the current tmux layout because {}",
-                reason
-            );
-            if let Some(pane) = select_visible_focus_pane_if_present(tmux, target_window, focus) {
-                sync_log(&format!(
-                    "safe_passive_layout_preserved_reselected_focus pane={} reason=protected_visible",
-                    pane
-                ));
-            }
-            sync_log(&format!(
-                "safe_passive_layout_preserved_protected_visible reason={}",
-                reason
-            ));
-            return Ok(());
-        }
+    if preserve_visible_layout_if_protected_attach_would_expand(
+        tmux,
+        window,
+        focus,
+        col_args,
+        auto_start_mode,
+    ) {
+        return Ok(());
     }
 
     // Only open-cycle panes are protected during DETACH. This is narrower than the
@@ -3288,6 +3344,18 @@ fn run_with_options(
             pane_count,
             result.file_panes.len()
         ));
+        let projected = projected_sync_pane_count(col_args);
+        if projected > 0 && pane_count > projected {
+            let warning = format!(
+                "[sync] warning: visible pane count {} exceeds requested editor projection {} after sync for window {}",
+                pane_count, projected, w
+            );
+            eprintln!("{}", warning);
+            sync_log(&format!(
+                "layout_projection_exceeded window={} desired_panes={} actual_visible_panes={}",
+                w, projected, pane_count
+            ));
+        }
         tracing::debug!(
             window = w,
             pane_count,
@@ -3484,9 +3552,10 @@ fn register_synced_files(
             let registry_root_matches = registry
                 .get(&registry_key)
                 .is_some_and(|entry| registry_entry_matches_document_root(entry, &project_root));
-            let claim_acceptable = pane_assignment_matches_document_root(tmux, pane_id, &project_root)
-                || registry_root_matches
-                || live_owner_matches;
+            let claim_acceptable =
+                pane_assignment_matches_document_root(tmux, pane_id, &project_root)
+                    || registry_root_matches
+                    || live_owner_matches;
             let acceptable_claim_count = acceptable_duplicate_claims
                 .get(pane_id)
                 .copied()
@@ -8795,6 +8864,101 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             iso.pane_window(&pane_c).unwrap(),
             pane_c_window,
             "safe passive preserve-layout guard should not move the requested pane into the visible agent-doc window"
+        );
+    }
+
+    #[test]
+    fn manual_sync_preserves_layout_when_attach_would_expand_around_protected_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let doc_a = root.join("tasks/a.md");
+        let doc_b = root.join("tasks/b.md");
+        let doc_c = root.join("tasks/c.md");
+        for (path, session) in [
+            (&doc_a, "sync-manual-a"),
+            (&doc_b, "sync-manual-b"),
+            (&doc_c, "sync-manual-c"),
+        ] {
+            std::fs::write(
+                path,
+                format!(
+                    "---\nagent_doc_session: {session}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let iso = IsolatedTmux::new("sync-manual-protected-grow");
+        let pane_a = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let pane_b = iso.split_window(&pane_a, root, "-dh").unwrap();
+        let target_window = iso.pane_window(&pane_a).unwrap();
+        let pane_c = iso.new_window("test", root).unwrap();
+        let pane_c_window = iso.pane_window(&pane_c).unwrap();
+
+        sessions::register_full_with_cwd(
+            "sync-manual-a",
+            &pane_a,
+            &doc_a.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &pane_a).unwrap(),
+            &target_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd(
+            "sync-manual-b",
+            &pane_b,
+            &doc_b.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &pane_b).unwrap(),
+            &target_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd(
+            "sync-manual-c",
+            &pane_c,
+            &doc_c.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &pane_c).unwrap(),
+            &pane_c_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+
+        let doc_a_content = std::fs::read_to_string(&doc_a).unwrap();
+        crate::cycle_state::start_preflight(&doc_a, Some(&doc_a_content), Some(&doc_a_content))
+            .unwrap();
+
+        run_with_options(
+            &[
+                doc_c.to_string_lossy().to_string(),
+                doc_b.to_string_lossy().to_string(),
+            ],
+            None,
+            Some(doc_c.to_string_lossy().as_ref()),
+            AutoStartMode::Full,
+            &iso,
+        )
+        .unwrap();
+
+        let ordered = iso.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(
+            ordered,
+            vec![pane_a.clone(), pane_b.clone()],
+            "manual sync should not expand a two-pane projection around a protected visible pane"
+        );
+        assert_eq!(
+            iso.pane_window(&pane_c).unwrap(),
+            pane_c_window,
+            "manual sync should leave the requested hidden pane in its original window when moving it would expand the visible projection"
         );
     }
 

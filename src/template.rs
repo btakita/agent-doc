@@ -515,12 +515,11 @@ fn escaped_conversation_range_outside_exchange(
 
     let mut search_start = exchange.close_end;
     for component in trailing_components {
-        if search_start < component.open_start {
-            if let Some(start) =
+        if search_start < component.open_start
+            && let Some(start) =
                 conversation_tail_start_in_range(doc, search_start, component.open_start)
-            {
-                return Some((start, component.open_start));
-            }
+        {
+            return Some((start, component.open_start));
         }
         search_start = search_start.max(component.close_end);
     }

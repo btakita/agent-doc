@@ -74,6 +74,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
     internal object AutomaticCommandPlanner {
         private const val SAFE_PASSIVE_LAYOUT_PRESERVED_MARKER =
             "[sync] safe passive sync preserved the current tmux layout because"
+        private const val SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER =
+            "[sync] safe_passive_layout_preserved_reselected_focus"
 
         fun resolveActiveFilePath(
             preferredActiveFile: String?,
@@ -143,6 +145,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 kind == AutomaticCommandKind.Sync &&
                 output.contains(SAFE_PASSIVE_LAYOUT_PRESERVED_MARKER)
             ) {
+                if (output.contains(SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER)) {
+                    return AutomaticCommandResult(applied = true, shouldRetry = false)
+                }
                 return AutomaticCommandResult(applied = false, shouldRetry = true)
             }
             return AutomaticCommandResult(applied = true, shouldRetry = false)

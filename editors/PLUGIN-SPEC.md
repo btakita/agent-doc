@@ -100,6 +100,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
   2. Detect 2D columnar layout (which files are stacked vertically vs. side-by-side).
   3. Run `agent-doc sync --col <absolute-files,...> [--col <absolute-files,...>] --focus <absolute-active-file>`.
      Preserve empty `--col` placeholders when a sibling editor split has no markdown file so the binary can keep left/right column identity. If the visible split spans the workspace root and a nested submodule, keep every visible markdown path in the reported layout instead of dropping the out-of-root file, and execute the sync from the workspace root `.agent-doc/` instead of the focused file's nested root so remembered column state survives unmanaged markdown focus changes. Plugins report layout only; window scoping, passive autostart, ambiguity handling, and cross-root owner resolution are all owned by the Rust binary.
+     The binary must preserve visible pane cardinality and warn instead of expanding the tmux window when a protected open-cycle pane blocks safe detach around the requested editor projection.
   4. Show inline hint with layout summary on manual trigger. Silent on automatic trigger.
 
 ### 2.5 Tab-to-Pane Sync (Automatic)
@@ -108,7 +109,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Debounce:** 500ms. Skip if the visible file set + active file signature is unchanged.
 - **Concurrency guard:** One automatic command at a time. When a newer selection/layout request arrives while a command is still running, queue only the latest request and replay it immediately after the running command finishes.
 - **Snapshot contract:** Capture the exact focus/layout snapshot from the triggering editor event and replay that latest captured snapshot after any in-flight command. Do not resample the live editor state later and risk landing on an earlier splitter hop.
-- **Behavior:** Same as Section 2.4, but runs silently (no user notification). Errors are silently ignored.
+- **Behavior:** Same as Section 2.4, but runs silently (no user notification) with `--no-autostart`. If the command reports preserve-layout output, keep the selection pending and retry unless the output also includes `[sync] safe_passive_layout_preserved_reselected_focus`, which proves the already-visible focus pane was selected. Errors are silently ignored.
 - **Safety:** Startup audits must be report-only (`agent-doc resync`), not `resync --fix`, unless the user explicitly invoked a repair action.
 
 ### 2.6 Prompt Polling

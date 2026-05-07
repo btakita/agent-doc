@@ -94,7 +94,23 @@ Committed and pushed:
 - `agent-loop` `f3760ec10` (`agent-doc: clarify dispatch-only unproven failures`) to `origin/main`
 
 No actionable follow-up backlog items.
-<!-- agent:boundary:d4aa8654 -->
+❯ #commit-push
+### Re: #commit-push — gpt-5
+
+Committed and pushed the pending workspace changes while keeping this session document out of the manual commit.
+
+Nested repositories committed and pushed:
+- `mail` `947820c` (`docs: add equity funding source progress draft`) to `origin/main`
+- `src/session-share/buildparty-investor-demo` `12d466f` (`fix: stabilize overlay review controls`) to `origin/main`
+- `src/session-share/claudescore.com` `688e051` (`chore: update deepeval telemetry id`) to `origin/main`
+- `src/session-share` `dfe344e0` (`agent-doc(dev): capture buildparty overlay fixes`) to `origin/main`
+- `src/boost-client` `a1b7e51` (`agent-doc: update monsterrodholders pointer`) to `origin/main`
+
+Parent repo committed and pushed:
+- `agent-loop` `3b6ec9772` (`chore: commit pending workspace changes`) to `origin/main`
+
+I did not run a verification suite for this turn; the request was commit/push of existing uncommitted work, and I did not modify code as part of the commit aggregation.
+<!-- agent:boundary:e0106219 -->
 <!-- /agent:exchange -->
 ###
 

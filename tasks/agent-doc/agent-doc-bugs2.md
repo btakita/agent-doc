@@ -143,7 +143,29 @@ There are no new actionable backlog items from this question alone.
 The passive `sync --no-autostart` visible-pane handoff work is already implemented in `src/agent-doc`: commit `10f9e04` added the preserve-layout focus reselect path plus the blocked/protected tmux regressions in `src/sync.rs`, and commit `e8d01c6` completed the JetBrains deferred-retry side so preserved-layout syncs are treated as deferred instead of complete.
 
 I re-ran the requested verification/build/install path in `src/agent-doc`: `cargo test`, `cargo build`, `cargo install --path . --force`, `./gradlew test buildPlugin`, and `agent-doc plugin install --local jetbrains` to `~/.config/JetBrains/IntelliJIdea2026.1`. All passed. Because the fix was already committed and pushed before this cycle, there was no new repo diff to commit or push here; I’m closing `#tmuxfocus` as completed.
-<!-- agent:boundary:e7f5f0bf -->
+❯ do [#verfpfx]. spec-test-build-install-commit-push
+### Re: #verfpfx — gpt-5
+Implemented the prompt-prefix leak fix in `src/agent-doc`. The CLI repair/sidecar verification path now treats `### Re:` / `## Assistant` headings as assistant-owned response blocks and only resumes prompt-prefix repair at an older boundary marker or a fresh prompt-like line. That keeps matching `normalize_prefix_lines` entries from turning assistant `Verification:` bullets into `❯ ` prompts while still repairing real user prompts in the same exchange.
+
+Updated the same structural guard in the JetBrains and VS Code patch watchers, and documented the invariant in `SPEC.md` and `editors/PLUGIN-SPEC.md`. Added regressions for the assistant verification-list shape and for rejecting a sidecar where a prefixed assistant list item is used as the normalization proof.
+
+Verification:
+- `cargo test normalize_exchange_prefixes_for_targets_skips_assistant_verification_lists`
+- `cargo test verify_sidecar_normalization_rejects_assistant_list_prefix_substitute`
+- `cargo test normalize_user_prompts_agent_response_not_prefixed`
+- `npm test` in `editors/vscode`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `./gradlew test buildPlugin`
+- `agent-doc plugin install --local jetbrains` to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`
+
+Commit / push:
+- `src/agent-doc`: `301bcb1` pushed to `origin/20260422/codex-agent-backend`
+- root `agent-loop`: `81dc38509` pushed to `origin/main`
+
+I left the pre-existing unrelated `src/agent-doc/src/sync.rs` local diff unstaged.
+<!-- agent:boundary:a24c744d -->
 <!-- /agent:exchange -->
 ###
 
@@ -158,7 +180,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#verfpfx] Stop `❯ ` prompt-prefix repair from leaking into assistant list items after `Verification:`. Plan: tasks/agent-doc/plan-verification-list-prompt-prefix-leak.md
 - [ ] [#tmuxreprocmd] Capture the exact command, crate root, and tooling context that produced the non-reproducing tmux-router RegistryEntry field mismatch. Plan: tasks/software/plan-tmux-router-repro-command-capture.md
 - [ ] [#tmuxpresetpath] Normalize repo-local #agent-doc-bug backlog target paths so copied agent-loop/tasks/... presets do not resolve to doubled paths. Plan: tasks/agent-doc/plan-tmux-router-preset-backlog-target-path-normalization.md
 - [ ] [#tmuxplanscope] Narrow prompt-contract escalation so copied prompt_presets definitions do not force unrelated software-task turns into plan_backlog_only. Plan: tasks/agent-doc/plan-tmux-router-preset-trigger-scope.md

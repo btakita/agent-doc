@@ -72,7 +72,7 @@ Priority order:
 4. `#tsum` — Extend context packs with cached summaries behind handles. For touched files, failure anchors, and tag_alias families, include short current summaries when available and expose expansion commands when not.
 
 The main UX principle is summary-first, expand-on-demand. The user should see enough context to decide what to inspect next, while raw transcripts, full hit lists, and verbose logs stay behind artifacts or expansion commands.
-<!-- agent:boundary:1e42554a -->
+<!-- agent:boundary:67a4d1ce -->
 <!-- /agent:exchange -->
 ###
 
@@ -80,10 +80,10 @@ The main UX principle is summary-first, expand-on-demand. The user should see en
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tsum] Extend context-pack/digest surfaces to surface cached symbol/file summaries behind stable handles for touched files, failures, and tag_alias families
-- [ ] [#tbud] Add budget presets and adaptive defaults for agent-facing tsift surfaces, including small/normal/deep budgets and context-window-aware max-items/max-bytes recommendations
-- [ ] [#trtk] Prototype RTK interop for generic tool-call output compression: detect installed rtk, delegate supported command families to rtk filters, and wrap results in tsift artifact/envelope metadata
 - [ ] [#tctx] Make tsift token-saving surfaces automatic for agent workflows: update rewrite/init/hook guidance to prefer --envelope plus preview budgets for search/explain/session-review/context-pack and digest-runner artifacts for build/test/log output
+- [ ] [#trtk] Prototype RTK interop for generic tool-call output compression: detect installed rtk, delegate supported command families to rtk filters, and wrap results in tsift artifact/envelope metadata
+- [ ] [#tbud] Add budget presets and adaptive defaults for agent-facing tsift surfaces, including small/normal/deep budgets and context-window-aware max-items/max-bytes recommendations
+- [ ] [#tsum] Extend context-pack/digest surfaces to surface cached symbol/file summaries behind stable handles for touched files, failures, and tag_alias families
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

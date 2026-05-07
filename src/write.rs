@@ -312,6 +312,52 @@ fn snapshot_persist_mode(
     }
 }
 
+fn snapshot_persist_mode_with_current(
+    baseline: Option<&str>,
+    base: &str,
+    content_current: &str,
+    content_ours: &str,
+    final_content: &str,
+) -> SnapshotPersistMode {
+    if baseline.is_some()
+        && strip_boundary_for_dedup(base) != strip_boundary_for_dedup(content_current)
+        && has_prompt_bearing_user_drift(base, content_current)
+    {
+        return SnapshotPersistMode::ContentOurs;
+    }
+
+    snapshot_persist_mode(baseline, content_ours, final_content)
+}
+
+fn has_prompt_bearing_user_drift(base: &str, current: &str) -> bool {
+    let base_norm = strip_boundary_for_dedup(base);
+    let current_norm = strip_boundary_for_dedup(current);
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(&base_norm, &current_norm) else {
+        return false;
+    };
+    if diff_text.lines().any(|line| {
+        let Some(added) = line.strip_prefix('+') else {
+            return false;
+        };
+        if line.starts_with("+++") {
+            return false;
+        }
+        let trimmed = added.trim();
+        trimmed.starts_with('❯') || crate::diff::text_line_looks_like_prompt_target(trimmed)
+    }) {
+        return true;
+    }
+    crate::diff::classify_prompt_bearing_changes(&diff_text)
+        .iter()
+        .any(|change| {
+            matches!(
+                change.kind,
+                crate::diff::PromptBearingChangeKind::PromptTarget
+                    | crate::diff::PromptBearingChangeKind::ContentEdit
+            )
+        })
+}
+
 fn snapshot_content_to_persist<'a>(
     mode: SnapshotPersistMode,
     content_ours: &'a str,
@@ -3379,7 +3425,13 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         return Ok(());
     }
 
-    let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
+    let snapshot_mode = snapshot_persist_mode_with_current(
+        baseline,
+        base,
+        &content_current,
+        &content_ours,
+        &final_content,
+    );
     let snapshot_content =
         snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
 
@@ -3542,7 +3594,13 @@ pub fn run_template(
         return Ok(());
     }
 
-    let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
+    let snapshot_mode = snapshot_persist_mode_with_current(
+        baseline,
+        base,
+        &content_current,
+        &content_ours,
+        &final_content,
+    );
     let snapshot_content =
         snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
 
@@ -3955,7 +4013,13 @@ pub fn run_stream(
                 snapshot_doc.as_deref(),
                 &final_content,
             )?;
-            let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
+            let snapshot_mode = snapshot_persist_mode_with_current(
+                baseline,
+                base,
+                &content_current,
+                &content_ours,
+                &final_content,
+            );
             let snapshot_content =
                 snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
             let snapshot_crdt_state = match snapshot_mode {
@@ -4128,7 +4192,13 @@ pub fn run_stream(
         return Ok(());
     }
 
-    let snapshot_mode = snapshot_persist_mode(baseline, &content_ours, &final_content);
+    let snapshot_mode = snapshot_persist_mode_with_current(
+        baseline,
+        base,
+        &content_current,
+        &content_ours,
+        &final_content,
+    );
     let snapshot_content =
         snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
     let snapshot_crdt_state = match snapshot_mode {

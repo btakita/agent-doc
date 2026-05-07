@@ -631,6 +631,65 @@ fn write_commit_fails_closed_when_internal_session_check_rejects_closeout() {
     );
 }
 
+#[test]
+fn finalize_fails_closed_on_concurrent_prompt_added_after_baseline() {
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let current_after_preflight = fs::read_to_string(&doc).unwrap();
+    let concurrent = current_after_preflight.replace(
+        "<!-- /agent:exchange -->",
+        "❯ What remains after this response?\n<!-- /agent:exchange -->",
+    );
+    fs::write(&doc, concurrent).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--stream",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: Please reply — gpt-5\nAnswered only the original prompt.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("[session-check] INTERRUPTED"))
+        .stderr(predicates::str::contains("prompt_target"))
+        .stderr(predicates::str::contains("What remains after this response?"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: Please reply — gpt-5"));
+    assert!(content.contains("❯ What remains after this response?"));
+
+    let head = head_blob(tmp.path());
+    assert!(head.contains("### Re: Please reply — gpt-5"));
+    assert!(
+        !head.contains("What remains after this response?"),
+        "late prompt must remain outside the committed closeout snapshot"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stdout(predicates::str::contains("prompt_target"))
+        .stdout(predicates::str::contains(
+            "What remains after this response?",
+        ));
+}
+
 // --- Phase 3: Queue consumption integration tests ---
 
 fn queue_doc_content() -> String {

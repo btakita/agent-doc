@@ -34,12 +34,7 @@ Active backlog:
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
 - 2 more active item(s)
-<!-- agent:boundary:df84efc7 -->
-<!-- /agent:exchange -->
-###
-
-<!--
-An agent-doc turn had an error for dev.md:
+❯ An agent-doc turn had an error for dev.md:
 ```
 ● Bash(agent-doc session-check
       /home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md 2>&1)
@@ -49,7 +44,29 @@ An agent-doc turn had an error for dev.md:
       Both redirects confirmed via `curl`. All 519 assertions pass (6 suites). Specs + news updated. Committed + pushed
       buildparty-investor-demo and session-share.
 ```
----
+### Re: dev.md `session-check` false prompt target — gpt-5
+
+
+This is a real agent-doc bug, and it lines up with the existing prompt-prefix leak family.
+
+The pasted failure shows `session-check` treating assistant closeout prose as unresolved user work:
+
+```text
+prompt_target: ❯ **Verification:** Both redirects confirmed via `curl`.
+```
+
+I could not rerun the exact check because `src/session-share/tasks/buildparty-investor-demo/dev.md` is not present in this checkout, but source inspection points to a concrete classifier ordering bug. In Rust, `text_line_looks_like_prompt_target()` treats any line beginning with `❯` as a prompt before `line_looks_like_plain_response_after_prompt()` can recognize response labels like `Verification`, `What changed:`, `Follow-up:`, or `Commit / push:`. The JetBrains prefix-repair helper has the same hazard: it checks for fresh prompts before normalizing prefixed response labels.
+
+I created and committed the fix plan here:
+
+`tasks/agent-doc/plan-response-label-prefix-false-prompt.md`
+
+I also added backlog item `#respfx` for the implementation. The fix should normalize optional `❯`, list markers, and markdown emphasis before testing known assistant response labels, then add Rust and JetBrains regressions so `❯ **Verification:** ...` does not reopen a committed cycle while real prefixed user follow-ups still do.
+<!-- agent:boundary:236f6352 -->
+<!-- /agent:exchange -->
+###
+
+<!--
 "❯ Commit / push:" should not have the `❯ ` prefix since this was the agent response. #agent-doc-bug
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
@@ -62,6 +79,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#respfx] Fix prefixed assistant response labels being classified as unresolved prompt targets; plan: tasks/agent-doc/plan-response-label-prefix-false-prompt.md
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.

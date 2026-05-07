@@ -153,20 +153,20 @@ Changes:
 Verification:
 - Passed: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo build`, `cargo install --path . --force`.
 ❯ - Passed focused tests:
-  ❯ - `cargo test tests::search_budget_report_truncates_symbol_preview_and_emits_stable_handle -- --exact`
-  ❯ - `cargo test tests::explain_budget_report_limits_edges_and_members -- --exact`
-  ❯ - `cargo test tests::session_review_next_context_budget_limits_lists -- --exact`
-  ❯ - `cargo test tests::context_pack_diff_preview_limits_files_and_symbols -- --exact`
+❯   - `cargo test tests::search_budget_report_truncates_symbol_preview_and_emits_stable_handle -- --exact`
+❯   - `cargo test tests::explain_budget_report_limits_edges_and_members -- --exact`
+❯   - `cargo test tests::session_review_next_context_budget_limits_lists -- --exact`
+❯   - `cargo test tests::context_pack_diff_preview_limits_files_and_symbols -- --exact`
 ❯ - `cargo test` is still red on pre-existing repo failures unrelated to this patch. Current failing tests in this environment:
-  ❯ - `diff_digest::tests::diff_digest_cached_uses_index_snapshot_instead_of_working_tree`
-  ❯ - `diff_digest::tests::diff_digest_revision_uses_commit_snapshots`
-  ❯ - `tests::community_cmd_no_index_errors`
-  ❯ - `tests::explain_cmd_no_index_errors`
-  ❯ - `tests::graph_cmd_no_index_errors`
-  ❯ - `tests::lint_finds_entities_from_project_root_index_db`
-  ❯ - `tests::path_cmd_no_index_errors`
-  ❯ - `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`
-  ❯ - `context_pack_json_composes_next_context_and_optional_digests`
+❯   - `diff_digest::tests::diff_digest_cached_uses_index_snapshot_instead_of_working_tree`
+❯   - `diff_digest::tests::diff_digest_revision_uses_commit_snapshots`
+❯   - `tests::community_cmd_no_index_errors`
+❯   - `tests::explain_cmd_no_index_errors`
+❯   - `tests::graph_cmd_no_index_errors`
+❯   - `tests::lint_finds_entities_from_project_root_index_db`
+❯   - `tests::path_cmd_no_index_errors`
+❯   - `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`
+❯   - `context_pack_json_composes_next_context_and_optional_digests`
 ❯ do [#tgqn]. spec-test-build-install-commit-push
 ### Re: #tgqn — gpt-5
 ### Re: #tgqn — gpt-5
@@ -226,15 +226,15 @@ Verification:
 - Passed: `cargo build`
 - Passed: `cargo install --path . --force`
 - `make check` is still red on the same eight pre-existing failures already present in this session context:
-  - `diff_digest::tests::diff_digest_cached_uses_index_snapshot_instead_of_working_tree`
-  - `diff_digest::tests::diff_digest_revision_uses_commit_snapshots`
-  - `tests::community_cmd_no_index_errors`
-  - `tests::explain_cmd_no_index_errors`
-  - `tests::graph_cmd_no_index_errors`
-  - `tests::lint_finds_entities_from_project_root_index_db`
-  - `tests::path_cmd_no_index_errors`
-  - `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`
-<!-- agent:boundary:2f421f52 -->
+❯   - `diff_digest::tests::diff_digest_cached_uses_index_snapshot_instead_of_working_tree`
+❯   - `diff_digest::tests::diff_digest_revision_uses_commit_snapshots`
+❯   - `tests::community_cmd_no_index_errors`
+❯   - `tests::explain_cmd_no_index_errors`
+❯   - `tests::graph_cmd_no_index_errors`
+❯   - `tests::lint_finds_entities_from_project_root_index_db`
+❯   - `tests::path_cmd_no_index_errors`
+❯   - `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`
+<!-- agent:boundary:3b607a92 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

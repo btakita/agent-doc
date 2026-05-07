@@ -8379,6 +8379,47 @@ do #verfpfx. spec-test-build-install-commit-push
     }
 
     #[test]
+    fn extract_post_commit_targets_ignores_prefixed_assistant_commit_label() {
+        let committed = "\
+<!-- agent:exchange patch=append -->
+### Re: #old — gpt-5
+Verified.
+
+❯ Commit / push:
+❯ do [#next]. spec-test-build-install-commit-push
+### Re: #next — gpt-5
+Verified.
+
+Commit / push:
+- `git push` returned `Everything up-to-date`.
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: #old — gpt-5
+Verified.
+
+❯ Commit / push:
+❯ do [#next]. spec-test-build-install-commit-push
+### Re: #next — gpt-5
+Verified.
+
+Commit / push:
+- `git push` returned `Everything up-to-date`.
+<!-- agent:boundary:abc --> (HEAD)
+<!-- /agent:exchange -->
+";
+
+        let targets = extract_post_commit_normalization_targets(committed, working);
+
+        assert!(
+            !targets.iter().any(|target| target == "Commit / push:"),
+            "assistant evidence label must not become a prefix repair target: {targets:?}"
+        );
+    }
+
+    #[test]
     fn verify_sidecar_normalization_rejects_assistant_list_prefix_substitute() {
         let sidecar = "\
 <!-- agent:exchange patch=append -->

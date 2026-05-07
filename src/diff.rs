@@ -419,7 +419,15 @@ pub(crate) fn line_looks_like_soft_prompt_request(trimmed: &str) -> bool {
 }
 
 pub(crate) fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool {
-    if trimmed.is_empty() || normalized_prompt_preview_line(trimmed).is_some() {
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if trimmed.starts_with("Commit / push:") {
+        return true;
+    }
+
+    if normalized_prompt_preview_line(trimmed).is_some() {
         return false;
     }
 
@@ -429,7 +437,6 @@ pub(crate) fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool
         || trimmed.starts_with("Verification")
         || trimmed.starts_with("What changed:")
         || trimmed.starts_with("Follow-up:")
-        || trimmed.starts_with("Commit / push:")
         || trimmed.starts_with("Backlog:")
         || trimmed.starts_with("`#")
     {

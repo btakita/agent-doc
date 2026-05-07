@@ -1471,16 +1471,97 @@ internal fun normalizeExchangePrefixesUtil(doc: String, lines: List<String>): St
     // Build normalized target set once — trimEnd() absorbs trailing-whitespace divergence.
     val targetLines = lines.filter { it.isNotBlank() }.map { it.trimEnd() }.toSet()
 
+    var inResponseBlock = false
     val normalizedUserRegion = userRegion.split("\n").joinToString("\n") { docLine ->
+        val trimmed = docLine.trim()
+        when {
+            boundaryTag.matches(trimmed) -> {
+                inResponseBlock = false
+                return@joinToString docLine
+            }
+            isExchangeResponseHeadingForPrefixRepair(trimmed) -> {
+                inResponseBlock = true
+                return@joinToString docLine
+            }
+        }
         val normalized = docLine.trimEnd()
+        val isTarget = normalized in targetLines
+        if (inResponseBlock) {
+            if (startsPromptRunAfterResponseForPrefixRepair(trimmed, isTarget)) {
+                inResponseBlock = false
+            } else {
+                return@joinToString docLine
+            }
+        }
         when {
             normalized.startsWith("❯ ") -> docLine   // already prefixed — idempotent
-            normalized in targetLines -> "❯ $docLine" // match — add prefix
+            isTarget -> "❯ $docLine" // match — add prefix
             else -> docLine
         }
     }
 
     return beforeExchange + normalizedUserRegion + agentRegion + afterExchange
+}
+
+private fun isExchangeResponseHeadingForPrefixRepair(trimmed: String): Boolean =
+    trimmed == "## Assistant" ||
+        trimmed.startsWith("### Re:") ||
+        trimmed.startsWith("#### Re:") ||
+        trimmed.startsWith("##### Re:") ||
+        trimmed.startsWith("###### Re:")
+
+private fun startsPromptRunAfterResponseForPrefixRepair(trimmed: String, isTarget: Boolean): Boolean {
+    val alreadyPrefixed = trimmed.startsWith("❯ ")
+    val unprefixed = if (alreadyPrefixed) trimmed.removePrefix("❯ ").trimStart() else trimmed
+    return lineLooksLikeFreshPromptAfterResponseForPrefixRepair(unprefixed) ||
+        ((alreadyPrefixed || isTarget) && !lineLooksLikePlainResponseAfterPromptForPrefixRepair(unprefixed))
+}
+
+private fun lineLooksLikeFreshPromptAfterResponseForPrefixRepair(trimmed: String): Boolean {
+    val lower = trimmed.removePrefix("❯").trim().lowercase()
+    return trimmed.startsWith("❯") ||
+        trimmed.endsWith("?") ||
+        lower == "go" ||
+        lower == "continue" ||
+        lower.startsWith("do #") ||
+        lower.startsWith("do [#") ||
+        lower.startsWith("fix #") ||
+        lower.startsWith("run ") ||
+        lower.startsWith("rerun ") ||
+        lower.startsWith("build ") ||
+        lower.startsWith("test ") ||
+        lower.startsWith("commit ") ||
+        lower.startsWith("push ") ||
+        lower.startsWith("verify ") ||
+        lower.startsWith("investigate ")
+}
+
+private fun lineLooksLikePlainResponseAfterPromptForPrefixRepair(trimmed: String): Boolean {
+    if (trimmed.isBlank()) return false
+    if (lineLooksLikeFreshPromptAfterResponseForPrefixRepair(trimmed)) return false
+    if (
+        trimmed.startsWith("- ") ||
+        trimmed.startsWith("* ") ||
+        trimmed.startsWith("Plan:") ||
+        trimmed.startsWith("Verification") ||
+        trimmed.startsWith("What changed:") ||
+        trimmed.startsWith("Follow-up:") ||
+        trimmed.startsWith("Commit / push:") ||
+        trimmed.startsWith("Backlog:") ||
+        trimmed.startsWith("`#")
+    ) {
+        return true
+    }
+    val lower = trimmed.lowercase()
+    return lower.startsWith("i updated ") ||
+        lower.startsWith("i fixed ") ||
+        lower.startsWith("i added ") ||
+        lower.startsWith("i implemented ") ||
+        lower.startsWith("i left ") ||
+        lower.startsWith("updated ") ||
+        lower.startsWith("fixed ") ||
+        lower.startsWith("added ") ||
+        lower.startsWith("implemented ")
 }
 
 /**

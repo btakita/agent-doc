@@ -1446,15 +1446,93 @@ class PatchWatcher implements vscode.Disposable {
         // divergence between binary disk-side payload and editor buffer.
         const targetLines = new Set(lines.filter(l => l.trim()).map(l => l.trimEnd()));
 
+        let inResponseBlock = false;
         const normalizedLines = userRegion.split('\n').map(docLine => {
+            const trimmed = docLine.trim();
+            if (/<!-- agent:boundary:[a-z0-9][a-z0-9:-]* -->/.test(trimmed)) {
+                inResponseBlock = false;
+                return docLine;
+            }
+            if (this.isExchangeResponseHeadingForPrefixRepair(trimmed)) {
+                inResponseBlock = true;
+                return docLine;
+            }
             const normalized = docLine.trimEnd();
+            const isTarget = targetLines.has(normalized);
+            if (inResponseBlock) {
+                if (this.startsPromptRunAfterResponseForPrefixRepair(trimmed, isTarget)) {
+                    inResponseBlock = false;
+                } else {
+                    return docLine;
+                }
+            }
             if (normalized.startsWith('❯ ')) return docLine;       // already prefixed
-            if (targetLines.has(normalized)) return `❯ ${docLine}`; // match — add prefix
+            if (isTarget) return `❯ ${docLine}`; // match — add prefix
             return docLine;
         });
         userRegion = normalizedLines.join('\n');
 
         return beforeExchange + userRegion + agentRegion + afterExchange;
+    }
+
+    private isExchangeResponseHeadingForPrefixRepair(trimmed: string): boolean {
+        return trimmed === '## Assistant'
+            || trimmed.startsWith('### Re:')
+            || trimmed.startsWith('#### Re:')
+            || trimmed.startsWith('##### Re:')
+            || trimmed.startsWith('###### Re:');
+    }
+
+    private startsPromptRunAfterResponseForPrefixRepair(trimmed: string, isTarget: boolean): boolean {
+        const alreadyPrefixed = trimmed.startsWith('❯ ');
+        const unprefixed = alreadyPrefixed ? trimmed.substring(2).trimStart() : trimmed;
+        return this.lineLooksLikeFreshPromptAfterResponseForPrefixRepair(unprefixed)
+            || ((alreadyPrefixed || isTarget) && !this.lineLooksLikePlainResponseAfterPromptForPrefixRepair(unprefixed));
+    }
+
+    private lineLooksLikeFreshPromptAfterResponseForPrefixRepair(trimmed: string): boolean {
+        const lower = trimmed.replace(/^❯\s*/, '').trim().toLowerCase();
+        return trimmed.startsWith('❯')
+            || trimmed.endsWith('?')
+            || lower === 'go'
+            || lower === 'continue'
+            || lower.startsWith('do #')
+            || lower.startsWith('do [#')
+            || lower.startsWith('fix #')
+            || lower.startsWith('run ')
+            || lower.startsWith('rerun ')
+            || lower.startsWith('build ')
+            || lower.startsWith('test ')
+            || lower.startsWith('commit ')
+            || lower.startsWith('push ')
+            || lower.startsWith('verify ')
+            || lower.startsWith('investigate ');
+    }
+
+    private lineLooksLikePlainResponseAfterPromptForPrefixRepair(trimmed: string): boolean {
+        if (!trimmed.trim()) return false;
+        if (this.lineLooksLikeFreshPromptAfterResponseForPrefixRepair(trimmed)) return false;
+        if (trimmed.startsWith('- ')
+            || trimmed.startsWith('* ')
+            || trimmed.startsWith('Plan:')
+            || trimmed.startsWith('Verification')
+            || trimmed.startsWith('What changed:')
+            || trimmed.startsWith('Follow-up:')
+            || trimmed.startsWith('Commit / push:')
+            || trimmed.startsWith('Backlog:')
+            || trimmed.startsWith('`#')) {
+            return true;
+        }
+        const lower = trimmed.toLowerCase();
+        return lower.startsWith('i updated ')
+            || lower.startsWith('i fixed ')
+            || lower.startsWith('i added ')
+            || lower.startsWith('i implemented ')
+            || lower.startsWith('i left ')
+            || lower.startsWith('updated ')
+            || lower.startsWith('fixed ')
+            || lower.startsWith('added ')
+            || lower.startsWith('implemented ');
     }
 
     /**

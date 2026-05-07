@@ -2628,17 +2628,17 @@ pub fn verify_sidecar_normalization(sidecar: &str, normalize_prefix_lines: &[Str
                 .map(|component| component.content(sidecar).to_string())
         })
         .unwrap_or_else(|| sidecar.to_string());
-    let sidecar_user_region = exchange_user_region(&sidecar_exchange);
+    let target_counts = normalization_target_counts(normalize_prefix_lines);
 
     let mut prefixed_counts = std::collections::HashMap::<String, usize>::new();
-    for line in sidecar_user_region.lines() {
+    for line in exchange_prompt_prefix_eligible_lines(&sidecar_exchange, Some(&target_counts)) {
         let trimmed = line.trim_end();
         if let Some(stripped) = trimmed.strip_prefix("❯ ") {
             *prefixed_counts.entry(stripped.to_string()).or_default() += 1;
         }
     }
 
-    for (target, required) in normalization_target_counts(normalize_prefix_lines) {
+    for (target, required) in target_counts {
         if prefixed_counts.get(&target).copied().unwrap_or(0) < required {
             return false;
         }
@@ -2657,6 +2657,61 @@ fn exchange_user_region(content: &str) -> &str {
         offset += line.len() + 1;
     }
     &content[..boundary_pos]
+}
+
+fn is_exchange_response_heading_for_prefix_repair(trimmed: &str) -> bool {
+    trimmed == "## Assistant"
+        || trimmed.starts_with("### Re:")
+        || trimmed.starts_with("#### Re:")
+        || trimmed.starts_with("##### Re:")
+        || trimmed.starts_with("###### Re:")
+}
+
+fn starts_prompt_run_after_response(trimmed: &str, is_target: bool) -> bool {
+    let unprefixed = trimmed
+        .strip_prefix("❯ ")
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+    let already_prefixed = unprefixed.len() != trimmed.len();
+
+    crate::diff::line_looks_like_fresh_prompt_after_response(unprefixed)
+        || ((already_prefixed || is_target)
+            && !crate::diff::line_looks_like_plain_response_after_prompt(unprefixed))
+}
+
+fn exchange_prompt_prefix_eligible_lines<'a>(
+    content: &'a str,
+    target_counts: Option<&std::collections::HashMap<String, usize>>,
+) -> Vec<&'a str> {
+    let boundary_prefix = "<!-- agent:boundary:";
+    let mut eligible = Vec::new();
+    let mut in_response_block = false;
+
+    for line in exchange_user_region(content).lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(boundary_prefix) {
+            in_response_block = false;
+            continue;
+        }
+        if is_exchange_response_heading_for_prefix_repair(trimmed) {
+            in_response_block = true;
+            continue;
+        }
+
+        let normalized = line.trim_end();
+        let is_target = target_counts.is_some_and(|counts| counts.contains_key(normalized));
+        if in_response_block {
+            if starts_prompt_run_after_response(trimmed, is_target) {
+                in_response_block = false;
+            } else {
+                continue;
+            }
+        }
+
+        eligible.push(line);
+    }
+
+    eligible
 }
 
 /// Compare the committed/snapshot document against the working tree and return
@@ -2680,12 +2735,9 @@ pub fn extract_post_commit_normalization_targets(committed: &str, working: &str)
         return vec![];
     }
 
-    let committed_user_region = exchange_user_region(committed_exc);
-    let working_user_region = exchange_user_region(working_exc);
-
     let mut working_prefixed = std::collections::HashMap::<String, usize>::new();
     let mut working_unprefixed = std::collections::HashMap::<String, usize>::new();
-    for line in working_user_region.lines() {
+    for line in exchange_prompt_prefix_eligible_lines(working_exc, None) {
         let trimmed = line.trim_end();
         if trimmed.is_empty() {
             continue;
@@ -2698,7 +2750,7 @@ pub fn extract_post_commit_normalization_targets(committed: &str, working: &str)
     }
 
     let mut committed_prefixed = std::collections::HashMap::<String, usize>::new();
-    for line in committed_user_region.lines() {
+    for line in exchange_prompt_prefix_eligible_lines(committed_exc, None) {
         let Some(stripped) = line.strip_prefix("❯ ") else {
             continue;
         };
@@ -2723,7 +2775,7 @@ pub fn extract_post_commit_normalization_targets(committed: &str, working: &str)
     }
 
     let mut targets = Vec::new();
-    for line in committed_user_region.lines() {
+    for line in exchange_prompt_prefix_eligible_lines(committed_exc, None) {
         let Some(stripped) = line.strip_prefix("❯ ") else {
             continue;
         };
@@ -2788,10 +2840,28 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
         return doc.to_string();
     }
 
+    let mut in_response_block = false;
     let normalized_user_region = user_region
         .split('\n')
         .map(|doc_line| {
+            let trimmed = doc_line.trim();
+            if trimmed.starts_with(boundary_prefix) {
+                in_response_block = false;
+                return doc_line.to_string();
+            }
+            if is_exchange_response_heading_for_prefix_repair(trimmed) {
+                in_response_block = true;
+                return doc_line.to_string();
+            }
             let normalized = doc_line.trim_end();
+            let is_target = remaining.contains_key(normalized);
+            if in_response_block {
+                if starts_prompt_run_after_response(trimmed, is_target) {
+                    in_response_block = false;
+                } else {
+                    return doc_line.to_string();
+                }
+            }
             if normalized.starts_with("❯ ") {
                 return doc_line.to_string();
             }
@@ -7832,6 +7902,70 @@ spec-test-build-install-commit-push
         assert!(
             !repaired.contains("\n❯ ❯ spec-test-build-install-commit-push"),
             "repair must not double-prefix existing matches"
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_skips_assistant_verification_lists() {
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: previous — gpt-5
+
+Implemented.
+
+Verification:
+- Passed focused tests:
+  - `cargo test normalize_prefix`
+- `cargo test` is still red on a pre-existing failure.
+<!-- agent:boundary:previous -->
+do #verfpfx. spec-test-build-install-commit-push
+<!-- agent:boundary:working -->
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &[
+                "- Passed focused tests:".to_string(),
+                "  - `cargo test normalize_prefix`".to_string(),
+                "- `cargo test` is still red on a pre-existing failure.".to_string(),
+                "do #verfpfx. spec-test-build-install-commit-push".to_string(),
+            ],
+        );
+
+        assert!(
+            repaired.contains("Verification:\n- Passed focused tests:\n  - `cargo test normalize_prefix`\n- `cargo test` is still red on a pre-existing failure."),
+            "assistant verification list must stay unprefixed:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n❯ do #verfpfx. spec-test-build-install-commit-push\n"),
+            "real prompt after the response boundary must still be repaired:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\n❯ - Passed focused tests:")
+                && !repaired.contains("\n❯   - `cargo test normalize_prefix`")
+                && !repaired.contains("\n❯ - `cargo test` is still red on a pre-existing failure."),
+            "assistant list items must not receive prompt prefixes:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn verify_sidecar_normalization_rejects_assistant_list_prefix_substitute() {
+        let sidecar = "\
+<!-- agent:exchange patch=append -->
+### Re: previous — gpt-5
+
+Verification:
+❯ - Passed focused tests:
+<!-- agent:boundary:previous -->
+do #verfpfx. spec-test-build-install-commit-push
+<!-- agent:boundary:working -->
+<!-- /agent:exchange -->
+";
+
+        assert!(
+            !verify_sidecar_normalization(sidecar, &["- Passed focused tests:".to_string()]),
+            "a prefixed assistant list item must not satisfy prompt-prefix sidecar verification"
         );
     }
 }

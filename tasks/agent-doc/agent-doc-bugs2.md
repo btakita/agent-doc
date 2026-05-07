@@ -96,10 +96,26 @@ Verification:
 - `cargo install --path .`
 - `agent-doc --version` -> `agent-doc 0.33.16`.
 
-Commit / push:
-- `src/agent-doc`: `2fe95ea` (`fix: ignore assistant commit labels in prefix repair`) pushed to `origin/20260422/codex-agent-backend`.
-- `agent-loop`: submodule pointer commit `eca7ad4e4` created locally; root push will run after this binary-owned session closeout.
-<!-- agent:boundary:4aa0ac18 -->
+❯ Commit / push:
+❯ - `src/agent-doc`: `2fe95ea` (`fix: ignore assistant commit labels in prefix repair`) pushed to `origin/20260422/codex-agent-backend`.
+❯ - `agent-loop`: submodule pointer commit `eca7ad4e4` created locally; root push will run after this binary-owned session closeout.
+### Re: #pfxleak final correction — gpt-5
+Closed with the additional application-side guard.
+
+The first patch stopped `Commit / push:` from being classified as a prompt target, but the live closeout still had stale historical prefix targets available to the post-commit repair path. The final patch also makes prefix application refuse to add `❯ ` to assistant evidence labels even if a stale target list contains them.
+
+Additional verification:
+- `cargo test assistant_commit_label` passed: target extraction, full-document prefix repair, and IPC patch-content normalization regressions.
+- `cargo test` passed: 1923 unit tests, integration suites passed, 3 debounce timing tests ignored.
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`.
+
+Final commit / push state before root push:
+- `src/agent-doc`: `2436cc4` (`fix: guard assistant labels during prefix application`) pushed to `origin/20260422/codex-agent-backend`.
+- `agent-loop`: submodule pointer commit `141e52609` created locally; root push will run after this closeout.
+- `agent-doc session-check tasks/agent-doc/agent-doc-bugs2.md` passed before this final correction.
+<!-- agent:boundary:159ba6ba -->
 <!-- /agent:exchange -->
 ###
 

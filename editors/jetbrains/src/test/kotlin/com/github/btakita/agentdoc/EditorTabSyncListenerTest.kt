@@ -179,6 +179,21 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `generic preserve output from bugs2 to tsift keeps automatic sync pending for retry`() {
+        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
+            kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
+            exitCode = 0,
+            output = """
+                [sync] resolved target window after repair: 4:agent-doc -> @128
+                [sync] sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:/repo/tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely because those panes still own open closeout cycle(s)
+            """.trimIndent(),
+        )
+
+        assertEquals(false, result.applied)
+        assertEquals(true, result.shouldRetry)
+    }
+
+    @Test
     fun `safe passive preserve output with reselected focus is treated as applied`() {
         val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
             kind = EditorTabSyncListener.AutomaticCommandKind.Sync,

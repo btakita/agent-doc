@@ -25,14 +25,24 @@ class SyncLayoutAction : AnAction() {
         private const val SAFE_PASSIVE_PRESERVED_LAYOUT_MARKER =
             "[sync] safe passive sync preserved the current tmux layout because"
 
-        internal fun preservedLayoutWarning(output: String): String? =
+        internal const val PRESERVED_LAYOUT_DEFERRED_WARNING =
+            "Sync deferred: another visible agent-doc pane is mid-closeout, so the current tmux layout was preserved. Try again after that closeout finishes."
+
+        internal fun isPreservedLayoutOutput(output: String): Boolean =
             output
                 .lineSequence()
                 .map { it.trim() }
-                .firstOrNull {
+                .any {
                     it.contains(PRESERVED_LAYOUT_MARKER) ||
                         it.contains(SAFE_PASSIVE_PRESERVED_LAYOUT_MARKER)
                 }
+
+        internal fun preservedLayoutWarning(output: String): String? =
+            if (isPreservedLayoutOutput(output)) {
+                PRESERVED_LAYOUT_DEFERRED_WARNING
+            } else {
+                null
+            }
 
         internal fun collectVisibleMarkdownFiles(
             files: Array<out com.intellij.openapi.vfs.VirtualFile>,

@@ -27,71 +27,14 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-213341.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-225020.md`*
 
 Active backlog:
-- [ ] [#concprompt] concurrent user edits during response cycle bypass prompt detection + session-check — plan: tasks/agent-doc/plan-concurrent-edit-prompt-miss.md
-- [ ] [#pfxcours] content_ours fallback strips ❯ prefix from user prompts — plan: tasks/agent-doc/plan-content-ours-prefix-strip.md
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
-- 4 more active item(s)
-❯ do [#concprompt]. spec-test-build-install-commit-push
-### Re: #concprompt — gpt-5
-
-Implemented `#concprompt` and marked it done.
-
-What changed:
-- `src/agent-doc/src/write.rs` now classifies live disk drift against the pre-response baseline before merging the agent response. If a prompt is added after preflight but before `finalize` / `write --commit`, the committed snapshot stays at `content_ours` and the required closeout check sees the prompt as unresolved instead of treating the in-flight response as its answer.
-- Added `finalize_fails_closed_on_concurrent_prompt_added_after_baseline` in `src/agent-doc/tests/finalize_integration.rs`.
-- Updated `src/agent-doc/SPEC.md`, `src/agent-doc/specs/07-closeout-commands.md`, and `src/agent-doc/VERSIONS.md`.
-
-Verification:
-- `cargo test finalize_fails_closed_on_concurrent_prompt_added_after_baseline` passed.
-- `make check` passed clippy, then the parallel full test run failed in tmux-heavy route/resync tests where mock panes did not become ready under concurrent tmux use.
-- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test -- --test-threads=1` passed: 1928 unit/bin tests plus all integration tests.
-- `make version-sync` passed.
-- `cargo build` passed.
-- `make install` passed and installed `agent-doc 0.33.16` plus `libagent_doc-0.33.16.so` locally.
-
-❯ Commit / push:
-❯ - `src/agent-doc`: `dfe6a18` (`fix: fail closed on concurrent closeout prompts`) pushed to `origin/20260422/codex-agent-backend`.
-❯ - parent `agent-loop`: `ce4b8db8f` (`agent-doc: fail closed on concurrent prompts`) pushed to `origin/main` with only the `src/agent-doc` submodule pointer update.
-❯ do [#pfxcours]. spec-test-build-install-commit-push
-### Re: #pfxcours — gpt-5
-
-Implemented `#pfxcours` and marked it done.
-
-What changed:
-- `src/agent-doc/src/write.rs` now repairs the working tree to the same normalized `content_ours` fallback that it saves as the snapshot when IPC sidecar normalization drops required `❯ ` prefixes. This prevents a later commit from capturing plugin-stripped prompt prefixes.
-- The regression now simulates the plugin writing bare sidecar content to disk and asserts both the saved snapshot and working tree keep the prefixed prompt.
-- `src/agent-doc/src/codex_hook.rs` now skips malformed/transient hook session JSON entries while scanning for the latest prompt, fixing the full-suite failure that surfaced during verification.
-- Updated `src/agent-doc/SPEC.md`, `src/agent-doc/specs/07-closeout-commands.md`, and `src/agent-doc/VERSIONS.md`.
-
-Verification:
-- `cargo test normalization_fallback_repairs_bare_content_ours_prompt_prefix -- --exact` passed.
-- `cargo test load_latest_prompt_for_file -- --test-threads=1` passed.
-- Initial `make check` exposed the Codex hook latest-prompt race; after fixing it, `make check` passed clippy plus the full test suite: 1929 unit/bin tests, integration tests, and doc tests.
-- `make version-sync` passed.
-- `cargo build` passed.
-- `make install` passed and installed `agent-doc 0.33.16` plus `libagent_doc-0.33.16.so` locally.
-
-❯ Commit / push:
-❯ - `src/agent-doc`: `189c91d` (`fix: repair content_ours prefix fallback`) pushed to `origin/20260422/codex-agent-backend`.
-❯ - parent `agent-loop`: `0e2baa9c5` (`agent-doc: repair content_ours prefix fallback`) pushed to `origin/main` with only the `src/agent-doc` submodule pointer update.
-### Re: #pfxcours closeout addendum — gpt-5
-
-Closeout exposed one more prefix-repair path: a stale target list containing historical `Commit / push:` could still prefix a later assistant `Commit / push:` label. I fixed that follow-through before ending the cycle.
-
-Additional verification:
-- `cargo test normalize_exchange_prefixes_for_targets_skips -- --test-threads=1` passed.
-- The final `make check` passed clippy plus the full suite: 1930 unit/bin tests, integration tests, and doc tests.
-- `make version-sync` passed.
-- `cargo build` passed.
-- `make install` passed again with the corrected binary and library.
-
-Additional commit / push:
-- `src/agent-doc`: `0caca20` (`fix: skip assistant commit labels in prefix repair`) pushed to `origin/20260422/codex-agent-backend`.
-- parent `agent-loop`: `9ed9cb51a` (`agent-doc: skip assistant commit labels in prefix repair`) pushed to `origin/main` with only the `src/agent-doc` submodule pointer update.
-<!-- agent:boundary:6fc6df72 -->
+- [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
+- [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
+- 2 more active item(s)
+<!-- agent:boundary:df84efc7 -->
 <!-- /agent:exchange -->
 ###
 

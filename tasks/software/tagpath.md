@@ -131,13 +131,12 @@ Active backlog:
 ### Re: release — sonnet-4-6
 
 Bumped to v0.6.0 (minor — new library API), ran 80 tests + clippy clean, tagged and pushed, published to [crates.io/crates/tagpath](https://crates.io/crates/tagpath).
-<!-- agent:boundary:1e404b45 -->
+<!-- agent:boundary:9df743aa -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#pz75] Add lib.rs — expose parser/tokenizer as library API for downstream crates (tsift)
 - [ ] [#xrfe] tsift integration: add tagpath as path dep, store canonical tags in symbols table tags column at index time
 - [ ] [#rbxy] tsift integration: tag-based search ranking in tsift search — exact tag match > partial > BM25 fallback
 <!-- /agent:backlog -->

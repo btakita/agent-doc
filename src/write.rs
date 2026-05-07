@@ -8597,6 +8597,41 @@ Commit / push:
     }
 
     #[test]
+    fn normalize_exchange_prefixes_for_targets_skips_later_assistant_commit_label_after_stale_target()
+     {
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: #old — gpt-5
+Verified.
+
+Commit / push:
+- `old-sha`
+❯ do [#next]. spec-test-build-install-commit-push
+### Re: #next — gpt-5
+Verified.
+
+Commit / push:
+- `new-sha`
+<!-- agent:boundary:abc --> (HEAD)
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &[String::from("Commit / push:"), String::from("- `old-sha`")],
+        );
+
+        assert!(
+            repaired.contains("\nCommit / push:\n- `new-sha`\n"),
+            "later assistant commit label/list must stay bare:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\n❯ Commit / push:\n- `new-sha`\n"),
+            "later assistant commit label must not become a prompt:\n{repaired}"
+        );
+    }
+
+    #[test]
     fn normalize_patch_content_skips_assistant_commit_label() {
         let patch = "\
 ### Re: #done — gpt-5

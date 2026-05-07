@@ -390,6 +390,10 @@ fn normalized_prompt_preview_line(line: &str) -> Option<String> {
 }
 
 pub(crate) fn line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool {
+    if line_looks_like_plain_response_after_prompt(trimmed) {
+        return false;
+    }
+
     let lower = trimmed.trim_start_matches('❯').trim().to_ascii_lowercase();
     trimmed.starts_with('❯')
         || trimmed.ends_with('?')

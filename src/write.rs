@@ -2275,6 +2275,67 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
     exchange.replace_content(content, &new_exc_content)
 }
 
+fn preserve_head_unprefixed_exchange_lines(content: &str, head: &str) -> String {
+    let Ok(head_components) = component::parse(head) else {
+        return content.to_string();
+    };
+    let Some(head_exchange) = head_components.iter().find(|c| c.name == "exchange") else {
+        return content.to_string();
+    };
+    let head_unprefixed: HashSet<String> = head_exchange
+        .content(head)
+        .lines()
+        .map(str::trim_end)
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with('❯')
+                || trimmed.starts_with("<!--")
+                || trimmed.starts_with("### Re:")
+                || trimmed.starts_with("#### Re:")
+                || trimmed.starts_with("##### Re:")
+                || trimmed.starts_with("###### Re:")
+            {
+                None
+            } else {
+                Some(line.to_string())
+            }
+        })
+        .collect();
+    if head_unprefixed.is_empty() {
+        return content.to_string();
+    }
+
+    let Ok(content_components) = component::parse(content) else {
+        return content.to_string();
+    };
+    let Some(exchange) = content_components.iter().find(|c| c.name == "exchange") else {
+        return content.to_string();
+    };
+    let exchange_content = exchange.content(content);
+    let mut changed = false;
+    let mut rebuilt = String::with_capacity(exchange_content.len());
+    for segment in exchange_content.split_inclusive('\n') {
+        let (line, newline) = segment
+            .strip_suffix('\n')
+            .map(|line| (line, "\n"))
+            .unwrap_or((segment, ""));
+        if let Some(unprefixed) = line.strip_prefix("❯ ")
+            && head_unprefixed.contains(unprefixed)
+        {
+            rebuilt.push_str(unprefixed);
+            changed = true;
+        } else {
+            rebuilt.push_str(line);
+        }
+        rebuilt.push_str(newline);
+    }
+    if !changed {
+        return content.to_string();
+    }
+    exchange.replace_content(content, &rebuilt)
+}
+
 /// Phrases that signal deferred/future work in an agent response.
 /// When detected without a corresponding `--pending-add`, a warning is emitted.
 const FUTURE_WORK_SIGNALS: &[&str] = &[
@@ -2556,7 +2617,22 @@ pub fn normalize_user_prompts_in_exchange_safe(
     snapshot: &str,
     file: &std::path::Path,
 ) -> String {
-    let normalized = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+    let mut normalized = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+    if normalized != content
+        && let Ok(Some(head)) = crate::git::show_head(file)
+    {
+        let preserved = preserve_head_unprefixed_exchange_lines(&normalized, &head);
+        if preserved != normalized {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "normalize_preserved_head_unprefixed_lines file={}",
+                    file.display()
+                ),
+            );
+            normalized = preserved;
+        }
+    }
 
     // Count `❯ ` prefixes before/after to measure how many lines this call applied.
     // Note: also count a prefix at offset 0 (no leading newline).
@@ -7221,6 +7297,80 @@ mod tests {
         assert!(
             result.contains("❯ Hello"),
             "under threshold, ❯ prefix should still be applied: {result}"
+        );
+    }
+
+    #[test]
+    fn normalize_safe_preserves_unprefixed_agent_lines_from_head() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["init", "-q"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test User"])
+            .output()
+            .unwrap();
+
+        let file = root.join("doc.md");
+        let head = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: deployed — gpt-5\n",
+            "Done:\n",
+            "- build passed\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, head).unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: deployed — gpt-5\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: deployed — gpt-5\n",
+            "Done:\n",
+            "- build passed\n",
+            "run follow-up\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: deployed — gpt-5\n",
+            "Done:\n",
+            "- build passed\n",
+            "run follow-up\n",
+            "<!-- agent:boundary:abc -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let result = normalize_user_prompts_in_exchange_safe(content, baseline, snapshot, &file);
+        assert!(
+            result.contains("\nDone:\n- build passed\n"),
+            "committed agent response lines from HEAD must stay unprefixed:\n{result}"
+        );
+        assert!(
+            result.contains("\n❯ run follow-up\n"),
+            "new user prompt should still be prefixed:\n{result}"
         );
     }
 

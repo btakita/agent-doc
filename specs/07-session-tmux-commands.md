@@ -131,7 +131,9 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   satisfying it would attach or create another pane around an already-visible
   protected open-cycle pane, both manual sync and passive `--no-autostart` sync
   must preserve the current visible pane cardinality and warn instead of
-  expanding the window beyond the editor-visible projection.
+  expanding the window beyond the editor-visible projection. The warning must
+  explain that the visible pane cannot be detached because it still owns an
+  open closeout cycle.
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.
 - If any visible file stays blocked under passive `--no-autostart`, sync must preserve the current visible tmux layout and warn instead of reconciling the remaining foreign pane set into a new authoritative layout. This includes the live mixed-root replay shape where `tasks/agent-doc/agent-doc-bugs2.md` shares the visible `agent-doc` window with `src/session-share/tasks/claudescore-3.md`; a blocked sibling file must not let the remaining visible pane set collapse into a new authoritative layout.

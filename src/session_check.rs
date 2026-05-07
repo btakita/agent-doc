@@ -1287,6 +1287,7 @@ pub(crate) fn first_unstarted_prompt_bearing_change(
                 }
                 if crate::diff::prompt_change_is_already_answered(&change.text)
                     || crate::diff::prompt_change_is_answered_by_later_response(&changes, idx)
+                    || prompt_target_is_immediately_before_existing_response(&current, &change.text)
                 {
                     skip_answered_response_run = true;
                     continue;
@@ -1294,14 +1295,54 @@ pub(crate) fn first_unstarted_prompt_bearing_change(
                 return Ok(Some(change.clone()));
             }
             crate::diff::PromptBearingChangeKind::ContentEdit => {
-                if skip_answered_response_run {
-                    continue;
-                }
-                return Ok(Some(change.clone()));
+                continue;
             }
         }
     }
     Ok(None)
+}
+
+fn prompt_target_is_immediately_before_existing_response(
+    current_doc: &str,
+    change_text: &str,
+) -> bool {
+    let target = change_text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().trim_start_matches('❯').trim().to_string());
+    let Some(target) = target else {
+        return false;
+    };
+    if target.is_empty() {
+        return false;
+    }
+    let body = crate::frontmatter::parse(current_doc)
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_else(|_| current_doc.to_string());
+    let Ok(components) = crate::component::parse(&body) else {
+        return false;
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return false;
+    };
+    let lines: Vec<&str> = exchange.content(&body).lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        let normalized = line.trim().trim_start_matches('❯').trim();
+        if normalized != target {
+            continue;
+        }
+        for next in lines.iter().skip(idx + 1) {
+            let trimmed = next.trim();
+            if trimmed.is_empty() || trimmed.starts_with("<!--") {
+                continue;
+            }
+            return is_exchange_response_heading(trimmed);
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1431,6 +1472,50 @@ Body\n\
         assert!(
             change.is_none(),
             "raw assistant completion prose after a stale-boundary prompt must not stay actionable"
+        );
+    }
+
+    #[test]
+    fn first_unstarted_prompt_bearing_change_ignores_plain_content_edit_noise() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "The service returned 401 from this endpoint\n",
+            "### Re: service status — gpt-5\n\n",
+            "Already answered.\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = snapshot.replace(
+            "The service returned 401 from this endpoint",
+            "The service returned 503 from this endpoint",
+        );
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        let changes = crate::diff::classify_prompt_bearing_changes(
+            &crate::diff::unified_diff_from_contents(
+                &crate::frontmatter::parse(snapshot).unwrap().1,
+                &crate::frontmatter::parse(&fs::read_to_string(&doc).unwrap())
+                    .unwrap()
+                    .1,
+            )
+            .unwrap(),
+        );
+        assert_eq!(changes.len(), 1, "expected one content edit: {changes:?}");
+        assert_eq!(
+            changes[0].kind,
+            crate::diff::PromptBearingChangeKind::ContentEdit
+        );
+
+        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        assert!(
+            change.is_none(),
+            "session-check should not reopen a committed turn for plain content-edit drift"
         );
     }
 

@@ -592,7 +592,11 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
     Ok(RepairOutcome::CompletedBacklogReaped)
 }
 
-fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<String> {
+fn repair_template_doc_if_needed(
+    file: &Path,
+    doc_content: &str,
+    known_response: Option<&str>,
+) -> Result<String> {
     let mut dup_opener_input = doc_content.to_string();
     let mut duplicate_opener_changed = false;
     while let Some(merged) = crate::template::repair_duplicate_exchange_opener(&dup_opener_input)? {
@@ -634,8 +638,16 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
         || boundary_changed
         || prompt_changed
     {
+        let save_repaired_snapshot = match snapshot::load(file)? {
+            Some(snapshot_content) => {
+                !repair_leaves_unanswered_prompt_diff(&snapshot_content, &repaired, known_response)
+            }
+            None => true,
+        };
         write::atomic_write_pub(file, &repaired)?;
-        snapshot::save(file, &repaired)?;
+        if save_repaired_snapshot {
+            snapshot::save(file, &repaired)?;
+        }
         if duplicate_opener_changed {
             crate::ops_log::log_op(
                 file,
@@ -689,6 +701,129 @@ fn repair_template_doc_if_needed(file: &Path, doc_content: &str) -> Result<Strin
     }
 
     Ok(repaired)
+}
+
+fn repair_leaves_unanswered_prompt_diff(
+    snapshot_content: &str,
+    repaired: &str,
+    known_response: Option<&str>,
+) -> bool {
+    let norm_snapshot = crate::git::normalize_committed_exchange_artifacts(snapshot_content);
+    let norm_repaired = crate::git::normalize_committed_exchange_artifacts(repaired);
+    let Some(diff_text) = crate::diff::unified_diff_from_contents(&norm_snapshot, &norm_repaired)
+    else {
+        return false;
+    };
+    let changes = crate::diff::classify_prompt_bearing_changes(&diff_text);
+    let mut skip_answered_response_run = false;
+    for (idx, change) in changes.iter().enumerate() {
+        if change.kind != crate::diff::PromptBearingChangeKind::PromptTarget {
+            continue;
+        }
+        if skip_answered_response_run {
+            let preview = change
+                .text
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or(change.text.as_str())
+                .trim();
+            if !repair_line_looks_like_fresh_prompt_after_response(preview) {
+                continue;
+            }
+        }
+        if crate::diff::prompt_change_is_already_answered(&change.text)
+            || crate::diff::prompt_change_is_answered_by_later_response(&changes, idx)
+            || repair_prompt_target_immediately_before_existing_response(repaired, &change.text)
+            || known_response
+                .map(|response| prompt_change_is_known_response(&change.text, response))
+                .unwrap_or(false)
+        {
+            skip_answered_response_run = true;
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+fn repair_line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool {
+    let lower = trimmed.trim_start_matches('❯').trim().to_ascii_lowercase();
+    trimmed.ends_with('?')
+        || lower == "go"
+        || lower == "continue"
+        || lower.starts_with("do #")
+        || lower.starts_with("do [#")
+        || lower.starts_with("fix #")
+        || lower.starts_with("run ")
+        || lower.starts_with("rerun ")
+        || lower.starts_with("build ")
+        || lower.starts_with("test ")
+        || lower.starts_with("commit ")
+        || lower.starts_with("push ")
+        || lower.starts_with("verify ")
+        || lower.starts_with("investigate ")
+}
+
+fn repair_prompt_target_immediately_before_existing_response(
+    current_doc: &str,
+    change_text: &str,
+) -> bool {
+    let target = change_text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().trim_start_matches('❯').trim().to_string());
+    let Some(target) = target else {
+        return false;
+    };
+    if target.is_empty() {
+        return false;
+    }
+
+    let body = crate::frontmatter::parse(current_doc)
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_else(|_| current_doc.to_string());
+    let Ok(components) = crate::component::parse(&body) else {
+        return false;
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return false;
+    };
+
+    let lines: Vec<&str> = exchange.content(&body).lines().collect();
+    for (idx, line) in lines.iter().enumerate() {
+        let normalized = line.trim().trim_start_matches('❯').trim();
+        if normalized != target {
+            continue;
+        }
+        for next in lines.iter().skip(idx + 1) {
+            let trimmed = next.trim();
+            if trimmed.is_empty() || trimmed.starts_with("<!--") {
+                continue;
+            }
+            let normalized = trimmed.strip_prefix("❯ ").unwrap_or(trimmed).trim();
+            return crate::session_check::is_exchange_response_heading(normalized);
+        }
+    }
+    false
+}
+
+fn prompt_change_is_known_response(change_text: &str, response: &str) -> bool {
+    let response_lines: HashSet<String> = normalized_response_lines(response)
+        .into_iter()
+        .map(|line| line.trim().trim_start_matches('❯').trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if response_lines.is_empty() {
+        return false;
+    }
+    change_text
+        .lines()
+        .map(|line| line.trim().trim_start_matches('❯').trim())
+        .filter(|line| !line.is_empty())
+        .all(|line| response_lines.contains(line))
 }
 
 fn repair_answered_stale_boundary_if_safe(
@@ -936,7 +1071,7 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         let has_live_prompt =
             crate::session_check::first_unstarted_prompt_bearing_change(file)?.is_some();
         if !has_live_prompt {
-            let repaired_doc = repair_template_doc_if_needed(file, &doc_content)?;
+            let repaired_doc = repair_template_doc_if_needed(file, &doc_content, None)?;
             if repaired_doc != doc_content {
                 return Ok(RepairOutcome::TemplateNormalized);
             }
@@ -974,7 +1109,7 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         eprintln!(
             "[repair] Response already present in document — skipping apply, cleaning up pending file"
         );
-        let repaired_doc = repair_template_doc_if_needed(file, &doc_content)?;
+        let repaired_doc = repair_template_doc_if_needed(file, &doc_content, Some(&response))?;
         let state_is_open = crate::cycle_state::load(file)?
             .map(|state| state.is_open())
             .unwrap_or(true);

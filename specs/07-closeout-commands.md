@@ -97,6 +97,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 
 - Verifies that the latest response cycle reached a terminal committed state and that no likely direct assistant patchback bypassed the binary-owned write path.
 - Fails on open cycle states, uncommitted visible `### Re:` / `## Assistant` patchbacks, or hidden `snapshot != HEAD` closeout drift.
+- Plain `content_edit` drift without a new prompt target or response patchback is not an unstarted closeout by itself; session-check must leave that to the next normal preflight diff instead of forcing another finalize cycle after a committed turn.
 - May self-heal only narrow exchange-only already-committed historical drift proven by `HEAD`.
 - Must fail closed when the repaired tail would still include a bare prompt target or typed-component drift.
 - Optional closeout sidecars such as cycle-state, capture, startup-miss, and ops-log files are advisory; if one disappears between discovery and read, session-check treats it as absent state instead of surfacing a transient `ENOENT`.

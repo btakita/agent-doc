@@ -950,7 +950,7 @@ fn safe_passive_visible_layout_blockers(
     missing_requested.sort();
     protected_unwanted.sort();
     Some(format!(
-        "missing requested pane(s) {} while visible protected pane(s) {} cannot be detached safely",
+        "missing requested pane(s) {} while visible protected pane(s) {} cannot be detached safely because those panes still own open closeout cycle(s)",
         missing_requested.join(", "),
         protected_unwanted.join(", ")
     ))
@@ -8854,7 +8854,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         assert_eq!(
             ordered,
             vec![pane_a.clone(), pane_b.clone()],
-            "safe passive sync should preserve the current visible layout instead of attaching pane_c beside a protected pane"
+            "safe passive sync should preserve the current visible layout instead of attaching pane_c beside a protected open-cycle pane"
         );
         assert!(
             iso.pane_alive(&pane_c),

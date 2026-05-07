@@ -170,7 +170,7 @@ class EditorTabSyncListenerTest {
             exitCode = 0,
             output = """
                 [sync] resolved target window after repair: 4:agent-doc → @128
-                [sync] safe passive sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tmux-router.md while visible protected pane(s) %241:preflight_started:/repo/tasks/software/tagpath.md cannot be detached safely
+                [sync] safe passive sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tmux-router.md while visible protected pane(s) %241:preflight_started:/repo/tasks/software/tagpath.md cannot be detached safely because those panes still own open closeout cycle(s)
             """.trimIndent(),
         )
 
@@ -184,7 +184,7 @@ class EditorTabSyncListenerTest {
             kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
             exitCode = 0,
             output = """
-                [sync] safe passive sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tmux-router.md while visible protected pane(s) %241:preflight_started:/repo/tasks/software/tagpath.md cannot be detached safely
+                [sync] safe passive sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tmux-router.md while visible protected pane(s) %241:preflight_started:/repo/tasks/software/tagpath.md cannot be detached safely because those panes still own open closeout cycle(s)
                 [sync] safe_passive_layout_preserved_reselected_focus pane=%202 reason=protected_visible
             """.trimIndent(),
         )

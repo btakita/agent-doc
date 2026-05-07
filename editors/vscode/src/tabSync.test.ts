@@ -228,7 +228,7 @@ describe('buildTabChangeCommand', () => {
                 args: ['sync', '--col', 'tasks/software/tsift.md', '--focus', 'tasks/software/tsift.md', '--no-autostart'],
             },
             0,
-            '[sync] safe passive sync preserved the current tmux layout because missing requested pane(s) tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely',
+            '[sync] safe passive sync preserved the current tmux layout because missing requested pane(s) tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely because those panes still own open closeout cycle(s)',
         );
 
         assert.deepStrictEqual(result, { applied: false, shouldRetry: true });

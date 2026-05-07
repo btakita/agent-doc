@@ -126,12 +126,30 @@ v0.6.0 published to crates.io
 
 Active backlog:
 - [ ] [#tp05] [recommended] Add a tsift-facing token-savings benchmark fixture comparing raw symbol output against tagpath family/alias output for search, explain, and session-review previews.
-<!-- agent:boundary:ec52b8df -->
+❯ do [#tp05]. spec-test-build-install-commit-push
+### Re: #tp05 — gpt-5
+
+Completed `#tp05`.
+
+Added a tsift-facing token-savings benchmark fixture at `fixtures/tsift-token-savings.json` covering search, explain, and session-review previews. The fixture compares raw symbol rows against compact tagpath family/alias previews, records deterministic `ceil(utf8_bytes / 4)` savings thresholds, and includes generated aliases for all six naming conventions.
+
+Updated `SPEC.md` with the fixture contract and added `tests/tsift_token_savings_fixture.rs` to verify raw symbols parse back to the expected family counts, fixture aliases match tagpath-generated aliases, and every preview surface meets its savings threshold.
+
+Verification completed:
+- `cargo fmt`
+- `cargo test`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Commits pushed:
+- `btakita/tagpath`: `5182594` (`test: add tsift token savings fixture`)
+- `btakita/agent-loop`: `b69d14cde` (`chore: update tagpath submodule`)
+<!-- agent:boundary:2ee84f96 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tp05] [recommended] Add a tsift-facing token-savings benchmark fixture comparing raw symbol output against tagpath family/alias output for search, explain, and session-review previews.
 <!-- /agent:backlog -->

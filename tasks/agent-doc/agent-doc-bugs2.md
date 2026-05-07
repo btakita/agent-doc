@@ -34,7 +34,43 @@ Active backlog:
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 1 more active item(s)
-<!-- agent:boundary:527b76f9 -->
+❯ Now both switching editors and `Sync Tmux Layout` are inconsistent. The last commit broke `Sync Tmux Layout` syncing with the tmux pane consistently.
+❯ And there's a 3 tmux pane layout.
+❯ Would it help to refactor the code into smaller files or have a daemon actor process to manage all the shared state?
+
+❯ spec-test-build-install-commit-push
+### Re: preserved layout sync state — gpt-5
+
+Fixed the editor-side part of this regression and pushed it.
+
+What was happening: the last sync-cardinality fix made the CLI correctly preserve tmux layout when swapping panes would detach a protected open-cycle pane, but the editor integrations made that look inconsistent. Manual `Sync Tmux Layout` could exit `0` after intentionally preserving layout without surfacing the warning, and VS Code automatic tab sync treated a preserved-layout noop as synchronized instead of leaving it pending for retry.
+
+Changes shipped:
+
+- VS Code tab sync now parses preserve-layout output, keeps the target pending, and schedules bounded retries unless the CLI prints `safe_passive_layout_preserved_reselected_focus`.
+- VS Code manual sync now shows preserve-layout warnings visibly instead of replacing them with a generic success hint.
+- JetBrains manual `Sync Tmux Layout` now surfaces preserve-layout warnings as Agent Doc warnings.
+- Specs/tests now require this behavior across both editor integrations.
+- Version bumps: JetBrains plugin `0.2.96`, VS Code extension `0.2.13`.
+
+Verification/build/install:
+
+- `npm test` passed for VS Code.
+- `./gradlew test buildPlugin` passed for JetBrains.
+- `make install` installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so` locally.
+- `agent-doc plugin install --local vscode` installed VS Code/Codium extension `0.2.13`.
+- `agent-doc plugin install --local jetbrains` installed JetBrains plugin `0.2.96` into the active `IntelliJIdea2026.1` data dir; restart the IDE to activate it.
+- `make version-sync` passed.
+- Full `make check` was rerun twice; each run passed 1911 tests and failed one different tmux-heavy route timing test. Both failing tests passed immediately in isolation, so I am treating that as pre-existing route-suite isolation flakiness rather than this editor patch.
+
+Commits pushed:
+
+- `src/agent-doc`: `ff8bcaa fix: surface preserved layout sync state`
+- parent repo: `5c7f56b3c agent-doc: surface preserved layout sync state`
+
+On the architecture question: smaller files would help readability, but they will not solve this class of bug by themselves. The real pressure is multiple actors projecting and mutating shared state: editor plugins, `sync`, `route`, registry files, session logs, tmux layout, and supervisor lifecycle state. A single-owner daemon/actor model would help more than file splitting because it can serialize those transitions and make `sessions.json`, tmux layout, and editor UI state derived projections instead of competing sources of truth. I would still keep modules smaller as part of that work, but the daemon/actor boundary is the architectural fix.
+
+<!-- agent:boundary:97434771 -->
 <!-- /agent:exchange -->
 ###
 

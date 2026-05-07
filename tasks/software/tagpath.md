@@ -122,50 +122,14 @@ v0.6.0 published to crates.io
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-050927.md`*
-❯ Are there #next-steps for tagpath to help tsift save tokens?
-### Re: tagpath next steps for tsift token savings — gpt-5
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-141744.md`*
 
-Yes. The best next steps are for `tagpath` to become the stable semantic compaction layer under `tsift`, rather than another broad search surface. `tsift` already depends on `tagpath`, and its spec already points toward tagpath-style query normalization plus `tag_alias` preview handles. The gap is making those handles stable, compact, and benchmarked.
-
-I added the follow-ups to the backlog in priority order:
-
-1. `#tp01` — stable tag family API/schema for canonical aliases, dimensions, role, shape, and representative spellings. This is the top item because it directly lets `tsift` collapse many symbol variants into one compact semantic handle.
-2. `#tp02` — compact grouped output for `extract`/`search`, so callers see tag families with counts/examples instead of every raw spelling.
-3. `#tp03` — free-text query normalization helpers for agent prompts before `tsift` falls back to lexical/hybrid search.
-4. `#tp04` — `.naming/tags` ontology loading, so summaries can reference stable domain vocabulary instead of repeatedly explaining it.
-5. `#tp05` — a benchmark fixture proving token savings across `tsift search`, `explain`, and `session-review` previews.
-
-Top backlog item: `#tp01`.
-❯ do [#tp01]. spec-test-build-install-commit-push
-### Re: #tp01 tag family schema — gpt-5
-
-Completed `#tp01`.
-
-Implemented a stable tag family API/schema in `tagpath`:
-
-- Added `tagpath::family::{generate_family, generate_family_with_convention}` and the serializable `TagFamily`, `TagDimension`, and `SurfaceExample` schema.
-- Added `tagpath family <NAME> [--format text|json]` for CLI access.
-- The family output includes canonical handle, canonical tags, namespace dimensions, detected role, detected shape, convention aliases, and ordered surface spelling examples.
-- Updated `SPEC.md`, `README.md`, unit tests, and the public library API test.
-
-Verification completed:
-
-- `cargo fmt`
-- `cargo test`
-- `cargo clippy`
-- `cargo build`
-- `cargo install --path .`
-- `tagpath family auth0__user__validate`
-- `cargo run -- family auth0__user__validate --format json`
-
-Pushed commits:
-
-- `tagpath` repo: `3ec95ed` (`feat: add tag family schema`)
-- `agent-loop` repo: `635c4f62e` (`chore: update tagpath submodule`)
-
-Marked `#tp01` done.
-<!-- agent:boundary:c919d96b -->
+Active backlog:
+- [ ] [#tp02] [recommended] Add compact family output for tagpath extract/search that groups identifiers by canonical tags with counts and a few examples instead of listing every spelling and location.
+- [ ] [#tp03] [recommended] Add tagpath query-normalization helpers for free-text agent prompts, returning ordered/weighted tags that tsift can use before lexical or hybrid fallback.
+- [ ] [#tp04] [recommended] Add .naming/tags ontology loading and validation so tsift summaries can reference stable domain tags instead of re-explaining domain vocabulary in prose.
+- 1 more active item(s)
+<!-- agent:boundary:9d96f79a -->
 <!-- /agent:exchange -->
 ###
 

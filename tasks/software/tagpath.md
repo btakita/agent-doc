@@ -1,8 +1,17 @@
 ---
 agent_doc_session: 4602f467-ef2a-4094-a750-5eb533368988
+agent: codex
+claude_model: claude-opus-4-6
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  '#code-review': Please review tsift codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
+  '#spec-test-commit-push': update spec + tests. commit + push
 ---
 
 
@@ -105,35 +114,24 @@ presets/               Convention presets (immutable-tag.toml)
 ## Status
 
 <!-- agent:status patch=replace -->
-v0.6.0 published to crates.io
 <!-- /agent:status -->
 
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-❯ do #pz75. add spec + test. run tests. commit + push
-### Re: #pz75 lib.rs — opus-4-6
+### Session Summary
 
-Done. Created `src/lib.rs` with all 9 modules as `pub mod`. Updated `main.rs` to import from `tagpath::` instead of local `mod` declarations. Added `tests/lib_api.rs` with 8 integration tests covering:
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-015728.md`*
 
-- `parser::parse`, `detect_convention`, `join_tags`
-- `ALL_CONVENTIONS` accessibility
-- Cross-convention equivalence (all 6 conventions → same canonical tags)
-- `alias::generate_aliases`, `prose::to_prose`, `config::generate_config`
-
-80 tests pass (72 existing + 8 new), clippy clean. Committed and pushed.
-
-release
-### Re: release — sonnet-4-6 (HEAD)
-
-Bumped to v0.6.0 (minor — new library API), ran 80 tests + clippy clean, tagged and pushed, published to [crates.io/crates/tagpath](https://crates.io/crates/tagpath).
-<!-- agent:boundary:14157c35 -->
+Active backlog:
+- [ ] [#xrfe] tsift integration: add tagpath as path dep, store canonical tags in symbols table tags column at index time
+- [ ] [#rbxy] tsift integration: tag-based search ranking in tsift search — exact tag match > partial > BM25 fallback
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
-<!-- agent:pending patch=replace -->
+<!-- agent:backlog patch=replace -->
 - [x] [#pz75] Add lib.rs — expose parser/tokenizer as library API for downstream crates (tsift)
 - [ ] [#xrfe] tsift integration: add tagpath as path dep, store canonical tags in symbols table tags column at index time
 - [ ] [#rbxy] tsift integration: tag-based search ranking in tsift search — exact tag match > partial > BM25 fallback
-<!-- /agent:pending -->
+<!-- /agent:backlog -->

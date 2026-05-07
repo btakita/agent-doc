@@ -27,88 +27,14 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-143138.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-155421.md`*
 
 Active backlog:
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 1 more active item(s)
-❯ Now both switching editors and `Sync Tmux Layout` are inconsistent. The last commit broke `Sync Tmux Layout` syncing with the tmux pane consistently.
-❯ And there's a 3 tmux pane layout.
-❯ Would it help to refactor the code into smaller files or have a daemon actor process to manage all the shared state?
-
-❯ spec-test-build-install-commit-push
-### Re: preserved layout sync state — gpt-5
-
-Fixed the editor-side part of this regression and pushed it.
-
-What was happening: the last sync-cardinality fix made the CLI correctly preserve tmux layout when swapping panes would detach a protected open-cycle pane, but the editor integrations made that look inconsistent. Manual `Sync Tmux Layout` could exit `0` after intentionally preserving layout without surfacing the warning, and VS Code automatic tab sync treated a preserved-layout noop as synchronized instead of leaving it pending for retry.
-
-Changes shipped:
-
-- VS Code tab sync now parses preserve-layout output, keeps the target pending, and schedules bounded retries unless the CLI prints `safe_passive_layout_preserved_reselected_focus`.
-- VS Code manual sync now shows preserve-layout warnings visibly instead of replacing them with a generic success hint.
-- JetBrains manual `Sync Tmux Layout` now surfaces preserve-layout warnings as Agent Doc warnings.
-- Specs/tests now require this behavior across both editor integrations.
-- Version bumps: JetBrains plugin `0.2.96`, VS Code extension `0.2.13`.
-
-Verification/build/install:
-
-- `npm test` passed for VS Code.
-- `./gradlew test buildPlugin` passed for JetBrains.
-- `make install` installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so` locally.
-- `agent-doc plugin install --local vscode` installed VS Code/Codium extension `0.2.13`.
-- `agent-doc plugin install --local jetbrains` installed JetBrains plugin `0.2.96` into the active `IntelliJIdea2026.1` data dir; restart the IDE to activate it.
-- `make version-sync` passed.
-- Full `make check` was rerun twice; each run passed 1911 tests and failed one different tmux-heavy route timing test. Both failing tests passed immediately in isolation, so I am treating that as pre-existing route-suite isolation flakiness rather than this editor patch.
-
-Commits pushed:
-
-- `src/agent-doc`: `ff8bcaa fix: surface preserved layout sync state`
-- parent repo: `5c7f56b3c agent-doc: surface preserved layout sync state`
-
-On the architecture question: smaller files would help readability, but they will not solve this class of bug by themselves. The real pressure is multiple actors projecting and mutating shared state: editor plugins, `sync`, `route`, registry files, session logs, tmux layout, and supervisor lifecycle state. A single-owner daemon/actor model would help more than file splitting because it can serialize those transitions and make `sessions.json`, tmux layout, and editor UI state derived projections instead of competing sources of truth. I would still keep modules smaller as part of that work, but the daemon/actor boundary is the architectural fix.
-
-### Re: prompt prefix stripped on finalize — opus-4-6
-
-❯ Filed `#bppfxstrip`. Root cause: when `verify_sidecar_normalization()` detects missing `❯ ` prefixes in the IPC sidecar content and falls back to `content_ours`, that fallback content was captured before prefix normalization ran, so the prefixes are lost. Fix: apply `normalize_user_prompts_in_exchange()` to `content_ours` before using it as fallback (write.rs ~4599). Plan: `tasks/agent-doc/plan-prompt-prefix-stripped-on-finalize.md`.
-### Re: Duplicate Invocation — gpt-5
-
-❯ No new document edits were present beyond the repeated `agent-doc` invocation, so this cycle is only closing the duplicate prompt after the earlier implementation and commit.
-### Re: Repair Closeout — gpt-5
-
-The transcript repair is now being committed through the agent-doc write path.
-❯ do #bppfxstrip. spec-test-build-install-commit-push
-### Re: prompt prefix stripped on finalize — gpt-5
-
-Implemented and pushed `#bppfxstrip`.
-
-Root cause: sidecar verification correctly rejected editor ack-content that lacked a required `❯ ` prompt prefix, but the `content_ours` fallback could still be saved without re-applying `normalize_prefix_lines`. That left a bare `do #...` prompt as the next committed closeout baseline until the following preflight repaired it.
-
-What changed:
-
-- `src/write.rs` now normalizes `content_ours` fallback snapshots with `normalize_exchange_prefixes_for_targets()` after preserving any live backlog mutations.
-- Both socket IPC and file IPC sidecar-divergence fallback paths use the same normalized fallback helper.
-- Added a regression for the `#bppfxstrip` shape where both the sidecar and fallback content are bare, and the saved snapshot must still contain `❯ do #bppfxstrip...`.
-- Updated `editors/PLUGIN-SPEC.md`, `specs/07-closeout-commands.md`, and `VERSIONS.md` for the fallback invariant.
-- Hardened one tmux route test that was making its replacement pane before the restart signal and registering it before its prompt was ready; this was required to get the full suite green rather than waiving route-suite red.
-
-Verification/build/install:
-
-- `cargo test normalization_fallback_repairs_bare_content_ours_prompt_prefix` passed.
-- Existing fallback regressions for `#jbpfx2` and `#splpend` passed.
-- `cargo fmt --check` passed.
-- `make check` passed: 1913 main tests plus all integration/doc tests.
-- `make install` installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so` locally.
-- `make version-sync` passed.
-- `agent-doc --version` reports `agent-doc 0.33.16`.
-
-Commits pushed:
-
-- `src/agent-doc`: `c187911 fix: normalize IPC fallback snapshots`
-- parent repo: `f3bdf8fc8 agent-doc: normalize IPC fallback snapshots`
-<!-- agent:boundary:a03a4db6 -->
+<!-- agent:boundary:7dc30214 -->
 <!-- /agent:exchange -->
 ###
 

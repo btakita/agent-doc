@@ -137,13 +137,41 @@ I added the follow-ups to the backlog in priority order:
 5. `#tp05` — a benchmark fixture proving token savings across `tsift search`, `explain`, and `session-review` previews.
 
 Top backlog item: `#tp01`.
-<!-- agent:boundary:f0453983 -->
+❯ do [#tp01]. spec-test-build-install-commit-push
+### Re: #tp01 tag family schema — gpt-5
+
+Completed `#tp01`.
+
+Implemented a stable tag family API/schema in `tagpath`:
+
+- Added `tagpath::family::{generate_family, generate_family_with_convention}` and the serializable `TagFamily`, `TagDimension`, and `SurfaceExample` schema.
+- Added `tagpath family <NAME> [--format text|json]` for CLI access.
+- The family output includes canonical handle, canonical tags, namespace dimensions, detected role, detected shape, convention aliases, and ordered surface spelling examples.
+- Updated `SPEC.md`, `README.md`, unit tests, and the public library API test.
+
+Verification completed:
+
+- `cargo fmt`
+- `cargo test`
+- `cargo clippy`
+- `cargo build`
+- `cargo install --path .`
+- `tagpath family auth0__user__validate`
+- `cargo run -- family auth0__user__validate --format json`
+
+Pushed commits:
+
+- `tagpath` repo: `3ec95ed` (`feat: add tag family schema`)
+- `agent-loop` repo: `635c4f62e` (`chore: update tagpath submodule`)
+
+Marked `#tp01` done.
+<!-- agent:boundary:c919d96b -->
 <!-- /agent:exchange -->
+###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tp01] [recommended] Add a stable tagpath family API/schema for tsift: canonical tag aliases, dimensions, role, shape, and surface spelling examples, so tsift preview/search/explain can collapse repeated identifier variants into one compact handle.
 - [ ] [#tp02] [recommended] Add compact family output for tagpath extract/search that groups identifiers by canonical tags with counts and a few examples instead of listing every spelling and location.
 - [ ] [#tp03] [recommended] Add tagpath query-normalization helpers for free-text agent prompts, returning ordered/weighted tags that tsift can use before lexical or hybrid fallback.
 - [ ] [#tp04] [recommended] Add .naming/tags ontology loading and validation so tsift summaries can reference stable domain tags instead of re-explaining domain vocabulary in prose.

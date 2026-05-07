@@ -74,6 +74,7 @@ After `preflight`, run `agent-doc plan <FILE>` and treat its `prompt_targets`, `
 
 - Address the user's changes naturally in the console — the console response IS the document response.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest question; each unresolved prompt in that tail must be answered or grouped, while each unresolved `prompt_target` must be answered or grouped and `content_edit` items are user corrections to incorporate.
+- If session-accretion replaced the full exchange tail with a bounded recent-context pack, treat the included `### Re:` blocks as prompt-position anchors (enclosing response for inline edits, immediately previous response for tail follow-ups), not as proof that unrelated older turns are absent.
 - Execute the cycle from the planning record instead of re-reading the raw diff ad hoc. If `execution_scope=plan_backlog_only`, stay in plan/backlog capture mode. Otherwise, complete the requested repo work before persistence or stop on a concrete blocker. Do not keep appending "starting/continuing" status prose while the requested work remains undone.
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use h4–h6 for sub-sections within a response.

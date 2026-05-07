@@ -38,7 +38,7 @@ This file covers binary-owned planning/orchestration and the queue surface that 
 
 - Orchestration subprocesses inherit explicit harness arg resolution from document frontmatter and config.
 - Streaming subprocess stderr is surfaced explicitly on failure instead of collapsing into an "empty response" error.
-- When the live session has warn/block accretion and the current diff still contains prompt targets, fresh orchestration agent requests use a bounded response-context pack instead of replaying the full exchange tail. The pack must include the active prompt targets, the current `### Session Summary` block when present, and the head of `agent:backlog`.
+- When the live session has warn/block accretion and the current diff still contains prompt targets, fresh orchestration agent requests use a bounded response-context pack instead of replaying the full exchange tail. The pack must include the active prompt targets, the current `### Session Summary` block when present, the head of `agent:backlog`, and the `### Re:` turns anchored to the prompt positions in `exchange` (enclosing response for inline edits, immediately previous response for tail prompts).
 
 ### Command classification
 

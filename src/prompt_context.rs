@@ -3,6 +3,13 @@ use crate::{component, diff, pending, session_accretion};
 const BACKLOG_HEAD_LIMIT: usize = 3;
 const RECENT_EXCHANGE_TURNS_LIMIT: usize = 2;
 
+#[derive(Debug, Clone)]
+struct ResponseSection {
+    start_line: usize,
+    end_line: usize,
+    text: String,
+}
+
 pub(crate) fn build_document_section(
     diff_text: &str,
     doc: &str,
@@ -24,8 +31,8 @@ pub(crate) fn build_document_section(
         .unwrap_or_else(|| "No explicit `### Session Summary` block is present yet.".to_string());
     let backlog_head = render_backlog_head(&components, doc)
         .unwrap_or_else(|| "No active backlog items found.".to_string());
-    let recent_exchange_turns =
-        render_recent_exchange_turns(&components, doc).unwrap_or_else(|| {
+    let recent_exchange_turns = render_recent_exchange_turns(&components, doc, &prompt_targets)
+        .unwrap_or_else(|| {
             "No earlier `### Re:` turns are available in the current exchange.".to_string()
         });
     let available_components = render_available_components(&components);
@@ -164,44 +171,165 @@ fn render_available_components(components: &[component::Component]) -> String {
         .join("\n")
 }
 
-fn render_recent_exchange_turns(components: &[component::Component], doc: &str) -> Option<String> {
+fn render_recent_exchange_turns(
+    components: &[component::Component],
+    doc: &str,
+    prompt_targets: &[String],
+) -> Option<String> {
     let exchange = components.iter().find(|comp| comp.name == "exchange")?;
-    let sections = collect_recent_exchange_turn_sections(exchange.content(doc));
+    let sections = collect_recent_exchange_turn_sections(exchange.content(doc), prompt_targets);
     if sections.is_empty() {
         return None;
     }
     Some(sections.join("\n\n"))
 }
 
-fn collect_recent_exchange_turn_sections(exchange_body: &str) -> Vec<String> {
+fn collect_recent_exchange_turn_sections(
+    exchange_body: &str,
+    prompt_targets: &[String],
+) -> Vec<String> {
     let lines: Vec<&str> = exchange_body.lines().collect();
+    let sections = collect_response_sections(&lines);
+    if sections.is_empty() {
+        return Vec::new();
+    }
+
+    let anchored = collect_prompt_anchored_sections(&lines, &sections, prompt_targets);
+    if !anchored.is_empty() {
+        return anchored;
+    }
+
+    collect_recent_sections(&sections)
+}
+
+fn collect_response_sections(lines: &[&str]) -> Vec<ResponseSection> {
     let mut sections = Vec::new();
     let mut current = Vec::new();
+    let mut current_start = None;
 
-    for line in lines {
+    for (idx, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
         if trimmed.starts_with("<!-- agent:boundary:") {
             break;
         }
         if trimmed.starts_with("### Re:") && !current.is_empty() {
-            sections.push(current.join("\n").trim().to_string());
+            sections.push(ResponseSection {
+                start_line: current_start.expect("response sections always start with a heading"),
+                end_line: idx,
+                text: current.join("\n").trim().to_string(),
+            });
             current.clear();
+            current_start = None;
         }
         if !current.is_empty() || trimmed.starts_with("### Re:") {
-            current.push(line);
+            if current_start.is_none() {
+                current_start = Some(idx);
+            }
+            current.push(*line);
         }
     }
 
     if !current.is_empty() {
-        sections.push(current.join("\n").trim().to_string());
+        sections.push(ResponseSection {
+            start_line: current_start.expect("response sections always start with a heading"),
+            end_line: lines.len(),
+            text: current.join("\n").trim().to_string(),
+        });
     }
 
-    let keep_from = sections.len().saturating_sub(RECENT_EXCHANGE_TURNS_LIMIT);
     sections
+}
+
+fn collect_prompt_anchored_sections(
+    lines: &[&str],
+    sections: &[ResponseSection],
+    prompt_targets: &[String],
+) -> Vec<String> {
+    let mut selected_indexes = Vec::new();
+
+    for prompt_target in prompt_targets {
+        let Some(prompt_line) = find_prompt_target_line(lines, prompt_target) else {
+            continue;
+        };
+        let Some(section_idx) = find_context_section_for_prompt_line(sections, prompt_line) else {
+            continue;
+        };
+        if !selected_indexes.contains(&section_idx) {
+            selected_indexes.push(section_idx);
+        }
+    }
+
+    selected_indexes
         .into_iter()
-        .skip(keep_from)
+        .filter_map(|idx| sections.get(idx))
+        .map(|section| section.text.clone())
         .filter(|section| !section.is_empty())
         .collect()
+}
+
+fn collect_recent_sections(sections: &[ResponseSection]) -> Vec<String> {
+    let keep_from = sections.len().saturating_sub(RECENT_EXCHANGE_TURNS_LIMIT);
+    sections
+        .iter()
+        .skip(keep_from)
+        .map(|section| section.text.clone())
+        .filter(|section| !section.is_empty())
+        .collect()
+}
+
+fn find_prompt_target_line(lines: &[&str], prompt_target: &str) -> Option<usize> {
+    let target_lines = normalize_prompt_target_lines(prompt_target);
+    if target_lines.is_empty() {
+        return None;
+    }
+
+    let normalized_lines: Vec<String> = lines
+        .iter()
+        .map(|line| normalize_prompt_match_text(line))
+        .collect();
+
+    normalized_lines
+        .windows(target_lines.len())
+        .enumerate()
+        .filter_map(|(idx, window)| (window == target_lines.as_slice()).then_some(idx))
+        .next_back()
+}
+
+fn normalize_prompt_target_lines(prompt_target: &str) -> Vec<String> {
+    prompt_target
+        .lines()
+        .map(normalize_prompt_match_text)
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+fn normalize_prompt_match_text(line: &str) -> String {
+    line.trim()
+        .strip_prefix("❯ ")
+        .or_else(|| line.trim().strip_prefix('❯').map(str::trim_start))
+        .unwrap_or(line.trim())
+        .trim()
+        .to_string()
+}
+
+fn find_context_section_for_prompt_line(
+    sections: &[ResponseSection],
+    prompt_line: usize,
+) -> Option<usize> {
+    if let Some((idx, _)) = sections
+        .iter()
+        .enumerate()
+        .find(|(_, section)| prompt_line >= section.start_line && prompt_line < section.end_line)
+    {
+        return Some(idx);
+    }
+
+    sections
+        .iter()
+        .enumerate()
+        .take_while(|(_, section)| section.end_line <= prompt_line)
+        .map(|(idx, _)| idx)
+        .last()
 }
 
 fn level_name(level: session_accretion::SessionAccretionLevel) -> &'static str {
@@ -271,6 +399,58 @@ mod tests {
         assert!(section.contains("Older response body."));
         assert!(section.contains("ask for more previous turns"));
         assert!(section.contains("available_components"));
+    }
+
+    #[test]
+    fn build_document_section_anchors_tail_prompt_to_immediately_previous_response() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+            Done.\n\
+            +do [#tailctx]. spec-test-build-install-commit-push\n\
+            <!-- /agent:exchange -->\n";
+        let doc = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted earlier turns.\n\n",
+            "### Re: older topic — gpt-5\n\n",
+            "Old response body.\n\n",
+            "### Re: latest topic — gpt-5\n\n",
+            "Latest response body.\n",
+            "do [#tailctx]. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#tailctx] Tail follow-up\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let section = build_document_section(diff, doc, Some(&warn_report()));
+        assert!(section.contains("### Re: latest topic — gpt-5"));
+        assert!(section.contains("Latest response body."));
+        assert!(!section.contains("Old response body."));
+    }
+
+    #[test]
+    fn collect_recent_exchange_turn_sections_anchors_inline_prompt_edit_to_enclosing_response() {
+        let exchange = concat!(
+            "### Session Summary\n\n",
+            "Compacted earlier turns.\n\n",
+            "### Re: earlier topic — gpt-5\n\n",
+            "Earlier response body.\n",
+            "do [#inlinectx]. spec-test-build-install-commit-push\n\n",
+            "### Re: latest topic — gpt-5\n\n",
+            "Latest response body.\n",
+        );
+
+        let sections = collect_recent_exchange_turn_sections(
+            exchange,
+            &["do [#inlinectx]. spec-test-build-install-commit-push".to_string()],
+        );
+        assert_eq!(sections.len(), 1);
+        assert!(sections[0].contains("### Re: earlier topic — gpt-5"));
+        assert!(sections[0].contains("Earlier response body."));
+        assert!(!sections[0].contains("Latest response body."));
     }
 
     #[test]

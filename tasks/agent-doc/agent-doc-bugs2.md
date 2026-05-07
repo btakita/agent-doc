@@ -176,7 +176,25 @@ ZeroMQ does not remove those requirements. Pub/sub is especially easy to misuse 
 Raw Unix sockets are lower-level, but the protocol can be intentionally small: request/response commands for mutations, optional watch streams for UI updates, command ids for idempotency, and SQLite-backed recovery for durable facts. That is usually simpler to debug than a messaging stack whose behavior is correct but still not the same thing as application correctness.
 
 I would use ZeroMQ only if we later need richer client fanout, cross-language clients, or remote/multi-host messaging. For the first coordinator, raw local sockets plus a disciplined protocol should be more reliable because the reliability model stays explicit and testable in agent-doc itself.
-<!-- agent:boundary:e6a795c3 -->
+❯ Is 0mq difficult to install on Windows?
+### Re: ZeroMQ on Windows — gpt-5
+
+ZeroMQ is not impossible to install on Windows, but it is enough friction that I would count it against using ZeroMQ for the first coordinator.
+
+The current practical path is usually `vcpkg install zeromq`, and vcpkg does list a Windows-capable `zeromq` package. That makes developer setup much better than manually building libzmq. Still, it means agent-doc would take on a native C/C++ dependency with Windows-specific concerns:
+
+- Visual Studio Build Tools or a compatible C++ toolchain must be present
+- CI has to install/cache vcpkg artifacts for Windows
+- Rust bindings would need reliable libzmq discovery or vendoring
+- dynamic DLL placement versus static linking has to be handled deliberately
+- user bug reports may become toolchain/package-manager issues instead of agent-doc issues
+
+For a project whose coordinator can work with standard local IPC, that is a meaningful simplicity penalty. Raw Windows named pipes or loopback TCP plus Unix sockets on Unix-like systems avoid adding a C library dependency and keep installation closer to normal Rust distribution.
+
+So the Windows install story reinforces the earlier recommendation: avoid ZeroMQ until there is a specific messaging topology that justifies the dependency. If we later need it, vcpkg makes it feasible; it just is not free enough to choose by default.
+
+Reference checked: vcpkg's `zeromq` package page lists `vcpkg install zeromq` and Windows support.
+<!-- agent:boundary:67a311a0 -->
 <!-- /agent:exchange -->
 ###
 

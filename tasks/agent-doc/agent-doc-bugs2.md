@@ -39,7 +39,15 @@ Active backlog:
 Implemented `agent-doc response-toc` and `agent-doc response-fetch` so bounded prompt packs can expose lightweight live+archive response locators and load exact neighboring sections on demand. `prompt_context` now includes that TOC plus the retrieval hint, and the command/spec/docs surfaces were updated to describe the new flow.
 
 Verification completed: `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force` all passed in `src/agent-doc`. The repo work is committed and pushed in `src/agent-doc` as `8bbd89a` on `origin/20260422/codex-agent-backend`.
-<!-- agent:boundary:1a8061b9 -->
+❯ When I switch focus on different editor files, `agent-doc sync` does not change the visible tmux pane in the agent-doc tmux window. This is a recent regression. Probably when the fix for the 3-4 panes were in the agent-doc tmux window after selecting tsift.md fix was applied.
+❯ spec-test-build-install-commit-push
+### Re: sync visible-pane regression — gpt-5
+The regression was in the new safe-passive preserve-layout exits added for the 3+/4+-pane fix. When `sync --no-autostart` kept the current layout because a missing file was blocked or a protected pane could not detach safely, it returned before the final pane-selection step, so tab switches between already-visible docs could leave the `agent-doc` tmux window stuck on the old pane.
+
+`sync.rs` now reselects the requested pane before either preserve-layout return whenever that file is already visible in the kept window. I added tmux-backed regressions for both preserve-layout paths, and updated the passive-sync spec/docs to lock the focus-handoff contract.
+
+Verification passed in `src/agent-doc`: `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force`. The repo work is committed and pushed in `src/agent-doc` as `10f9e04` on `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:14a59191 -->
 <!-- /agent:exchange -->
 ###
 
@@ -54,6 +62,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sshcut] `agent-doc` appears to prevent later SSH connections after SSH-dependent sessions. Prove whether the breakage is child-local capability drift or a wider environment leak/mutation, then fail closed and preserve later SSH usability. Plan: tasks/agent-doc/plan-agent-doc-prevents-ssh-connections.md
 - [ ] [#oobprompt] Out-of-exchange prompt relocation — preflight does not relocate user prompts typed after the exchange close tag; response lands correctly inside exchange but orphaned prompt text remains outside. Plan: tasks/agent-doc/plan-out-of-exchange-prompt-relocation.md
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.

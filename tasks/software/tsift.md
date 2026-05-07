@@ -39,7 +39,22 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:4a6a210b -->
+❯ do [#ts1d]. spec-test-build-install-commit-push
+### Re: #ts1d — gpt-5
+Implemented the degraded `tsift search --autoindex` path for live `index.lock` contention.
+
+- When another tsift writer is actively refreshing a stale index, search now keeps going in read-only mode against the current index snapshot and emits one concise retry hint.
+- When the index is still missing and a live writer holds the lock, search now falls back to exact live-file search instead of failing closed.
+- Updated the versioned surfaces for this behavior in `Cargo.toml`/`Cargo.lock`, `VERSIONS.md`, `SPEC.md`, `CLAUDE.md`, and the code-navigation marker.
+
+Verification + install:
+- `cargo test` passed with `TMPDIR=/home/brian/.tmp-tsift-tests-full` to keep the test temp roots away from the host `/tmp/.tsift` ancestor.
+- `cargo build` passed.
+- `cargo install --path . --force` passed; installed binary now reports `tsift 0.1.38`.
+
+Commit + push:
+- `6e4ed3a feat: degrade search when index writer is active`
+<!-- agent:boundary:53759e8f -->
 <!-- /agent:exchange -->
 ###
 
@@ -52,7 +67,6 @@ Can tsift use rtk to compress tool call output in the context?
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ts1d] Improve tsift lock/degraded-mode UX so active index writers fall back to read-only or exact search with a minimal actionable summary
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

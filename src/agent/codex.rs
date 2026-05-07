@@ -117,6 +117,27 @@ fn lower_trimmed_lines(text: &str) -> impl Iterator<Item = &str> {
     text.lines().map(str::trim).filter(|line| !line.is_empty())
 }
 
+fn append_isolated_ssh_probe_args(args: &mut Vec<String>) {
+    args.extend(
+        [
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=5",
+            "-o",
+            "ControlMaster=no",
+            "-o",
+            "ControlPath=none",
+            "-o",
+            "ClearAllForwardings=yes",
+            "-o",
+            "PermitLocalCommand=no",
+        ]
+        .into_iter()
+        .map(str::to_string),
+    );
+}
+
 fn looks_like_ssh_dns_failure(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.contains("could not resolve hostname")
@@ -463,25 +484,15 @@ impl Codex {
         for target in &self.required_ssh_targets {
             match_terms.push(target.clone());
 
-            let alias_args = vec![
-                "-o".to_string(),
-                "BatchMode=yes".to_string(),
-                "-o".to_string(),
-                "ConnectTimeout=5".to_string(),
-                target.clone(),
-                "true".to_string(),
-            ];
+            let mut alias_args = Vec::new();
+            append_isolated_ssh_probe_args(&mut alias_args);
+            alias_args.push(target.clone());
+            alias_args.push("true".to_string());
             let alias = self.run_ssh_probe(&alias_args)?;
             let resolved = self.resolve_direct_target(target)?;
             let direct = if let Some(resolved) = &resolved {
-                let mut args = vec![
-                    "-F".to_string(),
-                    "/dev/null".to_string(),
-                    "-o".to_string(),
-                    "BatchMode=yes".to_string(),
-                    "-o".to_string(),
-                    "ConnectTimeout=5".to_string(),
-                ];
+                let mut args = vec!["-F".to_string(), "/dev/null".to_string()];
+                append_isolated_ssh_probe_args(&mut args);
                 if let Some(port) = &resolved.port {
                     args.push("-p".to_string());
                     args.push(port.clone());
@@ -519,7 +530,7 @@ impl Codex {
             {
                 anyhow::bail!(
                     "required SSH capability failed for target `{}`: alias/config path is degraded (`{}`), \
-                     but direct host probe `{}` succeeded. Fix the SSH alias/config before trusting this Codex session.",
+                     but isolated direct host probe `{}` succeeded. Fix the SSH alias/config before trusting this Codex session.",
                     target,
                     alias_detail,
                     direct_target
@@ -546,19 +557,19 @@ impl Codex {
                     "SSH capability could not be proven"
                 };
                 format!(
-                    "{classification} for `{}` via `{}`: {}",
+                    "{classification} for `{}` via isolated direct probe `{}`: {}",
                     target, direct_target, direct_text
                 )
             } else if looks_like_ssh_alias_config_failure(alias_detail)
                 || looks_like_ssh_dns_failure(alias_detail)
             {
                 format!(
-                    "SSH alias/config resolution failed for `{}`: {}",
+                    "SSH alias/config resolution failed for `{}` during isolated pre-launch probe: {}",
                     target, alias_detail
                 )
             } else {
                 format!(
-                    "SSH capability could not be proven for `{}`: {}",
+                    "SSH capability could not be proven for `{}` during isolated pre-launch probe: {}",
                     target, alias_detail
                 )
             };
@@ -1567,7 +1578,52 @@ exit 0
             .unwrap_err()
             .to_string();
         assert!(err.contains("monsterrodholders-server"), "got: {err}");
-        assert!(err.contains("direct host probe"), "got: {err}");
+        assert!(err.contains("isolated direct host probe"), "got: {err}");
+    }
+
+    #[test]
+    fn required_ssh_probes_disable_shared_control_socket_state() {
+        let (dir, path_dir) = write_fake_ssh_script(
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$SSH_LOG"
+if [ "$1" = "-G" ]; then
+  echo "user root"
+  echo "hostname 50.28.2.199"
+  echo "port 22"
+  echo "identityfile /tmp/id_ed25519"
+  exit 0
+fi
+exit 0
+"#,
+        );
+        let log_path = dir.path().join("ssh-probe.log");
+        fs::write(&log_path, "").unwrap();
+        let codex = Codex::new(None, None)
+            .with_env(vec![
+                ("PATH".to_string(), Some(path_dir)),
+                (
+                    "SSH_LOG".to_string(),
+                    Some(log_path.to_string_lossy().into_owned()),
+                ),
+            ])
+            .with_required_ssh_targets(vec!["monsterrodholders-server".to_string()]);
+
+        codex.prove_required_ssh_capability().unwrap();
+
+        let log = fs::read_to_string(&log_path).unwrap();
+        let connect_lines: Vec<_> = log
+            .lines()
+            .filter(|line| !line.starts_with("-G "))
+            .collect();
+        assert_eq!(connect_lines.len(), 2, "got log: {log}");
+        for line in connect_lines {
+            assert!(line.contains("-o BatchMode=yes"), "got: {line}");
+            assert!(line.contains("-o ConnectTimeout=5"), "got: {line}");
+            assert!(line.contains("-o ControlMaster=no"), "got: {line}");
+            assert!(line.contains("-o ControlPath=none"), "got: {line}");
+            assert!(line.contains("-o ClearAllForwardings=yes"), "got: {line}");
+            assert!(line.contains("-o PermitLocalCommand=no"), "got: {line}");
+        }
     }
 
     #[test]

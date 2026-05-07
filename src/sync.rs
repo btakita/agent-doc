@@ -3389,12 +3389,22 @@ fn register_synced_files(
         if pane_claim_counts.get(pane_id).copied().unwrap_or(0) < 2 {
             continue;
         }
-        let Some((_, project_root, _)) = registry_location_for_file(file_path) else {
+        let Some((_, project_root, registry_key)) = registry_location_for_file(file_path) else {
             continue;
         };
+        let registry_root_matches = sessions::load_in(&project_root)
+            .ok()
+            .and_then(|registry| registry.get(&registry_key).cloned())
+            .is_some_and(|entry| {
+                entry.session_id == *session_id
+                    && entry.pane == pane_id
+                    && registry_entry_matches_document_root(&entry, &project_root)
+            });
         let live_owner_matches =
             sync_actor_or_live_owner_matches(tmux, file_path, session_id, pane_id);
-        if pane_assignment_matches_document_root(tmux, pane_id, &project_root) || live_owner_matches
+        if pane_assignment_matches_document_root(tmux, pane_id, &project_root)
+            || registry_root_matches
+            || live_owner_matches
         {
             *acceptable_duplicate_claims
                 .entry(pane_id.to_string())
@@ -3471,9 +3481,12 @@ fn register_synced_files(
         }
         let duplicate_claim_count = pane_claim_counts.get(pane_id).copied().unwrap_or(0);
         if duplicate_claim_count > 1 {
-            let claim_acceptable =
-                pane_assignment_matches_document_root(tmux, pane_id, &project_root)
-                    || live_owner_matches;
+            let registry_root_matches = registry
+                .get(&registry_key)
+                .is_some_and(|entry| registry_entry_matches_document_root(entry, &project_root));
+            let claim_acceptable = pane_assignment_matches_document_root(tmux, pane_id, &project_root)
+                || registry_root_matches
+                || live_owner_matches;
             let acceptable_claim_count = acceptable_duplicate_claims
                 .get(pane_id)
                 .copied()
@@ -4192,6 +4205,19 @@ fn pane_project_root(tmux: &Tmux, pane_id: &str) -> Option<PathBuf> {
     }
     let path = PathBuf::from(current_path);
     crate::snapshot::find_project_root(&path).or(Some(path))
+}
+
+fn registry_entry_matches_document_root(
+    entry: &sessions::SessionEntry,
+    project_root: &Path,
+) -> bool {
+    let cwd = Path::new(entry.cwd.trim());
+    if cwd.as_os_str().is_empty() {
+        return false;
+    }
+    crate::snapshot::find_project_root(cwd)
+        .or_else(|| cwd.is_dir().then_some(cwd.to_path_buf()))
+        .is_some_and(|root| root == project_root)
 }
 
 fn pane_assignment_matches_document_root(tmux: &Tmux, pane_id: &str, project_root: &Path) -> bool {

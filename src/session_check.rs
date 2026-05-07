@@ -1553,6 +1553,40 @@ Body\n\
     }
 
     #[test]
+    fn first_unstarted_prompt_bearing_change_ignores_prefixed_response_label_noise() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: deploy — gpt-5\n\n",
+            "Both redirects confirmed via `curl`.\n",
+            "<!-- agent:boundary:done -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: deploy — gpt-5\n\n",
+            "Both redirects confirmed via `curl`.\n",
+            "❯ **Verification:** Both redirects confirmed via `curl`.\n",
+            "❯ **Commit / push:**\n",
+            "<!-- agent:boundary:done -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        assert!(
+            change.is_none(),
+            "prefixed assistant response labels must not reopen a committed cycle"
+        );
+    }
+
+    #[test]
     fn first_unstarted_prompt_bearing_change_detects_plain_exchange_tail_prompt() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("session.md");

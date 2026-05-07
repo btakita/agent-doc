@@ -1513,6 +1513,7 @@ private fun isExchangeResponseHeadingForPrefixRepair(trimmed: String): Boolean =
 private fun startsPromptRunAfterResponseForPrefixRepair(trimmed: String, isTarget: Boolean): Boolean {
     val alreadyPrefixed = trimmed.startsWith("❯ ")
     val unprefixed = if (alreadyPrefixed) trimmed.removePrefix("❯ ").trimStart() else trimmed
+    if (lineLooksLikePlainResponseAfterPromptForPrefixRepair(unprefixed)) return false
     return lineLooksLikeFreshPromptAfterResponseForPrefixRepair(unprefixed) ||
         ((alreadyPrefixed || isTarget) && !lineLooksLikePlainResponseAfterPromptForPrefixRepair(unprefixed))
 }
@@ -1538,6 +1539,7 @@ private fun lineLooksLikeFreshPromptAfterResponseForPrefixRepair(trimmed: String
 
 private fun lineLooksLikePlainResponseAfterPromptForPrefixRepair(trimmed: String): Boolean {
     if (trimmed.isBlank()) return false
+    if (lineHasKnownResponseLabelForPrefixRepair(trimmed)) return true
     if (lineLooksLikeFreshPromptAfterResponseForPrefixRepair(trimmed)) return false
     if (
         trimmed.startsWith("- ") ||
@@ -1562,6 +1564,48 @@ private fun lineLooksLikePlainResponseAfterPromptForPrefixRepair(trimmed: String
         lower.startsWith("fixed ") ||
         lower.startsWith("added ") ||
         lower.startsWith("implemented ")
+}
+
+private fun lineHasKnownResponseLabelForPrefixRepair(line: String): Boolean {
+    val normalized = normalizeResponseLabelCandidateForPrefixRepair(line) ?: return false
+    return normalized.startsWith("Plan:") ||
+        normalized.startsWith("Verification:") ||
+        normalized.startsWith("What changed:") ||
+        normalized.startsWith("Follow-up:") ||
+        normalized.startsWith("Commit / push:") ||
+        normalized.startsWith("Backlog:")
+}
+
+private fun normalizeResponseLabelCandidateForPrefixRepair(line: String): String? {
+    var trimmed = line.trim()
+    if (trimmed.isBlank()) return null
+
+    if (trimmed.startsWith("❯")) {
+        trimmed = trimmed.removePrefix("❯").trimStart()
+    }
+
+    val listMarker = Regex("""^([-*+]|\d+[.)])\s+""").find(trimmed)
+    if (listMarker != null) {
+        trimmed = trimmed.substring(listMarker.range.last + 1).trimStart()
+    }
+
+    trimmed = stripMarkdownEmphasisPairForPrefixRepair(trimmed).trimStart()
+    return trimmed.ifBlank { null }
+}
+
+private fun stripMarkdownEmphasisPairForPrefixRepair(text: String): String {
+    for (marker in listOf("***", "___", "**", "__", "*", "_")) {
+        if (!text.startsWith(marker)) continue
+        val rest = text.removePrefix(marker)
+        val end = rest.indexOf(marker)
+        if (end < 0) continue
+        val label = rest.substring(0, end)
+        val tail = rest.substring(end + marker.length)
+        if (label.isNotBlank() && (label.trimEnd().endsWith(":") || tail.trimStart().startsWith(":"))) {
+            return label + tail
+        }
+    }
+    return text
 }
 
 /**

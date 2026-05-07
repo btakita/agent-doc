@@ -127,6 +127,9 @@
 //!   `prompt_target` blocks from `classify_prompt_bearing_changes`
 //! - `format_prompt_bearing_changes(diff)`: renders the typed change list into a prompt-ready
 //!   section with explicit turn-completeness and edit/artifact instructions
+//! - `text_line_looks_like_prompt_target("❯ **Verification:** passed")` → `false`;
+//!   known assistant response labels are recognized after optional prompt glyph,
+//!   list marker, and markdown emphasis normalization.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -360,6 +363,7 @@ fn line_looks_like_prompt_target(line: &str) -> bool {
         && !trimmed.starts_with("```")
         && !trimmed.starts_with("~~~")
         && !trimmed.starts_with("### Re:")
+        && !line_has_known_response_label_after_prompt(trimmed)
         && (trimmed.starts_with('❯')
             || trimmed.ends_with('?')
             || looks_like_imperative_directive(trimmed))
@@ -427,7 +431,7 @@ pub(crate) fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool
         return false;
     }
 
-    if trimmed.starts_with("Commit / push:") {
+    if line_has_known_response_label_after_prompt(trimmed) {
         return true;
     }
 
@@ -457,6 +461,69 @@ pub(crate) fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool
         || lower.starts_with("fixed ")
         || lower.starts_with("added ")
         || lower.starts_with("implemented ")
+}
+
+fn line_has_known_response_label_after_prompt(line: &str) -> bool {
+    let Some(normalized) = normalize_response_label_candidate(line) else {
+        return false;
+    };
+    matches!(
+        normalized.as_str(),
+        s if s.starts_with("Plan:")
+            || s.starts_with("Verification:")
+            || s.starts_with("What changed:")
+            || s.starts_with("Follow-up:")
+            || s.starts_with("Commit / push:")
+            || s.starts_with("Backlog:")
+    )
+}
+
+fn normalize_response_label_candidate(line: &str) -> Option<String> {
+    let mut trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = trimmed.strip_prefix('❯') {
+        trimmed = rest.trim_start();
+    }
+
+    if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+    {
+        trimmed = rest.trim_start();
+    } else {
+        let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits > 0 {
+            let rest = &trimmed[digits..];
+            if let Some(rest) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+                trimmed = rest.trim_start();
+            }
+        }
+    }
+
+    let stripped = strip_markdown_emphasis_pair(trimmed);
+    let normalized = stripped.trim_start();
+    (!normalized.is_empty()).then(|| normalized.to_string())
+}
+
+fn strip_markdown_emphasis_pair(text: &str) -> String {
+    for marker in ["***", "___", "**", "__", "*", "_"] {
+        if let Some(rest) = text.strip_prefix(marker)
+            && let Some(end) = rest.find(marker)
+        {
+            let label = &rest[..end];
+            let tail = &rest[end + marker.len()..];
+            if !label.trim().is_empty()
+                && (label.trim_end().ends_with(':') || tail.trim_start().starts_with(':'))
+            {
+                return format!("{}{}", label, tail);
+            }
+        }
+    }
+    text.to_string()
 }
 
 pub(crate) fn prompt_change_is_already_answered(change_text: &str) -> bool {
@@ -635,6 +702,13 @@ fn classify_prompt_bearing_block(
     }
     if block_looks_like_prompt_target(trimmed) {
         return Some(PromptBearingChangeKind::PromptTarget);
+    }
+    if closes_exchange_tail
+        && non_blank
+            .iter()
+            .all(|line| line_looks_like_plain_response_after_prompt(line))
+    {
+        return None;
     }
     if closes_exchange_tail {
         return Some(PromptBearingChangeKind::PromptTarget);
@@ -3335,6 +3409,57 @@ Please fix the bug.\n\
         assert_eq!(
             changes[0].text,
             "When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push"
+        );
+    }
+
+    #[test]
+    fn prefixed_markdown_response_labels_are_not_prompt_targets() {
+        for line in [
+            "❯ **Verification:** Both redirects confirmed via `curl`.",
+            "❯ Commit / push:",
+            "❯ **Commit / push:**",
+            "❯ - **Verification:** `cargo test` passed.",
+            "❯ 1. **What changed:** normalized response labels.",
+        ] {
+            assert!(
+                !text_line_looks_like_prompt_target(line),
+                "assistant response label must not be classified as a prompt target: {line}"
+            );
+            assert!(
+                line_looks_like_plain_response_after_prompt(line),
+                "assistant response label must remain response prose: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn prefixed_user_followup_after_response_still_starts_prompt() {
+        for line in [
+            "❯ verify deploy status",
+            "❯ Verification failed; what next?",
+            "❯ do [#respfx]. spec-test-build-install-commit-push",
+        ] {
+            assert!(
+                text_line_looks_like_prompt_target(line),
+                "real user follow-up must stay prompt-bearing: {line}"
+            );
+            assert!(
+                line_looks_like_fresh_prompt_after_response(line),
+                "real user follow-up must start a new prompt run: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_prompt_bearing_changes_ignores_prefixed_markdown_response_label() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
+            ### Re: done — gpt-5\n\
+            +❯ **Verification:** Both redirects confirmed via `curl`.\n\
+            <!-- /agent:exchange -->\n";
+        let changes = classify_prompt_bearing_changes(diff);
+        assert!(
+            changes.is_empty(),
+            "prefixed assistant response label must not reopen a cycle: {changes:?}"
         );
     }
 

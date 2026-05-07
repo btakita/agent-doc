@@ -171,4 +171,36 @@ New user prompt.
         assertFalse(result.contains("❯   - `cargo test normalize_prefix`"))
         assertFalse(result.contains("❯ - `cargo test` is still red on a pre-existing failure."))
     }
+
+    @Test
+    fun `does not treat prefixed markdown response labels as fresh prompts`() {
+        val doc = """
+<!-- agent:exchange patch=append -->
+### Re: previous — gpt-5
+
+Implemented.
+
+❯ **Verification:** Both redirects confirmed via `curl`.
+❯ **Commit / push:**
+- `abc1234` pushed.
+do #next. spec-test-build-install-commit-push
+<!-- agent:boundary:bbb22222 -->
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val result = normalizeExchangePrefixesUtil(
+            doc,
+            listOf(
+                "**Verification:** Both redirects confirmed via `curl`.",
+                "**Commit / push:**",
+                "- `abc1234` pushed.",
+                "do #next. spec-test-build-install-commit-push"
+            )
+        )
+
+        assertTrue(result.contains("❯ **Verification:** Both redirects confirmed via `curl`.\n"))
+        assertTrue(result.contains("❯ **Commit / push:**\n- `abc1234` pushed."))
+        assertFalse(result.contains("❯ - `abc1234` pushed."))
+        assertTrue(result.contains("❯ do #next. spec-test-build-install-commit-push\n"))
+    }
 }

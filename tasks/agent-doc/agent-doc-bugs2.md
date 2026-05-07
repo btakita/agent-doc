@@ -220,7 +220,22 @@ A good Rust shape would be:
 If the project later needs a broader brokerless messaging fabric, then revisit `zmq`, NNG, or newer Rust-native ZMTP crates. But for the first coordinator, a small Tokio-based actor plus local IPC is likely more reliable because it has fewer moving parts and the correctness properties stay in agent-doc code.
 
 References checked: ZeroMQ's Rust page lists `zmq` bindings and labels native `zeromq`/`zmq.rs` as WIP; current Rust crate search also shows newer native options, but they do not remove the need for application-level reliability semantics.
-<!-- agent:boundary:12989872 -->
+❯ Do you recommend #next-steps for a coordinator in the backlog or icebox?
+### Re: coordinator next steps — gpt-5
+
+Backlog, not icebox.
+
+The coordinator work is connected to live reliability symptoms: duplicate tmux panes, startup-miss behavior, supervisor responsiveness, and cross-process ownership. That makes it more than speculative architecture. I would keep it as recommended backlog work, but not above the current concrete correctness bugs.
+
+I added a coordinator design spike after `#tmuxcoord`. The ordering should be:
+
+1. fix the current prompt/session-check correctness issue
+2. investigate the `tsift.md` three-pane state in `#tmuxcoord`
+3. draft the coordinator actor MVP from that evidence
+4. keep SQLite-store evaluation below those until the actor boundary is clearer
+
+Top backlog item: `#concprompt`.
+<!-- agent:boundary:18f76ae1 -->
 <!-- /agent:exchange -->
 ###
 
@@ -250,6 +265,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 <!-- agent:backlog -->
 - [ ] [#concprompt] concurrent user edits during response cycle bypass prompt detection + session-check — plan: tasks/agent-doc/plan-concurrent-edit-prompt-miss.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
+- [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#pfxcours] content_ours fallback strips ❯ prefix from user prompts — plan: tasks/agent-doc/plan-content-ours-prefix-strip.md
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

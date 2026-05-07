@@ -106,6 +106,7 @@ Verification:
 ❯ - committed workspace instruction-surface sync on `main`: `9747b6bb3`
 ❯ - pushing after this closeout commit so the session response commit is included
 ❯ do [#fye2]. spec-test-build-install-commit-push
+❯ do [#fye2]. spec-test-build-install-commit-push
 ### Re: Run Agent Doc reroute auto-remediation — gpt-5
 
 Completed .
@@ -116,6 +117,8 @@ Plan:
 
 Verification/build/install completed:
 - === instruction-files: clippy + test ===
+❯ - 
+❯ - 
 ❯ - 
 
 ❯ Repo work:
@@ -191,7 +194,7 @@ The duplicated `❯ do [#fye2]. spec-test-build-install-commit-push` line plus t
 ### Re: closeout drift cleanup — gpt-5
 
 The prefixed push-target line is stale working-tree drift from the already committed `#wv7g` closeout, not a new request. No additional repo work is needed.
-❯ I opened tagpath.md. tagpath.md had a syntax error which I fixed. I somehow ended up with the agent-doc tmux window having 3 panes. I tried `agent-doc sync` but the repair correct back to two panes when I have 2 editor windows open. Please investigate and fix root cause(s). spec-test-build-install-commit-push
+❯ I opened tagpath.md. tagpath.md had a syntax error which I fixed. I somehow ended up with the agent-doc tmux window having 4 panes. I tried `agent-doc sync` but the repair correct back to two panes when I have 2 editor windows open. Please investigate and fix root cause(s). spec-test-build-install-commit-push
 ### Re: sync pane growth around protected closeouts — gpt-5
 
 I reproduced the visible-pane growth from the live sync log instead of treating it as a generic tmux layout glitch.
@@ -222,7 +225,7 @@ Repo work:
 - pushed `src/agent-doc` to `origin/20260422/codex-agent-backend`
 - committed workspace mirror sync on `main`: `d631d8ed3` `chore: sync agent-doc instruction mirrors`
 - pushed workspace `main`
-<!-- agent:boundary:27163cb0 -->
+<!-- agent:boundary:7e2e7958 -->
 <!-- /agent:exchange -->
 ###
 

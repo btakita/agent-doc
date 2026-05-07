@@ -126,11 +126,25 @@ v0.6.0 published to crates.io
 
 Active backlog:
 - [ ] [#tgcl] tsift: cluster repeated symbol results by canonical tag family with one summary row + expand handle
-<!-- agent:boundary:989b0c27 -->
+❯ do [#tgcl]. spec-test-build-install-commit-push
+### Re: #tgcl — gpt-5
+Implemented grouped symbol-family previews for `tsift search --max-items ...`.
+
+- Search preview now collapses repeated symbol hits that share a canonical `tag_alias` into one family row with match/file counts, sample spellings, and a stable family-scoped `expand` command.
+- Updated the preview contract in `SPEC.md` and added regression tests for truncation + family grouping.
+
+Verification + install:
+- `TMPDIR=/home/brian/.tmp-tsift-tests-full cargo test search_budget_report_` passed.
+- `TMPDIR=/home/brian/.tmp-tsift-tests-full cargo test` ran with an isolated temp root. The main unit suite passed (`545 passed`), but `tests/exit_code.rs::context_pack_json_composes_next_context_and_optional_digests` still fails because the reproduced `context-pack` JSON has `next_context.touched_symbol_total = 0`, so `touched_symbol_refs[0]` is absent.
+- `TMPDIR=/home/brian/.tmp-tsift-tests-full cargo build` passed.
+- `TMPDIR=/home/brian/.tmp-tsift-tests-full cargo install --path . --force` passed; installed binary reports `tsift 0.1.38`.
+
+Commit + push:
+- `2c79c07 feat: group repeated search preview symbols`
+<!-- agent:boundary:4d86959e -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tgcl] tsift: cluster repeated symbol results by canonical tag family with one summary row + expand handle
 <!-- /agent:backlog -->

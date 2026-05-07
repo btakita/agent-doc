@@ -158,7 +158,25 @@ I would only revisit ZeroMQ if the design grows into one of these shapes:
 - backpressure/fanout patterns become more complex than request/response plus watch events
 
 For now, the reliable/simple path is bespoke actor plus explicit protocol boundaries. The protocol should be designed cleanly enough that the transport can change later, but the first implementation should avoid a messaging dependency until there is a concrete topology that needs it.
-<!-- agent:boundary:0518a839 -->
+❯ Would 0mq pub/sub and 0mq queue patterns be useful over raw sockets for reliability?
+### Re: ZeroMQ reliability patterns — gpt-5
+
+ZeroMQ pub/sub and queue patterns can be useful for transport ergonomics, but I would not choose them primarily for reliability in this coordinator.
+
+For agent-doc, the reliability properties we need are mostly application-level:
+
+- exactly one coordinator owns live topology decisions
+- commands are idempotent and replay-safe
+- supervisor leases/heartbeats expire predictably
+- coordinator restart can reconcile SQLite state with tmux reality
+- clients know whether a command was accepted, committed, or needs retry
+
+ZeroMQ does not remove those requirements. Pub/sub is especially easy to misuse here because subscribers can miss events during disconnects unless the application adds sequence numbers, snapshots, durable catch-up, or explicit resync. Queue patterns can help distribute work, but this design should avoid distributed ownership; the coordinator should serialize the important work itself.
+
+Raw Unix sockets are lower-level, but the protocol can be intentionally small: request/response commands for mutations, optional watch streams for UI updates, command ids for idempotency, and SQLite-backed recovery for durable facts. That is usually simpler to debug than a messaging stack whose behavior is correct but still not the same thing as application correctness.
+
+I would use ZeroMQ only if we later need richer client fanout, cross-language clients, or remote/multi-host messaging. For the first coordinator, raw local sockets plus a disciplined protocol should be more reliable because the reliability model stays explicit and testable in agent-doc itself.
+<!-- agent:boundary:e6a795c3 -->
 <!-- /agent:exchange -->
 ###
 

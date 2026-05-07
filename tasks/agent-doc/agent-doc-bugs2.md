@@ -34,7 +34,50 @@ Active backlog:
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - 3 more active item(s)
-<!-- agent:boundary:b3c13f9e -->
+❯ When I ran `Sync Tmux Layout` on agent-doc-bugs2.md, JB plugin surfaced an error:
+```
+Sync deferred: another visible agent-doc pane is mid-closeout, so the current tmux layout was preserved. Try again after that closeout finishes.
+```
+❯ Why is the tsift.md agent-doc pane mid-closeout?
+❯ spec-test-build-install-commit-push
+### Re: tsift.md mid-closeout — gpt-5
+
+It was a real, temporary closeout guard, not a stuck tsift supervisor.
+
+The relevant sync log entries show pane `%208` was registered to `/home/brian/work/btakita/agent-loop/tasks/software/tsift.md` and had an open `preflight_started` cycle from 2026-05-07 18:56:41 EDT until it closed at 18:59:47 EDT. During that window, `Sync Tmux Layout` tried to replace the visible tsift pane with `agent-doc-bugs2.md`, but sync preserved the layout because detaching a pane that still owns `preflight_started`, `response_captured`, or `write_applied` can strand the response/commit boundary.
+
+The exact backend reason in `/tmp/agent-doc-sync.log` was:
+
+```text
+visible protected pane(s) %208:preflight_started:/home/brian/work/btakita/agent-loop/tasks/software/tsift.md cannot be detached safely
+```
+
+Current state is clean for tsift: `agent-doc session-check tasks/software/tsift.md` reports `committed`.
+
+I also fixed the UX gap that made the JetBrains notification too vague. The plugin now parses that protected-pane detail from sync output and includes the pane id, phase, and document path in the warning instead of only saying "another visible agent-doc pane".
+
+Changed in `src/agent-doc`:
+
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutAction.kt`
+- `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/SyncLayoutActionTest.kt`
+- `editors/jetbrains/SPEC.md`
+- `editors/jetbrains/gradle.properties` bumped to `0.2.99`
+- `VERSIONS.md`
+
+Verification:
+
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed
+- `cargo build` passed
+- `cargo test` passed: 1934 unit tests, all integration suites, and doc tests passed
+- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.99.zip` into `IntelliJIdea2026.1`; restart the IDE to activate it
+
+Commit / push:
+
+- `src/agent-doc`: `1a2dbc7` (`fix: show protected sync pane details`) pushed to `origin/20260422/codex-agent-backend`
+- superproject: `0178cc172` (`chore: update agent-doc submodule`) pushed to `origin/main`
+
+I left unrelated existing workspace dirt untouched: `src/session-share`, `src/tsift`, and the untracked plan files shown by root `git status`.
+<!-- agent:boundary:512d9a58 -->
 <!-- /agent:exchange -->
 ###
 

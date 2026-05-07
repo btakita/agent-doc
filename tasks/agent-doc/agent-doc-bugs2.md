@@ -34,8 +34,25 @@ Active backlog:
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 1 more active item(s)
-<!-- agent:boundary:ff39e974 -->
-do [#commitchurn]. spec-test-build-install-commit-push
+❯ do [#commitchurn]. spec-test-build-install-commit-push
+### Re: #commitchurn — gpt-5
+
+Implemented the closeout-churn fix and marked `#commitchurn` done.
+
+What changed:
+- `session-check` now ignores exchange-only content edits when there is no unresolved prompt target, so minor edits to already-answered exchange text do not force a second finalize cycle.
+- The closeout spec now documents that active Codex post-commit drift uses the same scoping: typed-component drift, fresh prompt targets, and response patchbacks still fail closed.
+- I fixed the current clippy failure in `route.rs` by grouping supervisor IPC dispatch booleans into a small options struct.
+
+Verification:
+- `cargo test -p agent-doc session_check_ -- --nocapture`
+- `make check` twice after the final source edits; both passed.
+- `make install` after the green suite; installed `agent-doc 0.33.16` and refreshed `libagent_doc-0.33.16.so`.
+
+Commits:
+- agent-doc: `5d0106e` (`fix: avoid closeout churn for exchange edits`) pushed to `origin/20260422/codex-agent-backend`.
+- agent-loop: `e956c8579` (`chore: update agent-doc closeout guard`) committed locally; I will push `main` immediately after this managed closeout so the response commit is included.
+<!-- agent:boundary:a06c4bf0 -->
 <!-- /agent:exchange -->
 ###
 
@@ -53,7 +70,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 - [ ] [#pfxleak3] Response tail line misclassified as user prompt — boundary synthesis / content_ours adds `❯ ` to agent response tail during prompt replacement. Variant of #pfxleak2 — plan: src/session-share/tasks/agent-doc/plan-response-tail-prefix-misclassification.md
-- [ ] [#commitchurn] Session-check forces new finalize cycle for minor content edits on already-answered prompts, causing 3-4 extra commits per turn — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.

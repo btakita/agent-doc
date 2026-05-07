@@ -145,7 +145,23 @@ Verification completed:
 Commits pushed:
 - `btakita/tagpath`: `5182594` (`test: add tsift token savings fixture`)
 - `btakita/agent-loop`: `b69d14cde` (`chore: update tagpath submodule`)
-<!-- agent:boundary:2ee84f96 -->
+❯ release + publish
+### Re: release + publish — gpt-5
+
+Released and published `tagpath` `v0.6.1`.
+
+Release work completed:
+- Bumped `Cargo.toml` and `Cargo.lock` from `0.6.0` to `0.6.1`.
+- Verified with `cargo fmt`, `cargo test`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo publish --dry-run`.
+- Tagged `v0.6.1` and pushed `btakita/tagpath` `main` plus the tag.
+- Published `tagpath v0.6.1` to crates.io.
+- Reinstalled the local binary with `cargo install --path . --force`.
+- Updated and pushed the `agent-loop` `src/tagpath` submodule pointer.
+
+Commits:
+- `btakita/tagpath`: `fa5225f` (`chore: release v0.6.1`)
+- `btakita/agent-loop`: `7e361a2ed` (`chore: update tagpath to v0.6.1`)
+<!-- agent:boundary:0afc8723 -->
 <!-- /agent:exchange -->
 ###
 

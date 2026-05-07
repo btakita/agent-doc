@@ -33,7 +33,31 @@ Active backlog:
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
-<!-- agent:boundary:05f7478a -->
+❯ do [#chkptcap]. spec-test-build-install-commit-push
+### Re: #chkptcap partial streaming checkpoints — gpt-5
+
+Implemented `#chkptcap` in `src/agent-doc` and marked it done.
+
+The streaming paths now save durable partial response checkpoints before final closeout. `capture.rs` has a `PartialCheckpointWriter` that writes the first non-empty partial response immediately, then writes changed partial output at most every 30 seconds to `.agent-doc/captures/<doc-hash>/<cycle-id>.partial.json`. These partial checkpoints include session/model/write metadata and hashes, but they deliberately do not move the cycle to `response_captured`, so automatic replay still depends on a validated final capture or already-visible response content.
+
+Both normal streaming (`stream.rs`) and orchestration CRDT streaming (`orchestrate.rs`) feed that writer for non-final chunks. Final captures continue to use the existing `.json` ledger, and final capture discovery skips `.partial.json` files. I also updated `SPEC.md`, backend/orchestration specs, `README.md`, and `VERSIONS.md` with the checkpoint invariant and closeout note.
+
+Verification completed:
+
+- `cargo fmt`
+- `cargo test partial_checkpoint`
+- `cargo test stream_loop_captures_partial_checkpoints`
+- `make check` passed: 1,928 unit tests plus integration suites and doc tests
+- `make build`
+- `make install` installed `agent-doc 0.33.16` and refreshed the local shared library symlink
+
+Committed and pushed the `src/agent-doc` submodule change:
+
+- `f366d3e fix: checkpoint partial streaming responses`
+- pushed to `origin/20260422/codex-agent-backend`
+
+No follow-up backlog item is needed for this task.
+<!-- agent:boundary:93dee23a -->
 <!-- /agent:exchange -->
 ###
 
@@ -61,7 +85,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 

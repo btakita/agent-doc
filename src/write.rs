@@ -2984,7 +2984,9 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
                     return doc_line.to_string();
                 }
             }
-            if normalized.starts_with("❯ ") {
+            if normalized.starts_with("❯ ")
+                || crate::diff::line_looks_like_plain_response_after_prompt(normalized)
+            {
                 return doc_line.to_string();
             }
             let Some(remaining_count) = remaining.get_mut(normalized) else {
@@ -5270,6 +5272,11 @@ fn normalize_patch_content(content: &str, prefix_lines: &[String]) -> String {
             .trim_end()
             .strip_prefix("\u{276f} ")
             .unwrap_or(line.trim_end());
+        if crate::diff::line_looks_like_plain_response_after_prompt(bare) {
+            result.push_str(line);
+            result.push('\n');
+            continue;
+        }
         if !line.starts_with("\u{276f} ")
             && let Some(remaining_count) = remaining.get_mut(bare)
             && *remaining_count > 0
@@ -8375,6 +8382,56 @@ do #verfpfx. spec-test-build-install-commit-push
                 && !repaired.contains("\n❯   - `cargo test normalize_prefix`")
                 && !repaired.contains("\n❯ - `cargo test` is still red on a pre-existing failure."),
             "assistant list items must not receive prompt prefixes:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_skips_assistant_commit_label() {
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: #done — gpt-5
+Verification:
+- `cargo test`
+
+Commit / push:
+- `git push` returned `Everything up-to-date`.
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+
+        let repaired =
+            normalize_exchange_prefixes_for_targets(working, &[String::from("Commit / push:")]);
+
+        assert!(
+            repaired.contains("\nCommit / push:\n"),
+            "assistant commit evidence label must stay unprefixed:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\n❯ Commit / push:\n"),
+            "assistant commit evidence label must not receive prompt prefix:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_patch_content_skips_assistant_commit_label() {
+        let patch = "\
+### Re: #done — gpt-5
+Verification:
+- `cargo test`
+
+Commit / push:
+- `git push` returned `Everything up-to-date`.
+";
+
+        let normalized = normalize_patch_content(patch, &[String::from("Commit / push:")]);
+
+        assert!(
+            normalized.contains("\nCommit / push:\n"),
+            "assistant commit evidence label must stay unprefixed:\n{normalized}"
+        );
+        assert!(
+            !normalized.contains("\n❯ Commit / push:\n"),
+            "assistant commit evidence label must not receive prompt prefix:\n{normalized}"
         );
     }
 

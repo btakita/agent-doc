@@ -72,7 +72,31 @@ The default parallel `cargo test` run exposed one sync focus test failure in an 
 Committed and pushed `btakita/agent-doc` `4e325a5` and `btakita/agent-loop` `b1f3910a8`.
 
 No new follow-up work to track.
-<!-- agent:boundary:3722f746 -->
+❯ do [#tmuxplanscope]. spec-test-build-install-commit-push
+### Re: #tmuxplanscope — gpt-5
+
+Completed `#tmuxplanscope`.
+
+Narrowed prompt preset scope so copied `prompt_presets` frontmatter is treated as preset definition text, not as a preset invocation. The effective prompt scanner now strips preset definition lines before plan/backlog signal detection and before recursive preset expansion, which keeps software-task prompts like `do #tmuxreprocmd. spec-test-build-install-commit-push` in normal execution scope even when copied frontmatter defines `#agent-doc-bug`.
+
+Changed:
+- `src/agent-doc/src/prompt_contract.rs`
+- `src/agent-doc/src/plan.rs`
+- `src/agent-doc/specs/07-orchestration-commands.md`
+- `tasks/agent-doc/plan-tmux-router-preset-trigger-scope.md`
+
+Verification passed:
+- `cargo test prompt_contract::tests::plan_request_ignores_copied_prompt_preset_definitions`
+- `cargo test plan::tests::build_plan_keeps_copied_prompt_preset_definitions_out_of_prompt_scope`
+- `cargo check --all-targets`
+- `cargo test` (1911 unit tests, integration tests, doctests)
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Committed and pushed `btakita/agent-doc` `3df8b90` and `btakita/agent-loop` `2679f1abc`.
+
+No new follow-up work to track.
+<!-- agent:boundary:0f728e87 -->
 <!-- /agent:exchange -->
 ###
 
@@ -102,7 +126,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxplanscope] Narrow prompt-contract escalation so copied prompt_presets definitions do not force unrelated software-task turns into plan_backlog_only. Plan: tasks/agent-doc/plan-tmux-router-preset-trigger-scope.md
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

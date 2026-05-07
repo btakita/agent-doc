@@ -76,16 +76,24 @@ I left unrelated existing workspace edits out of the manual commits: `src/sessio
 ### Re: closeout recovery — gpt-5
 
 Closed the post-commit drift guard after the `#pfxleak3` response. The later editor-only scratch-comment update was preserved; preflight classified it as non-prompt-bearing, so no additional repo work was needed.
-<!-- agent:boundary:ba6aa067 -->
+❯ I navigated the editor from agent-doc-bugs2.md to tsift.md while agent-doc-bugs2.md was mid-turn. The JB plugin surfaced an error:
+```
+[sync] sync preserved the current tmux layout because missing requested pane(s) /home/brian/work/btakita/agent-loop/tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely because those panes still own open closeout cycle(s
+```
+### Re: JetBrains protected sync warning — gpt-5
+
+Captured this as `#jbsyncwarn` and added the plan at `tasks/agent-doc/plan-jetbrains-protected-sync-warning-ux.md`.
+
+My read is that the underlying sync guard is intentional: while `agent-doc-bugs2.md` owns an open closeout cycle, sync should not detach that visible pane just to satisfy the new `tsift.md` editor selection. The bug is the JetBrains UX/contract around that guard. Normal editor navigation should treat protected preserve-layout output as a deferred sync state with retry/focus convergence, not as a scary terminal error.
+
+I scoped the plan separately from the existing passive-focus plan because this report is specifically about how JetBrains classifies and presents the warning. The plan calls for JetBrains tests around manual warning presentation, automatic deferred retry behavior, clearer notification copy, and live validation that `tsift.md` gets focus automatically once the protected closeout completes.
+
+Committed the plan file as `48f71a0b6` (`docs: plan jetbrains protected sync warning ux`). I did not run the full suite because this turn only created a backlog plan and did not change code, specs, build logic, or instruction surfaces.
+<!-- agent:boundary:cb36600a -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-I navigated the editor from agent-doc-bugs2.md to tsift.md while agent-doc-bugs2.md was mid-turn. The JB plugin surfaced an error:
-```
-[sync] sync preserved the current tmux layout because missing requested pane(s) /home/brian/work/btakita/agent-loop/tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely because those panes still own open closeout cycle(s
-```
----
 "❯ Commit / push:" should not have the `❯ ` prefix since this was the agent response. #agent-doc-bug
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
@@ -98,6 +106,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbsyncwarn] Fix JetBrains protected sync warning UX so protected-layout preservation during editor navigation is treated as deferred sync, not a hard error — plan: tasks/agent-doc/plan-jetbrains-protected-sync-warning-ux.md
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.

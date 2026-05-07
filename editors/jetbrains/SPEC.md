@@ -36,6 +36,7 @@ Two strategies for detecting the file's position in the editor split:
 - Automatic tab sync may coalesce a short burst of selection events, but it must not suppress the first deliberate left/right split selection after a prior sync.
 - During `selectionChanged`, JetBrains must treat the event's `newFile` as the authoritative active markdown target for dedup/snapshot planning instead of trusting `selectedTextEditor` to have already switched inside the same callback.
 - If a newer automatic selection/layout request lands while another automatic sync is still running, JetBrains must queue only the latest request and replay it immediately after the running command finishes instead of dropping the event.
+- If a passive `agent-doc sync --no-autostart ...` run exits `0` but reports that it preserved the current layout because a visible protected pane could not detach yet, JetBrains must treat that as deferred rather than complete: leave dedup state unchanged and schedule bounded retries until the requested selection applies or a newer request supersedes it.
 
 ### Auto-Save Before Poll
 

@@ -31,6 +31,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
     companion object {
         private const val DEBOUNCE_MS = 100L
+        private const val DEFERRED_RETRY_BASE_MS = 750L
+        private const val DEFERRED_RETRY_MAX_MS = 5_000L
+        private const val MAX_DEFERRED_RETRIES = 8
         private val fallbackGeneration = AtomicLong(0)
         private val fallbackRunning = AtomicBoolean(false)
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
@@ -63,7 +66,15 @@ class EditorTabSyncListener : FileEditorManagerListener {
         val visibleSignature: String,
     )
 
+    internal data class AutomaticCommandResult(
+        val applied: Boolean,
+        val shouldRetry: Boolean,
+    )
+
     internal object AutomaticCommandPlanner {
+        private const val SAFE_PASSIVE_LAYOUT_PRESERVED_MARKER =
+            "[sync] safe passive sync preserved the current tmux layout because"
+
         fun resolveActiveFilePath(
             preferredActiveFile: String?,
             selectedEditorFile: String?,
@@ -119,7 +130,30 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
         fun shouldReplayAfterRun(startedGeneration: Long, latestGeneration: Long): Boolean =
             latestGeneration > startedGeneration
+
+        fun analyzeCommandResult(
+            kind: AutomaticCommandKind,
+            exitCode: Int,
+            output: String,
+        ): AutomaticCommandResult {
+            if (exitCode != 0) {
+                return AutomaticCommandResult(applied = false, shouldRetry = false)
+            }
+            if (
+                kind == AutomaticCommandKind.Sync &&
+                output.contains(SAFE_PASSIVE_LAYOUT_PRESERVED_MARKER)
+            ) {
+                return AutomaticCommandResult(applied = false, shouldRetry = true)
+            }
+            return AutomaticCommandResult(applied = true, shouldRetry = false)
+        }
     }
+
+    @Volatile
+    private var deferredRetryKey: String? = null
+
+    @Volatile
+    private var deferredRetryCount: Int = 0
 
     private fun log(msg: String) {
         LOG.info("[layout-sync] $msg")
@@ -248,6 +282,31 @@ class EditorTabSyncListener : FileEditorManagerListener {
         )
     }
 
+    private fun resetDeferredRetryState() {
+        deferredRetryKey = null
+        deferredRetryCount = 0
+    }
+
+    private fun nextDeferredRetryDelayMs(retryCount: Int): Long {
+        val step = (retryCount - 1).coerceAtLeast(0)
+        val delay = DEFERRED_RETRY_BASE_MS * (1L shl step.coerceAtMost(3))
+        return delay.coerceAtMost(DEFERRED_RETRY_MAX_MS)
+    }
+
+    private fun registerDeferredRetry(snapshot: AutomaticStateSnapshot): Long? {
+        val retryKey = "${snapshot.visibleSignature}\u0000${snapshot.activeFile}"
+        if (deferredRetryKey == retryKey) {
+            deferredRetryCount += 1
+        } else {
+            deferredRetryKey = retryKey
+            deferredRetryCount = 1
+        }
+        if (deferredRetryCount > MAX_DEFERRED_RETRIES) {
+            return null
+        }
+        return nextDeferredRetryDelayMs(deferredRetryCount)
+    }
+
     private fun drainAutomaticSync(
         project: com.intellij.openapi.project.Project,
         requestedGeneration: Long,
@@ -277,9 +336,29 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 val output = process.inputStream.bufferedReader().readText()
                 val exitCode = process.waitFor()
                 log("result: exit=$exitCode output=${output.trim()}")
-                if (exitCode == 0) {
+                val result = AutomaticCommandPlanner.analyzeCommandResult(
+                    kind = execution.plan.kind,
+                    exitCode = exitCode,
+                    output = output,
+                )
+                if (result.applied) {
                     lastVisibleSignature = execution.plan.visibleSignature
                     lastFocusedFile = execution.activeFile
+                    resetDeferredRetryState()
+                } else if (result.shouldRetry) {
+                    val delayMs = registerDeferredRetry(snapshot)
+                    if (delayMs != null) {
+                        log(
+                            "deferred: passive sync preserved layout for ${execution.activeFile}; retry $deferredRetryCount/$MAX_DEFERRED_RETRIES in ${delayMs}ms"
+                        )
+                        requestAutomaticSync(project, snapshot, delayMs)
+                    } else {
+                        log(
+                            "deferred: passive sync preserved layout for ${execution.activeFile}; retry budget exhausted after $MAX_DEFERRED_RETRIES attempts"
+                        )
+                    }
+                } else if (exitCode != 0) {
+                    resetDeferredRetryState()
                 }
             }
         } finally {

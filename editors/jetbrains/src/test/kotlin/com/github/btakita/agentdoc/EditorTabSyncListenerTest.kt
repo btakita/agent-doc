@@ -164,6 +164,48 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `safe passive preserve output keeps sync pending for retry`() {
+        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
+            kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
+            exitCode = 0,
+            output = """
+                [sync] resolved target window after repair: 4:agent-doc → @128
+                [sync] safe passive sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tmux-router.md while visible protected pane(s) %241:preflight_started:/repo/tasks/software/tagpath.md cannot be detached safely
+            """.trimIndent(),
+        )
+
+        assertEquals(false, result.applied)
+        assertEquals(true, result.shouldRetry)
+    }
+
+    @Test
+    fun `successful sync output without preserve marker applies immediately`() {
+        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
+            kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
+            exitCode = 0,
+            output = """
+                [sync] resolved target window after repair: 4:agent-doc → @128
+                [sync] reconcile path: 2 columns, [["%243"], ["%202"]]
+            """.trimIndent(),
+        )
+
+        assertEquals(true, result.applied)
+        assertEquals(false, result.shouldRetry)
+    }
+
+    @Test
+    fun `focus command success is treated as applied`() {
+        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
+            kind = EditorTabSyncListener.AutomaticCommandKind.Focus,
+            exitCode = 0,
+            output = "",
+        )
+
+        assertEquals(true, result.applied)
+        assertEquals(false, result.shouldRetry)
+    }
+
+    @Test
     fun `column aware signatures preserve splitter identity for replayed requests`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",

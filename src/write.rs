@@ -4423,6 +4423,15 @@ fn content_ours_with_pending_from_disk(file: &Path, content_ours: &str) -> Strin
     }
 }
 
+fn normalized_content_ours_fallback(
+    file: &Path,
+    content_ours: &str,
+    normalize_prefix_lines: &[String],
+) -> String {
+    let fallback = content_ours_with_pending_from_disk(file, content_ours);
+    normalize_exchange_prefixes_for_targets(&fallback, normalize_prefix_lines)
+}
+
 /// Result of an IPC write attempt, including the patch_id used.
 ///
 /// The `patch_id` is returned so callers (e.g., `run_stream()` timeout fallback)
@@ -4584,7 +4593,7 @@ pub fn try_ipc(
                         && !verify_sidecar_normalization(&snap_content, lines)
                     {
                         if let Some(ours) = content_ours {
-                            let fallback = content_ours_with_pending_from_disk(file, ours);
+                            let fallback = normalized_content_ours_fallback(file, ours, lines);
                             eprintln!(
                                 "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
                                 fallback.len()
@@ -4985,7 +4994,8 @@ fn write_ipc_and_poll(
                             && !verify_sidecar_normalization(&content, lines)
                         {
                             if let Some(ours) = content_ours {
-                                let fallback = content_ours_with_pending_from_disk(doc_file, ours);
+                                let fallback =
+                                    normalized_content_ours_fallback(doc_file, ours, lines);
                                 eprintln!(
                                     "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
                                     fallback.len()
@@ -7678,6 +7688,105 @@ mod ack_content_snapshot_tests {
         assert!(
             snap.contains("❯ do #jbpfx2"),
             "snapshot must use content_ours with ❯ prefix; got: {}",
+            snap
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_repairs_bare_content_ours_prompt_prefix() {
+        // Regression for #bppfxstrip: if sidecar verification rejects the plugin
+        // snapshot, the content_ours fallback must still apply normalize_prefix_lines
+        // before saving the snapshot.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #bppfxstrip. spec-test-build-install-commit-push
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let content_ours = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #bppfxstrip. spec-test-build-install-commit-push
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        let normalize_prefix_lines =
+            vec!["do #bppfxstrip. spec-test-build-install-commit-push".to_string()];
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = std::fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = std::fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            let bad_sidecar = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #bppfxstrip. spec-test-build-install-commit-push
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                        }
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("❯ do #bppfxstrip. spec-test-build-install-commit-push"),
+            "content_ours fallback must be normalized before snapshot save; got: {}",
             snap
         );
     }

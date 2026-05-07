@@ -9345,10 +9345,14 @@ Body\n\
         let replacement = std::thread::spawn(move || {
             let wait_start = std::time::Instant::now();
             while !restart_called_for_thread.load(Ordering::Relaxed)
-                && wait_start.elapsed() < Duration::from_secs(2)
+                && wait_start.elapsed() < Duration::from_secs(10)
             {
                 std::thread::sleep(Duration::from_millis(25));
             }
+            assert!(
+                restart_called_for_thread.load(Ordering::Relaxed),
+                "route should request a supervisor restart before test replacement handoff"
+            );
             let replacement_pane = iso_for_thread.auto_start(session, &cwd).unwrap();
             iso_for_thread
                 .send_keys(
@@ -9360,6 +9364,15 @@ Body\n\
                     ),
                 )
                 .unwrap();
+            let prompt_wait_start = std::time::Instant::now();
+            while prompt_wait_start.elapsed() < Duration::from_secs(5) {
+                let captured = crate::sessions::capture_pane(&iso_for_thread, &replacement_pane)
+                    .unwrap_or_default();
+                if captured.contains("> ") {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
             let _ = iso_for_thread.raw_cmd(&["kill-pane", "-t", &busy_pane_for_thread]);
             sessions::register_full_with_cwd_in(
                 &registry_root,

@@ -50,6 +50,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Template/CRDT retries must adopt the already-visible response instead of appending a duplicate block.
 - Prompt-prefix normalization for append-mode exchange comes from the shared prompt-bearing classifier, not ad hoc line-shape guesses.
 - IPC sidecar verification and post-commit working-tree prompt-prefix repair must preserve duplicate prompt-target occurrences by count; one earlier prefixed `spec-test-...` line must not mask a later bare duplicate.
+- IPC sidecar verification fallbacks must re-apply `normalize_prefix_lines` to `content_ours` before saving that fallback as the snapshot; a bare prompt-target line in fallback content must not become the next committed closeout baseline.
 - Carried-forward formatting directives from historical `❯ ...` prompt blocks must be re-injected into new agent prompts when they still read as active document-level requirements.
 - Template writes fail closed if live conversation content would end up outside `agent:exchange`, including the inter-component gap between the exchange close marker and later components such as backlog, except for the narrow duplicate-close / duplicate-open repair shapes the binary knows how to normalize safely.
 - Boundary markers are binary-owned. The write path removes stale boundaries, inserts a fresh end-of-exchange boundary, applies the response, and re-inserts a fresh boundary at the new exchange end.

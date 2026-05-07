@@ -74,10 +74,24 @@ Verification:
 - `cargo build` passed.
 - `make install` passed and installed `agent-doc 0.33.16` plus `libagent_doc-0.33.16.so` locally.
 
-Commit / push:
-- `src/agent-doc`: `189c91d` (`fix: repair content_ours prefix fallback`) pushed to `origin/20260422/codex-agent-backend`.
-- parent `agent-loop`: `0e2baa9c5` (`agent-doc: repair content_ours prefix fallback`) pushed to `origin/main` with only the `src/agent-doc` submodule pointer update.
-<!-- agent:boundary:ddd916e5 -->
+❯ Commit / push:
+❯ - `src/agent-doc`: `189c91d` (`fix: repair content_ours prefix fallback`) pushed to `origin/20260422/codex-agent-backend`.
+❯ - parent `agent-loop`: `0e2baa9c5` (`agent-doc: repair content_ours prefix fallback`) pushed to `origin/main` with only the `src/agent-doc` submodule pointer update.
+### Re: #pfxcours closeout addendum — gpt-5
+
+Closeout exposed one more prefix-repair path: a stale target list containing historical `Commit / push:` could still prefix a later assistant `Commit / push:` label. I fixed that follow-through before ending the cycle.
+
+Additional verification:
+- `cargo test normalize_exchange_prefixes_for_targets_skips -- --test-threads=1` passed.
+- The final `make check` passed clippy plus the full suite: 1930 unit/bin tests, integration tests, and doc tests.
+- `make version-sync` passed.
+- `cargo build` passed.
+- `make install` passed again with the corrected binary and library.
+
+Additional commit / push:
+- `src/agent-doc`: `0caca20` (`fix: skip assistant commit labels in prefix repair`) pushed to `origin/20260422/codex-agent-backend`.
+- parent `agent-loop`: `9ed9cb51a` (`agent-doc: skip assistant commit labels in prefix repair`) pushed to `origin/main` with only the `src/agent-doc` submodule pointer update.
+<!-- agent:boundary:6fc6df72 -->
 <!-- /agent:exchange -->
 ###
 

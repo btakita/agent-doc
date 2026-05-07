@@ -73,7 +73,34 @@ The failure you saw sounds like an ownership/reconciliation bug: agent-doc belie
 That said, I would not jump straight to a long-lived daemon as the first fix. The smaller architectural target is a single-owner actor for routing/session state, even if it is initially process-local or file-lock-backed. If the tsift case came from multiple entrypoints independently reconciling tmux panes, then a daemon is one implementation of the right principle. The principle is more important: there should be one writer deciding the desired tmux topology, and every CLI/editor/harness trigger should submit intent to that writer instead of mutating pane state directly.
 
 I added a follow-up backlog item to investigate the `tsift.md` three-pane state specifically and decide whether the repair belongs in tmux-router pane reconciliation, agent-doc session ownership, or a coordinator/actor model.
-<!-- agent:boundary:1f033151 -->
+❯ Compare having the supervisors using the same sqlite db to coordinate vs using the coordinator process with sqlite db persisting data when the coordinator restarts. Which architectural direction will lead to more reliable and simple coordination?
+### Re: coordinator process vs shared SQLite — gpt-5
+
+The more reliable and simpler direction is a coordinator process that owns live coordination, with SQLite as its durable state store.
+
+Having multiple supervisors coordinate directly through the same SQLite database sounds simpler at first because there is no daemon lifecycle to manage. In practice, it pushes distributed coordination into every supervisor. Each supervisor must implement the same locking protocol, lease expiry rules, stale owner cleanup, conflict resolution, schema migrations, retry behavior, and recovery semantics. SQLite can make the writes atomic, but it does not make the distributed protocol simple. The hard part becomes proving that every supervisor interprets rows the same way under crashes, restarts, and concurrent triggers.
+
+A coordinator process gives the system one live authority for intent and topology:
+
+- supervisors submit commands such as `start doc`, `reuse pane`, `retire pane`, or `recover session`
+- the coordinator serializes those decisions in one place
+- SQLite records durable facts, leases, and recovery checkpoints
+- after coordinator restart, it reloads SQLite, inspects tmux reality, and reconciles once
+- supervisors do not independently mutate pane/session ownership
+
+That shape is easier to reason about because SQLite becomes the journal and recovery substrate, not the coordination algorithm. You still get crash durability without making every participant a partial coordinator.
+
+The tradeoff is that the coordinator process must be supervised. But that is a cleaner problem than multi-writer coordination: restart one authority, reload state, reconcile tmux, resume accepting commands. If direct SQLite coordination is used, every supervisor restart is also a possible coordination edge case.
+
+So I would bias toward:
+
+1. coordinator/actor owns live session and tmux state
+2. SQLite persists coordinator state and command outcomes
+3. supervisors are clients, not peer writers of topology decisions
+4. a narrow SQLite lease can exist only to elect or protect the single coordinator, not to let every supervisor coordinate directly
+
+That should produce fewer pane duplication bugs, fewer startup-miss races, and a smaller correctness surface.
+<!-- agent:boundary:4fe290db -->
 <!-- /agent:exchange -->
 ###
 

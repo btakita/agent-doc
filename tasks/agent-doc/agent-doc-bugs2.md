@@ -27,28 +27,14 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-213200.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-213341.md`*
 
 Active backlog:
 - [ ] [#concprompt] concurrent user edits during response cycle bypass prompt detection + session-check — plan: tasks/agent-doc/plan-concurrent-edit-prompt-miss.md
-- [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
-- [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
+- [ ] [#pfxcours] content_ours fallback strips ❯ prefix from user prompts — plan: tasks/agent-doc/plan-content-ours-prefix-strip.md
+- [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - 4 more active item(s)
-❯ Please order the backlog by priority.
-### Re: Backlog Priority — gpt-5
-
-Reordered the backlog by priority. Top item: `#concprompt`.
-
-Priority order applied:
-1. `#concprompt` — concurrent user edits can bypass prompt detection and session-check, so this is the highest-risk workflow correctness bug.
-2. `#pfxcours` — prefix stripping can misclassify assistant response text as a user prompt and interrupt closeout.
-3. `#pathmove` — path moves can invalidate baselines and break session continuity.
-4. `#tmuxcoord` — investigate the observed `Run Agent Doc` non-response and locate ownership between tmux-router, session ownership, and coordinator design.
-5. `#coordspike` — coordinator actor MVP planning depends on the tmux coordination investigation.
-6. `#sqliterepros` — collect concrete failure cases before adding a transactional session store.
-7. `#sqliteeval` — evaluate the SQLite session-store plan after the failure examples and actor direction are clearer.
-
-<!-- agent:boundary:6dddfb1c -->
+<!-- agent:boundary:4f650cf8 -->
 <!-- /agent:exchange -->
 ###
 

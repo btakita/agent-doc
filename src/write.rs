@@ -7477,6 +7477,89 @@ mod tests {
     }
 
     #[test]
+    fn normalize_safe_preserves_prior_response_tail_before_new_prompt() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["init", "-q"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test User"])
+            .output()
+            .unwrap();
+
+        let file = root.join("doc.md");
+        let head = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous closeout — gpt-5\n",
+            "Verification:\n",
+            "- All 506 assertions pass.\n",
+            "Committed + pushed buildparty-investor-demo and session-share.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, head).unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous closeout — gpt-5\n",
+            "Verification:\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous closeout — gpt-5\n",
+            "Verification:\n",
+            "- All 506 assertions pass.\n",
+            "Committed + pushed buildparty-investor-demo and session-share.\n",
+            "do [#pfxleak3]. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: previous closeout — gpt-5\n",
+            "Verification:\n",
+            "- All 506 assertions pass.\n",
+            "Committed + pushed buildparty-investor-demo and session-share.\n",
+            "do [#pfxleak3]. spec-test-build-install-commit-push\n",
+            "<!-- agent:boundary:abc -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let result = normalize_user_prompts_in_exchange_safe(content, baseline, snapshot, &file);
+        assert!(
+            result.contains(
+                "\n- All 506 assertions pass.\nCommitted + pushed buildparty-investor-demo and session-share.\n❯ do [#pfxleak3]. spec-test-build-install-commit-push\n"
+            ),
+            "prior response tail must stay bare and only the new prompt may be prefixed:\n{result}"
+        );
+        assert!(
+            !result.contains("\n❯ - All 506 assertions pass.\n")
+                && !result.contains(
+                    "\n❯ Committed + pushed buildparty-investor-demo and session-share.\n"
+                ),
+            "assistant tail lines from HEAD must not gain prompt prefixes:\n{result}"
+        );
+    }
+
+    #[test]
     fn normalize_safe_preserves_prefixed_user_lines_from_head() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();

@@ -79,7 +79,36 @@ On the architecture question: smaller files would help readability, but they wil
 ### Re: Repair Closeout — gpt-5
 
 The transcript repair is now being committed through the agent-doc write path.
-<!-- agent:boundary:17c7b619 -->
+❯ do #bppfxstrip. spec-test-build-install-commit-push
+### Re: prompt prefix stripped on finalize — gpt-5
+
+Implemented and pushed `#bppfxstrip`.
+
+Root cause: sidecar verification correctly rejected editor ack-content that lacked a required `❯ ` prompt prefix, but the `content_ours` fallback could still be saved without re-applying `normalize_prefix_lines`. That left a bare `do #...` prompt as the next committed closeout baseline until the following preflight repaired it.
+
+What changed:
+
+- `src/write.rs` now normalizes `content_ours` fallback snapshots with `normalize_exchange_prefixes_for_targets()` after preserving any live backlog mutations.
+- Both socket IPC and file IPC sidecar-divergence fallback paths use the same normalized fallback helper.
+- Added a regression for the `#bppfxstrip` shape where both the sidecar and fallback content are bare, and the saved snapshot must still contain `❯ do #bppfxstrip...`.
+- Updated `editors/PLUGIN-SPEC.md`, `specs/07-closeout-commands.md`, and `VERSIONS.md` for the fallback invariant.
+- Hardened one tmux route test that was making its replacement pane before the restart signal and registering it before its prompt was ready; this was required to get the full suite green rather than waiving route-suite red.
+
+Verification/build/install:
+
+- `cargo test normalization_fallback_repairs_bare_content_ours_prompt_prefix` passed.
+- Existing fallback regressions for `#jbpfx2` and `#splpend` passed.
+- `cargo fmt --check` passed.
+- `make check` passed: 1913 main tests plus all integration/doc tests.
+- `make install` installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so` locally.
+- `make version-sync` passed.
+- `agent-doc --version` reports `agent-doc 0.33.16`.
+
+Commits pushed:
+
+- `src/agent-doc`: `c187911 fix: normalize IPC fallback snapshots`
+- parent repo: `f3bdf8fc8 agent-doc: normalize IPC fallback snapshots`
+<!-- agent:boundary:a03a4db6 -->
 <!-- /agent:exchange -->
 ###
 
@@ -109,7 +138,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#bppfxstrip] `❯ ` prompt prefix stripped during finalize when sidecar normalization diverges to content_ours fallback — plan: tasks/agent-doc/plan-prompt-prefix-stripped-on-finalize.md
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

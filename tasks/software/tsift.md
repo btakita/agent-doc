@@ -82,14 +82,35 @@ Top backlog item: `#tfxt`.
 Verification while reviewing:
 
 - `cargo test tsift_token_savings_fixture` in `src/tagpath` passed.
-<!-- agent:boundary:211e6985 -->
+❯ do [#tbud]. spec-test-build-install-commit-push
+### Re: #tbud — gpt-5
+
+Completed `#tbud`.
+
+Added `tsift token-savings --fixture <path>` as a CI-friendly report surface for preview compression contracts. It reads fixture cases with raw symbol rows, compact tagpath families, and minimum savings thresholds; reports byte deltas, estimated token deltas via `ceil(utf8_bytes / 4)`, savings percentages, and per-case pass/fail; supports `--json`, `--fail-under`, and the global `--envelope` wrapper.
+
+Updated `SPEC.md` with the new command and added unit coverage for CLI parsing plus fixture-threshold reporting. The tsift lockfile now points at local `tagpath` `v0.6.1`, matching the token-savings fixture work.
+
+Verification completed:
+
+- `cargo test token_savings`
+- `cargo run -- token-savings --fixture ../tagpath/fixtures/tsift-token-savings.json --fail-under --json`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- installed `tsift token-savings --fixture /home/brian/work/btakita/agent-loop/src/tagpath/fixtures/tsift-token-savings.json --fail-under`
+
+Pushed:
+
+- `btakita/tsift` `main`: `6e67f69` (`feat: add token savings report`)
+- parent `agent-loop` `main`: `14c757cb4` (`chore: update tsift submodule`)
+<!-- agent:boundary:0ed18b8e -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tbud] [recommended] Add a tsift token-savings report surface that compares raw vs envelope previews per command and records byte/token deltas in CI-friendly output.
 - [ ] [#tont] [recommended] Load tagpath ontology refs in tsift context-pack and summary-ref surfaces so stable domain tag docs can be referenced by handle/path instead of repeated prose.
 - [ ] [#tfam] Replace tsift's local tag alias/query normalization helpers with tagpath v0.6.1 family/query APIs so search, explain, session-review, and context-pack share one canonical family model.
 - [ ] [#tfxt] Add a tsift-side fixture-backed token-savings regression test using tagpath's fixtures/tsift-token-savings.json for search, explain, and session-review previews before expanding the contract to context-pack.

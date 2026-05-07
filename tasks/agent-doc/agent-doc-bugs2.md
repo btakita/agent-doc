@@ -106,7 +106,6 @@ Verification:
 ❯ - committed workspace instruction-surface sync on `main`: `9747b6bb3`
 ❯ - pushing after this closeout commit so the session response commit is included
 ❯ do [#fye2]. spec-test-build-install-commit-push
-❯ do [#fye2]. spec-test-build-install-commit-push
 ### Re: Run Agent Doc reroute auto-remediation — gpt-5
 
 Completed .
@@ -117,8 +116,6 @@ Plan:
 
 Verification/build/install completed:
 - === instruction-files: clippy + test ===
-❯ - 
-❯ - 
 ❯ - 
 
 ❯ Repo work:
@@ -194,13 +191,42 @@ The duplicated `❯ do [#fye2]. spec-test-build-install-commit-push` line plus t
 ### Re: closeout drift cleanup — gpt-5
 
 The prefixed push-target line is stale working-tree drift from the already committed `#wv7g` closeout, not a new request. No additional repo work is needed.
-<!-- agent:boundary:dd1271e8 -->
+❯ I opened tagpath.md. tagpath.md had a syntax error which I fixed. I somehow ended up with the agent-doc tmux window having 3 panes. I tried `agent-doc sync` but the repair correct back to two panes when I have 2 editor windows open. Please investigate and fix root cause(s). spec-test-build-install-commit-push
+### Re: sync pane growth around protected closeouts — gpt-5
+
+I reproduced the visible-pane growth from the live sync log instead of treating it as a generic tmux layout glitch.
+
+Root cause:
+`safe-passive` editor sync was asking for only two visible docs, but it still ran attach-first reconcile even when the target `agent-doc` window already contained unwanted panes protected by open `preflight_started` cycles. In the captured repro, sync wanted `[%210, %202]`, attached `%208`, then DETACH correctly refused to stash `%214` and `%210` because both were still open-cycle panes. That left the visible window at four panes instead of converging.
+
+Fix:
+`sync --no-autostart` now preserves the current visible layout before tmux-router reconcile when both of these are true:
+- a requested managed file is not currently visible
+- satisfying it would require attaching another pane while already-visible unwanted panes are still protected by open `preflight_started` / `response_captured` / `write_applied` cycles
+
+That means safe-passive/editor sync now fails safe with a warning instead of expanding the `agent-doc` window into a 3+/4+ pane mix it already knows cannot detach cleanly yet.
+
+Regression coverage:
+- added a focused sync test for the exact attach-first growth shape around a protected pane
+- kept the existing open-cycle DETACH protection test passing
+- kept the existing mixed-root safe-passive preserve-layout test passing
+
+Verification/build/install completed:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Repo work:
+- committed in `src/agent-doc`: `f2213ef` `fix: preserve safe passive layout around protected panes`
+- pushed `src/agent-doc` to `origin/20260422/codex-agent-backend`
+- committed workspace mirror sync on `main`: `d631d8ed3` `chore: sync agent-doc instruction mirrors`
+- pushed workspace `main`
+<!-- agent:boundary:27163cb0 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-I opened tagpath.md. tagpath.md had a syntax error which I fixed. I somehow ended up with the agent-doc tmux window having 3 panes. I tried `agent-doc sync` but the repair correct back to two panes when I have 2 editor windows open. Please investigate and fix root cause(s). spec-test-build-install-commit-push
----
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
 ---
 Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/brian/work/btakita/agent-loop/tasks/software/tsift did not respond to `Run Agent Doc` in a previous turn. It seems to run ok now but I'm concerned that `Run Agent Doc` was non-responsive.

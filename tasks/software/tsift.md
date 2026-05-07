@@ -92,14 +92,33 @@ Verification:
 Commits pushed:
 - `btakita/tsift@4a015e3` — `feat: default agent rewrites to envelopes`
 - `btakita/agent-loop@724880792` — `chore: update tsift submodule`
-<!-- agent:boundary:aff7ceec -->
+❯ do [#trtk]. spec-test-build-install-commit-push
+### Re: #trtk — gpt-5
+Implemented `#trtk` and marked it done in the backlog.
+
+What changed:
+- `tsift --envelope __digest-runner ...` now probes `rtk rewrite` when RTK is installed, executes supported command families through RTK's compact command filters, and records the chosen filter in `report.filter`.
+- Digest-runner reports now preserve both `report.command` (the original caller command) and `report.executed_command` (the actual RTK-filtered or fallback command), while keeping the existing exit-code preservation, digest payload, and persisted artifact handle.
+- Envelope summaries now include a `filter` metric (`rtk` or `none`) so harnesses can tell which compression path was used.
+- Updated `SPEC.md`, `CLAUDE.md`, `AGENTS.md`, `src/init.rs`, `VERSIONS.md`, and bumped tsift to `0.1.40`.
+
+Verification + install:
+- Targeted RTK delegation regression passed.
+- `TMPDIR=/home/brian/.tmp-tsift-tests-full cargo test` passed: 545 unit tests and 85 integration tests.
+- `cargo build` passed.
+- `cargo install --path . --force` passed.
+- Installed binary reports `tsift 0.1.40`.
+
+Commits pushed:
+- `btakita/tsift@531b36f` — `feat: wrap digest runner with rtk filters`
+- `btakita/agent-loop@5fa3a4f6b` — `chore: update tsift submodule`
+<!-- agent:boundary:bcb0eb96 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#trtk] Prototype RTK interop for generic tool-call output compression: detect installed rtk, delegate supported command families to rtk filters, and wrap results in tsift artifact/envelope metadata
 - [ ] [#tbud] Add budget presets and adaptive defaults for agent-facing tsift surfaces, including small/normal/deep budgets and context-window-aware max-items/max-bytes recommendations
 - [ ] [#tsum] Extend context-pack/digest surfaces to surface cached symbol/file summaries behind stable handles for touched files, failures, and tag_alias families
 <!-- /agent:backlog -->

@@ -1436,8 +1436,12 @@ fn dispatch_only_send_reopen(
             session_id,
             file_path,
             harness,
-            true,
-            should_print_dispatch_only_unproven_progress(file, harness),
+            SupervisorIpcDispatchOptions {
+                await_start_proof: true,
+                print_unproven_progress: should_print_dispatch_only_unproven_progress(
+                    file, harness,
+                ),
+            },
         )?,
         DispatchOnlyReopenDelivery::DirectPaneSubmit => dispatch_routed_reopen_with_mode(
             tmux,
@@ -3550,8 +3554,7 @@ fn dispatch_via_supervisor_ipc_with_mode(
     session_id: &str,
     file_path: &str,
     harness: &HarnessConfig,
-    await_start_proof: bool,
-    print_unproven_progress: bool,
+    options: SupervisorIpcDispatchOptions,
 ) -> Result<RoutedDispatchStartProof> {
     let Some(sock) = supervisor_socket_path(file, session_id) else {
         anyhow::bail!(
@@ -3606,7 +3609,7 @@ fn dispatch_via_supervisor_ipc_with_mode(
         trigger, pane
     );
 
-    if !await_start_proof {
+    if !options.await_start_proof {
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     }
 
@@ -3640,7 +3643,7 @@ fn dispatch_via_supervisor_ipc_with_mode(
             timeout.as_secs()
         ),
     );
-    if print_unproven_progress {
+    if options.print_unproven_progress {
         eprintln!(
             "[route] authoritative actor accepted the {} reopen for {} in pane {}, but no routed submission proof appeared after {}s",
             harness.binary,
@@ -3652,6 +3655,12 @@ fn dispatch_via_supervisor_ipc_with_mode(
     Ok(RoutedDispatchStartProof::CommandAcceptedOnly)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct SupervisorIpcDispatchOptions {
+    await_start_proof: bool,
+    print_unproven_progress: bool,
+}
+
 fn dispatch_via_supervisor_ipc(
     tmux: &Tmux,
     file: &Path,
@@ -3661,7 +3670,16 @@ fn dispatch_via_supervisor_ipc(
     harness: &HarnessConfig,
 ) -> Result<RoutedDispatchStartProof> {
     dispatch_via_supervisor_ipc_with_mode(
-        tmux, file, pane, session_id, file_path, harness, true, true,
+        tmux,
+        file,
+        pane,
+        session_id,
+        file_path,
+        harness,
+        SupervisorIpcDispatchOptions {
+            await_start_proof: true,
+            print_unproven_progress: true,
+        },
     )
 }
 

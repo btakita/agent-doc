@@ -18,8 +18,10 @@
 //!   a way that looks like a direct assistant patchback (`### Re:` or
 //!   `## Assistant`) without a corresponding `agent-doc` cycle.
 //! - Also fails closed when the current document already has unresolved
-//!   prompt-bearing user edits (`prompt_target` / `content_edit`) relative to
-//!   the snapshot, but no new `agent-doc` cycle ever started for them.
+//!   prompt-bearing user edits (`prompt_target`) relative to the snapshot, but
+//!   no new `agent-doc` cycle ever started for them. Plain exchange-only
+//!   content edits without a fresh prompt target do not reopen a committed
+//!   cycle.
 //! - When that bypassed patchback also leaves prompt-target lines in the same
 //!   diff without the binary-owned `❯ ` transcript prefix, `session-check`
 //!   reports the bare prompt target in the failure marker so the write path can
@@ -1030,6 +1032,9 @@ fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>
     }
 
     let prompt_marker = detect_unstarted_prompt_bearing_diff(file)?;
+    if prompt_marker.is_none() && exchange_only_promptless_content_drift(&snapshot, &current) {
+        return Ok(None);
+    }
     let prompt_preview = session
         .last_prompt
         .lines()
@@ -1048,6 +1053,34 @@ fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>
         ),
     };
     Ok(Some(detail))
+}
+
+fn exchange_only_promptless_content_drift(snapshot: &str, current: &str) -> bool {
+    if snapshot == current {
+        return true;
+    }
+    let Some(snapshot_masked) = mask_exchange_component_content(snapshot) else {
+        return false;
+    };
+    let Some(current_masked) = mask_exchange_component_content(current) else {
+        return false;
+    };
+    crate::git::normalize_transient_agent_doc_markers(&snapshot_masked)
+        == crate::git::normalize_transient_agent_doc_markers(&current_masked)
+}
+
+fn mask_exchange_component_content(doc: &str) -> Option<String> {
+    let components = crate::component::parse(doc).ok()?;
+    let mut masked = doc.to_string();
+    let mut saw_exchange = false;
+    for component in components.iter().rev() {
+        if component.name != "exchange" {
+            continue;
+        }
+        saw_exchange = true;
+        masked.replace_range(component.open_end..component.close_start, "\n");
+    }
+    saw_exchange.then_some(masked)
 }
 
 fn open_cycle_message(state: &crate::cycle_state::CycleState) -> String {
@@ -2041,6 +2074,60 @@ Body\n\
                 assert!(message.contains("agent-doc"));
             }
             other => panic!("expected interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_ignores_active_session_exchange_only_content_edit() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Done.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "The service returned 401 from this endpoint\n",
+            "### Re: service status — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = committed.replace(
+            "The service returned 401 from this endpoint",
+            "The service returned 503 from this endpoint",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, current).unwrap();
+        track_active_codex_session(
+            root,
+            &doc,
+            &format!(
+                "agent-doc {}\nDo #commitchurn. spec-test-build-install-commit-push",
+                doc.display()
+            ),
+        );
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected ok status, got {other:?}"),
         }
     }
 

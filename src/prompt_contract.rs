@@ -653,6 +653,30 @@ mod tests {
     }
 
     #[test]
+    fn explicit_backlog_target_strips_redundant_project_prefix_from_preset() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("agent-loop");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/software")).unwrap();
+        let current = root.join("tasks/software/tmux-router.md");
+        let target = root.join("tasks/agent-doc/agent-doc-bugs2.md");
+        std::fs::write(&current, "# source\n").unwrap();
+        std::fs::write(&target, "# bugs\n").unwrap();
+
+        let presets = IndexMap::from([(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md"
+                .to_string(),
+        )]);
+
+        let targets =
+            explicit_backlog_targets(&current, &["#agent-doc-bug".to_string()], &[], &presets);
+
+        assert_eq!(targets, vec![target.canonicalize().unwrap()]);
+    }
+
+    #[test]
     fn required_explicit_backlog_item_count_prefers_content_edits() {
         let presets = IndexMap::from([(
             "#agent-doc-bug".to_string(),

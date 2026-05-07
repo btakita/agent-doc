@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::frontmatter::{CollaborationMode, Frontmatter};
 
@@ -58,6 +58,9 @@ pub fn referenced_markdown_path(current_file: &Path, text: &str) -> Option<PathB
         } else {
             if let Some(root) = find_project_root(current_file) {
                 possibilities.push(root.join(path));
+                if let Some(stripped) = strip_redundant_project_prefix(&root, path) {
+                    possibilities.push(root.join(stripped));
+                }
             }
             possibilities.push(
                 current_file
@@ -88,6 +91,19 @@ pub fn referenced_markdown_path(current_file: &Path, text: &str) -> Option<PathB
         }
     }
     None
+}
+
+fn strip_redundant_project_prefix(root: &Path, path: &Path) -> Option<PathBuf> {
+    let root_name = root.file_name()?;
+    let mut components = path.components();
+    let Component::Normal(first) = components.next()? else {
+        return None;
+    };
+    if first != root_name {
+        return None;
+    }
+    let stripped = components.as_path();
+    (!stripped.as_os_str().is_empty()).then(|| stripped.to_path_buf())
 }
 
 fn same_document(left: &Path, right: &Path) -> bool {
@@ -136,6 +152,27 @@ mod tests {
         let file = Path::new("/tmp/tasks/plan.md");
         let path = referenced_markdown_path(file, "Follow tasks/other-plan.md next").unwrap();
         assert!(path.ends_with("tasks/other-plan.md"));
+    }
+
+    #[test]
+    fn referenced_markdown_path_strips_redundant_project_prefix() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("agent-loop");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/agent-doc")).unwrap();
+        let current = root.join("tasks/software/tmux-router.md");
+        let target = root.join("tasks/agent-doc/agent-doc-bugs2.md");
+        std::fs::create_dir_all(current.parent().unwrap()).unwrap();
+        std::fs::write(&current, "# source\n").unwrap();
+        std::fs::write(&target, "# bugs\n").unwrap();
+
+        let resolved = referenced_markdown_path(
+            &current,
+            "Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md",
+        )
+        .unwrap();
+
+        assert_eq!(resolved, target.canonicalize().unwrap());
     }
 
     #[test]

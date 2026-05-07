@@ -87,6 +87,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Boundary-only / `(HEAD)`-only churn is normalized back to `no_changes`.
 - If the file diff is empty but the active harness prompt still contains body text after `agent-doc <FILE>`, preflight synthesizes an in-memory diff from that prompt body.
 - Preflight must fail closed before diffing when the snapshot/file pair already looks like an uncommitted assistant closeout with no recoverable cycle left to explain it.
+- Explicit backlog targets extracted from prompt presets are resolved relative to the project root. If a relative target begins with the current project directory name, that redundant prefix is stripped before falling back to a non-existent doubled path.
 
 ## session-check
 

@@ -123,10 +123,28 @@ v0.6.0 published to crates.io
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-034315.md`*
-<!-- agent:boundary:7b18c0b4 -->
+❯ How can tagpath further assist tsift in saving tokens? #next-steps
+### Re: tagpath token savings — gpt-5
+
+Yes. `tagpath` can help `tsift` save more tokens in three concrete ways.
+
+1. Top leverage: replace repeated raw identifier text with stable tag handles.
+`tsift` already has compact output, preview budgets, and expansion handles. `tagpath` can shrink those further by turning repeated names like `get_user_profile`, `getUserProfile`, and `GetUserProfile` into one canonical tag handle plus one display alias. That matters most in `search`, `explain`, `context-pack`, and digest surfaces where the same symbol names repeat across sections.
+
+2. Normalize queries before fallback search.
+If an agent asks for `getUserProfile`, `user profile getter`, or `profile user get`, `tagpath` can canonicalize that intent into the same ordered tag query before `tsift` chooses exact search, symbol search, or BM25 fallback. That should reduce wasted broad searches and therefore reduce the size of the returned context.
+
+3. Collapse result sets by tag family instead of listing each symbol separately.
+When many hits differ only by convention, prefix, or namespace suffix, `tsift` can emit one family summary row first, with counts and an expand command. That preserves recall while spending tokens only when the caller actually drills in.
+
+Recommended next steps are now in backlog priority order. Top item: `#tgfh`.
+<!-- agent:boundary:b251cc92 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tgfh] tsift: add tagpath-backed compact symbol handles and tag aliases for search/explain/context-pack outputs
+- [ ] [#tgqn] tsift: normalize agent search queries through tagpath so cross-convention intent resolves before lexical fallback
+- [ ] [#tgcl] tsift: cluster repeated symbol results by canonical tag family with one summary row + expand handle
 <!-- /agent:backlog -->

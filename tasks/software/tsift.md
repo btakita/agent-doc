@@ -72,15 +72,33 @@ Priority order:
 4. `#tsum` — Extend context packs with cached summaries behind handles. For touched files, failure anchors, and tag_alias families, include short current summaries when available and expose expansion commands when not.
 
 The main UX principle is summary-first, expand-on-demand. The user should see enough context to decide what to inspect next, while raw transcripts, full hit lists, and verbose logs stay behind artifacts or expansion commands.
-<!-- agent:boundary:67a4d1ce -->
+❯ do [#tctx]. spec-test-build-install-commit-push
+### Re: #tctx — gpt-5
+Implemented `#tctx` and marked it done in the backlog.
+
+What changed:
+- `tsift rewrite` now defaults agent-facing rewrites to token-saving envelopes: `rg` / recursive `grep` become `tsift --envelope search ... --exact --max-items 5 --max-bytes 160`, and cargo/pytest/build/install rewrites become artifact-backed `tsift --envelope __digest-runner ...` commands.
+- `tsift rewrite --run` now executes the current `tsift` binary instead of whichever `tsift` is first on `PATH`, so local testing and freshly installed versions do not accidentally call an older binary.
+- Exact search now honors an explicit non-federated `--path` directly instead of promoting temp/non-git paths too broadly.
+- `context-pack` now enriches next-context and log previews from diff-touched symbols when the session/log surfaces do not have symbol refs on their own.
+- Updated `tsift init` Code Navigation output, `AGENTS.md`, `CLAUDE.md`, `SPEC.md`, and `VERSIONS.md`; bumped tsift to `0.1.39`.
+
+Verification:
+- `TMPDIR=/home/brian/.tmp-tsift-tests-full cargo test` passed: 545 unit tests and 84 integration tests.
+- `cargo build` passed.
+- `cargo install --path . --force` passed.
+- Installed binary reports `tsift 0.1.39`.
+
+Commits pushed:
+- `btakita/tsift@4a015e3` — `feat: default agent rewrites to envelopes`
+- `btakita/agent-loop@724880792` — `chore: update tsift submodule`
+<!-- agent:boundary:aff7ceec -->
 <!-- /agent:exchange -->
 ###
 
-<!--
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tctx] Make tsift token-saving surfaces automatic for agent workflows: update rewrite/init/hook guidance to prefer --envelope plus preview budgets for search/explain/session-review/context-pack and digest-runner artifacts for build/test/log output
 - [ ] [#trtk] Prototype RTK interop for generic tool-call output compression: detect installed rtk, delegate supported command families to rtk filters, and wrap results in tsift artifact/envelope metadata
 - [ ] [#tbud] Add budget presets and adaptive defaults for agent-facing tsift surfaces, including small/normal/deep budgets and context-window-aware max-items/max-bytes recommendations
 - [ ] [#tsum] Extend context-pack/digest surfaces to surface cached symbol/file summaries behind stable handles for touched files, failures, and tag_alias families

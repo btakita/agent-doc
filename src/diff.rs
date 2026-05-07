@@ -408,7 +408,7 @@ pub(crate) fn line_looks_like_fresh_prompt_after_response(trimmed: &str) -> bool
         || lower.starts_with("investigate ")
 }
 
-fn line_looks_like_soft_prompt_request(trimmed: &str) -> bool {
+pub(crate) fn line_looks_like_soft_prompt_request(trimmed: &str) -> bool {
     let lower = trimmed.to_ascii_lowercase();
     lower.starts_with("please ")
         || lower.contains(" please ")

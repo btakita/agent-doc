@@ -2175,6 +2175,7 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
     let mut baseline_fence_char = '`';
     let mut baseline_fence_len = 3usize;
     let mut in_agent_block = false;
+    let mut agent_block_had_blank = false;
     let mut saw_deleted_heading = false;
     for change in diff.iter_all_changes() {
         let line = change.value().trim_end_matches('\n');
@@ -2204,10 +2205,18 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
                 if heading_level(trimmed).is_some() {
                     in_agent_block =
                         change.tag() == ChangeTag::Insert && !heading_replaces_deleted_heading;
+                    agent_block_had_blank = false;
+                } else if in_agent_block && trimmed.is_empty() {
+                    agent_block_had_blank = true;
                 } else if in_agent_block
-                    && (trimmed.starts_with('❯') || trimmed.starts_with("<!--"))
+                    && (trimmed.starts_with('❯')
+                        || trimmed.starts_with("<!--")
+                        || crate::diff::line_looks_like_fresh_prompt_after_response(trimmed)
+                        || (agent_block_had_blank
+                            && crate::diff::line_looks_like_soft_prompt_request(trimmed)))
                 {
                     in_agent_block = false;
+                    agent_block_had_blank = false;
                 }
             }
         }
@@ -2275,34 +2284,38 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
     exchange.replace_content(content, &new_exc_content)
 }
 
-fn preserve_head_unprefixed_exchange_lines(content: &str, head: &str) -> String {
+fn preserve_head_exchange_prompt_prefix_state(content: &str, head: &str) -> String {
     let Ok(head_components) = component::parse(head) else {
         return content.to_string();
     };
     let Some(head_exchange) = head_components.iter().find(|c| c.name == "exchange") else {
         return content.to_string();
     };
-    let head_unprefixed: HashSet<String> = head_exchange
-        .content(head)
-        .lines()
-        .map(str::trim_end)
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty()
-                || trimmed.starts_with('❯')
-                || trimmed.starts_with("<!--")
-                || trimmed.starts_with("### Re:")
-                || trimmed.starts_with("#### Re:")
-                || trimmed.starts_with("##### Re:")
-                || trimmed.starts_with("###### Re:")
-            {
-                None
-            } else {
-                Some(line.to_string())
-            }
-        })
-        .collect();
-    if head_unprefixed.is_empty() {
+    let mut head_unprefixed = HashMap::<String, usize>::new();
+    let mut head_prefixed = HashMap::<String, usize>::new();
+    for line in head_exchange.content(head).lines() {
+        let line = line.trim_end();
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('❯')
+            || trimmed.starts_with("<!--")
+            || is_exchange_response_heading_for_prefix_repair(trimmed)
+        {
+            continue;
+        }
+        *head_unprefixed.entry(line.to_string()).or_default() += 1;
+    }
+    for line in exchange_prompt_prefix_eligible_lines(head_exchange.content(head), None) {
+        let line = line.trim_end();
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("<!--") {
+            continue;
+        }
+        if let Some(stripped) = line.strip_prefix("❯ ") {
+            *head_prefixed.entry(stripped.to_string()).or_default() += 1;
+        }
+    }
+    if head_unprefixed.is_empty() && head_prefixed.is_empty() {
         return content.to_string();
     }
 
@@ -2315,18 +2328,51 @@ fn preserve_head_unprefixed_exchange_lines(content: &str, head: &str) -> String 
     let exchange_content = exchange.content(content);
     let mut changed = false;
     let mut rebuilt = String::with_capacity(exchange_content.len());
+    let target_counts =
+        normalization_target_counts(&head_prefixed.keys().cloned().collect::<Vec<String>>());
+    let mut in_response_block = false;
     for segment in exchange_content.split_inclusive('\n') {
         let (line, newline) = segment
             .strip_suffix('\n')
             .map(|line| (line, "\n"))
             .unwrap_or((segment, ""));
+        let trimmed = line.trim();
+        if trimmed.starts_with("<!-- agent:boundary:") {
+            in_response_block = false;
+        } else if is_exchange_response_heading_for_prefix_repair(trimmed) {
+            in_response_block = true;
+        }
+        let is_target = target_counts
+            .get(line.trim_end())
+            .copied()
+            .unwrap_or_default()
+            > 0;
+        let eligible = if in_response_block {
+            starts_prompt_run_after_response(trimmed, is_target)
+        } else {
+            true
+        };
         if let Some(unprefixed) = line.strip_prefix("❯ ")
-            && head_unprefixed.contains(unprefixed)
+            && let Some(remaining) = head_unprefixed.get_mut(unprefixed)
+            && *remaining > 0
         {
             rebuilt.push_str(unprefixed);
+            *remaining -= 1;
+            changed = true;
+        } else if eligible
+            && !line.starts_with("❯ ")
+            && let Some(remaining) = head_prefixed.get_mut(line)
+            && *remaining > 0
+        {
+            rebuilt.push_str("❯ ");
+            rebuilt.push_str(line);
+            *remaining -= 1;
             changed = true;
         } else {
             rebuilt.push_str(line);
+        }
+        if in_response_block && eligible && starts_prompt_run_after_response(trimmed, is_target) {
+            in_response_block = false;
         }
         rebuilt.push_str(newline);
     }
@@ -2621,12 +2667,12 @@ pub fn normalize_user_prompts_in_exchange_safe(
     if normalized != content
         && let Ok(Some(head)) = crate::git::show_head(file)
     {
-        let preserved = preserve_head_unprefixed_exchange_lines(&normalized, &head);
+        let preserved = preserve_head_exchange_prompt_prefix_state(&normalized, &head);
         if preserved != normalized {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "normalize_preserved_head_unprefixed_lines file={}",
+                    "normalize_preserved_head_prompt_prefix_state file={}",
                     file.display()
                 ),
             );
@@ -7279,6 +7325,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn normalize_user_prompts_multiline_prompt_after_stale_response_gets_prefix() {
+        // Regression for #pfxstrip2: when a stale snapshot makes the previous
+        // assistant response appear as inserted content, the normalizer enters
+        // agent-block mode. A blank-separated fresh prompt run after that
+        // response is still user input, and every nonblank prompt line needs
+        // the prompt prefix.
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\n❯ Previous prompt\n<!-- /agent:exchange -->\n";
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Previous prompt\n",
+            "### Re: previous — gpt-5\n",
+            "Implemented and verified.\n",
+            "\n",
+            "Please increment version to v0.1.1. Release to github. Create a plan for rollout.\n",
+            "Miguel will be integrating the demo into the partner workspace.\n",
+            "\n",
+            "Please rename the gh repo ClaudeScore/buildparty-investor-demo to the final name.\n",
+            "Also, please draft slack instructions for robert-ross and miguel-mendez.\n",
+            "\n",
+            "spec-test-news-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let content = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->",
+        );
+
+        let result = normalize_user_prompts_in_exchange(&content, baseline, snapshot);
+
+        for expected in [
+            "❯ Please increment version to v0.1.1. Release to github. Create a plan for rollout.",
+            "❯ Miguel will be integrating the demo into the partner workspace.",
+            "❯ Please rename the gh repo ClaudeScore/buildparty-investor-demo to the final name.",
+            "❯ Also, please draft slack instructions for robert-ross and miguel-mendez.",
+            "❯ spec-test-news-commit-push",
+        ] {
+            assert!(
+                result.contains(expected),
+                "missing expected prefixed prompt line {expected:?}:\n{result}"
+            );
+        }
+        assert!(
+            !result.contains("❯ Implemented and verified."),
+            "stale assistant response body must stay unprefixed:\n{result}"
+        );
+    }
+
     // ── safety rail: normalize_user_prompts_in_exchange_safe ────────────────
 
     #[test]
@@ -7371,6 +7466,81 @@ mod tests {
         assert!(
             result.contains("\n❯ run follow-up\n"),
             "new user prompt should still be prefixed:\n{result}"
+        );
+    }
+
+    #[test]
+    fn normalize_safe_preserves_prefixed_user_lines_from_head() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["init", "-q"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test User"])
+            .output()
+            .unwrap();
+
+        let file = root.join("doc.md");
+        let head = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please increment version to v0.1.1.\n",
+            "❯ Miguel will be integrating the demo.\n",
+            "### Re: done — gpt-5\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, head).unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let snapshot = head;
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "Please increment version to v0.1.1.\n",
+            "Miguel will be integrating the demo.\n",
+            "### Re: done — gpt-5\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "Please increment version to v0.1.1.\n",
+            "Miguel will be integrating the demo.\n",
+            "### Re: done — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let result = normalize_user_prompts_in_exchange_safe(content, baseline, snapshot, &file);
+        assert!(
+            result.contains("❯ Please increment version to v0.1.1."),
+            "HEAD-prefixed first prompt line must regain its prefix:\n{result}"
+        );
+        assert!(
+            result.contains("❯ Miguel will be integrating the demo."),
+            "HEAD-prefixed continuation line must regain its prefix:\n{result}"
+        );
+        assert!(
+            !result.contains("\nPlease increment version to v0.1.1.\n"),
+            "bare first prompt line must not remain:\n{result}"
         );
     }
 

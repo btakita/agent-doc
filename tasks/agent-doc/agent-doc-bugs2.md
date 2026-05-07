@@ -50,10 +50,32 @@ Verification:
 - `cargo install --path .`
 - `agent-doc --version` -> `agent-doc 0.33.16`
 
+❯ Commit / push:
+❯ - `src/agent-doc`: `73ba5d2` (`fix: preserve multiline prompt prefixes`) pushed to `origin/20260422/codex-agent-backend`.
+❯ - `agent-loop`: `4e9258323` (`agent-doc(dev): 2026-05-07 13:47:55 (submodule pointer)`) pushed to `origin/main`.
+❯ do [#pfxleak]. spec-test-build-install-commit-push
+### Re: #pfxleak — gpt-5
+Verified and closed.
+
+The `#pfxleak` fix is already present in current `src/agent-doc` HEAD via `5e53d78` (`fix: reduce closeout drift noise`), with the follow-up `73ba5d2` preserving the same HEAD prefix-state invariant while extending the multi-line prompt handling. I did not add another code patch because `src/agent-doc` was clean and the targeted behavior is already covered in the checked-in spec and tests.
+
+What is covered:
+- `SPEC.md` requires `content_ours` fallback to preserve committed exchange prefix state in both directions: prefixed user prompt lines stay prefixed, and unprefixed agent response lines stay bare.
+- `write.rs` preserves HEAD exchange prefix state after normalization, so committed agent response lines do not gain `❯ ` during sidecar/content_ours fallback.
+- Regression coverage includes `normalize_safe_preserves_unprefixed_agent_lines_from_head`, `normalize_safe_preserves_prefixed_user_lines_from_head`, and the stale-response multi-line prompt case.
+
+Verification:
+- `cargo test normalize_safe_preserves` passed: 2 targeted tests.
+- `cargo test` passed: 1920 unit tests, integration suites passed, 3 debounce timing tests ignored.
+- `cargo build` passed.
+- `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/agent-doc`.
+- `agent-doc --version` -> `agent-doc 0.33.16`.
+
 Commit / push:
-- `src/agent-doc`: `73ba5d2` (`fix: preserve multiline prompt prefixes`) pushed to `origin/20260422/codex-agent-backend`.
-- `agent-loop`: `4e9258323` (`agent-doc(dev): 2026-05-07 13:47:55 (submodule pointer)`) pushed to `origin/main`.
-<!-- agent:boundary:be0facd7 -->
+- `src/agent-doc` had no new local code changes to commit for this cycle.
+- `git -C src/agent-doc push origin 20260422/codex-agent-backend` returned `Everything up-to-date`.
+- Marked `#pfxleak` done in this session closeout.
+<!-- agent:boundary:2d0b393e -->
 <!-- /agent:exchange -->
 ###
 
@@ -68,7 +90,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pfxleak] `❯ ` prompt prefix leaks onto agent content during content_ours fallback, then requires a separate normalize commit to strip — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - [ ] [#commitchurn] Session-check forces new finalize cycle for minor content edits on already-answered prompts, causing 3-4 extra commits per turn — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

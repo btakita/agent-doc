@@ -34,8 +34,12 @@ Active backlog:
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - 2 more active item(s)
-<!-- agent:boundary:d52ec6e8 -->
-do [#restoc]. spec-test-build-install-commit-push
+❯ do [#restoc]. spec-test-build-install-commit-push
+### Re: #restoc — gpt-5
+Implemented `agent-doc response-toc` and `agent-doc response-fetch` so bounded prompt packs can expose lightweight live+archive response locators and load exact neighboring sections on demand. `prompt_context` now includes that TOC plus the retrieval hint, and the command/spec/docs surfaces were updated to describe the new flow.
+
+Verification completed: `cargo test -- --test-threads=1`, `cargo build`, and `cargo install --path . --force` all passed in `src/agent-doc`. The repo work is committed and pushed in `src/agent-doc` as `8bbd89a` on `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:1a8061b9 -->
 <!-- /agent:exchange -->
 ###
 
@@ -51,7 +55,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 - [ ] [#oobprompt] Out-of-exchange prompt relocation — preflight does not relocate user prompts typed after the exchange close tag; response lands correctly inside exchange but orphaned prompt text remains outside. Plan: tasks/agent-doc/plan-out-of-exchange-prompt-relocation.md
-- [ ] [#restoc] [recommended] Add a lightweight live+archive exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent sections on demand instead of relying only on the fixed recent-turn window.
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

@@ -129,14 +129,37 @@ Active backlog:
 - [ ] [#tp03] [recommended] Add tagpath query-normalization helpers for free-text agent prompts, returning ordered/weighted tags that tsift can use before lexical or hybrid fallback.
 - [ ] [#tp04] [recommended] Add .naming/tags ontology loading and validation so tsift summaries can reference stable domain tags instead of re-explaining domain vocabulary in prose.
 - 1 more active item(s)
-<!-- agent:boundary:9d96f79a -->
+❯ do [#tp02]. spec-test-build-install-commit-push
+### Re: #tp02 — gpt-5
+
+Implemented compact family output for `tagpath extract` and `tagpath search`.
+
+What changed:
+- Added reusable grouped family summaries in `src/family/mod.rs`, with canonical tags, total count, roles/shapes, and capped representative examples.
+- Added `extract_families_from_path(_with_mode)` and `search_families` library APIs.
+- Added CLI formats: `--format family` for compact text and `--format family-json` for machine-readable grouped output.
+- Updated `SPEC.md` and `README.md` with the new extract/search formats.
+- Marked `#tp02` done.
+
+Verification:
+- `cargo fmt --check`
+- `cargo check`
+- `cargo test` (78 unit tests + 9 integration tests)
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo install --path .`
+- Smoke-tested installed `tagpath search summarize_occurrences src --format family-json` and `tagpath extract tests --format family`.
+
+Commits pushed:
+- `btakita/tagpath@4446b05` — `feat: add compact family output`
+- `btakita/agent-loop@7e8619a56` — `chore: update tagpath submodule`
+<!-- agent:boundary:c7cbe52d -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tp02] [recommended] Add compact family output for tagpath extract/search that groups identifiers by canonical tags with counts and a few examples instead of listing every spelling and location.
 - [ ] [#tp03] [recommended] Add tagpath query-normalization helpers for free-text agent prompts, returning ordered/weighted tags that tsift can use before lexical or hybrid fallback.
 - [ ] [#tp04] [recommended] Add .naming/tags ontology loading and validation so tsift summaries can reference stable domain tags instead of re-explaining domain vocabulary in prose.
 - [ ] [#tp05] [recommended] Add a tsift-facing token-savings benchmark fixture comparing raw symbol output against tagpath family/alias output for search, explain, and session-review previews.

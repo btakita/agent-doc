@@ -1,7 +1,7 @@
 # Plan: Trim `AGENTS.md` + `SKILL.md` context footprint without weakening `agent-doc`
 
 **Pending:** `#instrcap` in `tasks/agent-doc/agent-doc-bugs2.md`
-**Status:** Draft
+**Status:** Implemented
 
 ## Problem
 
@@ -39,31 +39,31 @@ always-loaded instruction surface for both Claude Code and Codex.
 
 ## Implementation Steps
 
-- [ ] Inventory the current hot-path instruction overlap across:
+- [x] Inventory the current hot-path instruction overlap across:
   - root `AGENTS.md`
   - source `src/agent-doc/SKILL.md`
   - installed harness copies
   - the most frequently cited runbooks
-- [ ] Classify each rule as one of:
+- [x] Classify each rule as one of:
   - always-needed turn contract
   - rare recovery procedure
   - explanatory background that can move out of the hot path
-- [ ] Rewrite the top-level surfaces into a shorter decision checklist that preserves:
+- [x] Rewrite the top-level surfaces into a shorter decision checklist that preserves:
   - binary-owned preflight/plan/finalize ordering
   - the no-manual-patchback rule
   - commit-boundary and session-check requirements
   - pending/backlog mutation rules that must stay visible every turn
-- [ ] Push long-form recovery details behind specific runbook links and verify the shortened text
+- [x] Push long-form recovery details behind specific runbook links and verify the shortened text
   still points to the exact executable path for:
   - startup-miss recovery
   - orchestration handoff
   - commit-boundary exceptions
   - compact / compact exchange flows
-- [ ] Audit the generation/install path so Claude/Codex copies remain aligned from one shared
+- [x] Audit the generation/install path so Claude/Codex copies remain aligned from one shared
   source instead of drifting by manual edits
-- [ ] Add a lightweight regression or budget check for instruction size / duplicated sections so
+- [x] Add a lightweight regression or budget check for instruction size / duplicated sections so
   future growth is explicit
-- [ ] Re-run the `agent-doc` harness-install/update flow and verify the shortened instructions are
+- [x] Re-run the `agent-doc` harness-install/update flow and verify the shortened instructions are
   still sufficient for a full preflight -> plan -> finalize cycle in both harnesses
 
 ## Files Likely To Change

@@ -34,7 +34,21 @@ Active backlog:
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
 - 4 more active item(s)
-<!-- agent:boundary:3a363be2 -->
+❯ Please order the backlog by priority.
+### Re: Backlog Priority — gpt-5
+
+Reordered the backlog by priority. Top item: `#concprompt`.
+
+Priority order applied:
+1. `#concprompt` — concurrent user edits can bypass prompt detection and session-check, so this is the highest-risk workflow correctness bug.
+2. `#pfxcours` — prefix stripping can misclassify assistant response text as a user prompt and interrupt closeout.
+3. `#pathmove` — path moves can invalidate baselines and break session continuity.
+4. `#tmuxcoord` — investigate the observed `Run Agent Doc` non-response and locate ownership between tmux-router, session ownership, and coordinator design.
+5. `#coordspike` — coordinator actor MVP planning depends on the tmux coordination investigation.
+6. `#sqliterepros` — collect concrete failure cases before adding a transactional session store.
+7. `#sqliteeval` — evaluate the SQLite session-store plan after the failure examples and actor direction are clearer.
+
+<!-- agent:boundary:6dddfb1c -->
 <!-- /agent:exchange -->
 ###
 
@@ -63,10 +77,10 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 - [ ] [#concprompt] concurrent user edits during response cycle bypass prompt detection + session-check — plan: tasks/agent-doc/plan-concurrent-edit-prompt-miss.md
+- [ ] [#pfxcours] content_ours fallback strips ❯ prefix from user prompts — plan: tasks/agent-doc/plan-content-ours-prefix-strip.md
+- [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
-- [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
-- [ ] [#pfxcours] content_ours fallback strips ❯ prefix from user prompts — plan: tasks/agent-doc/plan-content-ours-prefix-strip.md
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 

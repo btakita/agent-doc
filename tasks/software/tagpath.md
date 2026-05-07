@@ -152,22 +152,23 @@ Changes:
 
 Verification:
 - Passed: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo build`, `cargo install --path . --force`.
-- Passed focused tests:
-  - `cargo test tests::search_budget_report_truncates_symbol_preview_and_emits_stable_handle -- --exact`
-  - `cargo test tests::explain_budget_report_limits_edges_and_members -- --exact`
-  - `cargo test tests::session_review_next_context_budget_limits_lists -- --exact`
-  - `cargo test tests::context_pack_diff_preview_limits_files_and_symbols -- --exact`
-- `cargo test` is still red on pre-existing repo failures unrelated to this patch. Current failing tests in this environment:
-  - `diff_digest::tests::diff_digest_cached_uses_index_snapshot_instead_of_working_tree`
-  - `diff_digest::tests::diff_digest_revision_uses_commit_snapshots`
-  - `tests::community_cmd_no_index_errors`
-  - `tests::explain_cmd_no_index_errors`
-  - `tests::graph_cmd_no_index_errors`
-  - `tests::lint_finds_entities_from_project_root_index_db`
-  - `tests::path_cmd_no_index_errors`
-  - `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`
-  - `context_pack_json_composes_next_context_and_optional_digests`
+❯ - Passed focused tests:
+  ❯ - `cargo test tests::search_budget_report_truncates_symbol_preview_and_emits_stable_handle -- --exact`
+  ❯ - `cargo test tests::explain_budget_report_limits_edges_and_members -- --exact`
+  ❯ - `cargo test tests::session_review_next_context_budget_limits_lists -- --exact`
+  ❯ - `cargo test tests::context_pack_diff_preview_limits_files_and_symbols -- --exact`
+❯ - `cargo test` is still red on pre-existing repo failures unrelated to this patch. Current failing tests in this environment:
+  ❯ - `diff_digest::tests::diff_digest_cached_uses_index_snapshot_instead_of_working_tree`
+  ❯ - `diff_digest::tests::diff_digest_revision_uses_commit_snapshots`
+  ❯ - `tests::community_cmd_no_index_errors`
+  ❯ - `tests::explain_cmd_no_index_errors`
+  ❯ - `tests::graph_cmd_no_index_errors`
+  ❯ - `tests::lint_finds_entities_from_project_root_index_db`
+  ❯ - `tests::path_cmd_no_index_errors`
+  ❯ - `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`
+  ❯ - `context_pack_json_composes_next_context_and_optional_digests`
 ❯ do [#tgqn]. spec-test-build-install-commit-push
+### Re: #tgqn — gpt-5
 ### Re: #tgqn — gpt-5
 
 Implemented in  and pushed on  as .
@@ -178,6 +179,17 @@ Changes:
 -  documents the new search behavior, and regression coverage was added in .
 
 Verification:
+❯ - Passed: 
+❯   - 
+❯ - Passed: 
+❯ - === instruction-files: clippy + test === is still red on the same eight pre-existing failures already present in this session context:
+❯   - 
+❯   -
+### Re: #tgqn closeout — gpt-5
+
+Implemented in `src/tsift` and pushed on `main` as `541b6f4`. `tsift search` now normalizes free-text agent queries into `tagpath`-style tags before lexical or hybrid fallback, covering phrases like `user profile getter` and `profile user get`; `SPEC.md` documents the behavior and regression coverage was added in `src/index.rs`.
+
+Verification passed for `cargo fmt`, `cargo build`, `cargo install --path . --force`, and the focused tests `cargo test compute_tags_splits_agent_style_phrase_queries`, `cargo test symbol_search_matches_agent_style_phrase_queries`, and `cargo test symbol_search_cross_convention`. `make check` remains red on the same eight pre-existing failures already noted in this session: `diff_digest::tests::diff_digest_cached_uses_index_snapshot_instead_of_working_tree`, `diff_digest::tests::diff_digest_revision_uses_commit_snapshots`, `tests::community_cmd_no_index_errors`, `tests::explain_cmd_no_index_errors`, `tests::graph_cmd_no_index_errors`, `tests::lint_finds_entities_from_project_root_index_db`, `tests::path_cmd_no_index_errors`, and `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`.
 ❯ - Passed: 
 ❯ - Passed focused tests:
 ❯   - 
@@ -207,7 +219,7 @@ Changes:
 
 Verification:
 - Passed: `cargo fmt`
-- Passed focused tests:
+❯ - Passed focused tests:
   - `cargo test compute_tags_splits_agent_style_phrase_queries`
   - `cargo test symbol_search_matches_agent_style_phrase_queries`
   - `cargo test symbol_search_cross_convention`
@@ -222,7 +234,7 @@ Verification:
   - `tests::lint_finds_entities_from_project_root_index_db`
   - `tests::path_cmd_no_index_errors`
   - `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`
-<!-- agent:boundary:5975cb07 -->
+<!-- agent:boundary:2f421f52 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

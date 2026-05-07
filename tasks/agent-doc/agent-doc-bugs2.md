@@ -79,7 +79,7 @@ Verification/build/install completed:
 
 Commit / push:
 - `5cf5af1` `fix: clear stale startup miss after owner handoff`
-- pushed to `origin/20260422/codex-agent-backend`
+❯ - pushed to `origin/20260422/codex-agent-backend`
 
 Plan: tasks/agent-doc/plan-startup-miss-stale-after-later-session-start.md
 ❯ do [#rsxe]. spec-test-build-install-commit-push
@@ -101,10 +101,10 @@ Verification:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Repo work:
-- committed `src/agent-doc` on `20260422/codex-agent-backend`: `47fc9ef`
-- committed workspace instruction-surface sync on `main`: `9747b6bb3`
-- pushing after this closeout commit so the session response commit is included
+❯ Repo work:
+❯ - committed `src/agent-doc` on `20260422/codex-agent-backend`: `47fc9ef`
+❯ - committed workspace instruction-surface sync on `main`: `9747b6bb3`
+❯ - pushing after this closeout commit so the session response commit is included
 ❯ do [#fye2]. spec-test-build-install-commit-push
 ❯ do [#fye2]. spec-test-build-install-commit-push
 ### Re: Run Agent Doc reroute auto-remediation — gpt-5
@@ -138,9 +138,9 @@ Verification/build/install completed:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Repo work:
-- committed `src/agent-doc` on `20260422/codex-agent-backend`: `ca8778b` `fix: fail closed on unproven Codex dispatch-only reroutes`
-- pushed to `origin/20260422/codex-agent-backend`
+❯ Repo work:
+❯ - committed `src/agent-doc` on `20260422/codex-agent-backend`: `ca8778b` `fix: fail closed on unproven Codex dispatch-only reroutes`
+❯ - pushed to `origin/20260422/codex-agent-backend`
 ❯ do [#grdd]. spec-test-build-install-commit-push
 ### Re: startup-miss diagnostic dispatch — gpt-5
 
@@ -154,7 +154,7 @@ Verification/build/install completed on the current branch:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Repo work:
+❯ Repo work:
 - no new code changes were needed for `#grdd`
 - `src/agent-doc` is clean at `ca8778b` on `20260422/codex-agent-backend`
 - branch is already aligned with `origin/20260422/codex-agent-backend`, so there was nothing new to commit or push
@@ -190,8 +190,11 @@ Verification/build/install completed:
 
 The duplicated `❯ do [#fye2]. spec-test-build-install-commit-push` line plus the stray `❯ -` lines are stale working-tree drift from the earlier mangled `#fye2` closeout, not a new repo-work request.
 
-No additional code changes were needed here. The authoritative `#fye2` result remains the earlier correction block above plus `src/agent-doc` commit `ca8778b` on `20260422/codex-agent-backend`, and `#wv7g` is already completed in `src/agent-doc` commit `4737e73`.
-<!-- agent:boundary:a6303ecc -->
+❯ No additional code changes were needed here. The authoritative `#fye2` result remains the earlier correction block above plus `src/agent-doc` commit `ca8778b` on `20260422/codex-agent-backend`, and `#wv7g` is already completed in `src/agent-doc` commit `4737e73`.
+### Re: closeout drift cleanup — gpt-5
+
+The prefixed push-target line is stale working-tree drift from the already committed `#wv7g` closeout, not a new request. No additional repo work is needed.
+<!-- agent:boundary:dd1271e8 -->
 <!-- /agent:exchange -->
 ###
 

@@ -79,8 +79,7 @@ On the architecture question: smaller files would help readability, but they wil
 ### Re: Repair Closeout — gpt-5
 
 The transcript repair is now being committed through the agent-doc write path.
-
-<!-- agent:boundary:b29b7509 -->
+<!-- agent:boundary:17c7b619 -->
 <!-- /agent:exchange -->
 ###
 

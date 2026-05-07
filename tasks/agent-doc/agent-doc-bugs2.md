@@ -117,7 +117,10 @@ Added a focused follow-up plan in [tasks/agent-doc/plan-passive-sync-existing-pa
 I also added the implementation item to backlog and put it at the top by inserting it as the newest pending item.
 
 Top backlog item: `#tmuxfocus`.
-<!-- agent:boundary:8086930d -->
+Updated [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md) with a `#next-steps` response, added the plan at [plan-passive-sync-existing-pane-handoff.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-passive-sync-existing-pane-handoff.md), and captured the new top backlog item as `#tmuxfocus`.
+
+The response was committed through `agent-doc finalize`, and the follow-up `agent-doc session-check` passed.
+<!-- agent:boundary:0193a80c -->
 <!-- /agent:exchange -->
 ###
 
@@ -133,7 +136,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 - [ ] [#tmuxfocus] Fix passive sync visible-pane handoff so --no-autostart preserves layout without skipping focus reselect. Plan: tasks/agent-doc/plan-passive-sync-existing-pane-handoff.md
-- [ ] [#verfpfx] Stop `❯ ` prompt-prefix repair from leaking into assistant list items after `Verification:`. Plan: tasks/agent-doc/plan-verification-list-prompt-prefix-leak.md
+- [__________________c ] [#verfpfx] Stop `❯ ` prompt-prefix repair from leaking into assistant list items after `Verification:`. Plan: tasks/agent-doc/plan-verification-list-prompt-prefix-leak.md
 - [ ] [#tmuxreprocmd] Capture the exact command, crate root, and tooling context that produced the non-reproducing tmux-router RegistryEntry field mismatch. Plan: tasks/software/plan-tmux-router-repro-command-capture.md
 - [ ] [#tmuxpresetpath] Normalize repo-local #agent-doc-bug backlog target paths so copied agent-loop/tasks/... presets do not resolve to doubled paths. Plan: tasks/agent-doc/plan-tmux-router-preset-backlog-target-path-normalization.md
 - [ ] [#tmuxplanscope] Narrow prompt-contract escalation so copied prompt_presets definitions do not force unrelated software-task turns into plan_backlog_only. Plan: tasks/agent-doc/plan-tmux-router-preset-trigger-scope.md

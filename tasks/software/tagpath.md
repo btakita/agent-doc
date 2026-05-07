@@ -123,10 +123,29 @@ v0.6.0 published to crates.io
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-050927.md`*
-<!-- agent:boundary:95c3aa16 -->
+❯ Are there #next-steps for tagpath to help tsift save tokens?
+### Re: tagpath next steps for tsift token savings — gpt-5
+
+Yes. The best next steps are for `tagpath` to become the stable semantic compaction layer under `tsift`, rather than another broad search surface. `tsift` already depends on `tagpath`, and its spec already points toward tagpath-style query normalization plus `tag_alias` preview handles. The gap is making those handles stable, compact, and benchmarked.
+
+I added the follow-ups to the backlog in priority order:
+
+1. `#tp01` — stable tag family API/schema for canonical aliases, dimensions, role, shape, and representative spellings. This is the top item because it directly lets `tsift` collapse many symbol variants into one compact semantic handle.
+2. `#tp02` — compact grouped output for `extract`/`search`, so callers see tag families with counts/examples instead of every raw spelling.
+3. `#tp03` — free-text query normalization helpers for agent prompts before `tsift` falls back to lexical/hybrid search.
+4. `#tp04` — `.naming/tags` ontology loading, so summaries can reference stable domain vocabulary instead of repeatedly explaining it.
+5. `#tp05` — a benchmark fixture proving token savings across `tsift search`, `explain`, and `session-review` previews.
+
+Top backlog item: `#tp01`.
+<!-- agent:boundary:f0453983 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tp01] [recommended] Add a stable tagpath family API/schema for tsift: canonical tag aliases, dimensions, role, shape, and surface spelling examples, so tsift preview/search/explain can collapse repeated identifier variants into one compact handle.
+- [ ] [#tp02] [recommended] Add compact family output for tagpath extract/search that groups identifiers by canonical tags with counts and a few examples instead of listing every spelling and location.
+- [ ] [#tp03] [recommended] Add tagpath query-normalization helpers for free-text agent prompts, returning ordered/weighted tags that tsift can use before lexical or hybrid fallback.
+- [ ] [#tp04] [recommended] Add .naming/tags ontology loading and validation so tsift summaries can reference stable domain tags instead of re-explaining domain vocabulary in prose.
+- [ ] [#tp05] [recommended] Add a tsift-facing token-savings benchmark fixture comparing raw symbol output against tagpath family/alias output for search, explain, and session-review previews.
 <!-- /agent:backlog -->

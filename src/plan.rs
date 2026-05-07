@@ -146,7 +146,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         harness_diff.is_some(),
         &fm.prompt_presets,
     );
-    let repo_actions = if execution_scope == ExecutionScope::PlanBacklogOnly {
+    let mut repo_actions = if execution_scope == ExecutionScope::PlanBacklogOnly {
         Vec::new()
     } else {
         diff::extract_imperative_directives(&diff_text)
@@ -209,7 +209,16 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         }
     }
 
-    if !exchange_compaction_requested {
+    if matches!(handoff, HandoffTarget::None)
+        && execution_scope == ExecutionScope::Normal
+        && let Some(command) = noop_closeout_handoff_command(file)?
+    {
+        repo_actions.clear();
+        required_commands.push(command);
+        handoff = HandoffTarget::Compact;
+    }
+
+    if !exchange_compaction_requested && matches!(handoff, HandoffTarget::None) {
         required_commands.extend(finalize_placeholder_commands(file, &fm));
     }
 
@@ -222,6 +231,18 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         handoff,
         blockers: std::mem::take(&mut blockers),
     })
+}
+
+fn noop_closeout_handoff_command(file: &Path) -> Result<Option<String>> {
+    let report = crate::session_accretion::inspect(file)?;
+    if !report.needs_noop_closeout_handoff() {
+        return Ok(None);
+    }
+    Ok(Some(format!(
+        "Repeated no-op closeout handoff: stop before appending another `### Re:` section; run `agent-doc compact {} --keep 1 --component exchange --commit`, then rerun `agent-doc {}`. If the pane is already restart-heavy or compact is not appropriate, restart the harness pane from the current committed boundary instead.",
+        file.display(),
+        file.display()
+    )))
 }
 
 fn orchestration_mode_arg(mode: diff::OrchestrationRequestMode) -> &'static str {
@@ -1364,6 +1385,98 @@ Done.
         assert_eq!(
             plan.repo_actions,
             vec!["do #ctxacc. spec-test-build-install-commit-push".to_string()]
+        );
+    }
+
+    #[test]
+    fn build_plan_hands_off_repeated_noop_closeout_churn() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+
+do #nooploop. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+        write_cycles_log(
+            &doc,
+            &[
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(20).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+                crate::ops_log::CycleEntry {
+                    op: "commit_noop".to_string(),
+                    file: "plan.md".to_string(),
+                    timestamp: now.saturating_sub(10).to_string(),
+                    commit_hash: None,
+                    snapshot_hash: None,
+                    file_hash: None,
+                },
+            ],
+        );
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.handoff, HandoffTarget::Compact);
+        assert!(
+            plan.repo_actions.is_empty(),
+            "compact handoff should suppress normal repo work until rerun: {:?}",
+            plan.repo_actions
+        );
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|command| command.contains("agent-doc compact")
+                    && command.contains("--keep 1")
+                    && command.contains("restart the harness pane")),
+            "expected compact/restart guidance, got {:?}",
+            plan.required_commands
+        );
+        assert!(
+            !plan
+                .required_commands
+                .iter()
+                .any(|command| command.contains("finalize")),
+            "compact handoff should not also request a normal response finalize: {:?}",
+            plan.required_commands
         );
     }
 

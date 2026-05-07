@@ -80,6 +80,10 @@ impl SessionAccretionReport {
     pub fn is_healthy(&self) -> bool {
         self.level == SessionAccretionLevel::Healthy
     }
+
+    pub fn needs_noop_closeout_handoff(&self) -> bool {
+        self.recent_noop_closeouts >= WARN_RECENT_NOOP_CLOSEOUTS
+    }
 }
 
 pub fn inspect(file: &Path) -> Result<SessionAccretionReport> {

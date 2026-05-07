@@ -343,25 +343,27 @@ fn run_component_compact_partial(
         &build_component_archive(file, content, target, &archive_body),
     )?;
 
-    // Build new component content
-    let mut new_content = String::new();
+    // Build new component content. The committed snapshot intentionally omits
+    // unresolved trailing prompt text after the boundary so compact+commit can
+    // reduce history without marking that prompt as answered.
+    let mut base_new_content = String::new();
 
     // Preamble: use --message if provided, else keep original preamble
     match message {
         Some(msg) => {
-            new_content.push_str(msg.trim_end());
-            new_content.push('\n');
+            base_new_content.push_str(msg.trim_end());
+            base_new_content.push('\n');
         }
         None => {
             if !preamble.trim().is_empty() {
-                new_content.push_str(preamble.trim_end());
-                new_content.push('\n');
+                base_new_content.push_str(preamble.trim_end());
+                base_new_content.push('\n');
             }
         }
     }
 
     // Archive pointer
-    new_content.push_str(&format!(
+    base_new_content.push_str(&format!(
         "\n*{} earlier topic(s) archived to `{}`*\n",
         to_archive.len(),
         archive_path.display()
@@ -369,10 +371,11 @@ fn run_component_compact_partial(
 
     // Kept sections
     for section in to_keep {
-        new_content.push('\n');
-        new_content.push_str(section.trim_end());
-        new_content.push('\n');
+        base_new_content.push('\n');
+        base_new_content.push_str(section.trim_end());
+        base_new_content.push('\n');
     }
+    let mut new_content = base_new_content.clone();
     if !trailing.trim().is_empty() {
         if !new_content.ends_with('\n') {
             new_content.push('\n');
@@ -384,8 +387,15 @@ fn run_component_compact_partial(
     let compacted = comp.replace_content(content, &new_content);
     let compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
         .unwrap_or(compacted);
+    let snapshot_compacted = if trailing.trim().is_empty() {
+        compacted.clone()
+    } else {
+        let snapshot_content = comp.replace_content(content, &base_new_content);
+        crate::template::repair_conversation_tail_outside_exchange(&snapshot_content)?
+            .unwrap_or(snapshot_content)
+    };
     crate::write::atomic_write_pub(file, &compacted)?;
-    snapshot::save(file, &compacted)?;
+    snapshot::save(file, &snapshot_compacted)?;
 
     if is_crdt {
         let new_crdt = crate::crdt::CrdtDoc::from_text(&compacted).encode_state();
@@ -1156,6 +1166,12 @@ mod tests {
         assert!(exchange.contains("### Re: second topic"));
         assert!(!exchange.contains("### Re: first topic"));
         assert!(exchange.contains("do #autocmp. spec-test-build-install-commit-push"));
+
+        let snapshot_after = snapshot::load(&file).unwrap().unwrap();
+        assert!(
+            !snapshot_after.contains("do #autocmp. spec-test-build-install-commit-push"),
+            "unresolved trailing prompt must remain live drift after compact, not committed snapshot state:\n{snapshot_after}"
+        );
     }
 
     #[test]

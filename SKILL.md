@@ -69,7 +69,7 @@ Read `effective_tier`, `required_tier`, `suggested_tier`, and `model_switch_tier
 
 ### 0d. Planning / dispatch
 
-After `preflight`, run `agent-doc plan <FILE>` and treat its `prompt_targets`, `execution_scope`, `repo_actions`, `required_commands`, `pending_mutations`, `handoff`, and `blockers` as the execution contract. If `blockers` is non-empty, stop. If `handoff=orchestrate`, run the emitted `agent-doc orchestrate ...` command before any manual response. Full contract: [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md).
+After `preflight`, run `agent-doc plan <FILE>` and treat its `prompt_targets`, `execution_scope`, `repo_actions`, `required_commands`, `pending_mutations`, `handoff`, and `blockers` as the execution contract. If `blockers` is non-empty, stop. If `handoff=orchestrate`, run the emitted `agent-doc orchestrate ...` command before any manual response. If `handoff=compact`, follow the emitted compact/restart instruction and stop before repo work or response finalization. Full contract: [runbooks/planning-dispatch.md](runbooks/planning-dispatch.md).
 
 ### 1. Respond
 

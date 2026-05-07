@@ -100,7 +100,38 @@ So I would bias toward:
 4. a narrow SQLite lease can exist only to elect or protect the single coordinator, not to let every supervisor coordinate directly
 
 That should produce fewer pane duplication bugs, fewer startup-miss races, and a smaller correctness surface.
-<!-- agent:boundary:4fe290db -->
+❯ Can the coordinator actor be started as both a daemon and lazily launch on the first supervisor launch? In the lazy launch case, can the coordinator be detached from the first supervisor so it will remain running if the first supervisor dies? Can the coordinator self-exit if all the supervisor processes are closed and the coordinator was lazily launched?
+### Re: daemon and lazy coordinator lifecycle — gpt-5
+
+Yes. The coordinator can support both explicit daemon startup and lazy first-supervisor startup, and that is probably the right operational shape.
+
+The important constraint is that both paths must converge on the same singleton coordinator identity. A supervisor should not care whether the coordinator was already started by a service manager, launched by an earlier supervisor, or launched by itself. Its flow should be:
+
+1. try to connect to the coordinator socket
+2. if unavailable, acquire a short SQLite/file lock for coordinator launch
+3. recheck the socket after acquiring the lock
+4. if still unavailable, spawn the coordinator detached
+5. wait for readiness, then connect as a normal client
+
+The lazy coordinator can be detached from the first supervisor. On Unix that means it should not remain a child whose lifetime depends on the launcher. The launcher can spawn it into its own process group/session, close inherited stdio, and communicate readiness through a socket or ready file. After that, the first supervisor is just another client. If it dies, the coordinator keeps running and other supervisors can continue using it.
+
+Self-exit is also reasonable, but only for coordinators that were lazy-launched. I would record the launch mode in coordinator state:
+
+- `managed`: started explicitly by service/tmux/user command; stays up until stopped
+- `lazy`: started on demand; may exit after no clients remain
+
+For lazy mode, the coordinator can track active supervisors through heartbeat leases or connected sockets. When the last supervisor disconnects or its lease expires, wait through a short idle grace period, reconcile any final writes, then exit. The grace period matters because editors and harnesses often restart supervisors briefly; immediate exit would create avoidable churn and launch races.
+
+The clean model is:
+
+- explicit daemon mode for stable long-running setups
+- lazy detached mode for zero-configuration local use
+- one socket/lock identity so both modes cannot create duplicate coordinators
+- SQLite for persisted state, launch mode, leases, and restart recovery
+- lazy self-exit only after all clients are gone and the idle grace window passes
+
+That gives convenience without giving up the single-owner coordination property.
+<!-- agent:boundary:6a7a8dd2 -->
 <!-- /agent:exchange -->
 ###
 

@@ -34,7 +34,26 @@ Active backlog:
 - [ ] [#pfxleak] `❯ ` prompt prefix leaks onto agent content during content_ours fallback, then requires a separate normalize commit to strip — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - [ ] [#commitchurn] Session-check forces new finalize cycle for minor content edits on already-answered prompts, causing 3-4 extra commits per turn — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - 3 more active item(s)
-<!-- agent:boundary:848a8146 -->
+❯ do [#pfxstrip2]. spec-test-build-install-commit-push
+### Re: #pfxstrip2 — gpt-5
+Implemented and verified.
+
+What changed:
+- `content_ours` prompt-prefix normalization now reopens a blank-separated fresh prompt run after a stale inserted response block, so every nonblank line of a multi-line user prompt gets `❯ `.
+- HEAD prefix state is preserved bidirectionally during the safe fallback: committed prefixed user lines regain `❯ `, while committed unprefixed agent response lines stay bare.
+- Updated `SPEC.md` and `VERSIONS.md` with the invariant.
+
+Verification:
+- `cargo test normalize_user_prompts`
+- `cargo test` (1920 unit tests passed, integration suites passed, 3 debounce timing tests ignored)
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commit / push:
+- `src/agent-doc`: `73ba5d2` (`fix: preserve multiline prompt prefixes`) pushed to `origin/20260422/codex-agent-backend`.
+- `agent-loop`: `4e9258323` (`agent-doc(dev): 2026-05-07 13:47:55 (submodule pointer)`) pushed to `origin/main`.
+<!-- agent:boundary:be0facd7 -->
 <!-- /agent:exchange -->
 ###
 
@@ -49,7 +68,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: src/session-share/tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
 - [ ] [#pfxleak] `❯ ` prompt prefix leaks onto agent content during content_ours fallback, then requires a separate normalize commit to strip — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - [ ] [#commitchurn] Session-check forces new finalize cycle for minor content edits on already-answered prompts, causing 3-4 extra commits per turn — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.

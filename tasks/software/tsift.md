@@ -112,14 +112,34 @@ Verification + install:
 Commits pushed:
 - `btakita/tsift@531b36f` — `feat: wrap digest runner with rtk filters`
 - `btakita/agent-loop@5fa3a4f6b` — `chore: update tsift submodule`
-<!-- agent:boundary:bcb0eb96 -->
+❯ do [#tbud]. spec-test-build-install-commit-push
+### Re: #tbud — gpt-5
+Implemented `#tbud` and marked it done in the backlog.
+
+What changed:
+- Added `--budget <small|normal|deep|auto>` to `search`, `explain`, `session-review`, and `context-pack` preview surfaces.
+- `tsift --envelope` now applies the adaptive budget by default for preview-capable commands when no explicit caps are supplied. `auto` reads `TSIFT_CONTEXT_WINDOW`, `CODEX_CONTEXT_WINDOW`, or `CLAUDE_CONTEXT_WINDOW`: <=64k uses `small`, >=200k uses `deep`, otherwise `normal`.
+- `rg` and recursive `grep` rewrites now emit `tsift --envelope search ... --exact --budget normal` instead of hard-coded `--max-items 5 --max-bytes 160`.
+- Updated `SPEC.md`, `AGENTS.md`, `CLAUDE.md`, `src/init.rs`, `VERSIONS.md`, and bumped tsift to `0.1.41`.
+
+Verification + install:
+- `cargo check` passed.
+- `TMPDIR=/home/brian/.tmp-tsift-tests-full cargo test` passed: 547 unit tests and 85 integration tests.
+- `cargo build` passed.
+- `cargo install --path . --force` passed.
+- Installed binary reports `tsift 0.1.41`.
+- Live checks confirmed `--budget small` emits `max_items: 3` / `max_bytes: 120`, and bare `--envelope search` defaults to the normal adaptive budget here.
+
+Commits pushed:
+- `btakita/tsift@884b46c` — `feat: add agent budget presets`
+- `btakita/agent-loop@3c675f37d` — `chore: update tsift submodule`
+<!-- agent:boundary:ebc0f1dc -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tbud] Add budget presets and adaptive defaults for agent-facing tsift surfaces, including small/normal/deep budgets and context-window-aware max-items/max-bytes recommendations
 - [ ] [#tsum] Extend context-pack/digest surfaces to surface cached symbol/file summaries behind stable handles for touched files, failures, and tag_alias families
 <!-- /agent:backlog -->
 

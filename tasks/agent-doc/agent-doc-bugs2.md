@@ -34,7 +34,25 @@ Active backlog:
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 1 more active item(s)
-<!-- agent:boundary:7dc30214 -->
+❯ do [#noopcap]. spec-test-build-install-commit-push
+### Re: #noopcap — gpt-5
+
+Implemented `#noopcap`.
+
+`agent-doc plan` now treats repeated `commit_noop` closeout churn as a `compact` handoff: it suppresses normal repo work/finalize for that pass and emits compact/restart guidance before another low-signal `### Re:` block can be appended. Partial exchange compact now leaves unresolved trailing prompts in the working tree while omitting them from the committed snapshot, so compacting old response history does not mark the current prompt as answered.
+
+Verification:
+- `cargo test plan::tests::build_plan_hands_off_repeated_noop_closeout_churn`
+- `cargo test compact::tests::partial_compact_preserves_trailing_prompt_after_boundary`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+- `src/agent-doc` `897e2f9` (`fix: hand off no-op closeout churn`) to `origin/20260422/codex-agent-backend`
+- `agent-loop` `84e88440f` (`agent-doc: hand off no-op closeout churn`) to `origin/main`
+<!-- agent:boundary:c5138cbb -->
 <!-- /agent:exchange -->
 ###
 
@@ -64,7 +82,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.

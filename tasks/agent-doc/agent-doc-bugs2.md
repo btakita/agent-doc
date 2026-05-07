@@ -96,7 +96,21 @@ So the right model is:
 - explicit operator repair/reconcile: manual `sync` with autostart still available
 
 That means the durable fix is not "make tab switching behave like manual sync every time." The durable fix is to make the passive path retry, reselect already-visible requested panes, and surface preserve-layout deferrals clearly, which is the direction of the recent fixes.
-<!-- agent:boundary:302524ee -->
+❯ Does the `sync --no-autorestart` paths have too many guards to prohibit an already existing tmux pane from reliably being focused?
+### Re: passive sync guards vs existing-pane focus — gpt-5
+If you mean `sync --no-autostart`, then my read is: the guard set is not too broad for layout/provisioning, but it was too easy for those guards to accidentally suppress the separate "reselect an already-visible pane" behavior.
+
+That distinction matters. In `src/agent-doc/src/sync.rs`, `safe_passive_visible_layout_blockers()` only fires when a requested file is missing from the visible window and some unrelated visible pane is still protected by an open cycle. That is a layout-reconcile guard, not a "do not focus an existing pane" rule.
+
+The bug shape here was that once passive sync decided to preserve layout, it used to return before reselecting the requested pane. That is exactly why the recent fix added `select_visible_focus_pane_if_present(...)` on both preserve-layout exits before returning. The spec/history now say the same thing explicitly: preserve the layout if needed, but still hand off focus when the requested pane is already visible.
+
+So the precise answer is:
+
+- for attach/detach/cold-start/reconcile: no, those guards are intentional
+- for already-visible pane focus handoff: yes, the path previously behaved as if the guards were too broad, and that was a bug
+
+After that fix, `sync --no-autostart` should still be able to focus an already-existing visible pane reliably even when it refuses to mutate the surrounding layout. If you still see a missed handoff after that change, I would treat it as a concrete regression in the "reselect visible focus pane" path or in the plugin's retry/dedup logic, not as evidence that the passive safety model itself is wrong.
+<!-- agent:boundary:a7d88537 -->
 <!-- /agent:exchange -->
 ###
 

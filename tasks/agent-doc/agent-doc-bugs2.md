@@ -52,12 +52,7 @@ Verification:
 Committed and pushed:
 - `src/agent-doc` `897e2f9` (`fix: hand off no-op closeout churn`) to `origin/20260422/codex-agent-backend`
 - `agent-loop` `84e88440f` (`agent-doc: hand off no-op closeout churn`) to `origin/main`
-<!-- agent:boundary:c5138cbb -->
-<!-- /agent:exchange -->
-###
-
-<!--
-After I canceled an agent-doc run on Codex, this error surfaced in the JB plugin:
+❯ After I canceled an agent-doc run on Codex, this error surfaced in the JB plugin:
 ```
 resync: stash pane %220 is registered in its own project root — skipping kill
 resync: stash pane %206 is registered in its own project root — skipping kill
@@ -71,6 +66,46 @@ resync: stash pane %214 is registered in its own project root — skipping kill
 [route] bare codex reopen for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %210, but no routed submission proof appeared after 10s — keeping the dispatch optimistic
 Error: dispatch-only codex reopen for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %210 via direct_pane_submit (tmux_literal_enter_delayed), but Codex never recorded a routed submission proof after waiting 10s; the pane is live but not dispatch-ready enough to confirm the reopen. Restore an idle Codex prompt or restart the session and reroute again
 ```
+❯ spec-test-build-install-commit-push
+### Re: dispatch-only Codex accepted-but-unproven route — gpt-5
+
+Fixed the JetBrains `Run Agent Doc` dispatch-only failure shape.
+
+`route.rs` now suppresses the old `keeping the dispatch optimistic` progress line when the reroute is dispatch-only Codex and hook tracking is visible. In that accepted-but-unproven case, the final routed-submission-proof error is the single user-facing outcome instead of a contradictory optimistic line followed by an error.
+
+I also fixed the compact handoff loop that surfaced during this cycle: after `agent-doc compact`, post-compact preflight no-op closeouts are ignored for the same recent-cycle window, so the rerun can proceed instead of immediately re-entering the same compact handoff.
+
+Updated specs/docs:
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/editors/jetbrains/SPEC.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification:
+- `cargo test plan::tests::build_plan_allows_post_compaction_rerun_noop_closeouts`
+- `cargo test route::tests::dispatch_only_codex_with_visible_hooks_suppresses_optimistic_unproven_progress`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+- `src/agent-doc` `ee74eb7` (`fix: clarify dispatch-only unproven failures`) to `origin/20260422/codex-agent-backend`
+- `agent-loop` `f3760ec10` (`agent-doc: clarify dispatch-only unproven failures`) to `origin/main`
+
+No actionable follow-up backlog items.
+<!-- agent:boundary:d4aa8654 -->
+<!-- /agent:exchange -->
+###
+
+<!--
+When I run `Sync Tmux Layout` on monsterrodholders.md, the JB plugin surfaces an error:
+```
+[sync] sync preserved the current tmux layout because missing requested pane(s) /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md while visible protected pane(s) %202:preflight_started:/home/brian/work/btakita/agent-loop/src/session-share/tasks/buildparty-investor-demo/dev.md cannot be detached safely
+```
+This seems to happen when dev.md is in an active turn. When the turn is over, the autosync works.
+Why can't dev.md be detached safely? I like the visibility into the error.
+spec-test-build-install-commit-push
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
 ---

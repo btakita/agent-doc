@@ -106,6 +106,7 @@ Repo work:
 - committed workspace instruction-surface sync on `main`: `9747b6bb3`
 - pushing after this closeout commit so the session response commit is included
 ❯ do [#fye2]. spec-test-build-install-commit-push
+❯ do [#fye2]. spec-test-build-install-commit-push
 ### Re: Run Agent Doc reroute auto-remediation — gpt-5
 
 Completed .
@@ -116,7 +117,9 @@ Plan:
 
 Verification/build/install completed:
 - === instruction-files: clippy + test ===
-- 
+❯ - 
+❯ - 
+❯ - 
 
 ❯ Repo work:
 ❯ - committed  on :  
@@ -157,7 +160,14 @@ Repo work:
 - branch is already aligned with `origin/20260422/codex-agent-backend`, so there was nothing new to commit or push
 
 Plan: `tasks/agent-doc/plan-startup-miss-diagnostic-dispatch.md`
-<!-- agent:boundary:fee892e0 -->
+### Re: #fye2 duplicate prompt cleanup — gpt-5
+
+I treated the repeated `❯ do [#fye2]. spec-test-build-install-commit-push` line as stale exchange drift from the earlier mangled `#fye2` closeout, not as a new repo-work request.
+
+No additional code changes were needed here. The authoritative `#fye2` result remains the correction block above plus `src/agent-doc` commit `ca8778b` on `20260422/codex-agent-backend`.
+
+Plan: `tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md`
+<!-- agent:boundary:43f074c0 -->
 <!-- /agent:exchange -->
 ###
 

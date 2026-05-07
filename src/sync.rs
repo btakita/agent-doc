@@ -815,6 +815,86 @@ fn open_cycle_protected_pane_state(
     open_cycle_protected_file_state(&file)
 }
 
+fn canonical_managed_sync_files(col_args: &[String]) -> HashSet<PathBuf> {
+    let mut managed = HashSet::new();
+    for file in col_args.iter().flat_map(|arg| arg.split(',')) {
+        let file = file.trim();
+        if file.is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(file);
+        let canonical = path.canonicalize().unwrap_or(path);
+        let Ok(content) = std::fs::read_to_string(&canonical) else {
+            continue;
+        };
+        let Ok((frontmatter, _)) = parse_frontmatter_for_sync(&content, &canonical, "sync-guard")
+        else {
+            continue;
+        };
+        if frontmatter.session.is_some() {
+            managed.insert(canonical);
+        }
+    }
+    managed
+}
+
+fn visible_registered_files_in_window(tmux: &Tmux, window: &str) -> HashSet<PathBuf> {
+    tmux.list_window_panes(window)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|pane| registered_file_for_pane(tmux, &pane))
+        .map(|path| path.canonicalize().unwrap_or(path))
+        .collect()
+}
+
+fn safe_passive_visible_layout_blockers(
+    tmux: &Tmux,
+    window: &str,
+    requested_files: &HashSet<PathBuf>,
+) -> Option<String> {
+    if requested_files.is_empty() {
+        return None;
+    }
+
+    let visible_files = visible_registered_files_in_window(tmux, window);
+    let mut missing_requested: Vec<String> = requested_files
+        .iter()
+        .filter(|file| !visible_files.contains(*file))
+        .map(|file| file.display().to_string())
+        .collect();
+    if missing_requested.is_empty() {
+        return None;
+    }
+
+    let mut protected_unwanted = Vec::new();
+    for pane in tmux.list_window_panes(window).unwrap_or_default() {
+        let Some(protected) = open_cycle_protected_pane_state(tmux, &pane) else {
+            continue;
+        };
+        let canonical = protected.file.canonicalize().unwrap_or(protected.file.clone());
+        if requested_files.contains(&canonical) {
+            continue;
+        }
+        protected_unwanted.push(format!(
+            "{}:{}:{}",
+            pane,
+            protected.phase,
+            canonical.display()
+        ));
+    }
+    if protected_unwanted.is_empty() {
+        return None;
+    }
+
+    missing_requested.sort();
+    protected_unwanted.sort();
+    Some(format!(
+        "missing requested pane(s) {} while visible protected pane(s) {} cannot be detached safely",
+        missing_requested.join(", "),
+        protected_unwanted.join(", ")
+    ))
+}
+
 fn persist_dead_pane_capture(
     file: &Path,
     session_id: &str,
@@ -3114,6 +3194,25 @@ fn run_with_options(
         protect_pane: Some(&protect_open_cycle_pane),
         allow_unresolved_pane_assignment: Some(&allow_unresolved_pane_assignment),
     };
+
+    if matches!(auto_start_mode, AutoStartMode::SafePassive)
+        && let Some(target_window) = window
+    {
+        let requested_files = canonical_managed_sync_files(col_args);
+        if let Some(reason) =
+            safe_passive_visible_layout_blockers(tmux, target_window, &requested_files)
+        {
+            eprintln!(
+                "[sync] safe passive sync preserved the current tmux layout because {}",
+                reason
+            );
+            sync_log(&format!(
+                "safe_passive_layout_preserved_protected_visible reason={}",
+                reason
+            ));
+            return Ok(());
+        }
+    }
 
     // Only open-cycle panes are protected during DETACH. This is narrower than the
     // older generic busy-process guard and preserves fail-closed closeout state
@@ -8519,6 +8618,105 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             ordered,
             vec![pane.clone()],
             "safe passive sync should immediately reuse the alive registered pane instead of provisioning a replacement"
+        );
+    }
+
+    #[test]
+    fn safe_passive_sync_preserves_layout_when_attach_would_expand_around_protected_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let doc_a = root.join("tasks/a.md");
+        let doc_b = root.join("tasks/b.md");
+        let doc_c = root.join("tasks/c.md");
+        for (path, session) in [
+            (&doc_a, "sync-preserve-a"),
+            (&doc_b, "sync-preserve-b"),
+            (&doc_c, "sync-preserve-c"),
+        ] {
+            std::fs::write(
+                path,
+                format!(
+                    "---\nagent_doc_session: {session}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let iso = IsolatedTmux::new("sync-safe-passive-protected-grow");
+        let pane_a = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let pane_b = iso.split_window(&pane_a, root, "-dh").unwrap();
+        let target_window = iso.pane_window(&pane_a).unwrap();
+        let pane_c = iso.new_window("test", root).unwrap();
+        let pane_c_window = iso.pane_window(&pane_c).unwrap();
+
+        sessions::register_full_with_cwd(
+            "sync-preserve-a",
+            &pane_a,
+            &doc_a.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &pane_a).unwrap(),
+            &target_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd(
+            "sync-preserve-b",
+            &pane_b,
+            &doc_b.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &pane_b).unwrap(),
+            &target_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd(
+            "sync-preserve-c",
+            &pane_c,
+            &doc_c.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &pane_c).unwrap(),
+            &pane_c_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+
+        let doc_a_content = std::fs::read_to_string(&doc_a).unwrap();
+        crate::cycle_state::start_preflight(&doc_a, Some(&doc_a_content), Some(&doc_a_content))
+            .unwrap();
+
+        run_with_options(
+            &[
+                doc_c.to_string_lossy().to_string(),
+                doc_b.to_string_lossy().to_string(),
+            ],
+            None,
+            Some(doc_c.to_string_lossy().as_ref()),
+            AutoStartMode::SafePassive,
+            &iso,
+        )
+        .unwrap();
+
+        let ordered = iso.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(
+            ordered,
+            vec![pane_a.clone(), pane_b.clone()],
+            "safe passive sync should preserve the current visible layout instead of attaching pane_c beside a protected pane"
+        );
+        assert!(
+            iso.pane_alive(&pane_c),
+            "requested pane should stay alive in its original window"
+        );
+        assert_eq!(
+            iso.pane_window(&pane_c).unwrap(),
+            pane_c_window,
+            "safe passive preserve-layout guard should not move the requested pane into the visible agent-doc window"
         );
     }
 }

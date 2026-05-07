@@ -39,14 +39,32 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:6ecb4c03 -->
+❯ do [#tsum]. spec-test-build-install-commit-push
+### Re: #tsum — gpt-5
+
+Completed `#tsum`.
+
+Implemented context-pack summary refs so cached summary snippets now surface behind stable handles on diff-touched files, test failures, log signals, log file refs, and log symbol/tag-alias family rows. Each `summary_refs` item carries a bounded summary preview plus a concrete `tsift summarize --file ...` or `tsift summarize <symbol>` expansion command. Human context-pack output also prints those summary handles when present.
+
+Updated `SPEC.md` for the new context-pack surface and tightened project-root resolution so child temp repos are not captured by ambient system-temp project markers; this fixed the full test suite in the current environment where `/tmp/.tsift` and `/tmp/.git` already existed.
+
+Verification completed:
+- `cargo test context_pack`
+- `cargo test resolve_project_root_or_canonical_path`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+
+Pushed:
+- `btakita/tsift` `main`: `8f26390` (`feat: surface context-pack summary refs`)
+- parent `agent-loop` `main`: `9e238c8ab` (`chore: update tsift submodule`)
+<!-- agent:boundary:68b6f4c3 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tsum] Extend context-pack/digest surfaces to surface cached symbol/file summaries behind stable handles for touched files, failures, and tag_alias families
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

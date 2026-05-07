@@ -52,10 +52,32 @@ Verification:
 - `cargo build` passed.
 - `make install` passed and installed `agent-doc 0.33.16` plus `libagent_doc-0.33.16.so` locally.
 
+❯ Commit / push:
+❯ - `src/agent-doc`: `dfe6a18` (`fix: fail closed on concurrent closeout prompts`) pushed to `origin/20260422/codex-agent-backend`.
+❯ - parent `agent-loop`: `ce4b8db8f` (`agent-doc: fail closed on concurrent prompts`) pushed to `origin/main` with only the `src/agent-doc` submodule pointer update.
+❯ do [#pfxcours]. spec-test-build-install-commit-push
+### Re: #pfxcours — gpt-5
+
+Implemented `#pfxcours` and marked it done.
+
+What changed:
+- `src/agent-doc/src/write.rs` now repairs the working tree to the same normalized `content_ours` fallback that it saves as the snapshot when IPC sidecar normalization drops required `❯ ` prefixes. This prevents a later commit from capturing plugin-stripped prompt prefixes.
+- The regression now simulates the plugin writing bare sidecar content to disk and asserts both the saved snapshot and working tree keep the prefixed prompt.
+- `src/agent-doc/src/codex_hook.rs` now skips malformed/transient hook session JSON entries while scanning for the latest prompt, fixing the full-suite failure that surfaced during verification.
+- Updated `src/agent-doc/SPEC.md`, `src/agent-doc/specs/07-closeout-commands.md`, and `src/agent-doc/VERSIONS.md`.
+
+Verification:
+- `cargo test normalization_fallback_repairs_bare_content_ours_prompt_prefix -- --exact` passed.
+- `cargo test load_latest_prompt_for_file -- --test-threads=1` passed.
+- Initial `make check` exposed the Codex hook latest-prompt race; after fixing it, `make check` passed clippy plus the full test suite: 1929 unit/bin tests, integration tests, and doc tests.
+- `make version-sync` passed.
+- `cargo build` passed.
+- `make install` passed and installed `agent-doc 0.33.16` plus `libagent_doc-0.33.16.so` locally.
+
 Commit / push:
-- `src/agent-doc`: `dfe6a18` (`fix: fail closed on concurrent closeout prompts`) pushed to `origin/20260422/codex-agent-backend`.
-- parent `agent-loop`: `ce4b8db8f` (`agent-doc: fail closed on concurrent prompts`) pushed to `origin/main` with only the `src/agent-doc` submodule pointer update.
-<!-- agent:boundary:16d05fdb -->
+- `src/agent-doc`: `189c91d` (`fix: repair content_ours prefix fallback`) pushed to `origin/20260422/codex-agent-backend`.
+- parent `agent-loop`: `0e2baa9c5` (`agent-doc: repair content_ours prefix fallback`) pushed to `origin/main` with only the `src/agent-doc` submodule pointer update.
+<!-- agent:boundary:ddd916e5 -->
 <!-- /agent:exchange -->
 ###
 
@@ -83,7 +105,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pfxcours] content_ours fallback strips ❯ prefix from user prompts — plan: tasks/agent-doc/plan-content-ours-prefix-strip.md
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.

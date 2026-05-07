@@ -35,6 +35,7 @@ Active backlog:
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - 2 more active item(s)
 <!-- agent:boundary:d52ec6e8 -->
+do [#restoc]. spec-test-build-install-commit-push
 <!-- /agent:exchange -->
 ###
 
@@ -49,6 +50,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#oobprompt] Out-of-exchange prompt relocation — preflight does not relocate user prompts typed after the exchange close tag; response lands correctly inside exchange but orphaned prompt text remains outside. Plan: tasks/agent-doc/plan-out-of-exchange-prompt-relocation.md
 - [ ] [#restoc] [recommended] Add a lightweight live+archive exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent sections on demand instead of relying only on the fixed recent-turn window.
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.

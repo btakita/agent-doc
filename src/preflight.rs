@@ -290,6 +290,34 @@ fn push_unique_prompt_bearing_changes(
     }
 }
 
+fn relocate_out_of_exchange_prompt_before_diff(
+    file: &Path,
+    doc_content: &str,
+) -> Result<Option<String>> {
+    let (frontmatter, _) = frontmatter::parse(doc_content)
+        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
+    if !frontmatter.resolve_mode().is_template() {
+        return Ok(None);
+    }
+
+    let Some(mut repaired) = crate::template::repair_prompt_tail_outside_exchange(doc_content)?
+    else {
+        return Ok(None);
+    };
+
+    if let Some(snapshot_content) = snapshot::load(file)? {
+        repaired = crate::write::normalize_user_prompts_in_exchange_safe(
+            &repaired,
+            &repaired,
+            &snapshot_content,
+            file,
+        );
+        repaired = crate::write::normalize_template_structure_or_fail(&repaired, file)?;
+    }
+
+    Ok((repaired != doc_content).then_some(repaired))
+}
+
 fn tracked_work_component_fingerprint(
     content: &str,
 ) -> Result<(Option<String>, Option<String>, Vec<String>)> {
@@ -851,7 +879,7 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Step 1: Recover orphaned pending responses.
     eprintln!("[preflight] step 1: repair");
-    let recovered = recovered_prior
+    let mut recovered = recovered_prior
         || match repair::run(file) {
             Ok(outcome) => outcome.repaired(),
             Err(e) => {
@@ -905,6 +933,24 @@ pub fn run(file: &Path) -> Result<()> {
     // Step 2b/2c: Save the baseline after commit so response merges start from
     // the actual visible document. Preflight no longer auto-compacts exchanges.
     let baseline_file = save_baseline_file(file);
+
+    if let Some(repaired_doc) =
+        relocate_out_of_exchange_prompt_before_diff(file, &std::fs::read_to_string(file)?)?
+    {
+        crate::write::atomic_write_pub(file, &repaired_doc)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "preflight_repair_prompt_tail_outside_exchange file={}",
+                file.display()
+            ),
+        );
+        eprintln!(
+            "[preflight] repaired prompt tail outside exchange in {}",
+            file.display()
+        );
+        recovered = true;
+    }
 
     // Step 2d: Cross-document sweep (Fix 5) — commit any other tracked docs in the same
     // project that have uncommitted snapshot content. Turns preflight into a catch-all
@@ -3292,6 +3338,88 @@ mod tests {
         assert!(
             !head_text.contains("do #statusws. spec-test-build-install-commit-push"),
             "repair/commit must not silently commit the live prompt:\n{head_text}"
+        );
+    }
+
+    #[test]
+    fn preflight_relocates_out_of_exchange_prompt_without_swallowing_live_diff() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "do [#oobprompt]. spec-test-build-install-commit-push\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted,
+            "preflight should still open a response cycle for the relocated prompt"
+        );
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        let exchange_close = file_after.find("<!-- /agent:exchange -->").unwrap();
+        let prompt = file_after
+            .find("❯ do [#oobprompt]. spec-test-build-install-commit-push")
+            .unwrap();
+        let gap_marker = file_after.find("\n###\n\n").unwrap();
+        assert!(
+            prompt < exchange_close,
+            "preflight should move the prompt back inside exchange:\n{file_after}"
+        );
+        assert!(
+            gap_marker > exchange_close,
+            "preflight should leave the gap marker outside exchange:\n{file_after}"
+        );
+        assert!(
+            !file_after.contains(
+                "\n<!-- /agent:exchange -->\n\ndo [#oobprompt]. spec-test-build-install-commit-push"
+            ),
+            "out-of-exchange prompt should not remain in the gap:\n{file_after}"
+        );
+
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snapshot_after.contains("oobprompt"),
+            "snapshot must not absorb the live prompt during preflight relocation:\n{snapshot_after}"
         );
     }
 

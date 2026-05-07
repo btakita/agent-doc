@@ -352,6 +352,15 @@ fn preamble_belongs_to_exchange(preamble: &str) -> bool {
     saw_nonempty
 }
 
+fn is_non_exchange_section_heading(trimmed: &str) -> bool {
+    let hashes = trimmed.chars().take_while(|&ch| ch == '#').count();
+    if hashes == 0 || hashes > 3 || is_exchange_turn_heading(trimmed) {
+        return false;
+    }
+    let rest = &trimmed[hashes..];
+    rest.is_empty() || rest.starts_with(' ')
+}
+
 fn conversation_tail_start_in_range(
     doc: &str,
     search_start: usize,
@@ -398,7 +407,67 @@ fn conversation_tail_start_in_range(
     }
 }
 
-fn escaped_conversation_range_outside_exchange(
+fn prompt_tail_range_in_region(
+    doc: &str,
+    search_start: usize,
+    search_end: usize,
+) -> Option<(usize, usize)> {
+    let code_ranges = component::find_code_ranges(doc);
+    let in_code = |pos: usize| {
+        code_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end)
+    };
+
+    let mut prompt_start = None;
+    let mut prompt_end = None;
+    let mut offset = 0usize;
+
+    for line in doc.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
+        if line_start < search_start || in_code(line_start) {
+            continue;
+        }
+        if line_start >= search_end {
+            break;
+        }
+
+        let trimmed = line.trim();
+        if prompt_start.is_none() {
+            if trimmed.is_empty()
+                || trimmed == "###"
+                || trimmed.starts_with("<!--")
+                || trimmed.starts_with("[//]:")
+                || is_non_exchange_section_heading(trimmed)
+            {
+                continue;
+            }
+            if text_line_looks_like_prompt_target(trimmed) {
+                prompt_start = Some(line_start);
+                prompt_end = Some(offset);
+                continue;
+            }
+            return None;
+        }
+
+        if trimmed.starts_with("<!--")
+            || trimmed.starts_with("[//]:")
+            || trimmed == "###"
+            || is_non_exchange_section_heading(trimmed)
+        {
+            break;
+        }
+        prompt_end = Some(offset);
+    }
+
+    match (prompt_start, prompt_end) {
+        (Some(start), Some(end)) if start < end => Some((start, end)),
+        _ => None,
+    }
+}
+
+fn escaped_prompt_range_outside_exchange(
     doc: &str,
     components: &[component::Component],
     exchange: &component::Component,
@@ -412,18 +481,57 @@ fn escaped_conversation_range_outside_exchange(
     let mut search_start = exchange.close_end;
     for component in trailing_components {
         if search_start < component.open_start
-            && let Some(start) =
-                conversation_tail_start_in_range(doc, search_start, component.open_start)
+            && let Some(range) =
+                prompt_tail_range_in_region(doc, search_start, component.open_start)
         {
-            return Some((start, component.open_start));
+            return Some(range);
         }
         search_start = search_start.max(component.close_end);
     }
 
     if search_start < doc.len()
-        && let Some(start) = conversation_tail_start_in_range(doc, search_start, doc.len())
+        && let Some(range) = prompt_tail_range_in_region(doc, search_start, doc.len())
     {
-        return Some((start, doc.len()));
+        return Some(range);
+    }
+
+    None
+}
+
+fn escaped_conversation_range_outside_exchange(
+    doc: &str,
+    components: &[component::Component],
+    exchange: &component::Component,
+) -> Option<(usize, usize)> {
+    if let Some(range) = escaped_prompt_range_outside_exchange(doc, components, exchange) {
+        return Some(range);
+    }
+
+    let mut trailing_components: Vec<&component::Component> = components
+        .iter()
+        .filter(|c| c.open_start >= exchange.close_end)
+        .collect();
+    trailing_components.sort_by_key(|c| c.open_start);
+
+    let mut search_start = exchange.close_end;
+    for component in trailing_components {
+        if search_start < component.open_start {
+            if let Some(start) =
+                conversation_tail_start_in_range(doc, search_start, component.open_start)
+            {
+                return Some((start, component.open_start));
+            }
+        }
+        search_start = search_start.max(component.close_end);
+    }
+
+    if search_start < doc.len() {
+        if let Some(range) = prompt_tail_range_in_region(doc, search_start, doc.len()) {
+            return Some(range);
+        }
+        if let Some(start) = conversation_tail_start_in_range(doc, search_start, doc.len()) {
+            return Some((start, doc.len()));
+        }
     }
 
     None
@@ -546,6 +654,54 @@ pub fn repair_conversation_tail_outside_exchange(doc: &str) -> Result<Option<Str
         .iter()
         .find(|c| c.name == "exchange")
         .context("exchange component disappeared during repair")?;
+    let escaped = tail.trim();
+    if escaped.is_empty() {
+        return Ok(None);
+    }
+
+    let mut repaired = if let Some(boundary_id) = find_boundary_in_component(prefix, exchange) {
+        exchange.append_with_boundary(prefix, escaped, &boundary_id)
+    } else {
+        let new_content = if exchange.content(prefix).trim().is_empty() {
+            format!("{escaped}\n")
+        } else {
+            format!("{}\n{}\n", exchange.content(prefix).trim_end(), escaped)
+        };
+        exchange.replace_content(prefix, &new_content)
+    };
+
+    repaired.push_str(suffix);
+    Ok(Some(repaired))
+}
+
+/// Repair only prompt-target drift that escaped below `<!-- /agent:exchange -->`
+/// while leaving later markdown section separators outside the exchange block.
+pub fn repair_prompt_tail_outside_exchange(doc: &str) -> Result<Option<String>> {
+    let components = component::parse(doc).context("failed to parse components")?;
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return Ok(None);
+    };
+
+    let Some((tail_start, tail_end)) =
+        escaped_prompt_range_outside_exchange(doc, &components, exchange)
+    else {
+        return Ok(None);
+    };
+
+    let tail = &doc[tail_start..tail_end];
+    if !tail_is_safe_exchange_content(tail) {
+        anyhow::bail!(
+            "prompt content escaped `agent:exchange`, but the trailing document structure is ambiguous"
+        );
+    }
+
+    let prefix = &doc[..tail_start];
+    let suffix = &doc[tail_end..];
+    let prefix_components = component::parse(prefix).context("failed to parse repair prefix")?;
+    let exchange = prefix_components
+        .iter()
+        .find(|c| c.name == "exchange")
+        .context("exchange component disappeared during prompt repair")?;
     let escaped = tail.trim();
     if escaped.is_empty() {
         return Ok(None);
@@ -3688,6 +3844,46 @@ Existing answer.
     }
 
     #[test]
+    fn repair_conversation_tail_outside_exchange_moves_prompt_before_gap_inside_exchange() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "do [#oobprompt]. spec-test-build-install-commit-push\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = repair_conversation_tail_outside_exchange(doc)
+            .unwrap()
+            .expect("repair should apply");
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        let prompt = repaired
+            .find("do [#oobprompt]. spec-test-build-install-commit-push")
+            .unwrap();
+        let gap_marker = repaired.find("\n###\n\n").unwrap();
+        let backlog = repaired.find("<!-- agent:backlog -->").unwrap();
+
+        assert!(
+            prompt < exchange_close,
+            "prompt should move back inside exchange:\n{repaired}"
+        );
+        assert!(
+            gap_marker > exchange_close,
+            "plain gap marker should remain outside exchange:\n{repaired}"
+        );
+        assert!(
+            backlog > exchange_close,
+            "backlog should remain outside exchange:\n{repaired}"
+        );
+    }
+
+    #[test]
     fn repair_duplicate_exchange_close_tail_moves_escaped_response_back_inside_exchange() {
         let doc = concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -3947,6 +4143,30 @@ Existing answer.
             "- [ ] keep me\n",
             "<!-- /agent:backlog -->\n"
         );
+        let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("outside `<!-- agent:exchange -->`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_fails_on_prompt_before_gap_marker() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "do [#oobprompt]. spec-test-build-install-commit-push\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
         let err = guard_no_conversation_tail_outside_exchange(doc).unwrap_err();
         assert!(
             err.to_string()

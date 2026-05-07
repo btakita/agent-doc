@@ -34,7 +34,14 @@ Active backlog:
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - 2 more active item(s)
-<!-- agent:boundary:445dcd15 -->
+❯ do [#oobprompt]. spec-test-build-install-commit-push
+### Re: #oobprompt — gpt-5
+Implemented the out-of-exchange prompt relocation fix from [tasks/agent-doc/plan-out-of-exchange-prompt-relocation.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-out-of-exchange-prompt-relocation.md). `template.rs` now isolates prompt-target blocks that land after `&lt;!-- /agent:exchange --&gt;` but before plain section breaks like `###` / `## Pending`, and `preflight.rs` now relocates that prompt back inside `agent:exchange` before diffing without absorbing it into the snapshot.
+
+Added regressions for the shared template guard/repair path and for preflight's prompt-preserving relocation. `cargo test`, `cargo build`, and `cargo install --path . --force` all passed in `src/agent-doc`.
+
+Pushed code repo commit `9812524` to `origin/20260422/codex-agent-backend` in `src/agent-doc`, then advanced the root repo to `8be748b10` on `origin/main`.
+<!-- agent:boundary:3b10f466 -->
 <!-- /agent:exchange -->
 ###
 
@@ -49,7 +56,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#oobprompt] Out-of-exchange prompt relocation — preflight does not relocate user prompts typed after the exchange close tag; response lands correctly inside exchange but orphaned prompt text remains outside. Plan: tasks/agent-doc/plan-out-of-exchange-prompt-relocation.md
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

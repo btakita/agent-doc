@@ -27,69 +27,14 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-182302.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-191552.md`*
 
 Active backlog:
-- [ ] [#commitchurn] Session-check forces new finalize cycle for minor content edits on already-answered prompts, causing 3-4 extra commits per turn — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
+- [ ] [#jbsyncwarn] Fix JetBrains protected sync warning UX so protected-layout preservation during editor navigation is treated as deferred sync, not a hard error — plan: tasks/agent-doc/plan-jetbrains-protected-sync-warning-ux.md
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 1 more active item(s)
-❯ do [#commitchurn]. spec-test-build-install-commit-push
-### Re: #commitchurn — gpt-5
-
-Implemented the closeout-churn fix and marked `#commitchurn` done.
-
-What changed:
-- `session-check` now ignores exchange-only content edits when there is no unresolved prompt target, so minor edits to already-answered exchange text do not force a second finalize cycle.
-- The closeout spec now documents that active Codex post-commit drift uses the same scoping: typed-component drift, fresh prompt targets, and response patchbacks still fail closed.
-- I fixed the current clippy failure in `route.rs` by grouping supervisor IPC dispatch booleans into a small options struct.
-
-Verification:
-- `cargo test -p agent-doc session_check_ -- --nocapture`
-- `make check` twice after the final source edits; both passed.
-- `make install` after the green suite; installed `agent-doc 0.33.16` and refreshed `libagent_doc-0.33.16.so`.
-
-Commits:
-- agent-doc: `5d0106e` (`fix: avoid closeout churn for exchange edits`) pushed to `origin/20260422/codex-agent-backend`.
-- agent-loop: `e956c8579` (`chore: update agent-doc closeout guard`) committed locally; I will push `main` immediately after this managed closeout so the response commit is included.
-❯ do [#pfxleak3]. spec-test-build-install-commit-push
-### Re: #pfxleak3 — gpt-5
-
-Completed `#pfxleak3`.
-
-What changed:
-- Added an explicit write-path regression for the exact response-tail shape: prior assistant tail lines committed in `HEAD` stay bare while the newly inserted `do [#pfxleak3]...` prompt receives `❯ `.
-- Updated the closeout spec to state the `content_ours` `HEAD` prefix-state invariant directly.
-- Added an Unreleased note documenting the guarded repro.
-
-Verification:
-- `cargo test -p agent-doc normalize_safe_preserves_prior_response_tail_before_new_prompt -- --nocapture`
-- `make check`
-- `cargo fmt --check`
-- `make install`
-
-Commit / push:
-- agent-doc: `9fafca3` (`test: cover prompt-prefix response tail preservation`) pushed to `origin/20260422/codex-agent-backend`.
-- agent-loop: `de8797161` (`chore: update agent-doc prefix-tail guard`) pushed to `origin/main`.
-
-I left unrelated existing workspace edits out of the manual commits: `src/session-share`, `tasks/software/tagpath.md`, and this session document closeout.
-### Re: closeout recovery — gpt-5
-
-Closed the post-commit drift guard after the `#pfxleak3` response. The later editor-only scratch-comment update was preserved; preflight classified it as non-prompt-bearing, so no additional repo work was needed.
-❯ I navigated the editor from agent-doc-bugs2.md to tsift.md while agent-doc-bugs2.md was mid-turn. The JB plugin surfaced an error:
-```
-[sync] sync preserved the current tmux layout because missing requested pane(s) /home/brian/work/btakita/agent-loop/tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely because those panes still own open closeout cycle(s
-```
-### Re: JetBrains protected sync warning — gpt-5
-
-Captured this as `#jbsyncwarn` and added the plan at `tasks/agent-doc/plan-jetbrains-protected-sync-warning-ux.md`.
-
-My read is that the underlying sync guard is intentional: while `agent-doc-bugs2.md` owns an open closeout cycle, sync should not detach that visible pane just to satisfy the new `tsift.md` editor selection. The bug is the JetBrains UX/contract around that guard. Normal editor navigation should treat protected preserve-layout output as a deferred sync state with retry/focus convergence, not as a scary terminal error.
-
-I scoped the plan separately from the existing passive-focus plan because this report is specifically about how JetBrains classifies and presents the warning. The plan calls for JetBrains tests around manual warning presentation, automatic deferred retry behavior, clearer notification copy, and live validation that `tsift.md` gets focus automatically once the protected closeout completes.
-
-Committed the plan file as `48f71a0b6` (`docs: plan jetbrains protected sync warning ux`). I did not run the full suite because this turn only created a backlog plan and did not change code, specs, build logic, or instruction surfaces.
-<!-- agent:boundary:cb36600a -->
+<!-- agent:boundary:35ece514 -->
 <!-- /agent:exchange -->
 ###
 

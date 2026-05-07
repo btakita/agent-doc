@@ -34,7 +34,28 @@ Active backlog:
 - [ ] [#pfxcours] content_ours fallback strips ❯ prefix from user prompts — plan: tasks/agent-doc/plan-content-ours-prefix-strip.md
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - 4 more active item(s)
-<!-- agent:boundary:4f650cf8 -->
+❯ do [#concprompt]. spec-test-build-install-commit-push
+### Re: #concprompt — gpt-5
+
+Implemented `#concprompt` and marked it done.
+
+What changed:
+- `src/agent-doc/src/write.rs` now classifies live disk drift against the pre-response baseline before merging the agent response. If a prompt is added after preflight but before `finalize` / `write --commit`, the committed snapshot stays at `content_ours` and the required closeout check sees the prompt as unresolved instead of treating the in-flight response as its answer.
+- Added `finalize_fails_closed_on_concurrent_prompt_added_after_baseline` in `src/agent-doc/tests/finalize_integration.rs`.
+- Updated `src/agent-doc/SPEC.md`, `src/agent-doc/specs/07-closeout-commands.md`, and `src/agent-doc/VERSIONS.md`.
+
+Verification:
+- `cargo test finalize_fails_closed_on_concurrent_prompt_added_after_baseline` passed.
+- `make check` passed clippy, then the parallel full test run failed in tmux-heavy route/resync tests where mock panes did not become ready under concurrent tmux use.
+- `env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test -- --test-threads=1` passed: 1928 unit/bin tests plus all integration tests.
+- `make version-sync` passed.
+- `cargo build` passed.
+- `make install` passed and installed `agent-doc 0.33.16` plus `libagent_doc-0.33.16.so` locally.
+
+Commit / push:
+- `src/agent-doc`: `dfe6a18` (`fix: fail closed on concurrent closeout prompts`) pushed to `origin/20260422/codex-agent-backend`.
+- parent `agent-loop`: `ce4b8db8f` (`agent-doc: fail closed on concurrent prompts`) pushed to `origin/main` with only the `src/agent-doc` submodule pointer update.
+<!-- agent:boundary:16d05fdb -->
 <!-- /agent:exchange -->
 ###
 
@@ -62,7 +83,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#concprompt] concurrent user edits during response cycle bypass prompt detection + session-check — plan: tasks/agent-doc/plan-concurrent-edit-prompt-miss.md
 - [ ] [#pfxcours] content_ours fallback strips ❯ prefix from user prompts — plan: tasks/agent-doc/plan-content-ours-prefix-strip.md
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.

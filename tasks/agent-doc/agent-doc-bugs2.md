@@ -109,8 +109,11 @@ Nested repositories committed and pushed:
 Parent repo committed and pushed:
 - `agent-loop` `3b6ec9772` (`chore: commit pending workspace changes`) to `origin/main`
 
-I did not run a verification suite for this turn; the request was commit/push of existing uncommitted work, and I did not modify code as part of the commit aggregation.
-<!-- agent:boundary:e0106219 -->
+❯ I did not run a verification suite for this turn; the request was commit/push of existing uncommitted work, and I did not modify code as part of the commit aggregation.
+### Re: post-commit boundary normalization — gpt-5
+
+Closed the post-commit boundary normalization drift from the previous `#commit-push` closeout. No additional repository changes were needed beyond the commits and pushes already listed above.
+<!-- agent:boundary:6623483b -->
 <!-- /agent:exchange -->
 ###
 
@@ -122,6 +125,17 @@ When I run `Sync Tmux Layout` on monsterrodholders.md, the JB plugin surfaces an
 This seems to happen when dev.md is in an active turn. When the turn is over, the autosync works.
 Why can't dev.md be detached safely? I like the visibility into the error.
 spec-test-build-install-commit-push
+---
+The agent-doc changes the agent:boundary id, a separate:
+```
+• Ran agent-doc repair /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  └ Error: [session-check] INTERRUPTED: cycle `cycle-1778171646764` is `committed` (commit_success), but the active
+    Codex session changed this document after the last committed closeout without reopening the binary-owned write/
+    … +2 lines (ctrl + t to view transcript)
+    home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Reopen closeout for this turn or let the Stop
+    hook recover it from the final assistant message.
+```
+
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
 ---

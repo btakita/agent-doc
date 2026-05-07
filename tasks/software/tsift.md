@@ -62,14 +62,38 @@ Commits:
 - parent repo submodule pointer: `1930283fa chore: update tsift submodule`
 
 After this agent-doc closeout commit, I will push the parent repo branch so the session document and submodule pointer are on `origin/main` as well.
-<!-- agent:boundary:522d5b85 -->
+❯ do [#tfam]. spec-test-build-install-commit-push
+### Re: do #tfam — gpt-5
+
+Completed `#tfam`.
+
+Replaced tsift's local tag normalization helpers with `tagpath` v0.6.1 APIs. `src/index.rs` now uses `tagpath::query::normalize_query_tags` for free-text search queries and `tagpath::family::generate_family` for canonical symbol tags. `src/main.rs` now derives preview `tag_alias` values and search family grouping keys from `tagpath::family`, so search, explain, session-review, and context-pack share one canonical family model.
+
+Updated `SPEC.md`, `VERSIONS.md`, and the `tagpath` dependency requirement to `0.6.1`.
+
+Verification:
+- `cargo test compute_tags_splits_agent_style_phrase_queries`
+- `cargo test symbol_search_matches_agent_style_phrase_queries`
+- `cargo test search_budget_report_groups_repeated_symbols_by_canonical_tag_family`
+- `cargo test explain_budget_report_limits_edges_and_members`
+- `cargo test session_review_next_context_budget_limits_lists`
+- `cargo test context_pack_diff_preview_limits_files_and_symbols`
+- `cargo test context_pack_diff_preview_attaches_tag_ontology_refs`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.41`
+
+Commits:
+- `src/tsift`: `c69c57f feat: use tagpath family APIs for previews` pushed to `btakita/tsift main`
+- parent repo submodule pointer: `8f81ce9bd chore: update tsift submodule` pushed to `btakita/agent-loop main`
+<!-- agent:boundary:6cb88eb0 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tfam] Replace tsift's local tag alias/query normalization helpers with tagpath v0.6.1 family/query APIs so search, explain, session-review, and context-pack share one canonical family model.
 - [ ] [#tfxt] Add a tsift-side fixture-backed token-savings regression test using tagpath's fixtures/tsift-token-savings.json for search, explain, and session-review previews before expanding the contract to context-pack.
 <!-- /agent:backlog -->
 

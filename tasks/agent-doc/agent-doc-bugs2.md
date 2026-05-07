@@ -73,11 +73,19 @@ Commit / push:
 - agent-loop: `de8797161` (`chore: update agent-doc prefix-tail guard`) pushed to `origin/main`.
 
 I left unrelated existing workspace edits out of the manual commits: `src/session-share`, `tasks/software/tagpath.md`, and this session document closeout.
-<!-- agent:boundary:9e6ad3b7 -->
+### Re: closeout recovery — gpt-5
+
+Closed the post-commit drift guard after the `#pfxleak3` response. The later editor-only scratch-comment update was preserved; preflight classified it as non-prompt-bearing, so no additional repo work was needed.
+<!-- agent:boundary:ba6aa067 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+I navigated the editor from agent-doc-bugs2.md to tsift.md while agent-doc-bugs2.md was mid-turn. The JB plugin surfaced an error:
+```
+[sync] sync preserved the current tmux layout because missing requested pane(s) /home/brian/work/btakita/agent-loop/tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely because those panes still own open closeout cycle(s
+```
+---
 "❯ Commit / push:" should not have the `❯ ` prefix since this was the agent response. #agent-doc-bug
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex

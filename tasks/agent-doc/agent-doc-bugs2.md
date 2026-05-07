@@ -113,7 +113,38 @@ I added the follow-up at the top of the backlog as `#syncfocuscard`:
 Top backlog item: `#syncfocuscard`.
 
 No test/build run was needed for this cycle because this was a plan/backlog capture only.
-<!-- agent:boundary:7a2df678 -->
+❯ do [#syncfocuscard]. spec-test-build-install-commit-push
+### Re: #syncfocuscard — gpt-5
+
+Completed `#syncfocuscard`.
+
+Changed `agent-doc sync` so protected open-cycle panes no longer let manual or passive sync expand a two-editor-pane projection into extra visible tmux panes. When satisfying the requested projection would attach a missing pane around an already-visible protected pane, sync now preserves the current visible cardinality and warns instead. Preserve-layout focus handoffs also print `safe_passive_layout_preserved_reselected_focus` to command output, and the JetBrains automatic sync planner treats that proof as applied instead of retrying a selection that already focused the requested visible pane.
+
+Changed:
+- `src/agent-doc/src/sync.rs`
+- `src/agent-doc/src/template.rs` (clippy-only cleanup required by full verification)
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/EditorTabSyncListenerTest.kt`
+- `src/agent-doc/editors/jetbrains/gradle.properties` (`0.2.95`)
+- `src/agent-doc/editors/SPEC.md`
+- `src/agent-doc/editors/PLUGIN-SPEC.md`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification passed:
+- focused Rust sync regressions
+- focused JetBrains planner regression
+- `cargo check --all-targets`
+- `cargo clippy -- -D warnings`
+- `cargo test -- --test-threads=1` (1912 unit tests, integration tests, doctests)
+- `./gradlew test buildPlugin signPlugin`
+- `cargo build --release`
+- `cargo install --path . --force`
+- `agent-doc lib-install`
+- `agent-doc plugin install --local jetbrains` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+
+Committed and pushed `btakita/agent-doc` `a63e8c9` and `btakita/agent-loop` `973ffb0bb`.
+<!-- agent:boundary:c8f946ba -->
 <!-- /agent:exchange -->
 ###
 
@@ -143,7 +174,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#syncfocuscard] Fix Sync Tmux Layout pane cardinality and passive focus handoff for two-editor-pane JetBrains layouts. Plan: tasks/agent-doc/plan-sync-layout-cardinality-focus-handoff.md
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

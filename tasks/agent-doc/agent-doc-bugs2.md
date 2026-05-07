@@ -73,7 +73,7 @@ The failure you saw sounds like an ownership/reconciliation bug: agent-doc belie
 That said, I would not jump straight to a long-lived daemon as the first fix. The smaller architectural target is a single-owner actor for routing/session state, even if it is initially process-local or file-lock-backed. If the tsift case came from multiple entrypoints independently reconciling tmux panes, then a daemon is one implementation of the right principle. The principle is more important: there should be one writer deciding the desired tmux topology, and every CLI/editor/harness trigger should submit intent to that writer instead of mutating pane state directly.
 
 I added a follow-up backlog item to investigate the `tsift.md` three-pane state specifically and decide whether the repair belongs in tmux-router pane reconciliation, agent-doc session ownership, or a coordinator/actor model.
-<!-- agent:boundary:51033f91 -->
+<!-- agent:boundary:1f033151 -->
 <!-- /agent:exchange -->
 ###
 
@@ -101,6 +101,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#concprompt] concurrent user edits during response cycle bypass prompt detection + session-check — plan: tasks/agent-doc/plan-concurrent-edit-prompt-miss.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#pfxcours] content_ours fallback strips ❯ prefix from user prompts — plan: tasks/agent-doc/plan-content-ours-prefix-strip.md

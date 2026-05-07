@@ -178,14 +178,51 @@ Changes:
 -  documents the new search behavior, and regression coverage was added in .
 
 Verification:
-- Passed: 
+❯ - Passed: 
+❯ - Passed focused tests:
+❯   - 
+❯   - 
+❯   - 
+❯ - Passed: 
+❯ - Passed: 
+❯ - === instruction-files: clippy + test === is still red on the same eight pre-existing failures already present in this session context:
+❯   - 
+❯   - 
+❯   - 
+❯   - 
+❯   - 
+❯   - 
+❯   - 
+❯   -
+### Re: #tgqn repair — gpt-5
+
+The previous closeout body was shell-mangled during finalize. Correct result:
+
+Implemented in `src/tsift` and pushed on `main` as `541b6f4`.
+
+Changes:
+- `tsift search` now splits free-text agent queries into `tagpath`-style tags when the raw parse collapses to one whitespace-delimited phrase, normalizes role words like `getter`, `setter`, and `validator`, and hoists trailing role tags before symbol matching.
+- Queries such as `user profile getter` and `profile user get` now resolve against identifiers like `get_user_profile` and `getUserProfile` before lexical or hybrid fallback.
+- `SPEC.md` documents the new search behavior, and regression coverage was added in `src/index.rs`.
+
+Verification:
+- Passed: `cargo fmt`
 - Passed focused tests:
-  - 
-- Passed: 
-- === instruction-files: clippy + test === is still red on the same eight pre-existing failures already present in this session context:
-  - 
-  -
-<!-- agent:boundary:cef61fb2 -->
+  - `cargo test compute_tags_splits_agent_style_phrase_queries`
+  - `cargo test symbol_search_matches_agent_style_phrase_queries`
+  - `cargo test symbol_search_cross_convention`
+- Passed: `cargo build`
+- Passed: `cargo install --path . --force`
+- `make check` is still red on the same eight pre-existing failures already present in this session context:
+  - `diff_digest::tests::diff_digest_cached_uses_index_snapshot_instead_of_working_tree`
+  - `diff_digest::tests::diff_digest_revision_uses_commit_snapshots`
+  - `tests::community_cmd_no_index_errors`
+  - `tests::explain_cmd_no_index_errors`
+  - `tests::graph_cmd_no_index_errors`
+  - `tests::lint_finds_entities_from_project_root_index_db`
+  - `tests::path_cmd_no_index_errors`
+  - `tests::search_timeout_message_reports_missing_index_as_rebuild_needed`
+<!-- agent:boundary:5975cb07 -->
 <!-- /agent:exchange -->
 
 ## Pending / Not Built

@@ -39,14 +39,30 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:ec8ab788 -->
+❯ do [#tfxt]. spec-test-build-install-commit-push
+### Re: #tfxt token-savings fixture — gpt-5
+
+Completed `#tfxt`.
+
+- Added a compiled CLI regression in `src/tsift/tests/exit_code.rs` that runs `tsift token-savings --fixture ../tagpath/fixtures/tsift-token-savings.json --fail-under --json` against tagpath's shared fixture.
+- The test locks the current fixture-backed preview contract to exactly `search`, `explain`, and `session-review`, with every case passing and a positive estimated token delta.
+- Updated `src/tsift/SPEC.md` to document that this fixture-backed gate intentionally excludes `context-pack` until its thresholds are added to the shared fixture.
+
+Verification passed:
+
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- installed `tsift token-savings --fixture ../tagpath/fixtures/tsift-token-savings.json --fail-under --json`
+
+Committed and pushed `src/tsift` `main`: `691fac6 test: cover token savings fixture`.
+<!-- agent:boundary:70793c27 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tfxt] Add a tsift-side fixture-backed token-savings regression test using tagpath's fixtures/tsift-token-savings.json for search, explain, and session-review previews before expanding the contract to context-pack.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

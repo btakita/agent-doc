@@ -52,6 +52,11 @@ Combine any number of flags in one `agent-doc write` call:
 | `--pending-gate <id>` | Transition to `[/]` gated state. Reaper skips gated items. |
 | `--pending-ungate <id>` | Return `[/]` to `[ ]`. |
 
+For every id-based pending flag except `--pending-add`, the binary normalizes
+the id by trimming whitespace, stripping one optional leading `#`, and
+lowercasing before lookup. `--pending-done 4qja` and `--pending-done #4QJA`
+therefore target the same tracked item.
+
 `agent:icebox` is not populated by `--pending-add`. When the response needs to
 rewrite the icebox component, use a template patch block in the response body:
 `<!-- replace:icebox --> ... <!-- /replace:icebox -->`.

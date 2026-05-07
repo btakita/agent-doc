@@ -131,7 +131,34 @@ The clean model is:
 - lazy self-exit only after all clients are gone and the idle grace window passes
 
 That gives convenience without giving up the single-owner coordination property.
-<!-- agent:boundary:6a7a8dd2 -->
+❯ Would 0mq be beneficial or should we have a bespoke actor implementation?
+### Re: ZeroMQ vs bespoke actor — gpt-5
+
+I would start with a bespoke coordinator actor, not ZeroMQ.
+
+ZeroMQ is useful when the messaging topology is the hard part: multiple peers, brokerless fanout, backpressure patterns, cross-host routing, language boundaries, or high-throughput pub/sub. The agent-doc coordinator problem is narrower. We want one local authority, a few local supervisor clients, request/response commands, heartbeats, and durable recovery through SQLite. Pulling in ZeroMQ would add another runtime dependency and another set of delivery semantics to understand without removing the core correctness work.
+
+A small bespoke actor can be simpler and more reliable here:
+
+- one coordinator event loop owns mutable session and tmux state
+- clients talk to it over a Unix domain socket, or named pipe fallback where needed
+- messages are structured JSON or a compact framed format
+- every command has an idempotency key and a typed response
+- SQLite persists state, leases, launch mode, and command outcomes
+- the coordinator serializes topology decisions in memory
+
+That keeps the correctness model local: the database handles durability; the actor handles ordering; the socket handles transport. There is no need to make supervisors understand a broader messaging framework.
+
+I would only revisit ZeroMQ if the design grows into one of these shapes:
+
+- multiple coordinator processes need to exchange events
+- remote agents across machines need first-class support
+- high-volume pub/sub becomes central to the UI
+- we need language-neutral clients beyond what a simple socket protocol gives us
+- backpressure/fanout patterns become more complex than request/response plus watch events
+
+For now, the reliable/simple path is bespoke actor plus explicit protocol boundaries. The protocol should be designed cleanly enough that the transport can change later, but the first implementation should avoid a messaging dependency until there is a concrete topology that needs it.
+<!-- agent:boundary:0518a839 -->
 <!-- /agent:exchange -->
 ###
 

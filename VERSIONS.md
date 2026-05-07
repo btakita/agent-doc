@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains protected-layout sync warnings now identify the blocking pane.** The live `tasks/software/tsift.md` replay showed the backend was correctly preserving pane `%208` while its `preflight_started` closeout was open, but the JetBrains notification collapsed that into a generic "another pane" warning. `SyncLayoutAction` now parses the protected pane list from sync output and includes the pane id, phase, and document path in the visible warning, with editor spec/test coverage. Bumped the JetBrains plugin build version to `0.2.99`.
+
 - **Prefixed assistant response labels no longer reopen committed cycles.** The prompt-target classifier now normalizes optional `❯`, list markers, and markdown emphasis before checking known assistant labels, so lines like `❯ **Verification:** ...` and `❯ **Commit / push:**` stay response prose while real prefixed follow-ups still start prompt runs. JetBrains prefix repair mirrors the same ordering, with Rust/session-check and editor regressions. Bumped the JetBrains plugin build version to `0.2.98`. This closes `#respfx` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Codex latest-prompt lookup now skips malformed hook-state entries.** `codex_hook.rs` no longer lets one unreadable or partially written session JSON hide a valid newer prompt for the same file, which keeps parallel hook-state churn from making `load_latest_prompt_for_file` return `None`. Added a direct regression and updated the shared spec.

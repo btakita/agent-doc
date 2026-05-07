@@ -28,6 +28,9 @@ class SyncLayoutAction : AnAction() {
         internal const val PRESERVED_LAYOUT_DEFERRED_WARNING =
             "Sync deferred: another visible agent-doc pane is mid-closeout, so the current tmux layout was preserved. Try again after that closeout finishes."
 
+        private val PROTECTED_PANES_PATTERN =
+            Regex("""visible protected pane\(s\) (.+?) cannot be detached safely""")
+
         internal fun isPreservedLayoutOutput(output: String): Boolean =
             output
                 .lineSequence()
@@ -37,9 +40,35 @@ class SyncLayoutAction : AnAction() {
                         it.contains(SAFE_PASSIVE_PRESERVED_LAYOUT_MARKER)
                 }
 
+        internal fun preservedLayoutDetails(output: String): String? {
+            val markerLine = output
+                .lineSequence()
+                .map { it.trim() }
+                .firstOrNull {
+                    it.contains(PRESERVED_LAYOUT_MARKER) ||
+                        it.contains(SAFE_PASSIVE_PRESERVED_LAYOUT_MARKER)
+                }
+                ?: return null
+            val protectedPaneText = PROTECTED_PANES_PATTERN.find(markerLine)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?: return null
+            val protectedPanes = protectedPaneText
+                .split(",")
+                .mapNotNull { raw ->
+                    val parts = raw.trim().split(":", limit = 3)
+                    if (parts.size != 3) return@mapNotNull null
+                    val (pane, phase, file) = parts
+                    "$pane $phase $file"
+                }
+            return protectedPanes.takeIf { it.isNotEmpty() }?.joinToString("; ")
+        }
+
         internal fun preservedLayoutWarning(output: String): String? =
             if (isPreservedLayoutOutput(output)) {
-                PRESERVED_LAYOUT_DEFERRED_WARNING
+                preservedLayoutDetails(output)?.let { details ->
+                    "$PRESERVED_LAYOUT_DEFERRED_WARNING Blocked pane(s): $details"
+                } ?: PRESERVED_LAYOUT_DEFERRED_WARNING
             } else {
                 null
             }

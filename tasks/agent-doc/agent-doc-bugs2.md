@@ -40,7 +40,19 @@ Active backlog:
 
 ### Re: post-commit boundary normalization — gpt-5
 
-Closed the post-commit boundary normalization drift from the previous `#commit-push` closeout. No additional repository changes were needed beyond the commits and pushes already listed above.
+❯ Closed the post-commit boundary normalization drift from the previous `#commit-push` closeout. No additional repository changes were needed beyond the commits and pushes already listed above.
+### Re: autocompaction without opt-in — gpt-5
+
+Fixed. The forced compaction was not coming from document frontmatter; it was coming from `agent-doc plan`, which converted repeated `commit_noop` session-accretion churn into a mandatory compact handoff. I removed that handoff, so closeout churn remains advisory unless the prompt or document explicitly asks for compaction.
+
+Updated the plan regression, closeout spec, README, SPEC index, planning runbook, and version notes to preserve the same rule: advisory session-accretion signals must not suppress normal repo work/finalize or force `agent-doc compact`.
+
+Verification passed: focused plan regressions, full `cargo test`, `cargo build`, `cargo install --path . --force`, and `agent-doc --version`.
+
+Committed and pushed:
+- `src/agent-doc` `5af3571 fix: keep no-op closeout churn advisory`
+- parent repo `d5c5643e4 chore: update agent-doc closeout behavior`
+<!-- agent:boundary:2f123a96 -->
 <!-- /agent:exchange -->
 ###
 
@@ -82,6 +94,8 @@ The agent-doc changes the agent:boundary id, drift noise occurs:
       ]
     }
 ```
+Please evaluate other cases of drift noise from the Claude Code + Codex session logs.
+The document also autocompacted during the last turn, which is undesirable. Since the frontmatter is not set, the document should not autocompact.
 spec-test-build-install-commit-push
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
@@ -94,6 +108,8 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#pfxleak] `❯ ` prompt prefix leaks onto agent content during content_ours fallback, then requires a separate normalize commit to strip — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
+- [ ] [#commitchurn] Session-check forces new finalize cycle for minor content edits on already-answered prompts, causing 3-4 extra commits per turn — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.

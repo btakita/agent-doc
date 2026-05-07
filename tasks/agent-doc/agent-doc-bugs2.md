@@ -52,7 +52,28 @@ Verification:
 Commits:
 - agent-doc: `5d0106e` (`fix: avoid closeout churn for exchange edits`) pushed to `origin/20260422/codex-agent-backend`.
 - agent-loop: `e956c8579` (`chore: update agent-doc closeout guard`) committed locally; I will push `main` immediately after this managed closeout so the response commit is included.
-<!-- agent:boundary:a06c4bf0 -->
+❯ do [#pfxleak3]. spec-test-build-install-commit-push
+### Re: #pfxleak3 — gpt-5
+
+Completed `#pfxleak3`.
+
+What changed:
+- Added an explicit write-path regression for the exact response-tail shape: prior assistant tail lines committed in `HEAD` stay bare while the newly inserted `do [#pfxleak3]...` prompt receives `❯ `.
+- Updated the closeout spec to state the `content_ours` `HEAD` prefix-state invariant directly.
+- Added an Unreleased note documenting the guarded repro.
+
+Verification:
+- `cargo test -p agent-doc normalize_safe_preserves_prior_response_tail_before_new_prompt -- --nocapture`
+- `make check`
+- `cargo fmt --check`
+- `make install`
+
+Commit / push:
+- agent-doc: `9fafca3` (`test: cover prompt-prefix response tail preservation`) pushed to `origin/20260422/codex-agent-backend`.
+- agent-loop: `de8797161` (`chore: update agent-doc prefix-tail guard`) pushed to `origin/main`.
+
+I left unrelated existing workspace edits out of the manual commits: `src/session-share`, `tasks/software/tagpath.md`, and this session document closeout.
+<!-- agent:boundary:9e6ad3b7 -->
 <!-- /agent:exchange -->
 ###
 
@@ -69,7 +90,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pfxleak3] Response tail line misclassified as user prompt — boundary synthesis / content_ours adds `❯ ` to agent response tail during prompt replacement. Variant of #pfxleak2 — plan: src/session-share/tasks/agent-doc/plan-response-tail-prefix-misclassification.md
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.

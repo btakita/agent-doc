@@ -58,13 +58,41 @@ Verification completed:
 Pushed:
 - `btakita/tsift` `main`: `8f26390` (`feat: surface context-pack summary refs`)
 - parent `agent-loop` `main`: `9e238c8ab` (`chore: update tsift submodule`)
-<!-- agent:boundary:68b6f4c3 -->
+❯ Please look at the latest tagpath updates. What are the #next-steps to integrate to save tokens?
+### Re: tagpath token-saving integration — gpt-5
+
+Latest `tagpath` updates relevant to `tsift`:
+
+- `v0.6.1` is tagged and published; local `src/tagpath` only has the version bump dirty in `Cargo.toml` / `Cargo.lock`.
+- New library APIs are available for `family`, `query`, and `ontology` through `src/tagpath/src/lib.rs`.
+- The new downstream fixture at `src/tagpath/fixtures/tsift-token-savings.json` defines measurable savings contracts: search `12 raw symbols -> 2 families` with at least `40%` savings, explain `12 -> 2` with at least `35%`, and session-review `18 -> 3` with at least `45%`.
+- `tsift` already has partial integration: search preview groups repeated symbol hits by canonical tag family, explain/next-context/context-pack expose `tag_alias`, and context-pack summary refs keep cached summaries behind stable handles.
+
+The highest-leverage next step is to import the `tagpath` fixture into `tsift` as a regression test before doing more feature work. That turns "save tokens" into a failing test contract and prevents later preview changes from drifting back toward raw symbol dumps.
+
+Backlog added in priority order:
+
+1. `#tfxt` — add a `tsift` fixture-backed token-savings regression test using `tagpath`'s `fixtures/tsift-token-savings.json` for search, explain, and session-review previews, then expand the contract to context-pack.
+2. `#tfam` — replace `tsift`'s local tag alias/query normalization helpers with `tagpath` v0.6.1 `family` / `query` APIs so every preview surface shares one canonical family model.
+3. `#tont` — load tagpath ontology refs in `context-pack` and summary-ref surfaces so stable domain tag docs can be referenced by handle/path instead of repeated prose.
+4. `#tbud` — add a CI-friendly token-savings report surface comparing raw vs envelope previews per command.
+
+Top backlog item: `#tfxt`.
+
+Verification while reviewing:
+
+- `cargo test tsift_token_savings_fixture` in `src/tagpath` passed.
+<!-- agent:boundary:211e6985 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tbud] [recommended] Add a tsift token-savings report surface that compares raw vs envelope previews per command and records byte/token deltas in CI-friendly output.
+- [ ] [#tont] [recommended] Load tagpath ontology refs in tsift context-pack and summary-ref surfaces so stable domain tag docs can be referenced by handle/path instead of repeated prose.
+- [ ] [#tfam] Replace tsift's local tag alias/query normalization helpers with tagpath v0.6.1 family/query APIs so search, explain, session-review, and context-pack share one canonical family model.
+- [ ] [#tfxt] Add a tsift-side fixture-backed token-savings regression test using tagpath's fixtures/tsift-token-savings.json for search, explain, and session-review previews before expanding the contract to context-pack.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

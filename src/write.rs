@@ -4626,6 +4626,24 @@ fn normalized_content_ours_fallback(
     normalize_exchange_prefixes_for_targets(&fallback, normalize_prefix_lines)
 }
 
+fn repair_disk_from_normalization_fallback(file: &Path, fallback: &str) -> Result<()> {
+    atomic_write(file, fallback).with_context(|| {
+        format!(
+            "failed to repair {} from normalized content_ours fallback",
+            file.display()
+        )
+    })?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "sidecar_normalization_fallback_repaired_working_tree file={} bytes={}",
+            file.display(),
+            fallback.len()
+        ),
+    );
+    Ok(())
+}
+
 /// Result of an IPC write attempt, including the patch_id used.
 ///
 /// The `patch_id` is returned so callers (e.g., `run_stream()` timeout fallback)
@@ -4782,7 +4800,8 @@ pub fn try_ipc(
                 if let Some(snap_content) = sidecar {
                     // Verify sidecar preserved normalize_prefix_lines targets.
                     // If the plugin's normalization diverged, prefer content_ours.
-                    let (effective_snap, snap_source) = if let Some(lines) = normalize_prefix_lines
+                    let (effective_snap, snap_source, repair_disk) = if let Some(lines) =
+                        normalize_prefix_lines
                         && !lines.is_empty()
                         && !verify_sidecar_normalization(&snap_content, lines)
                     {
@@ -4799,15 +4818,15 @@ pub fn try_ipc(
                                     file.display()
                                 ),
                             );
-                            (fallback, "content_ours")
+                            (fallback, "content_ours", true)
                         } else {
                             eprintln!(
                                 "[write] sidecar normalization diverged but no content_ours available — using sidecar"
                             );
-                            (snap_content, "ack_content_sidecar")
+                            (snap_content, "ack_content_sidecar", false)
                         }
                     } else {
-                        (snap_content, "ack_content_sidecar")
+                        (snap_content, "ack_content_sidecar", false)
                     };
 
                     eprintln!(
@@ -4817,6 +4836,9 @@ pub fn try_ipc(
                     );
                     if let Some(ref path) = fallback_patch_file {
                         let _ = std::fs::remove_file(path);
+                    }
+                    if repair_disk {
+                        repair_disk_from_normalization_fallback(file, &effective_snap)?;
                     }
                     crate::ops_log::log_op(
                         file,
@@ -5201,6 +5223,7 @@ fn write_ipc_and_poll(
                                         doc_file.display()
                                     ),
                                 );
+                                repair_disk_from_normalization_fallback(doc_file, &fallback)?;
                                 fallback
                             } else {
                                 eprintln!(
@@ -8214,6 +8237,7 @@ agent response
 
         let patches_dir = agent_doc_dir.join("patches");
         let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
         let _watcher = std::thread::spawn(move || {
             for _ in 0..40 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
@@ -8238,6 +8262,7 @@ agent response
 <!-- agent:boundary:test-bnd-002 -->
 <!-- /agent:exchange -->
 ";
+                            let _ = std::fs::write(&doc_for_watcher, bad_sidecar);
                             let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
                         }
                         let _ = std::fs::remove_file(&path);
@@ -8268,6 +8293,12 @@ agent response
             snap.contains("❯ do #bppfxstrip. spec-test-build-install-commit-push"),
             "content_ours fallback must be normalized before snapshot save; got: {}",
             snap
+        );
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk.contains("❯ do #bppfxstrip. spec-test-build-install-commit-push"),
+            "content_ours fallback must repair the working tree before commit; got: {}",
+            disk
         );
     }
 

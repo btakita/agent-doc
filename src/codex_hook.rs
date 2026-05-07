@@ -652,17 +652,17 @@ fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>>
         };
         for entry in entries {
             let Ok(entry) = entry else {
-                return Ok(None);
+                continue;
             };
             let path = entry.path();
             if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(&path) else {
-                return Ok(None);
+                continue;
             };
             let Ok(state) = serde_json::from_str::<SessionState>(&content) else {
-                return Ok(None);
+                continue;
             };
             let state_file = PathBuf::from(&state.doc_path)
                 .canonicalize()
@@ -888,6 +888,31 @@ agent-doc {}\n",
                 session_id: "codex-session-new".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-2".to_string(),
+                last_prompt: "/clear".to_string(),
+                updated_at: 20,
+            },
+        )
+        .unwrap();
+
+        let loaded = load_latest_prompt_for_file(&doc).unwrap();
+        assert_eq!(loaded.as_deref(), Some("/clear"));
+    }
+
+    #[test]
+    fn load_latest_prompt_for_file_skips_malformed_state_entries() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let root = project_root_for(dir.path()).unwrap();
+        let state_dir = root.join(".agent-doc/codex-hooks/sessions");
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::write(state_dir.join("bad.json"), "{").unwrap();
+
+        save_state(
+            &root,
+            &SessionState {
+                session_id: "codex-session-good".to_string(),
+                doc_path: doc.display().to_string(),
+                last_turn_id: "turn-1".to_string(),
                 last_prompt: "/clear".to_string(),
                 updated_at: 20,
             },

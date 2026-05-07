@@ -63,7 +63,18 @@ Verification completed in `src/agent-doc`:
 - `agent-doc plugin install --local jetbrains` (installed into `~/.config/JetBrains/IntelliJIdea2026.1`; IDE restart required)
 
 Pushed `src/agent-doc` commit `e8d01c6` to `origin/20260422/codex-agent-backend`, then advanced the root repo to `5744dc402` on `origin/main`.
-<!-- agent:boundary:858bc66d -->
+❯ Why would "the requested replacement would have required detaching a still-protected visible pane"? Why is the agent-doc supervisor actor losing track of the panes? The panes are still present and codex or claude is still running.
+
+❯ Is there an issue with the supervisor tracking the tmux panes? Do we have adequate logging to understand why tracking is lost?
+### Re: protected pane guard vs supervisor tracking — gpt-5
+This message does not mean `agent-doc` lost the pane. In `src/agent-doc/src/sync.rs`, the safe-passive path checks whether the requested files are already visible and whether any currently visible pane is registered to a document whose closeout cycle is still open (`preflight_started`, `response_captured`, or `write_applied`). If a requested file is missing and any unrelated visible pane is still in one of those phases, `sync --no-autostart` preserves the current layout instead of detaching that pane. That guard is implemented by `safe_passive_visible_layout_blockers()` together with `open_cycle_protected_file_state()`.
+
+The logs show that exact shape here, not a missing-pane case. `/tmp/agent-doc-sync.log` recorded repeated `safe_passive_layout_preserved_protected_visible` entries such as `missing requested pane(s) .../tasks/software/tmux-router.md while visible protected pane(s) %241:preflight_started:.../tasks/software/tagpath.md cannot be detached safely`. The tagpath session log at `.agent-doc/logs/4602f467-ef2a-4094-a750-5eb533368988.log` shows pane `%241` entering `preflight_started` at `1778127839` and not reaching `response_captured` until `1778127893`, so during that interval the protection was real.
+
+So the supervisor actor was not losing track of the tmux panes in this specific case. The pane could still be alive and Codex/Claude could still be running, while the sync guard intentionally refused to replace it because the document was mid-closeout. The protection keys off persisted document-cycle state plus the pane-to-file registration, not off whether the pane process disappeared.
+
+Logging is good enough to reconstruct the root cause, but not good enough to make the decision obvious in one place. The evidence exists across `/tmp/agent-doc-sync.log`, `.agent-doc/logs/ops.log`, and the per-session log, and that was enough to prove what happened. The weak part is correlation: the user-facing sync warning does not include the cycle id, session id, or generation, so it can read like a supervisor/pane-tracking failure even when it is only the open-cycle detach guard doing the safe thing.
+<!-- agent:boundary:bb4fa300 -->
 <!-- /agent:exchange -->
 ###
 

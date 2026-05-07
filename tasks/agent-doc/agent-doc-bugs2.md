@@ -72,8 +72,12 @@ On the architecture question: smaller files would help readability, but they wil
 
 ### Re: prompt prefix stripped on finalize — opus-4-6
 
-Filed `#bppfxstrip`. Root cause: when `verify_sidecar_normalization()` detects missing `❯ ` prefixes in the IPC sidecar content and falls back to `content_ours`, that fallback content was captured before prefix normalization ran, so the prefixes are lost. Fix: apply `normalize_user_prompts_in_exchange()` to `content_ours` before using it as fallback (write.rs ~4599). Plan: `tasks/agent-doc/plan-prompt-prefix-stripped-on-finalize.md`.
-<!-- agent:boundary:2e7cb030 -->
+❯ Filed `#bppfxstrip`. Root cause: when `verify_sidecar_normalization()` detects missing `❯ ` prefixes in the IPC sidecar content and falls back to `content_ours`, that fallback content was captured before prefix normalization ran, so the prefixes are lost. Fix: apply `normalize_user_prompts_in_exchange()` to `content_ours` before using it as fallback (write.rs ~4599). Plan: `tasks/agent-doc/plan-prompt-prefix-stripped-on-finalize.md`.
+### Re: Duplicate Invocation — gpt-5
+
+No new document edits were present beyond the repeated `agent-doc` invocation, so this cycle is only closing the duplicate prompt after the earlier implementation and commit.
+
+<!-- agent:boundary:dcdd036f -->
 <!-- /agent:exchange -->
 ###
 

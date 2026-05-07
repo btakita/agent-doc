@@ -82,7 +82,33 @@ Priority order after this cycle should be:
 4. `#sqliteeval` - decide whether the SQLite state-store prototype is still worthwhile
 
 Top backlog item: `#instrcap`.
-<!-- agent:boundary:67245359 -->
+❯ do [#instrcap]. spec-test-build-install-commit-push
+### Re: instruction surface trim — gpt-5
+
+Implemented `#instrcap`.
+
+What changed:
+
+- Trimmed the shared `src/agent-doc/SKILL.md` hot path from 147 to 136 lines by collapsing repeated workflow prose and leaving rare route/start/sync recovery details behind runbooks.
+- Tightened the generated instruction budget tests to 140 lines for the source template and 150 lines for rendered Claude/Codex/generic surfaces.
+- Added the instruction-size budget to `specs/07-core-commands.md`.
+- Reinstalled the local binary and refreshed generated Claude/Codex/root instruction artifacts. Installed sizes are now 135 lines for Claude, 139 for Codex, and 133 for root `AGENTS.md`.
+- Marked `tasks/agent-doc/plan-instruction-surface-context-trim.md` implemented.
+
+Verification:
+
+- `cargo test -q -p agent-doc skill::tests --manifest-path src/agent-doc/Cargo.toml` passed.
+- `make check` initially hit one unrelated tmux/resync race; the exact failing test passed when rerun alone, and the full `make check` rerun passed: 1925 unit tests plus integration/doc suites green.
+- `make install` completed and installed `agent-doc v0.33.16` plus the release `libagent_doc` library.
+- `agent-doc skill check` reports `Up to date (v0.33.16)`.
+
+Commits made before this closeout:
+
+- `src/agent-doc`: `e316bc5` (`docs: trim agent-doc instruction surface`), pushed to `origin/20260422/codex-agent-backend`.
+- `agent-loop`: `b522b7034` (`docs: trim agent-doc instruction surfaces`).
+
+I am leaving the active session document out of the manual repo commit as required; this `finalize` closeout owns the session response and `#instrcap` pending update. The parent repo push follows after the closeout commit so the session response is included.
+<!-- agent:boundary:d73650cd -->
 <!-- /agent:exchange -->
 ###
 
@@ -110,7 +136,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#instrcap] Execute plan tasks/agent-doc/plan-instruction-surface-context-trim.md to trim always-loaded AGENTS/SKILL surfaces, move rare recovery prose behind targeted runbooks, and add a size/duplication budget check.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.

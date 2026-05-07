@@ -127,13 +127,35 @@ v0.6.0 published to crates.io
 Active backlog:
 - [ ] [#tp04] [recommended] Add .naming/tags ontology loading and validation so tsift summaries can reference stable domain tags instead of re-explaining domain vocabulary in prose.
 - [ ] [#tp05] [recommended] Add a tsift-facing token-savings benchmark fixture comparing raw symbol output against tagpath family/alias output for search, explain, and session-review previews.
-<!-- agent:boundary:adad00bd -->
+❯ do [#tp04]. spec-test-build-install-commit-push
+### Re: #tp04 — gpt-5
+
+Completed `#tp04`.
+
+Implemented `.naming/tags` ontology loading and validation in tagpath:
+- Added `tagpath::ontology` with project loading, markdown tag records, validation diagnostics, and stable `OntologyTagReference` output for downstream summaries.
+- Added `tagpath ontology [PATH] [--format text|json]`.
+- Ontology files load from `.naming/tags/*.md`, support TOML frontmatter, and validate against `.naming.toml` `[tags]` / `[tags.declared]` rules.
+- Missing frontmatter summaries fall back to the first body paragraph; missing ontology metadata can be filled from `.naming.toml` declarations.
+- Updated `SPEC.md`, `README.md`, and library API coverage.
+
+Verification:
+- `cargo fmt`
+- `cargo test`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo build`
+- `cargo install --path .`
+- CLI smoke test: `tagpath ontology . --format json`
+
+Committed and pushed:
+- `btakita/tagpath@f2302c5` (`feat: load tag ontology docs`)
+- `btakita/agent-loop@78863f60e` (`chore: update tagpath submodule`)
+<!-- agent:boundary:972c2205 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tp04] [recommended] Add .naming/tags ontology loading and validation so tsift summaries can reference stable domain tags instead of re-explaining domain vocabulary in prose.
 - [ ] [#tp05] [recommended] Add a tsift-facing token-savings benchmark fixture comparing raw symbol output against tagpath family/alias output for search, explain, and session-review previews.
 <!-- /agent:backlog -->

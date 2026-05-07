@@ -105,6 +105,7 @@ Two modes:
 
 - The installed skill always renders `agent-doc-version` from the running binary version.
 - Harness-specific reload flows must use explicit `--harness` selection rather than environment guessing.
+- Generated Claude, Codex, and generic hot-path instruction surfaces must stay compact: the shared source template is budgeted at 140 lines, and rendered harness-specific surfaces are budgeted at 150 lines. Rare recovery detail belongs in bundled runbooks rather than the always-loaded skill body.
 
 ## outline
 

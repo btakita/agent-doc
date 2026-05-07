@@ -645,7 +645,7 @@ mod tests {
     #[test]
     fn bundled_skill_hot_path_stays_compact() {
         assert!(
-            line_count(SKILL_TEMPLATE) <= 150,
+            line_count(SKILL_TEMPLATE) <= 140,
             "SKILL.md hot path grew to {} lines",
             line_count(SKILL_TEMPLATE)
         );
@@ -660,7 +660,7 @@ mod tests {
         ] {
             let content = super::content_for_env(env);
             assert!(
-                line_count(&content) <= 160,
+                line_count(&content) <= 150,
                 "{env:?} rendered instruction surface grew to {} lines",
                 line_count(&content)
             );

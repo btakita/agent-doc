@@ -31,7 +31,7 @@ The command emits a structured planning record as JSON.
 1. Run the planning phase after preflight and before repo work.
 2. Execute `required_commands` and respect `handoff` before free-form response generation.
 3. If `handoff=orchestrate`, use the emitted `agent-doc orchestrate ...` command instead of manually simulating the batch.
-4. If `handoff=compact`, follow the emitted compact/restart instruction and stop before normal repo work or response finalization; this is used for repeated no-op closeout churn so the session does not grow by another low-signal `### Re:` block.
+4. If `handoff=compact`, follow the emitted compact/restart instruction and stop before normal repo work or response finalization. `handoff=compact` requires an explicit prompt or document compaction request; advisory session-accretion signals such as repeated no-op closeout churn must not force this handoff.
 5. If `execution_scope=plan_backlog_only`, do not start repo implementation, tests, builds, installs, commits, or pushes from this cycle even if the raw prompt contained imperative wording. Capture the plan and backlog items first, then wait for a later `do #id ...` turn to authorize implementation.
 6. Otherwise, execute `repo_actions` before `finalize` / `write --commit`.
 7. Resolve `pending_mutations` in the same cycle so pending state does not drift.

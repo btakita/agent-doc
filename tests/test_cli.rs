@@ -353,6 +353,77 @@ fn test_archive_index_and_search_commands() {
 }
 
 #[test]
+fn test_response_toc_and_fetch_commands() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("tasks/session.md");
+    fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+    fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    fs::write(
+        &doc,
+        concat!(
+            "---\n",
+            "agent_doc_session: current-session\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: current topic — gpt-5\n\n",
+            "Body for #restoc.\n",
+            "<!-- /agent:exchange -->\n",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        root.join(".agent-doc/archives/hash-20260506-000000.md"),
+        concat!(
+            "---\n",
+            "archived_from: compact\n",
+            "archived_at: 20260506-000000\n",
+            "component: exchange\n",
+            "document: tasks/session.md\n",
+            "session: current-session\n",
+            "---\n\n",
+            "## User\n\nDo #restoc.\n\n",
+            "## Assistant\n\n### Re: archived topic — gpt-5\n\nArchived body for #restoc.\n"
+        ),
+    )
+    .unwrap();
+
+    let mut toc_cmd = agent_doc_cmd();
+    toc_cmd.current_dir(root);
+    toc_cmd.args([
+        "response-toc",
+        doc.to_str().unwrap(),
+        "--id",
+        "restoc",
+        "--json",
+    ]);
+    toc_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"locator\""))
+        .stdout(predicate::str::contains("live:1"))
+        .stdout(predicate::str::contains(
+            "archive:.agent-doc/archives/hash-20260506-000000.md#2",
+        ));
+
+    let mut fetch_cmd = agent_doc_cmd();
+    fetch_cmd.current_dir(root);
+    fetch_cmd.args([
+        "response-fetch",
+        doc.to_str().unwrap(),
+        "--locator",
+        "archive:.agent-doc/archives/hash-20260506-000000.md#2",
+        "--json",
+    ]);
+    fetch_cmd
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Archived body for #restoc."));
+}
+
+#[test]
 fn test_cli_repair_aliases_legacy_recover() {
     let tmp = tempfile::TempDir::new().unwrap();
     let missing = tmp.path().join("missing.md");

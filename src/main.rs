@@ -98,6 +98,7 @@ mod rename;
 mod repair;
 mod replay_guard;
 mod reset;
+mod response_toc;
 mod resync;
 mod route;
 mod run;
@@ -626,6 +627,40 @@ enum Commands {
         /// If omitted, the full file is printed.
         #[arg(long)]
         component: Option<String>,
+    },
+    /// List live and archived response sections for targeted retrieval
+    ResponseToc {
+        /// Path to the session document
+        file: PathBuf,
+        /// Exact backlog / prompt id to match (with or without leading #)
+        #[arg(long = "id")]
+        backlog_id: Option<String>,
+        /// Free-text query over response headings and bodies
+        #[arg(long)]
+        query: Option<String>,
+        /// Max archive entries to include
+        #[arg(long, default_value_t = 6)]
+        limit: usize,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Load an exact live or archived response section, optionally with neighbors
+    ResponseFetch {
+        /// Path to the session document
+        file: PathBuf,
+        /// Locator from `agent-doc response-toc`
+        #[arg(long)]
+        locator: String,
+        /// Include this many earlier adjacent sections
+        #[arg(long, default_value_t = 0)]
+        before: usize,
+        /// Include this many later adjacent sections
+        #[arg(long, default_value_t = 0)]
+        after: usize,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Build or refresh the sqlite archive index for compacted turns
     ArchiveIndex {
@@ -1579,6 +1614,20 @@ fn main() -> anyhow::Result<()> {
         Commands::Plan { file } => plan::run(&file),
         Commands::SessionCheck { file } => session_check::run(&file),
         Commands::Read { file, component } => read::run(&file, component.as_deref()),
+        Commands::ResponseToc {
+            file,
+            backlog_id,
+            query,
+            limit,
+            json,
+        } => response_toc::run_toc(&file, backlog_id.as_deref(), query.as_deref(), limit, json),
+        Commands::ResponseFetch {
+            file,
+            locator,
+            before,
+            after,
+            json,
+        } => response_toc::run_fetch(&file, &locator, before, after, json),
         Commands::ArchiveIndex { file, rebuild } => archive_index::run_index(&file, rebuild),
         Commands::ArchiveSearch {
             file,

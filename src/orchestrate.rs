@@ -659,6 +659,7 @@ fn run_ordered_task_step(
     let model = model_override.or(fm.resolve_harness_model(&harness));
     let session_accretion = crate::session_accretion::inspect(file).ok();
     let prompt = build_agent_prompt(
+        file,
         mode,
         preflight.diff.as_deref(),
         &doc,
@@ -953,6 +954,7 @@ fn expand_frontmatter_env(fm: &frontmatter::Frontmatter) -> Vec<(String, Option<
 }
 
 fn build_agent_prompt(
+    file: &Path,
     mode: ResolvedMode,
     diff_text: Option<&str>,
     doc: &str,
@@ -966,7 +968,7 @@ fn build_agent_prompt(
         .map(|section| format!("\n\n{}\n", section))
         .unwrap_or_default();
     let document_section =
-        crate::prompt_context::build_document_section(diff_text, doc, session_accretion);
+        crate::prompt_context::build_document_section(file, diff_text, doc, session_accretion);
 
     if mode.is_template() {
         format!(
@@ -2867,6 +2869,7 @@ mod tests {
         );
 
         let prompt = build_agent_prompt(
+            Path::new("session.md"),
             ResolvedMode {
                 format: crate::frontmatter::AgentDocFormat::Template,
                 write: crate::frontmatter::AgentDocWrite::Crdt,
@@ -2910,6 +2913,7 @@ mod tests {
         };
 
         let prompt = build_agent_prompt(
+            Path::new("session.md"),
             ResolvedMode {
                 format: crate::frontmatter::AgentDocFormat::Template,
                 write: crate::frontmatter::AgentDocWrite::Crdt,

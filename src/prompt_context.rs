@@ -1,4 +1,5 @@
 use crate::{component, diff, pending, session_accretion};
+use std::path::Path;
 
 const BACKLOG_HEAD_LIMIT: usize = 3;
 const RECENT_EXCHANGE_TURNS_LIMIT: usize = 2;
@@ -11,6 +12,7 @@ struct ResponseSection {
 }
 
 pub(crate) fn build_document_section(
+    file: &Path,
     diff_text: &str,
     doc: &str,
     report: Option<&session_accretion::SessionAccretionReport>,
@@ -31,6 +33,10 @@ pub(crate) fn build_document_section(
         .unwrap_or_else(|| "No explicit `### Session Summary` block is present yet.".to_string());
     let backlog_head = render_backlog_head(&components, doc)
         .unwrap_or_else(|| "No active backlog items found.".to_string());
+    let response_toc = crate::response_toc::render_prompt_toc(file, doc, &prompt_targets)
+        .unwrap_or_else(|| {
+            "No live or archived response TOC entries are available yet.".to_string()
+        });
     let recent_exchange_turns = render_recent_exchange_turns(&components, doc, &prompt_targets)
         .unwrap_or_else(|| {
             "No earlier `### Re:` turns are available in the current exchange.".to_string()
@@ -46,6 +52,8 @@ pub(crate) fn build_document_section(
          </session_summary>\n\n\
          <backlog_head>\n{}\n\
          </backlog_head>\n\n\
+         <response_toc retrieval_hint=\"agent-doc response-fetch <FILE> --locator <LOCATOR>\">\n{}\n\
+         </response_toc>\n\n\
          <recent_exchange_turns limit=\"{}\">\n{}\n\
          </recent_exchange_turns>\n\n\
          <available_components>\n{}\n\
@@ -56,6 +64,7 @@ pub(crate) fn build_document_section(
         render_prompt_targets(&prompt_targets),
         session_summary.trim_end(),
         backlog_head.trim_end(),
+        response_toc.trim_end(),
         RECENT_EXCHANGE_TURNS_LIMIT,
         recent_exchange_turns.trim_end(),
         available_components.trim_end(),
@@ -355,6 +364,7 @@ mod tests {
     #[test]
     fn build_document_section_falls_back_to_full_document_when_healthy() {
         let section = build_document_section(
+            Path::new("session.md"),
             "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n+❯ Hello\n",
             "doc body",
             Some(&session_accretion::SessionAccretionReport::default()),
@@ -387,13 +397,16 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
 
-        let section = build_document_section(diff, doc, Some(&warn_report()));
+        let section =
+            build_document_section(Path::new("session.md"), diff, doc, Some(&warn_report()));
         assert!(section.contains("warn-level context accretion"));
         assert!(section.contains("<response_context level=\"warn\">"));
         assert!(section.contains("do [#ctxpack]. spec-test-build-install-commit-push"));
         assert!(section.contains("### Session Summary\n\nCompacted earlier turns."));
         assert!(section.contains("- [ ] [#ctxpack] Add bounded context pack"));
         assert!(section.contains("- 1 more active item(s)"));
+        assert!(section.contains("<response_toc"));
+        assert!(section.contains("response-fetch <FILE> --locator <LOCATOR>"));
         assert!(section.contains("<recent_exchange_turns limit=\"2\">"));
         assert!(section.contains("### Re: current topic — gpt-5"));
         assert!(section.contains("Older response body."));
@@ -425,7 +438,8 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
 
-        let section = build_document_section(diff, doc, Some(&warn_report()));
+        let section =
+            build_document_section(Path::new("session.md"), diff, doc, Some(&warn_report()));
         assert!(section.contains("### Re: latest topic — gpt-5"));
         assert!(section.contains("Latest response body."));
         assert!(!section.contains("Old response body."));
@@ -456,7 +470,12 @@ mod tests {
     #[test]
     fn build_document_section_keeps_full_document_for_warn_content_edits_without_prompt_targets() {
         let diff = "--- snapshot\n+++ document\n@@ -1 +1 @@\n-Old\n+Updated wording.\n";
-        let section = build_document_section(diff, "doc body", Some(&warn_report()));
+        let section = build_document_section(
+            Path::new("session.md"),
+            diff,
+            "doc body",
+            Some(&warn_report()),
+        );
         assert!(section.contains("The full document is now:"));
         assert!(!section.contains("<response_context"));
     }

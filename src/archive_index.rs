@@ -70,6 +70,20 @@ struct SearchResult {
     preview: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct IndexedArchiveTurn {
+    pub archive_path: String,
+    pub document_path: String,
+    pub session_id: Option<String>,
+    pub archived_at: String,
+    pub speaker: String,
+    pub turn_ordinal: i64,
+    pub heading: String,
+    pub preview: String,
+    pub refs: Vec<String>,
+    pub text: String,
+}
+
 #[derive(Debug)]
 struct SearchOptions<'a> {
     query: Option<&'a str>,
@@ -152,6 +166,205 @@ pub fn index_archive(doc: &Path, archive_path: &Path) -> Result<()> {
     let record = parse_archive(doc, archive_path, &project_root)?;
     upsert_archive(&conn, &record)?;
     Ok(())
+}
+
+pub(crate) fn list_recent_turns(
+    file: &Path,
+    query: Option<&str>,
+    backlog_id: Option<&str>,
+    limit: usize,
+) -> Result<Vec<IndexedArchiveTurn>> {
+    let project_root = find_project_root(file)?;
+    sync_project_index(&project_root)?;
+    let current_doc = canonical_document_key(file, &project_root)?;
+    let current_session = current_session_id(file)?;
+    let db_path = db_path(&project_root);
+    let conn = Connection::open(&db_path)
+        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    ensure_schema(&conn)?;
+
+    let query_norm = query.map(normalize_text);
+    let backlog_id = backlog_id.map(normalize_backlog_id).transpose()?;
+
+    let mut stmt = conn.prepare(
+        "SELECT a.id,
+                a.archive_path,
+                a.document_path,
+                a.session_id,
+                a.archived_at,
+                t.turn_ordinal,
+                t.speaker,
+                t.text,
+                t.normalized_text
+         FROM archive_turns t
+         JOIN archives a ON a.id = t.archive_id
+         WHERE a.document_path = ?1
+           AND t.speaker = 'assistant'
+           AND (?2 IS NULL OR instr(t.normalized_text, ?2) > 0)
+           AND (?3 IS NULL OR EXISTS (
+                SELECT 1 FROM archive_refs r
+                WHERE r.archive_id = a.id
+                  AND r.ref_kind = 'backlog_id'
+                  AND r.ref_value = ?3
+           ))
+         ORDER BY a.archived_at DESC, t.turn_ordinal DESC",
+    )?;
+
+    let rows = stmt.query_map(
+        params![current_doc, query_norm.as_deref(), backlog_id.as_deref()],
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+            ))
+        },
+    )?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        let (
+            archive_id,
+            archive_path,
+            document_path,
+            session_id,
+            archived_at,
+            turn_ordinal,
+            speaker,
+            text,
+            normalized_text,
+        ) = row?;
+        let refs = archive_backlog_refs(&conn, archive_id)?;
+        let score = score_result(
+            &document_path,
+            session_id.as_deref(),
+            &normalized_text,
+            query_norm.as_deref(),
+            SearchScoreContext {
+                has_backlog_filter: backlog_id.is_some(),
+                has_ref_hit: backlog_id
+                    .as_deref()
+                    .map(|needle| refs.iter().any(|candidate| candidate == needle))
+                    .unwrap_or(false),
+                current_doc: &current_doc,
+                current_session: current_session.as_deref(),
+            },
+        );
+        results.push((
+            score,
+            IndexedArchiveTurn {
+                heading: turn_heading(&text, &speaker, turn_ordinal),
+                preview: preview_text(&text),
+                archive_path,
+                document_path,
+                session_id,
+                archived_at,
+                speaker,
+                turn_ordinal,
+                refs,
+                text,
+            },
+        ));
+    }
+
+    results.sort_by(|(score_a, a), (score_b, b)| {
+        score_b
+            .cmp(score_a)
+            .then_with(|| b.archived_at.cmp(&a.archived_at))
+            .then_with(|| b.turn_ordinal.cmp(&a.turn_ordinal))
+    });
+    results.truncate(limit);
+    Ok(results.into_iter().map(|(_, turn)| turn).collect())
+}
+
+pub(crate) fn fetch_turn_window(
+    file: &Path,
+    archive_path: &str,
+    turn_ordinal: i64,
+    before: usize,
+    after: usize,
+) -> Result<Vec<IndexedArchiveTurn>> {
+    let project_root = find_project_root(file)?;
+    sync_project_index(&project_root)?;
+    let db_path = db_path(&project_root);
+    let conn = Connection::open(&db_path)
+        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    ensure_schema(&conn)?;
+
+    let archive_path = normalize_archive_path(&project_root, archive_path);
+    let start = turn_ordinal.saturating_sub(before as i64);
+    let end = turn_ordinal.saturating_add(after as i64);
+    let mut stmt = conn.prepare(
+        "SELECT a.id,
+                a.archive_path,
+                a.document_path,
+                a.session_id,
+                a.archived_at,
+                t.turn_ordinal,
+                t.speaker,
+                t.text
+         FROM archive_turns t
+         JOIN archives a ON a.id = t.archive_id
+         WHERE a.archive_path = ?1
+           AND t.turn_ordinal BETWEEN ?2 AND ?3
+         ORDER BY t.turn_ordinal ASC",
+    )?;
+
+    let turns = stmt
+        .query_map(params![archive_path, start, end], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    if turns.is_empty() {
+        anyhow::bail!(
+            "archive turn not found for {}#{}",
+            archive_path,
+            turn_ordinal
+        );
+    }
+
+    let mut results = Vec::new();
+    for (
+        archive_id,
+        archive_path,
+        document_path,
+        session_id,
+        archived_at,
+        turn_ordinal,
+        speaker,
+        text,
+    ) in turns
+    {
+        results.push(IndexedArchiveTurn {
+            heading: turn_heading(&text, &speaker, turn_ordinal),
+            preview: preview_text(&text),
+            refs: archive_backlog_refs(&conn, archive_id)?,
+            archive_path,
+            document_path,
+            session_id,
+            archived_at,
+            speaker,
+            turn_ordinal,
+            text,
+        });
+    }
+    Ok(results)
 }
 
 fn rebuild_project_index(project_root: &Path) -> Result<usize> {
@@ -330,6 +543,18 @@ fn ref_hits(conn: &Connection, archive_id: i64, backlog_id: Option<&str>) -> Res
         .query_map(params![archive_id, backlog_id], |row| {
             row.get::<_, String>(0)
         })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(hits)
+}
+
+fn archive_backlog_refs(conn: &Connection, archive_id: i64) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT ref_value FROM archive_refs
+         WHERE archive_id = ?1 AND ref_kind = 'backlog_id'
+         ORDER BY ref_value",
+    )?;
+    let hits = stmt
+        .query_map(params![archive_id], |row| row.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(hits)
 }
@@ -700,6 +925,14 @@ fn preview_text(text: &str) -> String {
     }
 }
 
+fn turn_heading(text: &str, speaker: &str, turn_ordinal: i64) -> String {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{} turn #{}", speaker, turn_ordinal))
+}
+
 fn normalize_text(text: &str) -> String {
     text.split_whitespace()
         .map(|segment| segment.to_ascii_lowercase())
@@ -752,6 +985,15 @@ fn relative_to_root(path: &Path, project_root: &Path) -> String {
     path.strip_prefix(project_root)
         .map(|rel| rel.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"))
+}
+
+fn normalize_archive_path(project_root: &Path, archive_path: &str) -> String {
+    let path = Path::new(archive_path);
+    if path.is_absolute() {
+        relative_to_root(path, project_root)
+    } else {
+        archive_path.replace('\\', "/")
+    }
 }
 
 fn db_path(project_root: &Path) -> PathBuf {

@@ -169,6 +169,7 @@ pub fn run(
     // Build prompt
     let session_accretion = crate::session_accretion::inspect(file).ok();
     let prompt = build_prompt(
+        file,
         &fm,
         &the_diff,
         &content_original,
@@ -503,6 +504,7 @@ pub(crate) fn flush_to_document(
 
 /// Build the prompt for the streaming agent.
 fn build_prompt(
+    file: &Path,
     fm: &frontmatter::Frontmatter,
     the_diff: &str,
     content: &str,
@@ -516,7 +518,7 @@ fn build_prompt(
             .map(|section| format!("\n\n{}\n", section))
             .unwrap_or_default();
     let document_section =
-        crate::prompt_context::build_document_section(the_diff, content, session_accretion);
+        crate::prompt_context::build_document_section(file, the_diff, content, session_accretion);
     if fm.resume.is_some() {
         format!(
             "The user edited the session document. Here is the diff since the last run:\n\n\
@@ -756,7 +758,13 @@ mod tests {
             resume: None,
             ..Default::default()
         };
-        let prompt = build_prompt(&fm, "diff here", "doc content", None);
+        let prompt = build_prompt(
+            Path::new("session.md"),
+            &fm,
+            "diff here",
+            "doc content",
+            None,
+        );
         assert!(prompt.contains("starting a session"));
         assert!(prompt.contains("doc content"));
         assert!(!prompt.contains("diff here")); // no diff for first submit
@@ -768,7 +776,13 @@ mod tests {
             resume: Some("sess-123".to_string()),
             ..Default::default()
         };
-        let prompt = build_prompt(&fm, "diff here", "doc content", None);
+        let prompt = build_prompt(
+            Path::new("session.md"),
+            &fm,
+            "diff here",
+            "doc content",
+            None,
+        );
         assert!(prompt.contains("edited the session document"));
         assert!(prompt.contains("diff here"));
         assert!(prompt.contains("doc content"));
@@ -777,7 +791,7 @@ mod tests {
     #[test]
     fn build_prompt_mentions_patch_blocks() {
         let fm = frontmatter::Frontmatter::default();
-        let prompt = build_prompt(&fm, "diff", "content", None);
+        let prompt = build_prompt(Path::new("session.md"), &fm, "diff", "content", None);
         assert!(
             prompt.contains("patch:exchange"),
             "prompt should mention patch block format"
@@ -795,7 +809,7 @@ mod tests {
            +❯ First unresolved question?\n\
            +\n\
            +❯ Second unresolved question?\n";
-        let prompt = build_prompt(&fm, diff, "doc content", None);
+        let prompt = build_prompt(Path::new("session.md"), &fm, diff, "doc content", None);
         assert!(prompt.contains("User-authored prompt-bearing changes (oldest first):"));
         assert!(prompt.contains("Do not stop at the newest question"));
         assert!(prompt.contains("kind=\"prompt_target\""));
@@ -817,7 +831,7 @@ mod tests {
             "Done.\n",
         );
 
-        let prompt = build_prompt(&fm, "diff", doc, None);
+        let prompt = build_prompt(Path::new("session.md"), &fm, "diff", doc, None);
         assert!(
             prompt.contains(
                 "Active document-level formatting / structure requirements carried forward"
@@ -856,7 +870,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prompt = build_prompt(&fm, diff, doc, Some(&report));
+        let prompt = build_prompt(Path::new("session.md"), &fm, diff, doc, Some(&report));
         assert!(prompt.contains("<response_context level=\"warn\">"));
         assert!(prompt.contains("<recent_exchange_turns limit=\"2\">"));
         assert!(!prompt.contains("<document>\n## Exchange"));

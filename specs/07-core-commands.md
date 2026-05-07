@@ -33,6 +33,23 @@ Two modes:
 
 `agent-doc diff <FILE>` prints the unified diff between the saved snapshot and the current document.
 
+## response-toc
+
+`agent-doc response-toc <FILE> [--id BACKLOG_ID] [--query TEXT] [--limit N] [--json]`
+
+- Lists lightweight locators for current live `### Re:` sections plus matching archived response sections for the same document.
+- `--id` accepts either `restoc` or `#restoc` and filters both live and archived entries.
+- `--query` matches normalized heading/body text.
+- Output locators are stable enough for follow-up `response-fetch` calls, for example `live:3` or `archive:.agent-doc/archives/hash.md#2`.
+
+## response-fetch
+
+`agent-doc response-fetch <FILE> --locator LOCATOR [--before N] [--after N] [--json]`
+
+- Loads the exact live or archived response section referenced by a `response-toc` locator.
+- `--before` / `--after` include adjacent response sections from the same source so agents can pull bounded neighboring context on demand instead of rereading whole exchanges or archives.
+- Archive fetches read from the derived archive index; callers do not need to open sqlite directly.
+
 ## archive-index
 
 `agent-doc archive-index <FILE> [--rebuild]`

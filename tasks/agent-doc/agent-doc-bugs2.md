@@ -109,8 +109,8 @@ Nested repositories committed and pushed:
 Parent repo committed and pushed:
 - `agent-loop` `3b6ec9772` (`chore: commit pending workspace changes`) to `origin/main`
 
-I did not run a verification suite for this turn; the request was commit/push of existing uncommitted work, and I did not modify code as part of the commit aggregation.
-### Re: post-commit boundary normalization — gpt-5 (HEAD)
+❯ I did not run a verification suite for this turn; the request was commit/push of existing uncommitted work, and I did not modify code as part of the commit aggregation.
+### Re: post-commit boundary normalization — gpt-5
 
 Closed the post-commit boundary normalization drift from the previous `#commit-push` closeout. No additional repository changes were needed beyond the commits and pushes already listed above.
 <!-- agent:boundary:6623483b -->
@@ -126,7 +126,7 @@ This seems to happen when dev.md is in an active turn. When the turn is over, th
 Why can't dev.md be detached safely? I like the visibility into the error.
 spec-test-build-install-commit-push
 ---
-The agent-doc changes the agent:boundary id, drift noise occurs:
+The agent-doc changes the agent:boundary id, a separate:
 ```
 • Ran agent-doc repair /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   └ Error: [session-check] INTERRUPTED: cycle `cycle-1778171646764` is `committed` (commit_success), but the active
@@ -135,27 +135,7 @@ The agent-doc changes the agent:boundary id, drift noise occurs:
     home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Reopen closeout for this turn or let the Stop
     hook recover it from the final assistant message.
 ```
-```
-• Ran agent-doc repair /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-  └ Error: [session-check] INTERRUPTED: cycle `cycle-1778171646764` is `committed` (commit_success), but the active
-    Codex session changed this document after the last committed closeout without reopening the binary-owned write/
-    … +2 lines (ctrl + t to view transcript)
-    home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. Reopen closeout for this turn or let the Stop
-    hook recover it from the final assistant message.
-```
-```
-• The interruption is from post-commit normalization drift: the committed response is present, but the live editor/IPC
-  copy changed the boundary marker and prompt prefix after the commit. I’m rerunning preflight so the binary can repair/
-  commit that drift through its normal path.
 
-• Ran agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-  └ [commit] staged snapshot already matches HEAD for /home/brian/work/btakita/agent-loop/tasks/professional/
-    equityfundingsource.md — closing cycle as already committed
-    … +41 lines (ctrl + t to view transcript)
-      ]
-    }
-```
-spec-test-build-install-commit-push
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
 ---

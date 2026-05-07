@@ -106,6 +106,7 @@ Repo work:
 - committed workspace instruction-surface sync on `main`: `9747b6bb3`
 - pushing after this closeout commit so the session response commit is included
 ❯ do [#fye2]. spec-test-build-install-commit-push
+❯ do [#fye2]. spec-test-build-install-commit-push
 ### Re: Run Agent Doc reroute auto-remediation — gpt-5
 
 Completed .
@@ -116,6 +117,8 @@ Plan:
 
 Verification/build/install completed:
 - === instruction-files: clippy + test ===
+❯ - 
+❯ - 
 ❯ - 
 
 ❯ Repo work:
@@ -179,15 +182,22 @@ Verification/build/install completed:
 - `cargo build --release`
 - `cargo install --path . --force`
 
-Repo work:
-- committed in `src/agent-doc`: `4737e73` `fix: anchor bounded context to prompt positions`
-- pushed to `origin/20260422/codex-agent-backend`
-- kept the already-dirty workspace root out of the manual repo commit; only the intended `src/agent-doc` path set was committed before this closeout
-<!-- agent:boundary:4b61b71f -->
+❯ Repo work:
+❯ - committed in `src/agent-doc`: `4737e73` `fix: anchor bounded context to prompt positions`
+❯ - pushed to `origin/20260422/codex-agent-backend`
+❯ - kept the already-dirty workspace root out of the manual repo commit; only the intended `src/agent-doc` path set was committed before this closeout
+### Re: #fye2 stale prompt-prefix drift cleanup — gpt-5
+
+The duplicated `❯ do [#fye2]. spec-test-build-install-commit-push` line plus the stray `❯ -` lines are stale working-tree drift from the earlier mangled `#fye2` closeout, not a new repo-work request.
+
+No additional code changes were needed here. The authoritative `#fye2` result remains the earlier correction block above plus `src/agent-doc` commit `ca8778b` on `20260422/codex-agent-backend`, and `#wv7g` is already completed in `src/agent-doc` commit `4737e73`.
+<!-- agent:boundary:a6303ecc -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+I opened tagpath.md. tagpath.md had a syntax error which I fixed. I somehow ended up with the agent-doc tmux window having 3 panes. I tried `agent-doc sync` but the repair correct back to two panes when I have 2 editor windows open. Please investigate and fix root cause(s). spec-test-build-install-commit-push
+---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
 ---
 Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/brian/work/btakita/agent-loop/tasks/software/tsift did not respond to `Run Agent Doc` in a previous turn. It seems to run ok now but I'm concerned that `Run Agent Doc` was non-responsive.

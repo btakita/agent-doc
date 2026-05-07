@@ -106,7 +106,6 @@ Repo work:
 - committed workspace instruction-surface sync on `main`: `9747b6bb3`
 - pushing after this closeout commit so the session response commit is included
 ❯ do [#fye2]. spec-test-build-install-commit-push
-❯ do [#fye2]. spec-test-build-install-commit-push
 ### Re: Run Agent Doc reroute auto-remediation — gpt-5
 
 Completed .
@@ -117,8 +116,6 @@ Plan:
 
 Verification/build/install completed:
 - === instruction-files: clippy + test ===
-❯ - 
-❯ - 
 ❯ - 
 
 ❯ Repo work:
@@ -167,7 +164,26 @@ I treated the repeated `❯ do [#fye2]. spec-test-build-install-commit-push` lin
 No additional code changes were needed here. The authoritative `#fye2` result remains the correction block above plus `src/agent-doc` commit `ca8778b` on `20260422/codex-agent-backend`.
 
 Plan: `tasks/agent-doc/plan-run-agent-doc-snappy-auto-remediation.md`
-<!-- agent:boundary:43f074c0 -->
+❯ do [#wv7g]. spec-test-build-install-commit-push
+### Re: #wv7g response-context anchors — gpt-5
+
+Completed `#wv7g`.
+
+Warn/block bounded response-context packs are now position-aware instead of always replaying the newest `### Re:` turns. `prompt_context.rs` now anchors each prompt target to its actual location in `exchange`: inline prompt edits pull in their enclosing response block, and tail follow-ups pull in the immediately previous response. If no clean anchor can be found, the pack still falls back to the bounded recent-turn slice.
+
+Coverage includes both anchor shapes in `src/prompt_context.rs`, and the contract text is updated in `README.md`, `SKILL.md`, `SPEC.md`, `CLAUDE.md`, `VERSIONS.md`, and `specs/07-orchestration-commands.md`.
+
+Verification/build/install completed:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Repo work:
+- committed in `src/agent-doc`: `4737e73` `fix: anchor bounded context to prompt positions`
+- pushed to `origin/20260422/codex-agent-backend`
+- kept the already-dirty workspace root out of the manual repo commit; only the intended `src/agent-doc` path set was committed before this closeout
+<!-- agent:boundary:4b61b71f -->
 <!-- /agent:exchange -->
 ###
 
@@ -182,8 +198,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#wv7g] ctxanchor=[recommended] Make bounded response-context packs position-aware: include the enclosing
-  `### Re:` block for inline prompt edits and the immediately previous response for tail prompts, while leaving later-turn expansion on-demand.
 - [ ] [#restoc] [recommended] Add a lightweight live+archive exchange/response TOC plus targeted retrieval API so bounded context packs can fetch exact enclosing/adjacent sections on demand instead of relying only on the fixed recent-turn window.
 - [ ] [#noopcap] [recommended] Collapse repeated commit_noop closeout churn into a compact or restart handoff instead of appending another Re: section.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.

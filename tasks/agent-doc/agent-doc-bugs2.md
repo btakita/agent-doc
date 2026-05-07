@@ -34,7 +34,27 @@ Active backlog:
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 1 more active item(s)
-<!-- agent:boundary:35ece514 -->
+❯ do [#jbsyncwarn]. spec-test-build-install-commit-push
+### Re: JetBrains Protected Sync Warning — gpt-5
+
+Implemented `#jbsyncwarn`.
+
+The JetBrains plugin now treats protected-layout preservation as a deferred sync state instead of an error-like raw diagnostic. Manual `Sync Tmux Layout` shows a concise warning while keeping the full CLI output in `idea.log`; automatic tab sync now recognizes both preserve-layout markers (`[sync] sync preserved...` and `[sync] safe passive sync preserved...`) and retries unless the CLI proves the requested visible pane was reselected.
+
+Updated specs and regressions for the `agent-doc-bugs2.md` to `tasks/software/tsift.md` navigation case. Bumped the JetBrains plugin to `0.2.97`, built and signed the plugin, and installed it locally into the active IntelliJ IDEA 2026.1 profile. IDEA needs a restart to load the new plugin build.
+
+Verification:
+- `./gradlew test` in `src/agent-doc/editors/jetbrains` passed.
+- `./gradlew buildPlugin signPlugin` passed.
+- `make check` in `src/agent-doc` passed: clippy clean, Rust test suite clean.
+- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.97-signed.zip` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
+
+Commit state before session closeout:
+- `src/agent-doc`: `90b9c82 fix: defer JetBrains protected sync warnings`
+- superproject: `59b919e8f chore: update agent-doc submodule`
+
+Per the session-doc commit boundary, pushes run after this `agent-doc finalize` closeout succeeds.
+<!-- agent:boundary:4a4b42a9 -->
 <!-- /agent:exchange -->
 ###
 
@@ -51,7 +71,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbsyncwarn] Fix JetBrains protected sync warning UX so protected-layout preservation during editor navigation is treated as deferred sync, not a hard error — plan: tasks/agent-doc/plan-jetbrains-protected-sync-warning-ux.md
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.

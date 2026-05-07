@@ -35,6 +35,7 @@ Active backlog:
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 1 more active item(s)
 <!-- agent:boundary:ff39e974 -->
+do [#commitchurn]. spec-test-build-install-commit-push
 <!-- /agent:exchange -->
 ###
 
@@ -51,6 +52,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#pfxleak3] Response tail line misclassified as user prompt — boundary synthesis / content_ours adds `❯ ` to agent response tail during prompt replacement. Variant of #pfxleak2 — plan: src/session-share/tasks/agent-doc/plan-response-tail-prefix-misclassification.md
 - [ ] [#commitchurn] Session-check forces new finalize cycle for minor content edits on already-answered prompts, causing 3-4 extra commits per turn — plan: src/session-share/tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death does not lose work entirely.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

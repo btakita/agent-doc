@@ -27,14 +27,14 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-213129.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260507-213200.md`*
 
 Active backlog:
 - [ ] [#concprompt] concurrent user edits during response cycle bypass prompt detection + session-check — plan: tasks/agent-doc/plan-concurrent-edit-prompt-miss.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
 - 4 more active item(s)
-<!-- agent:boundary:32d475d3 -->
+<!-- agent:boundary:3a363be2 -->
 <!-- /agent:exchange -->
 ###
 

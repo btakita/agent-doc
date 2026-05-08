@@ -262,12 +262,11 @@ impl StreamingAgent for Claude {
         // Write prompt to stdin and close it
         {
             use std::io::Write;
-            if let Some(ref mut stdin) = child.stdin {
-                if let Err(err) = stdin.write_all(prompt.as_bytes())
-                    && err.kind() != std::io::ErrorKind::BrokenPipe
-                {
-                    return Err(err.into());
-                }
+            if let Some(ref mut stdin) = child.stdin
+                && let Err(err) = stdin.write_all(prompt.as_bytes())
+                && err.kind() != std::io::ErrorKind::BrokenPipe
+            {
+                return Err(err.into());
             }
             child.stdin.take(); // Close stdin
         }

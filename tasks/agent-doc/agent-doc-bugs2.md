@@ -58,7 +58,22 @@ The backlog is already in the right priority order:
 2. `#sqliteeval` — use that evidence to decide whether `.agent-doc/state.db` should become the authoritative session store alongside the single-owner actor/controller rollout.
 
 Top backlog item: `#sqliterepros`.
-<!-- agent:boundary:52335eb4 -->
+❯ What happened to the other backlog items? Some backlog items were removed.
+### Re: backlog items — gpt-5
+
+They were reaped because they were completed, not lost.
+
+From the recent history:
+
+- `#commenttail` was completed before the latest compact. The archive records the implementation, verification, install, and pushed commits.
+- `#tmuxcoord` was completed next. Its result was the decision that the repair belongs in agent-doc session ownership, not tmux-router.
+- `#coordspike` was completed in commit `ea0a64337` when `tasks/agent-doc/plan-project-controller-session-actor-mvp.md` was created. The `agent-doc finalize --pending-done coordspike` call reaped it from the active backlog.
+- `#sqliterepros` and `#sqliteeval` are still active in `agent:backlog`.
+
+The confusing part is that completed items are removed from the active backlog instead of being retained in a visible completed section. Also, the compacted exchange summary is historical, so it can still mention items that were active at compact time even after the live backlog has been reaped.
+
+I added a follow-up item, `#backlogreap`, to make completed/reaped backlog items visible so this does not look like silent deletion.
+<!-- agent:boundary:8ecf4420 -->
 <!-- /agent:exchange -->
 ###
 
@@ -75,6 +90,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#backlogreap] [recommended] Make completed/reaped backlog items visible in the session document or closeout response so items like #commenttail, #tmuxcoord, and #coordspike do not look silently removed after --pending-done.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 

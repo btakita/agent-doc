@@ -78,7 +78,31 @@ Concretely, `#coordspike` should probably produce a plan titled something like:
 `single-owner session actor and controller MVP`
 
 That keeps the important invariant in the name: there is one owner. The controller may route and dispatch, but those are subordinate operations.
-<!-- agent:boundary:21226d83 -->
+❯ The "Session Actor" manages all the sessions while the "Supervisor Actor" manager a single session?
+### Re: session actor vs supervisor actor — gpt-5
+
+Close, but I would make one important correction: `Session Actor` should not mean “one actor that manages all sessions.” That name should refer to the single owner for one document session.
+
+Better hierarchy:
+
+- `Session Controller`: optional process/daemon that manages the fleet of session actors, socket ownership, lookup, lifecycle bootstrapping, and global invariants.
+- `Session Actor`: one authoritative actor per document/session binding. It owns the document -> session id -> generation -> pane/window -> state record.
+- `Session Supervisor`: one runtime process per live harness session. It starts/restarts the child agent, observes readiness/exit, and reports transitions back to the session actor.
+
+So the rule is:
+
+`Session Controller` manages all sessions.
+`Session Actor` owns one document session.
+`Session Supervisor` runs one live harness process for that session actor.
+
+I would avoid `Supervisor Actor` unless it is truly an actor with its own mailbox/protocol. In the current codebase, `supervisor` already means the runtime process around Codex/Claude, so renaming it to `Supervisor Actor` may blur the line between authority and execution. The authority should live in the session actor; the supervisor should remain subordinate.
+
+For `#coordspike`, I would phrase the target as:
+
+`session controller with single-owner session actors`
+
+That makes the all-sessions vs one-session split explicit.
+<!-- agent:boundary:bf1d5fc1 -->
 <!-- /agent:exchange -->
 ###
 

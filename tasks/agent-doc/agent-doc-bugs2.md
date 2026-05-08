@@ -19,7 +19,7 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed #harnessprompt: Codex same-line agent-doc directive bodies are tracked, verified, installed, committed, and pushed.
+Fixed protected-layout tmux sync replacement; built, installed, committed, and pushed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -28,7 +28,34 @@ Completed #harnessprompt: Codex same-line agent-doc directive bodies are tracked
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-182851.md`*
-<!-- agent:boundary:ecf5c3e1 -->
+❯ The autosync when switching the editor to another agent document + `Sync Tmux Layout` does not change the focus or the visible tmux panes in the agent-doc tmux window.
+❯ spec-test-build-install-commit-push
+### Re: protected tmux sync — gpt-5
+
+Fixed the no-op sync path.
+
+Root cause: the protected-layout guard preserved the entire visible `agent-doc` tmux window whenever a requested hidden document coincided with a visible pane that owned an open closeout cycle. That was too broad: when another unprotected visible pane can be safely displaced, sync should bring the requested document into view and focus it.
+
+Changed:
+- `src/agent-doc/src/sync.rs` now counts detachable unprotected unwanted visible panes and only preserve-warns when missing requested panes outnumber them.
+- Added tmux-backed regressions for both passive editor autosync and manual sync.
+- Updated `specs/07-session-tmux-commands.md` and `VERSIONS.md` for the new contract.
+
+Verification:
+- `cargo fmt`
+- `cargo test sync_replaces_detachable_visible_pane_while_protected_pane_remains -- --nocapture`
+- `cargo test`
+- `cargo build`
+- `make check` in `src/agent-doc`
+- `make install`
+- `agent-doc --version`
+
+Note: root `make check` still fails before running project checks because the root `Makefile` tries `cd instruction-files`, but this checkout has that crate at `src/instruction-files`. The relevant `src/agent-doc` `make check` suite passes.
+
+Committed and pushed:
+- `ee05a20` in `src/agent-doc`: `fix: unblock protected layout sync replacement`
+- `174cc0052` in `agent-loop`: `agent-doc: update protected sync replacement`
+<!-- agent:boundary:c425a975 -->
 <!-- /agent:exchange -->
 ###
 

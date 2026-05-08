@@ -95,7 +95,32 @@ Top backlog item: `#closeguard`.
 I kept `#closeguard` first because it protects the core closeout invariant: a session must not close successfully while a newer prompt-bearing exchange line or malformed matching backlog item remains unresolved.
 
 I added one recommended follow-up after it: `#tigersim`, to implement Phase 1-2 from `tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md`. That keeps the TigerBeetle-style simulator work available without putting it ahead of the immediate closeout guard bug.
-<!-- agent:boundary:84fdc6bb -->
+❯ do [#closeguard]. spec-test-build-install-commit-push
+### Re: #closeguard — gpt-5
+
+Implemented, verified, installed, committed, and pushed.
+
+What changed:
+- Added detection for malformed tracked backlog/icebox checklist lines such as `_- [ ] [#id] ...`, so they can no longer disappear from pending guards just because the normal pending parser cannot parse them.
+- Wired that detection into `session-check`, where malformed live tracked items now fail closeout with the exact id and line text.
+- Added strict pre-write/pre-commit finalize checks so a response that appears to complete a malformed tracked item fails before the response is written.
+- Updated the closeout command spec and added unit/integration regressions for the malformed pending-item closeout path.
+
+Verification:
+- `cargo test detects_malformed_tracked_checklist_lines`
+- `cargo test session_check_blocks_malformed_tracked_item_before_done_guard`
+- `cargo test --test finalize_integration finalize_fails_before_write_when_completed_pending_line_is_malformed`
+- `cargo build`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commit / push:
+- `src/agent-doc` branch `20260422/codex-agent-backend`: `e840cd3` (`fix: fail closeout on malformed pending items`)
+- root `agent-loop` branch `main`: `53d6a1f72` (`chore: update agent-doc submodule`)
+
+I left the pre-existing unrelated root workspace changes untouched. No actionable follow-up items came out of this implementation.
+<!-- agent:boundary:2d4fdf25 -->
 <!-- /agent:exchange -->
 ###
 
@@ -113,7 +138,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
 - [ ] [#tigersim] [recommended] Implement Phase 1-2 from tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: inventory pure closeout seams, build the first SimWorld closeout simulator, and promote fixed seeds for recent closeout/pending/snapshot bugs.
 <!-- /agent:backlog -->
 
@@ -135,6 +159,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#ctrlreload] [recommended] Add controller binary-generation/version invalidation so agent-doc restarts a stale project controller after local install/update instead of surfacing unknown controller command errors for newly-added controller RPCs.
 - 2026-05-08 [#ctrlsock] Implement tasks/agent-doc/plan-controller-stalled-client-start-hang.md: make project controller RPCs robust to stalled clients so a stuck sync/no-autostart or closed prior pane cannot make agent-doc start/session status hang; fail closed with stale-pane diagnostics instead.
 - 2026-05-08 [#tigertest] [recommended] Create a TigerBeetle-inspired deterministic simulation/property-test plan for agent-doc: model session-cycle state, generate concurrent document edits and crash/fault schedules, assert closeout/pending/git invariants, and keep most cases in fast pure tests.
+- 2026-05-08 [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
 <!-- /agent:pending-done -->
 
 

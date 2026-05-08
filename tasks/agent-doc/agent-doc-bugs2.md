@@ -47,7 +47,18 @@ Project Controller -> Session Actor -> Harness Supervisor -> Harness Child
 The plan is scoped around the `#tmuxcoord` finding: tmux-router should stay a deterministic layout primitive, while live ownership and dispatch authority move into a single Project Controller with per-document Session Actors. It covers singleton socket/launch locking, managed vs lazy detached lifecycle, SQLite as the durable journal/recovery store, a narrow Harness Supervisor client protocol, route/start/sync migration boundaries, lazy self-exit, and tmux-backed regressions for the stale-starting / three-pane failure shape.
 
 I left the existing uncommitted edits in `plan-single-owner-session-actor-transition.md` and `plan-sqlite-session-store-concurrency.md` untouched and made the new plan a separate artifact.
-<!-- agent:boundary:4ff10568 -->
+❯ #next-steps
+### Re: #next-steps — gpt-5
+
+No new follow-up backlog item is needed from this turn.
+
+The backlog is already in the right priority order:
+
+1. `#sqliterepros` — capture concrete failures where a transactional store would have reduced authority drift or non-atomic state bugs.
+2. `#sqliteeval` — use that evidence to decide whether `.agent-doc/state.db` should become the authoritative session store alongside the single-owner actor/controller rollout.
+
+Top backlog item: `#sqliterepros`.
+<!-- agent:boundary:52335eb4 -->
 <!-- /agent:exchange -->
 ###
 

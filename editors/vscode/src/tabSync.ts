@@ -112,18 +112,6 @@ export function buildTabChangeCommand(input: TabChangeInput): PlannedTabChange |
         return null;
     }
 
-    if (
-        previous &&
-        previous.visibleSignature === nextState.visibleSignature &&
-        visibleMd.length === 1 &&
-        visibleColumns.length <= 1
-    ) {
-        return {
-            command: { kind: 'focus', args: ['focus', input.activeFile] },
-            nextState,
-        };
-    }
-
     return {
         command: {
             kind: 'sync',

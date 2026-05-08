@@ -76,6 +76,9 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   `sessions.json` still points at an older projection.
 - Focus may use `sessions.json` only as a fallback binding helper when no live
   authoritative actor pane exists.
+- Editor automatic tab-to-pane sync must not use `focus` as a substitute for
+  passive `sync --no-autostart`; focus does not own stash rescue, safe passive
+  replacement, or preserved-layout reselect proof.
 
 ## layout
 

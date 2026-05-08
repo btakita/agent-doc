@@ -106,10 +106,10 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 ### 2.5 Tab-to-Pane Sync (Automatic)
 
 - **Trigger:** Editor tab selection or visible editor set changes.
-- **Debounce:** 500ms. Skip if the visible file set + active file signature is unchanged.
+- **Debounce:** 100ms. Skip if the visible file set + active file signature is unchanged.
 - **Concurrency guard:** One automatic command at a time. When a newer selection/layout request arrives while a command is still running, queue only the latest request and replay it immediately after the running command finishes.
 - **Snapshot contract:** Capture the exact focus/layout snapshot from the triggering editor event and replay that latest captured snapshot after any in-flight command. Do not resample the live editor state later and risk landing on an earlier splitter hop.
-- **Behavior:** Same as Section 2.4, but runs silently (no user notification) with `--no-autostart`. If the command reports preserve-layout output, keep the selection pending and retry unless the output also includes `[sync] safe_passive_layout_preserved_reselected_focus`, which proves the already-visible focus pane was selected. Do not update the automatic dedup state for a preserved-layout noop without that marker. Errors are silently ignored.
+- **Behavior:** Same as Section 2.4, but runs silently (no user notification) with `--no-autostart`. Automatic tab-to-pane sync must dispatch `agent-doc sync`, not `agent-doc focus`, even when only one markdown file is visible; the passive sync path owns stash rescue, protected-layout preserve/reselect proof, and safe pane replacement. If the command reports preserve-layout output, keep the selection pending and retry unless the output also includes `[sync] safe_passive_layout_preserved_reselected_focus`, which proves the already-visible focus pane was selected. Do not update the automatic dedup state for a preserved-layout noop without that marker. Errors are silently ignored.
 - **Safety:** Startup audits must be report-only (`agent-doc resync`), not `resync --fix`, unless the user explicitly invoked a repair action.
 
 ### 2.6 Prompt Polling

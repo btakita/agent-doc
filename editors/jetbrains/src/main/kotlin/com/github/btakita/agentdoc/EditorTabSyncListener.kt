@@ -117,15 +117,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 return null
             }
 
-            val kind = if (
-                visibleSignature != previousVisibleSignature ||
-                visibleMdFiles.size > 1
-            ) {
-                AutomaticCommandKind.Sync
-            } else {
-                AutomaticCommandKind.Focus
-            }
-            return AutomaticCommandPlan(kind, visibleSignature)
+            return AutomaticCommandPlan(AutomaticCommandKind.Sync, visibleSignature)
         }
 
         fun shouldReplayAfterRun(startedGeneration: Long, latestGeneration: Long): Boolean =

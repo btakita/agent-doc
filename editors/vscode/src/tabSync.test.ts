@@ -76,7 +76,7 @@ describe('buildTabChangeCommand', () => {
         });
     });
 
-    it('returns focus when a single visible markdown file stays selected', () => {
+    it('uses passive sync instead of focus when a single visible markdown file stays selected', () => {
         const planned = buildTabChangeCommand({
             activeFile: 'src/boost-client/tasks/monsterrodholders.md',
             visibleMd: ['src/boost-client/tasks/monsterrodholders.md'],
@@ -89,8 +89,15 @@ describe('buildTabChangeCommand', () => {
         });
 
         assert.deepStrictEqual(planned?.command, {
-            kind: 'focus',
-            args: ['focus', 'src/boost-client/tasks/monsterrodholders.md'],
+            kind: 'sync',
+            args: [
+                'sync',
+                '--col',
+                'src/boost-client/tasks/monsterrodholders.md',
+                '--focus',
+                'src/boost-client/tasks/monsterrodholders.md',
+                '--no-autostart',
+            ],
         });
     });
 

@@ -53,7 +53,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `single visible markdown file still uses focus when selection changes`() {
+    fun `single visible markdown file still uses sync when selection changes`() {
         val visibleMdFiles = listOf("/repo/src/boost-client/tasks/monsterrodholders.md")
         val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
             visibleMdFiles = visibleMdFiles,
@@ -63,7 +63,7 @@ class EditorTabSyncListenerTest {
             previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
         )
 
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
+        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
     }
 
     @Test

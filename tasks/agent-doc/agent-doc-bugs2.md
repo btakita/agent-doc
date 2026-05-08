@@ -49,12 +49,17 @@ So the visible delay is mainly two things: autosync/manual sync contention on `.
 
 That also explains why it shows up when switching panes in the editor: editor autosync can already be running, then a manual `Sync Tmux Layout` or another selection event queues behind it. The queued command still does its own prune/proof/reconcile after the lock wait, so the end-to-end time lands around 5s even though the final pane selection is quick.
 
-The current tree has already started making this accountable: sync now emits phase-level timings (`sync_lock_wait`, prune subphases, `controller_actor_lookup`, `projection_refresh`, `ownership_proof`, `tmux_router`, and total safe-passive time). The remaining optimization target is to avoid holding/contending the sync lock for routine selection churn and to shorten or skip expensive stash-pane prune work on the no-op safe-passive path.
-<!-- agent:boundary:d4afbb13 -->
+❯ The current tree has already started making this accountable: sync now emits phase-level timings (`sync_lock_wait`, prune subphases, `controller_actor_lookup`, `projection_refresh`, `ownership_proof`, `tmux_router`, and total safe-passive time). The remaining optimization target is to avoid holding/contending the sync lock for routine selection churn and to shorten or skip expensive stash-pane prune work on the no-op safe-passive path.
+### Re: closeout guard — gpt-5
+
+No additional prompt-bearing change was present after the sync-latency response. The later working-tree delta was comment-only after template comment stripping, so there was nothing else to answer in this cycle.
+<!-- agent:boundary:8c2ca019 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
+---
 Comments after a run starts are deleted by agent-doc.
 ---
 "❯ Commit / push:" should not have the `❯ ` prefix since this was the agent response. #agent-doc-bug

@@ -239,10 +239,15 @@ authority used by route/start/sync:
 - bootstrap state: `.agent-doc/controller-state.json`
 
 Lazy startup must connect first, acquire the launch lock only when needed,
-recheck the socket after acquiring the lock, launch the detached controller,
-and wait for bounded readiness before returning a client connection. The
-persisted bootstrap records `project_root`, `socket_path`, `launch_mode`,
-`bootstrap_epoch`, and `pid`.
+verify that the active controller was started from the same agent-doc binary
+identity as the caller, recheck the socket after acquiring the lock, and then
+launch the detached controller only when needed. If an active controller is
+missing that binary identity or reports a different path/version/size/mtime
+stamp, the client must shut it down and relaunch before returning a client
+connection. This keeps local installs or rebuilds from leaving a stale
+controller process that rejects newly-added controller RPCs as unknown
+commands. The persisted bootstrap records `project_root`, `socket_path`,
+`launch_mode`, `bootstrap_epoch`, `pid`, and the startup binary identity.
 
 `agent-doc start` creates owner generations through the controller. `route`
 and `sync` read actor bindings through the controller before consulting

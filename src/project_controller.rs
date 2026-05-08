@@ -53,12 +53,23 @@ impl LaunchMode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerBinaryIdentity {
+    pub path: PathBuf,
+    pub version: String,
+    pub len: u64,
+    pub modified_secs: u64,
+    pub modified_nanos: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerBootstrap {
     pub project_root: PathBuf,
     pub socket_path: PathBuf,
     pub launch_mode: LaunchMode,
     pub bootstrap_epoch: u64,
     pub pid: u32,
+    #[serde(default)]
+    pub controller_binary: Option<ControllerBinaryIdentity>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +80,8 @@ pub struct ControllerStatus {
     pub launch_mode: Option<LaunchMode>,
     pub bootstrap_epoch: Option<u64>,
     pub pid: Option<u32>,
+    #[serde(default)]
+    pub controller_binary: Option<ControllerBinaryIdentity>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -258,6 +271,24 @@ pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>
         .map(Some)
 }
 
+fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
+    let path = std::env::current_exe().context("failed to locate current agent-doc binary")?;
+    let metadata = std::fs::metadata(&path)
+        .with_context(|| format!("failed to stat current agent-doc binary {}", path.display()))?;
+    let modified = metadata
+        .modified()
+        .with_context(|| format!("failed to read modified time for {}", path.display()))?
+        .duration_since(UNIX_EPOCH)
+        .with_context(|| format!("modified time before unix epoch for {}", path.display()))?;
+    Ok(ControllerBinaryIdentity {
+        path,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        len: metadata.len(),
+        modified_secs: modified.as_secs(),
+        modified_nanos: modified.subsec_nanos(),
+    })
+}
+
 fn write_bootstrap(project_root: &Path, launch_mode: LaunchMode) -> Result<ControllerBootstrap> {
     let bootstrap = ControllerBootstrap {
         project_root: project_root.to_path_buf(),
@@ -268,6 +299,7 @@ fn write_bootstrap(project_root: &Path, launch_mode: LaunchMode) -> Result<Contr
             .unwrap_or_default()
             .as_secs(),
         pid: std::process::id(),
+        controller_binary: Some(current_binary_identity()?),
     };
     let path = state_path(project_root);
     if let Some(parent) = path.parent() {
@@ -1182,6 +1214,7 @@ pub fn authorize_dispatch(
             launch_mode: LaunchMode::Lazy,
             bootstrap_epoch: 0,
             pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
         };
         return handle_dispatch(
             &bootstrap,
@@ -1294,6 +1327,7 @@ pub fn authorize_operator_command(
             launch_mode: LaunchMode::Lazy,
             bootstrap_epoch: 0,
             pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
         };
         return handle_operator_command(
             &bootstrap,
@@ -1353,8 +1387,33 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
                 launch_mode: bootstrap.as_ref().map(|state| state.launch_mode),
                 bootstrap_epoch: bootstrap.as_ref().map(|state| state.bootstrap_epoch),
                 pid: bootstrap.as_ref().map(|state| state.pid),
+                controller_binary: bootstrap
+                    .as_ref()
+                    .and_then(|state| state.controller_binary.clone()),
             })
         }
+    }
+}
+
+fn active_controller_matches_current_binary(project_root: &Path) -> Result<bool> {
+    let response = request(project_root, "status")?;
+    let status: ControllerStatus =
+        serde_json::from_str(&response).context("failed to parse project controller status")?;
+    controller_status_matches_current_binary(&status)
+}
+
+fn controller_status_matches_current_binary(status: &ControllerStatus) -> Result<bool> {
+    Ok(status.controller_binary.as_ref() == Some(&current_binary_identity()?))
+}
+
+fn shutdown_stale_controller(project_root: &Path) {
+    let _ = request(project_root, "shutdown");
+    let start = Instant::now();
+    while start.elapsed() < CONNECT_WAIT {
+        if connect(project_root).is_err() {
+            return;
+        }
+        std::thread::sleep(CONNECT_POLL);
     }
 }
 
@@ -1362,13 +1421,16 @@ pub fn connect_or_launch(
     project_root: &Path,
     launch_mode: LaunchMode,
 ) -> Result<interprocess::local_socket::Stream> {
-    if let Ok(stream) = connect(project_root) {
-        return Ok(stream);
+    if active_controller_matches_current_binary(project_root).unwrap_or(false) {
+        return connect(project_root);
     }
 
     let _lock = LaunchLock::acquire(project_root)?;
-    if let Ok(stream) = connect(project_root) {
-        return Ok(stream);
+    if active_controller_matches_current_binary(project_root).unwrap_or(false) {
+        return connect(project_root);
+    }
+    if connect(project_root).is_ok() {
+        shutdown_stale_controller(project_root);
     }
 
     launch_detached(project_root, launch_mode)?;
@@ -1459,6 +1521,7 @@ fn handle_request(
             launch_mode: Some(bootstrap.launch_mode),
             bootstrap_epoch: Some(bootstrap.bootstrap_epoch),
             pid: Some(bootstrap.pid),
+            controller_binary: bootstrap.controller_binary.clone(),
         })?),
         "shutdown" => {
             *should_stop = true;
@@ -2076,10 +2139,63 @@ mod tests {
         let read = read_bootstrap(dir.path()).unwrap().unwrap();
         assert_eq!(read.launch_mode, LaunchMode::Lazy);
         assert_eq!(read.bootstrap_epoch, written.bootstrap_epoch);
+        assert_eq!(read.controller_binary, written.controller_binary);
+        assert_eq!(
+            read.controller_binary,
+            Some(current_binary_identity().unwrap())
+        );
         assert_eq!(
             read.socket_path,
             dir.path().join(".agent-doc/controller.sock")
         );
+    }
+
+    #[test]
+    fn controller_status_reports_startup_binary_identity() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let response = handle_request(
+            &(serde_json::json!({ "command": "status" }).to_string() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+
+        assert!(status.active);
+        assert_eq!(status.controller_binary, bootstrap.controller_binary);
+        assert!(controller_status_matches_current_binary(&status).unwrap());
+    }
+
+    #[test]
+    fn missing_or_changed_controller_binary_identity_is_stale() {
+        let current = current_binary_identity().unwrap();
+        let missing = ControllerStatus {
+            active: true,
+            project_root: PathBuf::from("/tmp/project"),
+            socket_path: PathBuf::from("/tmp/project/.agent-doc/controller.sock"),
+            launch_mode: Some(LaunchMode::Lazy),
+            bootstrap_epoch: Some(1),
+            pid: Some(2),
+            controller_binary: None,
+        };
+        assert!(!controller_status_matches_current_binary(&missing).unwrap());
+
+        let mut changed = current.clone();
+        changed.modified_nanos = changed.modified_nanos.wrapping_add(1);
+        let stale = ControllerStatus {
+            controller_binary: Some(changed),
+            ..missing
+        };
+        assert!(!controller_status_matches_current_binary(&stale).unwrap());
+
+        let fresh = ControllerStatus {
+            controller_binary: Some(current),
+            ..stale
+        };
+        assert!(controller_status_matches_current_binary(&fresh).unwrap());
     }
 
     fn test_bootstrap(dir: &tempfile::TempDir) -> ControllerBootstrap {
@@ -2089,6 +2205,7 @@ mod tests {
             launch_mode: LaunchMode::Lazy,
             bootstrap_epoch: 123,
             pid: 456,
+            controller_binary: Some(current_binary_identity().unwrap()),
         }
     }
 

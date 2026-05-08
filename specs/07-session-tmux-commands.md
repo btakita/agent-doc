@@ -142,7 +142,17 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Sync serialization is bounded: a contended `.agent-doc/sync.lock` may delay a
   later editor-triggered sync only up to the lock wait budget, after which the
   later sync logs the contention and continues rather than starving selection,
-  ownership proof, or auto-start handling behind an orphaned process.
+  ownership proof, or auto-start handling behind an orphaned process. Sync
+  latency logs must include the `sync_lock_wait` phase so contention is not
+  hidden inside the safe-passive total.
+- Sync latency diagnostics must name the phase that crossed budget. The
+  top-level phases include window resolution, prune, ownership proof,
+  tmux-router reconcile, and safe-passive total; prune must also emit subphase
+  timings for registry pruning, tmux window/pane metadata fetch, stash-window
+  cleanup, stash-pane cleanup, and retained-dead non-stash cleanup. Controller
+  actor lookup and projection refresh during ownership proof must be logged as
+  separate phases so cold/stale controller cost is not confused with
+  tmux-router work.
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.
 - If any visible file stays blocked under passive `--no-autostart`, sync must preserve the current visible tmux layout and warn instead of reconciling the remaining foreign pane set into a new authoritative layout. This includes the live mixed-root replay shape where `tasks/agent-doc/agent-doc-bugs2.md` shares the visible `agent-doc` window with `src/session-share/tasks/claudescore-3.md`; a blocked sibling file must not let the remaining visible pane set collapse into a new authoritative layout.
@@ -262,6 +272,10 @@ must close with a timeout diagnostic instead of monopolizing the server, and a
 client waiting for a response must fail closed rather than blocking
 indefinitely. `status --ensure` may use the connect-or-launch path only as a
 readiness check; it must close that stream before issuing the status RPC.
+Sync must measure controller actor-binding calls as `controller_actor_lookup`
+and any sessions.json projection update as `projection_refresh`; over-budget
+entries should point at the controller phase instead of only reporting broad
+ownership-proof latency.
 
 `agent-doc start` creates owner generations through the controller. `route`
 and `sync` read actor bindings through the controller before consulting

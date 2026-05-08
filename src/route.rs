@@ -6840,7 +6840,8 @@ done
                 &format!("exec {} {}", script.display(), file.display()),
             );
         }
-        let content = wait_for_pane_contains(iso, pane, "❯ ", std::time::Duration::from_secs(10));
+        let launch_command = format!("exec {} {}", script.display(), file.display());
+        let content = wait_for_mock_agent_prompt(iso, pane, &launch_command);
         assert!(
             content.contains("❯ "),
             "mock agent-doc session should present a prompt, got: {content}"
@@ -6856,11 +6857,24 @@ done
             );
             send_keys_with_retry(iso, pane, &format!("exec {}", script.display()));
         }
-        let content = wait_for_pane_contains(iso, pane, "❯ ", std::time::Duration::from_secs(10));
+        let launch_command = format!("exec {}", script.display());
+        let content = wait_for_mock_agent_prompt(iso, pane, &launch_command);
         assert!(
             content.contains("❯ "),
             "mock agent-doc session should present a prompt, got: {content}"
         );
+    }
+
+    fn wait_for_mock_agent_prompt(iso: &IsolatedTmux, pane: &str, launch_command: &str) -> String {
+        let mut content =
+            wait_for_pane_contains(iso, pane, "❯ ", std::time::Duration::from_secs(10));
+        if content.contains("❯ ") || !content.contains(launch_command) {
+            return content;
+        }
+
+        let _ = iso.send_keys_raw(pane, "Enter");
+        content = wait_for_pane_contains(iso, pane, "❯ ", std::time::Duration::from_secs(10));
+        content
     }
 
     fn wait_for_process_pid(pattern: &str, timeout: std::time::Duration) -> u32 {

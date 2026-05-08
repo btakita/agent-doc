@@ -185,6 +185,10 @@ const RENAME_DEBOUNCE_TTL_SECS: u64 = 5;
 const SYNC_FRONTMATTER_STATUS_PREFIX: &str = "[agent-doc sync] malformed frontmatter";
 const SYNC_WINDOW_RESOLUTION_BUDGET: Duration = Duration::from_millis(250);
 const SYNC_PRUNE_BUDGET: Duration = Duration::from_millis(1_000);
+const SYNC_PRUNE_SUBPHASE_BUDGET: Duration = Duration::from_millis(250);
+const SYNC_LOCK_WAIT_LATENCY_BUDGET: Duration = Duration::from_millis(100);
+const SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET: Duration = Duration::from_millis(250);
+const SYNC_PROJECTION_REFRESH_BUDGET: Duration = Duration::from_millis(250);
 const SYNC_OWNERSHIP_PROOF_BUDGET: Duration = Duration::from_millis(750);
 const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
@@ -1598,14 +1602,26 @@ fn project_authoritative_actor_binding(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
+    focus: Option<&str>,
+    auto_start_mode: AutoStartMode,
 ) -> Option<String> {
-    let record = load_live_authoritative_actor_record(tmux, file, session_id)?;
+    let lookup_start = Instant::now();
+    let record = load_live_authoritative_actor_record(tmux, file, session_id);
+    log_sync_latency(
+        focus,
+        "controller_actor_lookup",
+        lookup_start.elapsed(),
+        SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
+        auto_start_mode,
+    );
+    let record = record?;
     let actor_pane = record.pane_id.clone();
     if lookup_registry_entry_for_file_session(file, session_id)
         .as_ref()
         .map(|entry| entry.pane.as_str())
         != Some(actor_pane.as_str())
     {
+        let projection_start = Instant::now();
         eprintln!(
             "[sync] authoritative actor generation {} keeps {} on pane {} — refreshing sessions.json as a projection",
             record.generation,
@@ -1632,6 +1648,13 @@ fn project_authoritative_actor_binding(
                 err
             ));
         }
+        log_sync_latency(
+            focus,
+            "projection_refresh",
+            projection_start.elapsed(),
+            SYNC_PROJECTION_REFRESH_BUDGET,
+            auto_start_mode,
+        );
     }
     Some(actor_pane)
 }
@@ -2382,7 +2405,15 @@ fn run_with_options(
     // race against each other's stash operations, causing pane bouncing. Contention
     // is bounded so a stuck prior editor sync cannot starve later selections forever.
     let lock_path = std::path::Path::new(".agent-doc/sync.lock");
+    let sync_lock_start = Instant::now();
     let _lock_guard = acquire_sync_lock(lock_path, SYNC_LOCK_WAIT_BUDGET);
+    log_sync_latency(
+        focus,
+        "sync_lock_wait",
+        sync_lock_start.elapsed(),
+        SYNC_LOCK_WAIT_LATENCY_BUDGET,
+        auto_start_mode,
+    );
 
     // Check for new build and clear stale caches
     check_build_stamp();
@@ -2472,7 +2503,23 @@ fn run_with_options(
     }
 
     let prune_start = Instant::now();
-    let _ = resync::prune_with_tmux(tmux); // Clean stale entries before layout calculation
+    let prune_timings = match resync::prune_with_tmux_timed(tmux) {
+        Ok((_removed, timings)) => timings,
+        Err(err) => {
+            eprintln!("[sync] warning: prune failed: {}", err);
+            sync_log(&format!("warning: prune failed: {}", err));
+            Vec::new()
+        }
+    }; // Clean stale entries before layout calculation
+    for timing in prune_timings {
+        log_sync_latency(
+            focus,
+            timing.phase,
+            timing.elapsed,
+            SYNC_PRUNE_SUBPHASE_BUDGET,
+            auto_start_mode,
+        );
+    }
     log_sync_latency(
         focus,
         "prune",
@@ -2654,8 +2701,13 @@ fn run_with_options(
                 None => continue,
             };
 
-            let authoritative_actor_pane =
-                project_authoritative_actor_binding(tmux, file_path, &session_id);
+            let authoritative_actor_pane = project_authoritative_actor_binding(
+                tmux,
+                file_path,
+                &session_id,
+                focus,
+                auto_start_mode,
+            );
             let registered_entry = lookup_registry_entry_for_file_session(file_path, &session_id);
             let registered_pane = authoritative_actor_pane
                 .or_else(|| registered_entry.as_ref().map(|entry| entry.pane.clone()));
@@ -7172,6 +7224,18 @@ mod tests {
         );
         assert!(slow.contains("status=over_budget"), "{slow}");
         assert!(slow.contains("elapsed_ms=1000"), "{slow}");
+
+        let controller = sync_latency_message(
+            "controller_actor_lookup",
+            Duration::from_millis(251),
+            SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
+            AutoStartMode::SafePassive,
+        );
+        assert!(
+            controller.contains("phase=controller_actor_lookup"),
+            "{controller}"
+        );
+        assert!(controller.contains("status=over_budget"), "{controller}");
     }
 
     #[test]

@@ -92,6 +92,7 @@
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::sessions::{self, PaneMoveOp, Tmux};
 use crate::{config, frontmatter};
@@ -111,6 +112,18 @@ enum PaneProcessKind {
     IdleShell(String),
     Foreign(String),
     UnknownTransient,
+}
+
+fn pane_process_kind_from_current_command(cmd: &str) -> PaneProcessKind {
+    if AGENT_PROCESSES.contains(&cmd) {
+        PaneProcessKind::Agent(cmd.to_string())
+    } else if IDLE_SHELLS.contains(&cmd) {
+        PaneProcessKind::IdleShell(cmd.to_string())
+    } else if cmd.is_empty() {
+        PaneProcessKind::UnknownTransient
+    } else {
+        PaneProcessKind::Foreign(cmd.to_string())
+    }
 }
 
 fn classify_pane_process(tmux: &Tmux, pane_id: &str) -> PaneProcessKind {
@@ -369,6 +382,26 @@ pub(crate) struct TargetDocumentFixOutcome {
     pub(crate) fixed_issues: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PrunePhaseTiming {
+    pub(crate) phase: &'static str,
+    pub(crate) elapsed: Duration,
+}
+
+fn record_prune_phase<T>(
+    timings: &mut Vec<PrunePhaseTiming>,
+    phase: &'static str,
+    f: impl FnOnce() -> T,
+) -> T {
+    let start = Instant::now();
+    let value = f();
+    timings.push(PrunePhaseTiming {
+        phase,
+        elapsed: start.elapsed(),
+    });
+    value
+}
+
 impl TargetDocumentFixOutcome {
     pub(crate) fn made_changes(self) -> bool {
         self.pruned_dead_entries > 0
@@ -498,27 +531,44 @@ pub(crate) fn apply_targeted_fix_for_route(
 /// Quietly prune dead panes and deduplicate entries for the provided tmux server.
 /// Returns the number of registry entries removed.
 pub fn prune_with_tmux(tmux: &Tmux) -> Result<usize> {
+    prune_with_tmux_timed(tmux).map(|(removed, _)| removed)
+}
+
+pub(crate) fn prune_with_tmux_timed(tmux: &Tmux) -> Result<(usize, Vec<PrunePhaseTiming>)> {
     tracing::debug!("resync::prune start");
+    let mut timings = Vec::new();
     let registry_path = sessions::registry_path();
-    let removed = tmux_router::prune(&registry_path, tmux)?;
+    let removed = record_prune_phase(&mut timings, "prune_registry", || {
+        tmux_router::prune(&registry_path, tmux)
+    })?;
     if removed > 0 {
         tracing::debug!(removed, "resync: pruned stale sessions");
         eprintln!("resync: pruned {} stale session(s)", removed);
     }
 
     // Fetch all metadata once (2 subprocess calls total instead of ~20-40)
-    let windows = fetch_all_window_metadata(tmux);
-    let panes = fetch_all_pane_metadata(tmux);
+    let windows = record_prune_phase(&mut timings, "prune_fetch_windows", || {
+        fetch_all_window_metadata(tmux)
+    });
+    let panes = record_prune_phase(&mut timings, "prune_fetch_panes", || {
+        fetch_all_pane_metadata(tmux)
+    });
 
     // Purge idle stash panes (but do NOT return active panes from stash).
     // return_stashed_panes_bulk was removed from the automatic prune path because
     // it caused a stash-bounce loop: sync stashes unwanted panes → prune returns them
     // → next sync stashes them again. Active panes should stay in stash until the
     // reconciler explicitly needs them. Use `agent-doc resync --fix` for manual recovery.
-    purge_stash_windows_bulk(tmux, &windows, &panes);
-    purge_unregistered_stash_panes_bulk(tmux, &windows, &panes);
-    purge_unregistered_dead_non_stash_panes_bulk(tmux, &panes);
-    Ok(removed)
+    record_prune_phase(&mut timings, "prune_stash_windows", || {
+        purge_stash_windows_bulk(tmux, &windows, &panes)
+    });
+    record_prune_phase(&mut timings, "prune_stash_panes", || {
+        purge_unregistered_stash_panes_bulk(tmux, &windows, &panes)
+    });
+    record_prune_phase(&mut timings, "prune_dead_non_stash", || {
+        purge_unregistered_dead_non_stash_panes_bulk(tmux, &panes)
+    });
+    Ok((removed, timings))
 }
 
 /// Quietly prune dead panes and deduplicate entries.
@@ -1162,7 +1212,7 @@ fn purge_unregistered_stash_panes_bulk_with_supervisors(
     // Only kill idle shells — never kill agent processes (agent-doc, claude, node)
     // even if unregistered, because the registry can go stale and an active Claude
     // session should never be killed automatically.
-    for (pane_id, (window_id, _window_name, _cmd)) in panes {
+    for (pane_id, (window_id, _window_name, cmd)) in panes {
         if !stash_windows.contains(window_id.as_str()) {
             continue;
         }
@@ -1229,7 +1279,7 @@ fn purge_unregistered_stash_panes_bulk_with_supervisors(
             );
             continue;
         }
-        match classify_pane_process(tmux, pane_id) {
+        match pane_process_kind_from_current_command(cmd) {
             PaneProcessKind::IdleShell(_) | PaneProcessKind::Agent(_) => {
                 if let Err(e) = tmux.kill_pane(pane_id) {
                     eprintln!("resync: failed to kill stash pane {}: {}", pane_id, e);
@@ -2379,6 +2429,26 @@ mod tests {
             window: String::new(),
             supervisor_instance_id: String::new(),
         }
+    }
+
+    #[test]
+    fn pane_process_kind_uses_prefetched_command_without_sampling() {
+        assert!(matches!(
+            pane_process_kind_from_current_command("zsh"),
+            PaneProcessKind::IdleShell(cmd) if cmd == "zsh"
+        ));
+        assert!(matches!(
+            pane_process_kind_from_current_command("agent-doc"),
+            PaneProcessKind::Agent(cmd) if cmd == "agent-doc"
+        ));
+        assert!(matches!(
+            pane_process_kind_from_current_command("sleep"),
+            PaneProcessKind::Foreign(cmd) if cmd == "sleep"
+        ));
+        assert!(matches!(
+            pane_process_kind_from_current_command(""),
+            PaneProcessKind::UnknownTransient
+        ));
     }
 
     fn write_mock_agent_doc(base: &std::path::Path) -> std::path::PathBuf {

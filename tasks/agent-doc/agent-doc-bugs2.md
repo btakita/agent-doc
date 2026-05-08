@@ -52,13 +52,18 @@ That also explains why it shows up when switching panes in the editor: editor au
 ❯ The current tree has already started making this accountable: sync now emits phase-level timings (`sync_lock_wait`, prune subphases, `controller_actor_lookup`, `projection_refresh`, `ownership_proof`, `tmux_router`, and total safe-passive time). The remaining optimization target is to avoid holding/contending the sync lock for routine selection churn and to shorten or skip expensive stash-pane prune work on the no-op safe-passive path.
 ### Re: closeout guard — gpt-5
 
-No additional prompt-bearing change was present after the sync-latency response. The later working-tree delta was comment-only after template comment stripping, so there was nothing else to answer in this cycle.
-<!-- agent:boundary:8c2ca019 -->
+❯ No additional prompt-bearing change was present after the sync-latency response. The later working-tree delta was comment-only after template comment stripping, so there was nothing else to answer in this cycle.
+### Re: comment-only drift — gpt-5
+
+A follow-up preflight still found no prompt-bearing document change after stripping comments. I am closing this as comment-only drift; the substantive sync-latency answer above remains the response for the user question.
+<!-- agent:boundary:0be2a132 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
+---
+`❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is 
 ---
 Comments after a run starts are deleted by agent-doc.
 ---

@@ -33,7 +33,21 @@ Active backlog:
 - [ ] [#coordspike] [recommended] Draft a Project Controller -> Session Actor -> Harness Supervisor -> Harness Child MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, harness-supervisor client protocol, and tmux reconciliation tests.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
-<!-- agent:boundary:1aea8f1a -->
+❯ do [#coordspike]
+### Re: #coordspike — gpt-5
+
+Completed `#coordspike`.
+
+I created `tasks/agent-doc/plan-project-controller-session-actor-mvp.md` as the MVP plan for:
+
+```text
+Project Controller -> Session Actor -> Harness Supervisor -> Harness Child
+```
+
+The plan is scoped around the `#tmuxcoord` finding: tmux-router should stay a deterministic layout primitive, while live ownership and dispatch authority move into a single Project Controller with per-document Session Actors. It covers singleton socket/launch locking, managed vs lazy detached lifecycle, SQLite as the durable journal/recovery store, a narrow Harness Supervisor client protocol, route/start/sync migration boundaries, lazy self-exit, and tmux-backed regressions for the stale-starting / three-pane failure shape.
+
+I left the existing uncommitted edits in `plan-single-owner-session-actor-transition.md` and `plan-sqlite-session-store-concurrency.md` untouched and made the new plan a separate artifact.
+<!-- agent:boundary:4ff10568 -->
 <!-- /agent:exchange -->
 ###
 
@@ -50,7 +64,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#coordspike] [recommended] Draft a Project Controller -> Session Actor -> Harness Supervisor -> Harness Child MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, harness-supervisor client protocol, and tmux reconciliation tests.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 

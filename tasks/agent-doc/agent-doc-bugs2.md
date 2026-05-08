@@ -53,7 +53,32 @@ Findings:
 Decision: do not put the primary repair in tmux-router pane reconciliation. Keep tmux-router as a layout primitive, continue moving ownership into the single-owner session actor, and use the existing `#coordspike` item to design the coordinator/actor MVP around that authority boundary.
 
 I did not add a duplicate backlog item. The next backlog item should be `#coordspike`.
-<!-- agent:boundary:4b3204a2 -->
+❯ Is coordinator the best name or should it be something else? Router? Dispatcher? Something else?
+### Re: coordinator naming — gpt-5
+
+I would not use `router` or `dispatcher` for the owning process.
+
+Best naming split:
+
+- `session actor` for the core authority model.
+- `session supervisor` for the per-session harness process that starts/restarts/observes the child agent, but this name is already in use and should stay scoped to that role.
+- `session manager` or `session controller` for a daemon/process if we need a user-facing noun.
+
+I would avoid these:
+
+- `router`: too narrow. It sounds like it only chooses where a command goes. The thing we need owns generation, lifecycle, state transitions, restart policy, and projections.
+- `dispatcher`: also too narrow. It sounds like command delivery, not authority over document/session/pane ownership.
+- `coordinator`: acceptable for early design discussion, but it is a little vague. It can imply a passive mediator between existing authorities, which is exactly the failure mode we want to avoid.
+- `orchestrator`: too broad and buzzwordy for this codebase.
+
+My recommendation: rename the backlog concept from “coordinator actor” toward `session actor` / `session controller`.
+
+Concretely, `#coordspike` should probably produce a plan titled something like:
+
+`single-owner session actor and controller MVP`
+
+That keeps the important invariant in the name: there is one owner. The controller may route and dispatch, but those are subordinate operations.
+<!-- agent:boundary:21226d83 -->
 <!-- /agent:exchange -->
 ###
 

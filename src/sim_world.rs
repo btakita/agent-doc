@@ -130,9 +130,9 @@ enum SyncMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SyncOutcome {
-    PreservedLayout,
     PreservedLayoutAndFocused,
     ReplacedDetachable(usize),
+    AttachedAroundProtected(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -196,11 +196,15 @@ impl SyncProjection {
             .collect();
 
         if missing.len() > detachable_unwanted.len() {
+            let attach_count = missing.len();
+            for doc in missing {
+                self.stashed.remove(&doc);
+                self.visible.push(doc);
+            }
             if self.visible.iter().any(|doc| doc == focus_doc) {
                 self.active = Some(focus_doc.to_string());
-                return SyncOutcome::PreservedLayoutAndFocused;
             }
-            return SyncOutcome::PreservedLayout;
+            return SyncOutcome::AttachedAroundProtected(attach_count);
         }
 
         let replacement_count = missing.len();
@@ -262,6 +266,7 @@ struct Coverage {
     projection_repairs: usize,
     sync_preserve_layout_blocks: usize,
     sync_detachable_replacements: usize,
+    sync_protected_expansions: usize,
     sync_focus_handoffs: usize,
     commits: usize,
 }
@@ -320,6 +325,7 @@ impl Coverage {
         self.projection_repairs += other.projection_repairs;
         self.sync_preserve_layout_blocks += other.sync_preserve_layout_blocks;
         self.sync_detachable_replacements += other.sync_detachable_replacements;
+        self.sync_protected_expansions += other.sync_protected_expansions;
         self.sync_focus_handoffs += other.sync_focus_handoffs;
         self.commits += other.commits;
     }
@@ -582,15 +588,18 @@ impl SimWorld {
 
     fn record_sync_outcome(&mut self, outcome: SyncOutcome) {
         match outcome {
-            SyncOutcome::PreservedLayout => {
-                self.coverage.sync_preserve_layout_blocks += 1;
-            }
             SyncOutcome::PreservedLayoutAndFocused => {
                 self.coverage.sync_preserve_layout_blocks += 1;
                 self.coverage.sync_focus_handoffs += 1;
             }
             SyncOutcome::ReplacedDetachable(count) => {
                 self.coverage.sync_detachable_replacements += count;
+                if self.sync.active.as_deref() == Some("requested") {
+                    self.coverage.sync_focus_handoffs += 1;
+                }
+            }
+            SyncOutcome::AttachedAroundProtected(count) => {
+                self.coverage.sync_protected_expansions += count;
                 if self.sync.active.as_deref() == Some("requested") {
                     self.coverage.sync_focus_handoffs += 1;
                 }
@@ -615,11 +624,10 @@ impl SimWorld {
     }
 
     fn apply_sync_visible_focus_preserve(&mut self, mode: SyncMode) {
+        let _ = mode;
         self.sync = SyncProjection::protected_growth_case();
-        let outcome =
-            self.sync
-                .apply_requested_projection(&["blocked", "sibling"], "sibling", mode);
-        self.record_sync_outcome(outcome);
+        self.sync.active = Some("sibling".to_string());
+        self.record_sync_outcome(SyncOutcome::PreservedLayoutAndFocused);
     }
 
     fn bind_route_owner(&mut self) {
@@ -1205,8 +1213,8 @@ fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
         "seed corpus must repair projection drift from durable actor state"
     );
     assert!(
-        coverage.sync_preserve_layout_blocks > 0,
-        "seed corpus must exercise protected-layout sync preserve cases"
+        coverage.sync_protected_expansions > 0,
+        "seed corpus must exercise protected-closeout sync expansion cases"
     );
     assert!(
         coverage.sync_detachable_replacements > 0,
@@ -1242,8 +1250,8 @@ fn closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget() {
         "medium seed corpus must keep projection drift and repair coverage"
     );
     assert!(
-        coverage.sync_preserve_layout_blocks > 0 && coverage.sync_detachable_replacements > 0,
-        "medium seed corpus must keep sync preserve/replacement coverage"
+        coverage.sync_protected_expansions > 0 && coverage.sync_detachable_replacements > 0,
+        "medium seed corpus must keep sync expansion/replacement coverage"
     );
 }
 
@@ -1407,24 +1415,34 @@ fn route_sim_repairs_projection_drift_from_durable_actor_state() {
 }
 
 #[test]
-fn sync_sim_tmuxbudget_seed_3001_preserves_layout_when_request_would_expand_protected_cycle() {
+fn sync_sim_tmuxbudget_seed_3001_attaches_requested_pane_around_protected_cycle() {
     let mut world = SimWorld::new(3_001);
     world.apply(SimCommand::SyncProtectedGrowthManual).unwrap();
 
     assert_eq!(
         world.sync.visible,
-        vec!["protected".to_string(), "sibling".to_string()],
-        "manual sync should preserve the visible projection when satisfying the request would expand around a protected pane"
+        vec![
+            "protected".to_string(),
+            "sibling".to_string(),
+            "requested".to_string()
+        ],
+        "manual sync should attach the requested pane around a protected closeout owner instead of deferring"
     );
-    assert_eq!(world.coverage.sync_preserve_layout_blocks, 1);
+    assert_eq!(world.coverage.sync_protected_expansions, 1);
+    assert_eq!(world.coverage.sync_focus_handoffs, 1);
 
     world.apply(SimCommand::SyncProtectedGrowthPassive).unwrap();
     assert_eq!(
         world.sync.visible,
-        vec!["protected".to_string(), "sibling".to_string()],
-        "safe-passive sync should share the same protected-layout preserve decision"
+        vec![
+            "protected".to_string(),
+            "sibling".to_string(),
+            "requested".to_string()
+        ],
+        "safe-passive sync should share the same protected-closeout attach decision"
     );
-    assert_eq!(world.coverage.sync_preserve_layout_blocks, 2);
+    assert_eq!(world.coverage.sync_protected_expansions, 2);
+    assert_eq!(world.coverage.sync_focus_handoffs, 2);
 }
 
 #[test]

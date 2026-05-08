@@ -129,10 +129,11 @@ actor model:
 The simulator also owns pure sync-layout ownership schedules that do not need a
 live tmux server:
 
-- `sync_sim_tmuxbudget_seed_3001...` covers the protected-layout preserve case:
-  a hidden requested pane cannot be brought into the visible projection when the
-  only unwanted visible pane owns an open closeout cycle, because satisfying the
-  request would expand the pane set or detach the protected owner.
+- `sync_sim_tmuxbudget_seed_3001...` covers the protected-closeout attach case:
+  a hidden requested pane is brought into the visible projection even when the
+  only unwanted visible pane owns an open closeout cycle. The protected owner is
+  not detached, and the requested document syncs immediately with temporary pane
+  growth.
 - `sync_sim_tmuxbudget_seed_3002...` covers the replacement case: a hidden
   requested pane must replace an unprotected unwanted visible pane while a
   different protected open-cycle pane remains visible.

@@ -132,13 +132,12 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   stashing it mid-closeout.
 - If a requested projection is missing from the visible `agent-doc` window and
   a visible pane is protected by an open closeout cycle, both manual sync and
-  passive `--no-autostart` sync must first try to satisfy the request by
-  displacing unprotected unwanted visible panes. Sync must preserve-and-warn
-  only when the missing requested panes outnumber those detachable panes,
-  because satisfying the request would otherwise require detaching the
-  protected closeout owner or expanding the visible pane set. The warning must
-  explain that the visible pane cannot be detached because it still owns an
-  open closeout cycle.
+  passive `--no-autostart` sync must satisfy the requested projection without
+  waiting for the protected closeout owner. Sync may displace unprotected
+  unwanted visible panes, and when that is insufficient it must attach/focus the
+  requested pane around the protected closeout owner rather than preserving the
+  old layout as a deferred no-op. Temporary visible pane growth is preferable to
+  blocking a different document's sync.
 - Test coverage for those pure ownership/cardinality decisions should live in
   deterministic `SimWorld` traces. Keep real tmux coverage only for the
   minimal smoke surface that proves pane/window movement, tmux-router detach,

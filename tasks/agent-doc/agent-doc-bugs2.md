@@ -27,36 +27,14 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-033057.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-042116.md`*
 
 Active backlog:
-- [ ] [#pcctrl] Implement Phase A from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: add the project-local controller shell, singleton socket/launch lock, lazy connect-or-launch helper, controller status command, and bootstrap epoch/launch-mode persistence without changing route/start behavior yet.
 - [ ] [#pcstore] Implement Phase B from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: move actor-record load/store behind controller commands, write SQLite first, emit session-actors.json and sessions.json as projections, and add projection drift diagnostics.
 - [ ] [#pcsuper] Implement Phase C from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: make Harness Supervisor startup register with the controller and report ready/busy/waiting-input/blocked/closed lifecycle facts through controller-owned actor transitions.
-- 2 more active item(s)
-❯ do [#pcctrl]. spec-test-build-install-commit-push
-### Re: #pcctrl — gpt-5
-
-Implemented Phase A of the project controller/session actor MVP.
-
-What changed:
-- Added the additive `agent-doc controller` surface with `status`, hidden `serve`, and `shutdown` commands.
-- Added `.agent-doc/controller.sock`, `.agent-doc/locks/controller-launch.lock`, and `.agent-doc/controller-state.json` bootstrap handling.
-- Added lazy connect-or-launch with connect, lock, recheck, detached launch, bounded readiness wait, and persisted `launch_mode` / `bootstrap_epoch` status.
-- Kept `start`, `route`, and `sync` behavior unchanged for Phase A.
-- Updated the spec and added focused CLI/unit coverage.
-
-Verification:
-- `cargo check`
-- `cargo test project_controller`
-- `cargo test test_cli_controller_status`
-- `make check`
-- `make install`
-
-Commits:
-- `agent-doc` submodule: `b20b92b` (`feat: add project controller shell`), pushed to `origin/20260422/codex-agent-backend`.
-- Parent repo: `1cd230948` (`chore: update agent-doc submodule`), ready to push after this managed session closeout.
-<!-- agent:boundary:1851ed6d -->
+- [ ] [#pcroutes] Implement Phase D from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: convert start, route, and sync to read/dispatch through controller authority and keep tmux-router as layout reconciliation only.
+- 1 more active item(s)
+<!-- agent:boundary:3097faf3 -->
 <!-- /agent:exchange -->
 ###
 

@@ -66,23 +66,24 @@ This timeout is hardcoded in `get_status_via_file()` and not configurable.
 
 **Mitigation:** For long-running scenarios, increase the timeout (currently not exposed via config). The binary also sends `set_status()` updates, so well-instrumented operations will keep the timeout alive.
 
-**Test coverage:** `test_status_file_staleness_30s_timeout` (29s/30s/31s boundary). `test_status_file_write_includes_current_timestamp` blocked pending `status_file_path` pub exposure. See `tests/debounce_gaps_test_plan.rs`.
+**Test coverage:** `test_status_file_staleness_30s_timeout` (29s/30s/31s boundary) and `test_status_file_write_includes_current_timestamp`. See `tests/debounce_gaps_test_plan.rs`.
 
-## Hardcoded Timing Constants in Preflight
+## Configurable Timing Constants in Preflight
 
-**Gap:** Preflight applies a hardcoded **1500ms** debounce window via `is_typing_via_file(&file_str, 1500)` in `preflight.rs:366`.
+**Status:** Fixed for preflight. The preflight mtime debounce and cross-process typing-indicator debounce now use the same configured `agent_doc_debounce` frontmatter value, defaulting to **2000ms**.
 
-Meanwhile, the poll-based debounce used elsewhere defaults to **500ms**. This creates asymmetry:
-- Typing indicator requires 1500ms to expire
+The poll-based debounce used elsewhere defaults to **500ms**. This creates expected context-specific asymmetry:
+- Preflight typing detection uses the document's `agent_doc_debounce` value, defaulting to 2000ms
 - Poll-based debounce (watch, route) uses 500ms
+- Long debounce values expand preflight's maximum wait beyond the historical 3s cap
 
-Not configurable per-document; one-size-fits-all fails for slow CI systems or fast typists.
+Per-document configuration avoids one-size-fits-all behavior for slow CI systems or fast local sessions.
 
-**Impact:** Low to Medium. CI systems that take >1500ms to write files will appear to be typing longer than expected, potentially delaying preflight. Conversely, fast typists may experience premature debounce expiry on poll-based paths.
+**Impact:** Low. CI systems or editor integrations that need longer settling windows can configure the document. Fast local sessions can set a smaller value.
 
-**Mitigation:** Make timing constants configurable via frontmatter (`agent_doc_debounce_ms`, `agent_doc_typing_indicator_ms`). For now, operators can adjust via direct code modification if needed.
+**Mitigation:** Set `agent_doc_debounce` in frontmatter.
 
-**Test coverage:** `test_timing_constants_are_documented` (code review pass). `test_preflight_timing_1500ms_is_configurable`, `test_preflight_3s_timeout_is_sufficient_for_debounce` blocked pending `preflight::run()` exposure and `agent_doc_debounce_ms` frontmatter wiring. See `tests/debounce_gaps_test_plan.rs`.
+**Test coverage:** `test_timing_constants_are_documented`, `test_preflight_timing_1500ms_is_configurable`, `test_preflight_3s_timeout_is_sufficient_for_debounce`. See `tests/debounce_gaps_test_plan.rs`.
 
 ## Directory-Walk Double-Pop Bug (Fixed in v0.28)
 
@@ -100,10 +101,9 @@ Files at **odd depths** from the project root (1, 3, 5 levels) failed to find `.
 
 ## Recommended Improvements
 
-1. **Expose timing constants to frontmatter** — Allow per-document control via:
+1. **Expose remaining timing constants to frontmatter** — Allow per-document control via:
    ```yaml
-   agent_doc_debounce_ms: 500
-   agent_doc_typing_indicator_ms: 1500
+   agent_doc_debounce: 500
    agent_doc_status_timeout_ms: 30000
    ```
 

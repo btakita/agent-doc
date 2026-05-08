@@ -1,5 +1,9 @@
 .PHONY: build build-release release test clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
 
+CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+TEST_THREADS ?= 2
+CARGO_CLEAN_ENV = env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE
+
 # Build debug binary
 build:
 	cargo build
@@ -20,9 +24,18 @@ release: check
 	echo "Tag v$$version pushed. CI handles GitHub Release + PyPI."; \
 	cargo install --path .
 
-# Run tests (unset git hook env vars so temp-repo tests are not confused by GIT_DIR)
+# Run tests (unset git hook env vars so temp-repo tests are not confused by GIT_DIR).
+# Prefer cargo-nextest when installed; it runs test binaries concurrently while
+# preserving Cargo's integration-test environment. Fall back to Cargo's own
+# runner rather than reimplementing test execution.
 test:
-	env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test
+	@set -e; \
+	if command -v cargo-nextest >/dev/null 2>&1; then \
+		$(CARGO_CLEAN_ENV) cargo nextest run --all-targets; \
+		$(CARGO_CLEAN_ENV) cargo test --doc; \
+	else \
+		$(CARGO_CLEAN_ENV) cargo test --all-targets -- --test-threads="$(TEST_THREADS)"; \
+	fi
 
 # Lint
 clippy:

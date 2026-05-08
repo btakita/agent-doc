@@ -6,7 +6,7 @@
 //! 3. Hash Collision Risk
 //! 4. Reactive Mode CRDT
 //! 5. Status File Staleness
-//! 6. Timing Constants (1500ms Preflight)
+//! 6. Timing Constants (configurable preflight debounce)
 //!
 //! Tests are organized by gap, with prerequisites, validation logic, and expected behavior.
 //! These tests are NOT YET IMPLEMENTED — this is the test plan/spec only.
@@ -573,41 +573,55 @@ fn test_status_file_staleness_30s_timeout() {
 /// - same as above
 ///
 #[test]
-#[ignore] // Blocked: status_file_path() is private; would need pub(crate) to verify written path
 fn test_status_file_write_includes_current_timestamp() {
     let tmp = tempfile::TempDir::new().unwrap();
     let status_dir = tmp.path().join(".agent-doc/status");
     std::fs::create_dir_all(&status_dir).unwrap();
+    let doc = tmp.path().join("status-write-test.md");
+    std::fs::write(&doc, "content").unwrap();
+    let doc_str = doc.to_string_lossy().to_string();
 
-    // Note: set_status() writes to disk, but we don't have direct access
-    // to the file path from the public API. This test would require
-    // either exposing write_status_file or using a documented path.
+    agent_doc::debounce::set_status(&doc_str, "generating");
 
-    // Placeholder: would call something like:
-    // agent_doc::debounce::set_status("/tmp/test.md", "generating");
-    // let file_content = std::fs::read_to_string(status_path).unwrap();
-    // assert!(file_content.contains(":"), "status file must contain timestamp");
+    let entries: Vec<_> = std::fs::read_dir(&status_dir).unwrap().collect();
+    assert_eq!(entries.len(), 1, "set_status should create one status file");
+    let file_content = std::fs::read_to_string(entries[0].as_ref().unwrap().path()).unwrap();
+    let (status, timestamp) = file_content
+        .trim()
+        .split_once(':')
+        .expect("status file must contain status:timestamp");
+    assert_eq!(status, "generating");
+    let ts_ms: u128 = timestamp.parse().expect("timestamp should be millis");
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    assert!(
+        now_ms.saturating_sub(ts_ms) < 5_000,
+        "status timestamp should be current"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GAP 6: Timing Constants (Preflight 1500ms)
+// GAP 6: Timing Constants (configurable preflight debounce)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Test that the 1500ms hardcoded timeout in preflight is configurable or validated.
+/// Test that the preflight debounce timeout is configurable.
 ///
 /// ## Spec
-/// - `preflight.rs` line ~366: calls `is_typing_via_file(&file_str, 1500)`
-/// - 1500ms is hardcoded, not configurable
+/// - `preflight.rs` reads `agent_doc_debounce` from frontmatter.
+/// - The same configured value must apply to mtime settling and cross-process
+///   typing-indicator debounce.
 /// - risk: different projects might need different debounce windows
 ///   - Slow CI: might need 5000ms to settle
 ///   - Fast local: might want 500ms
-/// - Gap: no test for configurable timing, no validation that 1500ms is reasonable
+/// - Gap: no test for configurable timing, no validation that the default is reasonable
 ///
 /// ## What it validates
 /// - Preflight uses a configurable debounce value, not hardcoded
 /// - Or: if hardcoded, there's a comment explaining why
 /// - A test can override the value for different scenarios
-/// - Preflight timeout (3 seconds total) is appropriately longer than debounce (1500ms)
+/// - Preflight timeout (3 seconds total) is appropriately longer than the default debounce
 ///
 /// ## Prerequisites
 /// - Access to preflight config or frontmatter settings
@@ -615,62 +629,31 @@ fn test_status_file_write_includes_current_timestamp() {
 /// - A test that compares different debounce values
 ///
 /// ## Expected behavior (if gap is fixed)
-/// - Frontmatter can specify `debounce_ms: 5000` (for slow CI)
+/// - Frontmatter can specify `agent_doc_debounce: 5000` (for slow CI)
 /// - Preflight::run() respects the frontmatter value
 /// - Or: CLI flag `--debounce=<ms>` overrides default
-/// - Default is 1500ms (reasonable compromise)
+/// - Default is 2000ms (reasonable compromise)
 ///
 /// ## Current behavior (likely to fail)
-/// - 1500ms is hardcoded in preflight.rs
-/// - No frontmatter field controls it
-/// - No CLI override
-/// - All projects use the same debounce, regardless of build/edit speed
+/// - A stale hardcoded typing-indicator debounce can ignore the frontmatter value.
 ///
 #[test]
-#[ignore] // Blocked: preflight::run() not exposed; requires frontmatter agent_doc_debounce_ms wiring
 fn test_preflight_timing_1500ms_is_configurable() {
-    // Setup: Create a document with custom debounce in frontmatter
-    let tmp = tempfile::TempDir::new().unwrap();
-    let doc = tmp.path().join("preflight-timing-test.md");
-    let frontmatter = r#"---
-agent_doc_debounce_ms: 5000
----
-<!-- agent:exchange -->
-Content
-<!-- /agent:exchange -->
-"#;
-    std::fs::write(&doc, frontmatter).unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let preflight_src = std::fs::read_to_string(root.join("src/preflight.rs")).unwrap();
 
-    // Prerequisite: git init and create snapshot
-    std::process::Command::new("git")
-        .args(["init"])
-        .current_dir(tmp.path())
-        .output()
-        .ok();
-    std::process::Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(tmp.path())
-        .output()
-        .ok();
-    std::process::Command::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(tmp.path())
-        .output()
-        .ok();
-    std::process::Command::new("git")
-        .args(["add", "."])
-        .current_dir(tmp.path())
-        .output()
-        .ok();
-    std::process::Command::new("git")
-        .args(["commit", "-m", "init"])
-        .current_dir(tmp.path())
-        .output()
-        .ok();
-
-    // Action: Call preflight::run() (would need to expose it)
-    // Validation: preflight respects the 5000ms debounce from frontmatter
-    // (Currently, this test can't be written without modifying preflight.rs)
+    assert!(
+        preflight_src.contains(".and_then(|(fm, _)| fm.debounce_ms)"),
+        "preflight must read agent_doc_debounce from frontmatter"
+    );
+    assert!(
+        preflight_src.contains("is_typing_via_file(&file_str, debounce_ms)"),
+        "typing-indicator debounce must use the configured debounce_ms"
+    );
+    assert!(
+        !preflight_src.contains("is_typing_via_file(&file_str, 1500)"),
+        "preflight must not retain the stale hardcoded 1500ms typing debounce"
+    );
 }
 
 /// Test that preflight 3-second timeout is sufficient for the debounce period.
@@ -687,39 +670,31 @@ Content
 /// - Or: an error is returned with guidance to increase timeout
 ///
 #[test]
-#[ignore] // Blocked: preflight::run() not exposed; also depends on agent_doc_debounce_ms config
 fn test_preflight_3s_timeout_is_sufficient_for_debounce() {
-    // Setup: Document with 2800ms debounce (close to 3s limit)
-    let tmp = tempfile::TempDir::new().unwrap();
-    let doc = tmp.path().join("preflight-timeout-test.md");
-    let frontmatter = r#"---
-agent_doc_debounce_ms: 2800
----
-Content
-"#;
-    std::fs::write(&doc, frontmatter).unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let preflight_src = std::fs::read_to_string(root.join("src/preflight.rs")).unwrap();
 
-    // Action: Edit the file, then call preflight
-    std::fs::write(&doc, "Updated content").unwrap();
-    // Simulated: preflight::run(&doc) would be called
-    // The 2800ms debounce + 500ms mtime age ≈ 3300ms total
-    // If 3s timeout is exact, this would fail
-
-    // Validation: preflight completes successfully (or documents that timeout is needed)
-    // This is a boundary test to ensure sufficient margin
+    assert!(
+        preflight_src.contains("if debounce_ms > 3000"),
+        "preflight must expand max_wait when configured debounce exceeds 3s"
+    );
+    assert!(
+        preflight_src.contains("(debounce_ms / 1000) + 1"),
+        "preflight max_wait must leave margin for long configured debounce values"
+    );
 }
 
 /// Test that hardcoded timeout constants are documented.
 ///
 /// ## Expected behavior (if gap is fixed)
-/// - Each hardcoded constant (1500ms, 3000ms, 30000ms, 500ms) has a comment explaining:
+/// - Each hardcoded constant (2000ms, 3000ms, 30000ms, 500ms) has a comment explaining:
 ///   - Why this value was chosen
 ///   - When it should be changed
 ///   - Trade-offs (responsiveness vs. battery/CPU)
 ///
 /// ## Current behavior
 /// - 30000ms (30s) status file timeout is documented in debounce.rs
-/// - 1500ms preflight debounce is NOT documented (only visible in test evals)
+/// - 2000ms default preflight debounce is documented
 /// - 3000ms preflight timeout is NOT documented (only in preflight.rs comments)
 ///
 #[test]
@@ -735,7 +710,7 @@ fn test_timing_constants_are_documented() {
     assert!(
         debounce_src.contains("1500")
             && preflight_src.contains("3000")
-            && preflight_src.contains("500 ms old"),
+            && preflight_src.contains("Default: 2000ms"),
         "expected debounce.rs and preflight.rs to retain the documented debounce-related timeout constants"
     );
 }

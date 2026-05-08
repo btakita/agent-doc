@@ -1084,7 +1084,7 @@ pub fn run(file: &Path) -> Result<()> {
                 .and_then(|t| t.elapsed().ok())
                 .unwrap_or(debounce);
 
-            let typing_active = agent_doc::debounce::is_typing_via_file(&file_str, 1500);
+            let typing_active = agent_doc::debounce::is_typing_via_file(&file_str, debounce_ms);
             tracing::trace!(
                 idle_ms = idle_for.as_millis() as u64,
                 typing_active,

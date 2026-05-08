@@ -151,7 +151,17 @@ I read `#next-step` as the `#next-steps` prompt.
 There is no active top backlog item right now: `agent:backlog` is empty. The previously active work, including `#closeguard` and `#tigersim`, has been reaped into completed items.
 
 The practical next step is to add or promote a new backlog item before running another `do #id` cycle. Preflight also warned that this document has recent no-op closeout churn, so compacting with `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit` would be reasonable before the next large turn.
-<!-- agent:boundary:b7a6f4c2 -->
+❯ Please schedule the remaining phases for /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md in the backlog
+### Re: schedule TigerBeetle simulation phases — gpt-5
+
+Scheduled the remaining phases from `/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md` into the backlog in implementation order:
+
+- `#tigerfault` for Phase 3 crash and fault injection.
+- `#tigerroute` for Phase 4 route/controller schedules.
+- `#tigerci` for Phase 5 CI integration and seed replay documentation.
+
+Top backlog item: `#tigerfault`.
+<!-- agent:boundary:80d58062 -->
 <!-- /agent:exchange -->
 ###
 
@@ -169,6 +179,9 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#tigerfault] Implement Phase 3 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: add deterministic crash and fault injection points around snapshot save, fallback patch write, IPC delivery, template merge, working-tree write, index update, git commit, post-commit boundary reposition, and session-check.
+- [ ] [#tigerroute] Implement Phase 4 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: extend SimWorld with route/controller schedules, session actor generations, supervisor lifecycle facts, dispatch acceptance/proof, stale/missing pane observations, and projection-drift invariants.
+- [ ] [#tigerci] Implement Phase 5 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: wire fast fixed-seed simulator coverage into cargo test, add a wider deterministic make check budget if runtime stays acceptable, document seed-range replay/promotion, and track generated-coverage runtime budgets.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

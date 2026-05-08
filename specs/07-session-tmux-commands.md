@@ -139,6 +139,12 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   protected closeout owner or expanding the visible pane set. The warning must
   explain that the visible pane cannot be detached because it still owns an
   open closeout cycle.
+- Test coverage for those pure ownership/cardinality decisions should live in
+  deterministic `SimWorld` traces. Keep real tmux coverage only for the
+  minimal smoke surface that proves pane/window movement, tmux-router detach,
+  and focus selection still work against a live server; duplicate manual vs
+  passive ownership variants do not both need default-suite tmux coverage after
+  matching simulator traces exist.
 - Sync serialization is bounded: a contended `.agent-doc/sync.lock` may delay a
   later editor-triggered sync only up to the lock wait budget, after which the
   later sync logs the contention and continues rather than starving selection,

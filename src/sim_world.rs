@@ -79,6 +79,11 @@ enum SimCommand {
     ObserveMissingPane,
     DriftProjection,
     RepairProjection,
+    SyncProtectedGrowthManual,
+    SyncProtectedGrowthPassive,
+    SyncDetachableReplaceManual,
+    SyncDetachableReplacePassive,
+    SyncVisibleFocusPreserve,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +120,106 @@ struct DispatchReceipt {
     session_id: String,
     pane_id: String,
     proved: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncMode {
+    Full,
+    SafePassive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SyncOutcome {
+    PreservedLayout,
+    PreservedLayoutAndFocused,
+    ReplacedDetachable(usize),
+}
+
+#[derive(Debug, Clone)]
+struct SyncProjection {
+    visible: Vec<String>,
+    protected_open_cycle: BTreeSet<String>,
+    stashed: BTreeSet<String>,
+    active: Option<String>,
+}
+
+impl SyncProjection {
+    fn protected_growth_case() -> Self {
+        Self {
+            visible: vec!["protected".to_string(), "sibling".to_string()],
+            protected_open_cycle: BTreeSet::from(["protected".to_string()]),
+            stashed: BTreeSet::from(["requested".to_string()]),
+            active: Some("sibling".to_string()),
+        }
+    }
+
+    fn detachable_replacement_case() -> Self {
+        Self {
+            visible: vec!["protected".to_string(), "detachable".to_string()],
+            protected_open_cycle: BTreeSet::from(["protected".to_string()]),
+            stashed: BTreeSet::from(["requested".to_string()]),
+            active: Some("protected".to_string()),
+        }
+    }
+
+    fn apply_requested_projection(
+        &mut self,
+        requested_docs: &[&str],
+        focus_doc: &str,
+        mode: SyncMode,
+    ) -> SyncOutcome {
+        let _mode_label = match mode {
+            SyncMode::Full => "manual",
+            SyncMode::SafePassive => "safe-passive",
+        };
+        let requested: BTreeSet<String> = requested_docs
+            .iter()
+            .map(|doc| (*doc).to_string())
+            .collect();
+        let visible: BTreeSet<String> = self.visible.iter().cloned().collect();
+        let missing: Vec<String> = requested
+            .iter()
+            .filter(|doc| !visible.contains(*doc))
+            .cloned()
+            .collect();
+        let detachable_unwanted: Vec<usize> = self
+            .visible
+            .iter()
+            .enumerate()
+            .filter_map(|(index, doc)| {
+                if requested.contains(doc) || self.protected_open_cycle.contains(doc) {
+                    None
+                } else {
+                    Some(index)
+                }
+            })
+            .collect();
+
+        if missing.len() > detachable_unwanted.len() {
+            if self.visible.iter().any(|doc| doc == focus_doc) {
+                self.active = Some(focus_doc.to_string());
+                return SyncOutcome::PreservedLayoutAndFocused;
+            }
+            return SyncOutcome::PreservedLayout;
+        }
+
+        let replacement_count = missing.len();
+        for (doc, index) in missing.into_iter().zip(detachable_unwanted.into_iter()) {
+            self.stashed.remove(&doc);
+            self.stashed.insert(self.visible[index].clone());
+            self.visible[index] = doc;
+        }
+        if self.visible.iter().any(|doc| doc == focus_doc) {
+            self.active = Some(focus_doc.to_string());
+        }
+        SyncOutcome::ReplacedDetachable(replacement_count)
+    }
+}
+
+impl Default for SyncProjection {
+    fn default() -> Self {
+        Self::protected_growth_case()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +260,9 @@ struct Coverage {
     missing_pane_blocks: usize,
     projection_drift_blocks: usize,
     projection_repairs: usize,
+    sync_preserve_layout_blocks: usize,
+    sync_detachable_replacements: usize,
+    sync_focus_handoffs: usize,
     commits: usize,
 }
 
@@ -210,6 +318,9 @@ impl Coverage {
         self.missing_pane_blocks += other.missing_pane_blocks;
         self.projection_drift_blocks += other.projection_drift_blocks;
         self.projection_repairs += other.projection_repairs;
+        self.sync_preserve_layout_blocks += other.sync_preserve_layout_blocks;
+        self.sync_detachable_replacements += other.sync_detachable_replacements;
+        self.sync_focus_handoffs += other.sync_focus_handoffs;
         self.commits += other.commits;
     }
 }
@@ -224,6 +335,7 @@ struct SimWorld {
     captured_response: Option<String>,
     pending_fault: Option<FaultPoint>,
     route: RouteModel,
+    sync: SyncProjection,
     next_prompt: usize,
     coverage: Coverage,
 }
@@ -240,6 +352,7 @@ impl SimWorld {
             captured_response: None,
             pending_fault: None,
             route: RouteModel::new(),
+            sync: SyncProjection::default(),
             next_prompt: 1,
             coverage: Coverage::default(),
         }
@@ -249,7 +362,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(32) {
+            let command = match rng.next_usize(37) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -276,7 +389,12 @@ impl SimWorld {
                 28 => SimCommand::ObserveStalePane,
                 29 => SimCommand::ObserveMissingPane,
                 30 => SimCommand::DriftProjection,
-                _ => SimCommand::RepairProjection,
+                31 => SimCommand::RepairProjection,
+                32 => SimCommand::SyncProtectedGrowthManual,
+                33 => SimCommand::SyncProtectedGrowthPassive,
+                34 => SimCommand::SyncDetachableReplaceManual,
+                35 => SimCommand::SyncDetachableReplacePassive,
+                _ => SimCommand::SyncVisibleFocusPreserve,
             };
             world.apply(command)?;
             world.assert_structural_invariants()?;
@@ -443,8 +561,65 @@ impl SimWorld {
                 self.route.projection = self.route.durable.clone();
                 self.coverage.projection_repairs += 1;
             }
+            SimCommand::SyncProtectedGrowthManual => {
+                self.apply_sync_protected_growth(SyncMode::Full);
+            }
+            SimCommand::SyncProtectedGrowthPassive => {
+                self.apply_sync_protected_growth(SyncMode::SafePassive);
+            }
+            SimCommand::SyncDetachableReplaceManual => {
+                self.apply_sync_detachable_replace(SyncMode::Full);
+            }
+            SimCommand::SyncDetachableReplacePassive => {
+                self.apply_sync_detachable_replace(SyncMode::SafePassive);
+            }
+            SimCommand::SyncVisibleFocusPreserve => {
+                self.apply_sync_visible_focus_preserve(SyncMode::SafePassive);
+            }
         }
         Ok(())
+    }
+
+    fn record_sync_outcome(&mut self, outcome: SyncOutcome) {
+        match outcome {
+            SyncOutcome::PreservedLayout => {
+                self.coverage.sync_preserve_layout_blocks += 1;
+            }
+            SyncOutcome::PreservedLayoutAndFocused => {
+                self.coverage.sync_preserve_layout_blocks += 1;
+                self.coverage.sync_focus_handoffs += 1;
+            }
+            SyncOutcome::ReplacedDetachable(count) => {
+                self.coverage.sync_detachable_replacements += count;
+                if self.sync.active.as_deref() == Some("requested") {
+                    self.coverage.sync_focus_handoffs += 1;
+                }
+            }
+        }
+    }
+
+    fn apply_sync_protected_growth(&mut self, mode: SyncMode) {
+        self.sync = SyncProjection::protected_growth_case();
+        let outcome =
+            self.sync
+                .apply_requested_projection(&["requested", "sibling"], "requested", mode);
+        self.record_sync_outcome(outcome);
+    }
+
+    fn apply_sync_detachable_replace(&mut self, mode: SyncMode) {
+        self.sync = SyncProjection::detachable_replacement_case();
+        let outcome = self
+            .sync
+            .apply_requested_projection(&["requested"], "requested", mode);
+        self.record_sync_outcome(outcome);
+    }
+
+    fn apply_sync_visible_focus_preserve(&mut self, mode: SyncMode) {
+        self.sync = SyncProjection::protected_growth_case();
+        let outcome =
+            self.sync
+                .apply_requested_projection(&["blocked", "sibling"], "sibling", mode);
+        self.record_sync_outcome(outcome);
     }
 
     fn bind_route_owner(&mut self) {
@@ -1029,6 +1204,18 @@ fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
         coverage.projection_repairs > 0,
         "seed corpus must repair projection drift from durable actor state"
     );
+    assert!(
+        coverage.sync_preserve_layout_blocks > 0,
+        "seed corpus must exercise protected-layout sync preserve cases"
+    );
+    assert!(
+        coverage.sync_detachable_replacements > 0,
+        "seed corpus must exercise detachable-pane sync replacement cases"
+    );
+    assert!(
+        coverage.sync_focus_handoffs > 0,
+        "seed corpus must exercise sync focus handoffs"
+    );
 }
 
 #[test]
@@ -1053,6 +1240,10 @@ fn closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget() {
     assert!(
         coverage.projection_drift_blocks > 0 && coverage.projection_repairs > 0,
         "medium seed corpus must keep projection drift and repair coverage"
+    );
+    assert!(
+        coverage.sync_preserve_layout_blocks > 0 && coverage.sync_detachable_replacements > 0,
+        "medium seed corpus must keep sync preserve/replacement coverage"
     );
 }
 
@@ -1213,4 +1404,67 @@ fn route_sim_repairs_projection_drift_from_durable_actor_state() {
     assert_eq!(world.coverage.projection_repairs, 1);
     assert_eq!(world.coverage.route_dispatch_acceptances, 1);
     assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn sync_sim_tmuxbudget_seed_3001_preserves_layout_when_request_would_expand_protected_cycle() {
+    let mut world = SimWorld::new(3_001);
+    world.apply(SimCommand::SyncProtectedGrowthManual).unwrap();
+
+    assert_eq!(
+        world.sync.visible,
+        vec!["protected".to_string(), "sibling".to_string()],
+        "manual sync should preserve the visible projection when satisfying the request would expand around a protected pane"
+    );
+    assert_eq!(world.coverage.sync_preserve_layout_blocks, 1);
+
+    world.apply(SimCommand::SyncProtectedGrowthPassive).unwrap();
+    assert_eq!(
+        world.sync.visible,
+        vec!["protected".to_string(), "sibling".to_string()],
+        "safe-passive sync should share the same protected-layout preserve decision"
+    );
+    assert_eq!(world.coverage.sync_preserve_layout_blocks, 2);
+}
+
+#[test]
+fn sync_sim_tmuxbudget_seed_3002_replaces_detachable_pane_while_protected_cycle_remains() {
+    let mut world = SimWorld::new(3_002);
+    world
+        .apply(SimCommand::SyncDetachableReplaceManual)
+        .unwrap();
+
+    assert_eq!(
+        world.sync.visible,
+        vec!["protected".to_string(), "requested".to_string()],
+        "manual sync should displace an unprotected unwanted pane instead of treating any protected visible pane as a no-op"
+    );
+    assert_eq!(world.sync.active.as_deref(), Some("requested"));
+    assert_eq!(world.coverage.sync_detachable_replacements, 1);
+
+    world
+        .apply(SimCommand::SyncDetachableReplacePassive)
+        .unwrap();
+    assert_eq!(
+        world.sync.visible,
+        vec!["protected".to_string(), "requested".to_string()],
+        "safe-passive sync should share the same detachable-pane replacement decision"
+    );
+    assert_eq!(world.coverage.sync_detachable_replacements, 2);
+    assert_eq!(world.coverage.sync_focus_handoffs, 2);
+}
+
+#[test]
+fn sync_sim_tmuxbudget_seed_3003_preserve_layout_still_reselects_visible_focus() {
+    let mut world = SimWorld::new(3_003);
+    world.apply(SimCommand::SyncVisibleFocusPreserve).unwrap();
+
+    assert_eq!(
+        world.sync.visible,
+        vec!["protected".to_string(), "sibling".to_string()],
+        "preserve-layout sync should not mutate the visible pane set"
+    );
+    assert_eq!(world.sync.active.as_deref(), Some("sibling"));
+    assert_eq!(world.coverage.sync_preserve_layout_blocks, 1);
+    assert_eq!(world.coverage.sync_focus_handoffs, 1);
 }

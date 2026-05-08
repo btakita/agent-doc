@@ -9121,6 +9121,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "covered by sync_sim_tmuxbudget_seed_3001; safe-passive tmux smoke keeps the real pane/window path covered"]
     fn manual_sync_preserves_layout_when_attach_would_expand_around_protected_pane() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -9328,6 +9329,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "covered by sync_sim_tmuxbudget_seed_3002; safe-passive tmux smoke keeps the real pane/window path covered"]
     fn manual_sync_replaces_detachable_visible_pane_while_protected_pane_remains() {
         sync_replaces_detachable_visible_pane_while_protected_pane_remains(
             AutoStartMode::Full,

@@ -6,7 +6,8 @@ for workflow states that can be modeled in memory.
 
 The simulator is not a second implementation of the CLI. It is a test-only
 `SimWorld` that represents document text, snapshot text, cycle phase, captured
-response body, fake commit outcome, backlog state, and boundary markers. Each
+response body, fake commit outcome, backlog state, boundary markers, a small
+route/controller actor model, and sync-layout ownership projections. Each
 command in a generated schedule mutates that world through production pure
 functions whenever possible:
 
@@ -45,6 +46,11 @@ ObserveStalePane
 ObserveMissingPane
 DriftProjection
 RepairProjection
+SyncProtectedGrowthManual
+SyncProtectedGrowthPassive
+SyncDetachableReplaceManual
+SyncDetachableReplacePassive
+SyncVisibleFocusPreserve
 ```
 
 Every generated failure must include a stable seed and command trace. The
@@ -119,6 +125,25 @@ actor model:
 - Stale actor generation updates, stale pane observations, and missing pane
   observations block dispatch/proof instead of silently creating duplicate
   authoritative owners or sending prompts to stale panes.
+
+The simulator also owns pure sync-layout ownership schedules that do not need a
+live tmux server:
+
+- `sync_sim_tmuxbudget_seed_3001...` covers the protected-layout preserve case:
+  a hidden requested pane cannot be brought into the visible projection when the
+  only unwanted visible pane owns an open closeout cycle, because satisfying the
+  request would expand the pane set or detach the protected owner.
+- `sync_sim_tmuxbudget_seed_3002...` covers the replacement case: a hidden
+  requested pane must replace an unprotected unwanted visible pane while a
+  different protected open-cycle pane remains visible.
+- `sync_sim_tmuxbudget_seed_3003...` covers the focus proof: a preserve-layout
+  return still reselects an already-visible requested focus pane.
+
+Real tmux tests are still required for pane/window movement, `tmux-router`
+reconcile behavior, shell/process ownership proof, and end-to-end editor
+smokes. Pure ownership/cardinality variants should be promoted to named
+SimWorld traces before the duplicate tmux-backed edge test is removed from the
+default suite.
 
 The simulator tests print schedule count, command count, elapsed time, and the
 active budget for each corpus so CI logs show when generated coverage starts to

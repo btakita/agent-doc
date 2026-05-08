@@ -676,7 +676,7 @@ fn register_full_internal(
     }
 
     registry.insert(
-        registry_key,
+        registry_key.clone(),
         SessionEntry {
             pane: pane_id.to_string(),
             pid,
@@ -688,7 +688,10 @@ fn register_full_internal(
             supervisor_instance_id,
         },
     );
-    save_in(base_dir, registry)
+    save_in(base_dir, registry)?;
+    let _ =
+        crate::project_controller::project_sessions_projection_for_actor(base_dir, &registry_key);
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -69,9 +69,13 @@ Later phases may refine caller values without changing the field names.
 
 ## Current phase boundary
 
-- `.agent-doc/session-actors.json` is the durable per-document actor record
-  store. It is keyed by canonical document path and carries the authoritative
-  generation, pane/window binding, harness, state, and last transition.
+- `.agent-doc/state.db` is the durable per-project controller state store for
+  actor records. The `documents` table carries the authoritative generation,
+  pane/window binding, harness, state, and last transition id, while
+  `actor_transitions` records each monotonic ownership or lifecycle transition.
+- `.agent-doc/session-actors.json` is now a projection emitted from committed
+  SQLite state for compatibility with the existing route/start/sync migration
+  boundary. It must not become an independent write authority again.
 - Actor-record `harness` values use canonical ids rather than raw binary names:
   `claude` normalizes to `claude-code`, `codex` stays `codex`, and empty values
   collapse to `default`. Normal-path route/start/sync checks must compare
@@ -123,7 +127,10 @@ Later phases may refine caller values without changing the field names.
   `session clear` through the actor-backed command path, and preserve
   stage-specific dispatch failures in a durable diagnostics surface.
 - `sessions.json` remains a projection/binding helper during migration, not the
-  final actor store.
+  final actor store. Controller-backed actor writes reconcile existing registry
+  entries to the actor binding; if either `session-actors.json` or
+  `sessions.json` cannot be emitted or drifts from SQLite, the actor state stays
+  authoritative and the controller records projection diagnostics.
 - Session logs are the source of transition provenance and generation history.
 - Startup-miss, route, sync, and closeout recovery may read those logs, but
   they must not infer authority from multiple competing mutable sources once a

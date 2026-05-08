@@ -11,8 +11,9 @@
 //! - Ownership-transition events render stable machine-readable fields:
 //!   `caller`, `reason`, `prior_generation`, `new_generation`, `old_pane`,
 //!   `new_pane`, `old_window`, `new_window`.
-//! - The durable actor store lives at `.agent-doc/session-actors.json`, keyed by
-//!   canonical document path, while `sessions.json` remains the read projection.
+//! - The durable actor store lives behind the Project Controller's SQLite state,
+//!   keyed by canonical document path, while `session-actors.json` and
+//!   `sessions.json` remain compatibility projections during migration.
 //!
 //! ## Agentic Contracts
 //! - The actor store is authoritative for the latest generation once present.
@@ -29,12 +30,9 @@
 //! - `project_binding_advances_generation_on_new_pane`
 //! - `record_session_start_persists_authoritative_record`
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-const ACTOR_STORE_FILE: &str = ".agent-doc/session-actors.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OwnershipGeneration {
@@ -76,6 +74,18 @@ impl ActorState {
             Self::Blocked => "blocked",
         }
     }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "starting" => Some(Self::Starting),
+            "ready" => Some(Self::Ready),
+            "busy" => Some(Self::Busy),
+            "waiting_input" => Some(Self::WaitingInput),
+            "closed" => Some(Self::Closed),
+            "blocked" => Some(Self::Blocked),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,7 +109,7 @@ pub struct ActorRecord {
     pub last_transition: ActorLastTransition,
 }
 
-type ActorStore = BTreeMap<String, ActorRecord>;
+type ActorStore = std::collections::BTreeMap<String, ActorRecord>;
 
 #[derive(Debug, Clone)]
 struct ActorRecordUpdate<'a> {
@@ -126,10 +136,6 @@ fn log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
         root.join(".agent-doc/logs")
             .join(format!("{session_id}.log")),
     ))
-}
-
-fn actor_store_path_in(base_dir: &Path) -> PathBuf {
-    base_dir.join(ACTOR_STORE_FILE)
 }
 
 fn timestamp_secs() -> u64 {
@@ -198,24 +204,7 @@ pub fn canonical_document_id_in(base_dir: &Path, file: &str) -> String {
 }
 
 fn load_store_in(base_dir: &Path) -> Result<ActorStore> {
-    let path = actor_store_path_in(base_dir);
-    if !path.exists() {
-        return Ok(ActorStore::new());
-    }
-    let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let store = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    Ok(store)
-}
-
-fn save_store_in(base_dir: &Path, store: &ActorStore) -> Result<()> {
-    let path = actor_store_path_in(base_dir);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let content = serde_json::to_string_pretty(store)?;
-    std::fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))
+    crate::project_controller::load_actor_store(base_dir)
 }
 
 fn legacy_generation_for_document(file: &Path, session_id_hint: Option<&str>) -> Result<u64> {
@@ -259,9 +248,9 @@ fn store_record_in(
     update: ActorRecordUpdate<'_>,
 ) -> Result<ActorRecord> {
     let document_id = canonical_document_id_in(base_dir, file);
-    let mut store = load_store_in(base_dir)?;
-    let prior_generation = store
-        .get(&document_id)
+    let current_record = crate::project_controller::load_actor_record(base_dir, &document_id)?;
+    let prior_generation = current_record
+        .as_ref()
         .map(|record| record.generation)
         .unwrap_or_else(|| {
             current_generation_in(base_dir, file, Some(update.session_id)).unwrap_or(0)
@@ -301,9 +290,11 @@ fn store_record_in(
             new_generation: update.generation,
         },
     };
-    store.insert(document_id, record.clone());
-    save_store_in(base_dir, &store)?;
-    Ok(record)
+    crate::project_controller::store_actor_record(
+        base_dir,
+        update.expected_prior_generation,
+        &record,
+    )
 }
 
 pub fn detect_document_harness_in(base_dir: &Path, file: &str) -> String {

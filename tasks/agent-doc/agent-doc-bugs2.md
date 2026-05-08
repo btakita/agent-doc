@@ -34,7 +34,29 @@ Active backlog:
 - [ ] [#pcstore] Implement Phase B from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: move actor-record load/store behind controller commands, write SQLite first, emit session-actors.json and sessions.json as projections, and add projection drift diagnostics.
 - [ ] [#pcsuper] Implement Phase C from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: make Harness Supervisor startup register with the controller and report ready/busy/waiting-input/blocked/closed lifecycle facts through controller-owned actor transitions.
 - 2 more active item(s)
-<!-- agent:boundary:3d421e73 -->
+❯ do [#pcctrl]. spec-test-build-install-commit-push
+### Re: #pcctrl — gpt-5
+
+Implemented Phase A of the project controller/session actor MVP.
+
+What changed:
+- Added the additive `agent-doc controller` surface with `status`, hidden `serve`, and `shutdown` commands.
+- Added `.agent-doc/controller.sock`, `.agent-doc/locks/controller-launch.lock`, and `.agent-doc/controller-state.json` bootstrap handling.
+- Added lazy connect-or-launch with connect, lock, recheck, detached launch, bounded readiness wait, and persisted `launch_mode` / `bootstrap_epoch` status.
+- Kept `start`, `route`, and `sync` behavior unchanged for Phase A.
+- Updated the spec and added focused CLI/unit coverage.
+
+Verification:
+- `cargo check`
+- `cargo test project_controller`
+- `cargo test test_cli_controller_status`
+- `make check`
+- `make install`
+
+Commits:
+- `agent-doc` submodule: `b20b92b` (`feat: add project controller shell`), pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo: `1cd230948` (`chore: update agent-doc submodule`), ready to push after this managed session closeout.
+<!-- agent:boundary:1851ed6d -->
 <!-- /agent:exchange -->
 ###
 
@@ -52,7 +74,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#pcctrl] Implement Phase A from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: add the project-local controller shell, singleton socket/launch lock, lazy connect-or-launch helper, controller status command, and bootstrap epoch/launch-mode persistence without changing route/start behavior yet.
 - [ ] [#pcstore] Implement Phase B from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: move actor-record load/store behind controller commands, write SQLite first, emit session-actors.json and sessions.json as projections, and add projection drift diagnostics.
 - [ ] [#pcsuper] Implement Phase C from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: make Harness Supervisor startup register with the controller and report ready/busy/waiting-input/blocked/closed lifecycle facts through controller-owned actor transitions.
 - [ ] [#pcroutes] Implement Phase D from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: convert start, route, and sync to read/dispatch through controller authority and keep tmux-router as layout reconciliation only.
@@ -69,6 +90,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-07 [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 2026-05-07 [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 - 2026-05-07 [#pcperf] [recommended] Add sync/route latency instrumentation and budgets to the Project Controller rollout: measure prune/proof/router/dispatch-ack phases, keep no-op safe-passive sync on the fast path, and surface when a 10s dispatch-proof wait is the reason a pane appears non-responsive.
+- 2026-05-07 [#pcctrl] Implement Phase A from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: add the project-local controller shell, singleton socket/launch lock, lazy connect-or-launch helper, controller status command, and bootstrap epoch/launch-mode persistence without changing route/start behavior yet.
 <!-- /agent:pending-done -->
 
 

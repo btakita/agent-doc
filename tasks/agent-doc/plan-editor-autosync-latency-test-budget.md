@@ -1,7 +1,7 @@
 # Plan - editor autosync, sync latency, and tmux test budget
 
 **Pending:** `#autosync`, `#synclag`, `#tmuxbudget`
-**Status:** Proposed
+**Status:** Implemented through Phase 3
 
 ## Problem
 
@@ -123,6 +123,17 @@ Acceptance criteria:
 - `cargo test` keeps the fast fixed corpus cheap enough for normal development
 - `make check` remains the place for the wider deterministic corpus and the
   minimal real tmux integration set
+
+Implementation note:
+
+- Added `sync_sim_tmuxbudget_seed_3001...`, `sync_sim_tmuxbudget_seed_3002...`,
+  and `sync_sim_tmuxbudget_seed_3003...` as deterministic protected-layout
+  traces.
+- Kept safe-passive real tmux smokes for pane/window movement and focus, and
+  ignored the duplicate manual protected-layout tmux variants behind those
+  traces.
+- Extended the simulator corpus counters and deterministic simulation spec so
+  runtime-budget output includes sync preserve/replacement/focus coverage.
 
 ## Backlog Order
 

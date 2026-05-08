@@ -72,7 +72,36 @@ Priority order:
 3. `#tmuxbudget` - reduce slow tmux integration coverage third. We should keep real tmux tests for pane/window/shell/process mechanics, but pure ownership schedules, stale generations, projection drift, missing panes, and dispatch-proof combinations should move into deterministic SimWorld traces once the behavior contract is stable.
 
 Top of backlog: `#autosync`.
-<!-- agent:boundary:5ffe72b6 -->
+❯ do [#autosync]. spec-test-build-install-commit-push
+### Re: autosync — gpt-5
+
+Implemented `#autosync`.
+
+Root cause: automatic editor tab sync still had a focus-only shortcut for single-file handoffs. Manual Sync Tmux Layout used `agent-doc sync --no-autostart`, which owns stash rescue, safe passive replacement, and preserved-layout focus proof; `agent-doc focus` only selects a known pane.
+
+Changed:
+- VS Code and JetBrains automatic tab sync now dispatch passive `sync` for every real selection/layout change instead of substituting `focus`.
+- Updated editor regressions, shared plugin specs, tmux command spec, version notes, and plugin package versions.
+- Built and installed the local binary/shared library, built JetBrains and VS Code plugin artifacts, installed the VS Code/Codium extension, and installed the JetBrains plugin into the active `IntelliJIdea2026.1` profile.
+
+Verification:
+- `npm test -- --runInBand` in `editors/vscode`
+- `./gradlew test --tests com.github.btakita.agentdoc.EditorTabSyncListenerTest`
+- `cargo fmt --check`
+- `cargo build`
+- `cargo test`
+- `make check` after the final spec update
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `./gradlew buildPlugin signPlugin`
+- `npm run package`
+- `agent-doc plugin install --local vscode`
+- `agent-doc plugin install --local jetbrains` targeting `IntelliJIdea2026.1`
+
+Commit / push:
+- `src/agent-doc`: `5cb3e2b` (`fix: use passive sync for editor autosync`) pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `610c32887` (`agent-doc: update editor autosync`) pushed to `origin/main`
+<!-- agent:boundary:1cc39ce8 -->
 <!-- /agent:exchange -->
 ###
 
@@ -96,7 +125,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#autosync] Implement Phase 1 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: fix editor selection autosync so changing focused markdown files applies the same tmux pane/focus result as manual Sync Tmux Layout, with editor and CLI regressions.
 - [ ] [#synclag] Implement Phase 2 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: capture slow manual sync runs, split sync/controller latency buckets, keep warm-controller safe-passive sync under budget, and surface the exact over-budget phase.
 - [ ] [#tmuxbudget] Implement Phase 3 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: inventory slow tmux-backed edge tests, keep only real tmux smoke coverage, and migrate pure ownership/controller schedules into deterministic SimWorld traces with runtime-budget tracking.
 <!-- /agent:backlog -->
@@ -125,6 +153,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#harnessprompt] Implement tasks/agent-doc/plan-harness-prompt-no-changes-closeout.md: make harness-native agent-doc turns fail closed when preflight reports no markdown changes but the chat prompt contains actionable text that was never persisted to the exchange.
 - 2026-05-08 [#tigerroute] Implement Phase 4 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: extend SimWorld with route/controller schedules, session actor generations, supervisor lifecycle facts, dispatch acceptance/proof, stale/missing pane observations, and projection-drift invariants.
 - 2026-05-08 [#tigerci] Implement Phase 5 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: wire fast fixed-seed simulator coverage into cargo test, add a wider deterministic make check budget if runtime stays acceptable, document seed-range replay/promotion, and track generated-coverage runtime budgets.
+- 2026-05-08 [#autosync] Implement Phase 1 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: fix editor selection autosync so changing focused markdown files applies the same tmux pane/focus result as manual Sync Tmux Layout, with editor and CLI regressions.
 <!-- /agent:pending-done -->
 
 

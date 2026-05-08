@@ -66,7 +66,22 @@ The next steps should follow the controller plan phases in order, because each l
 5. `#pcops`: wire operator/editor commands through controller clients and keep destructive repair behind explicit `doctor --repair`-style surfaces.
 
 I added those as backlog items in that priority order. Top backlog item: `#pcctrl`.
-<!-- agent:boundary:9a1bb6c7 -->
+❯ Please fix
+❯ > ⚠ `[features].codex_hooks` is deprecated. Use `[features].hooks` instead.
+### Re: deprecated Codex hook config — gpt-5
+
+Fixed the deprecated Codex feature flag.
+
+What changed:
+- Updated `.codex/config.toml` from `codex_hooks = true` to `hooks = true`, which addresses the warning directly.
+- Updated `src/agent-doc/src/skill.rs` so future `agent-doc skill install` runs write `features.hooks = true` and remove any stale `features.codex_hooks` key from existing configs.
+- Updated the agent-doc tests and documentation/runbooks/spec text to reference `features.hooks = true`.
+
+Verification:
+- `cargo test` in `src/agent-doc`: passed.
+- `cargo fmt --check` in `src/agent-doc`: passed.
+- Searched the agent-doc/Codex instruction surfaces for stale `features.codex_hooks` / `codex_hooks = true` references: none remain.
+<!-- agent:boundary:ffb35bd7 -->
 <!-- /agent:exchange -->
 ###
 

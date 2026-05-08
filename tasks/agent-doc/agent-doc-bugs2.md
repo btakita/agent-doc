@@ -123,7 +123,29 @@ A clean model would be:
 `Session Supervisor` executes child-process work requested by that actor and reports observations back.
 
 That keeps the important invariant intact: only the session actor decides ownership. The controller coordinates actors; the supervisor performs runtime work.
-<!-- agent:boundary:144bda87 -->
+❯ How about "Fleet Commander", "Session Actor", "Session Supervisor"?
+### Re: Fleet Commander naming — gpt-5
+
+I would not use `Fleet Commander` in the code or specs.
+
+It is memorable, but it adds metaphor where the system needs precision. In this area the names should make failure analysis boring and exact: who owns state, who routes requests, who supervises a process, who is allowed to mutate tmux/session records.
+
+I would keep:
+
+- `Session Controller` for the fleet-level daemon/API.
+- `Session Actor` for the single authoritative owner of one document session.
+- `Session Supervisor` for the runtime process around one Codex/Claude child.
+
+If you want a slightly stronger fleet-level name than `Controller`, I would choose `Session Coordinator` over `Fleet Commander`, but only if the docs are explicit that it is not a passive coordinator. Still, `Session Controller` is cleaner because it sounds authoritative without being colorful.
+
+Recommended final vocabulary:
+
+`Session Controller` -> manages the fleet and routes requests.
+`Session Actor` -> owns one session's state and generation.
+`Session Supervisor` -> executes and observes one live harness process.
+
+That vocabulary should age better in logs, errors, specs, and code review.
+<!-- agent:boundary:3f9906f6 -->
 <!-- /agent:exchange -->
 ###
 

@@ -108,7 +108,30 @@ Commit / push:
 - `src/agent-doc` commit `326552f` pushed to `origin/20260422/codex-agent-backend`
 
 Marked `#syncproof` done.
-<!-- agent:boundary:3686d10c -->
+❯ do [#syncprune]. spec-test-build-install-commit-push
+### Re: syncprune — gpt-5
+
+Implemented `#syncprune` in `src/agent-doc`.
+
+What changed:
+- Safe-passive sync now records a short-lived visible column/window fingerprint and rate-limits expensive stash cleanup when that mapping is unchanged.
+- Repeated `sync --no-autostart` focus churn still prunes stale registry entries and retained-dead non-stash panes, but skips `prune_stash_windows` and `prune_stash_panes` inside the throttle window.
+- Normal prune callers still use full cleanup, and safe-passive cleanup falls back to full cleanup after the throttle expires or the visible layout changes.
+- Added focused regressions for unchanged layouts, focus-only changes, layout changes, and throttle expiry.
+- Updated the sync/tmux spec and `VERSIONS.md` entry for the `#syncprune` closeout.
+
+Verification passed:
+- `cargo test -p agent-doc safe_passive_prune_cleanup`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `make check`
+
+Commit / push:
+- `src/agent-doc` commit `1ac3fe1` pushed to `origin/20260422/codex-agent-backend`
+
+Marked `#syncprune` done.
+<!-- agent:boundary:a03762e7 -->
 <!-- /agent:exchange -->
 ###
 
@@ -135,7 +158,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#syncprune] [recommended] Shorten no-op prune work: skip or incrementally rate-limit stale/stash pane pruning when the active file/session mapping is unchanged, and keep prune_stash_panes under its 250ms subphase budget.
 - [ ] [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
 <!-- /agent:backlog -->
 
@@ -167,6 +189,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#synclag] Implement Phase 2 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: capture slow manual sync runs, split sync/controller latency buckets, keep warm-controller safe-passive sync under budget, and surface the exact over-budget phase.
 - 2026-05-08 [#tmuxbudget] Implement Phase 3 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: inventory slow tmux-backed edge tests, keep only real tmux smoke coverage, and migrate pure ownership/controller schedules into deterministic SimWorld traces with runtime-budget tracking.
 - 2026-05-08 [#syncproof] [recommended] Reduce safe-passive proof overhead after lock acquisition: cache cheap controller/session facts for unchanged editor selection, avoid repeated ownership proof on no-op syncs, and keep controller_actor_lookup plus ownership_proof inside explicit latency budgets.
+- 2026-05-08 [#syncprune] [recommended] Shorten no-op prune work: skip or incrementally rate-limit stale/stash pane pruning when the active file/session mapping is unchanged, and keep prune_stash_panes under its 250ms subphase budget.
 <!-- /agent:pending-done -->
 
 

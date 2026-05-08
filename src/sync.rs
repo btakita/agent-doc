@@ -172,6 +172,7 @@ use anyhow::{Context, Result};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
 use crate::sessions::{PaneMoveOp, Tmux};
@@ -181,6 +182,61 @@ use tmux_router::FileResolution;
 
 const RENAME_DEBOUNCE_TTL_SECS: u64 = 5;
 const SYNC_FRONTMATTER_STATUS_PREFIX: &str = "[agent-doc sync] malformed frontmatter";
+const SYNC_WINDOW_RESOLUTION_BUDGET: Duration = Duration::from_millis(250);
+const SYNC_PRUNE_BUDGET: Duration = Duration::from_millis(1_000);
+const SYNC_OWNERSHIP_PROOF_BUDGET: Duration = Duration::from_millis(750);
+const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
+const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
+
+fn latency_budget_status(elapsed: Duration, budget: Duration) -> &'static str {
+    if elapsed >= budget {
+        "over_budget"
+    } else {
+        "ok"
+    }
+}
+
+fn sync_latency_message(
+    phase: &str,
+    elapsed: Duration,
+    budget: Duration,
+    auto_start_mode: AutoStartMode,
+) -> String {
+    format!(
+        "sync_latency phase={} elapsed_ms={} budget_ms={} status={} mode={}",
+        phase,
+        elapsed.as_millis(),
+        budget.as_millis(),
+        latency_budget_status(elapsed, budget),
+        auto_start_mode.log_label()
+    )
+}
+
+fn log_sync_latency(
+    focus: Option<&str>,
+    phase: &str,
+    elapsed: Duration,
+    budget: Duration,
+    auto_start_mode: AutoStartMode,
+) {
+    let message = sync_latency_message(phase, elapsed, budget, auto_start_mode);
+    sync_log(&message);
+    if latency_budget_status(elapsed, budget) == "over_budget" {
+        eprintln!(
+            "[sync] latency budget exceeded: phase {} took {}ms (budget {}ms, mode={})",
+            phase,
+            elapsed.as_millis(),
+            budget.as_millis(),
+            auto_start_mode.log_label()
+        );
+    }
+    if let Some(focus) = focus {
+        let path = Path::new(focus);
+        if path.exists() {
+            crate::ops_log::log_op(path, &message);
+        }
+    }
+}
 
 fn parse_frontmatter_for_sync<'a>(
     content: &'a str,
@@ -2258,6 +2314,7 @@ fn run_with_options(
         auto_start_mode = auto_start_mode.log_label(),
         "sync::run_with_options start"
     );
+    let sync_total_start = Instant::now();
 
     // Serialize sync calls via file lock. Concurrent syncs (from rapid tab switches)
     // race against each other's stash operations, causing pane bouncing. A second sync
@@ -2314,6 +2371,7 @@ fn run_with_options(
     ));
     // Resolve the target session/window without mutating stash/layout state.
     // Phase-7 keeps layout rescue on explicit repair surfaces only.
+    let window_resolution_start = Instant::now();
     let target_session = resolve_sync_target_session(tmux, window, col_args, focus);
     let mut effective_window = match (window, target_session.as_deref()) {
         (Some(w), _) => Some(w.to_string()),
@@ -2355,6 +2413,13 @@ fn run_with_options(
         }
     }
     let window = effective_window.as_deref();
+    log_sync_latency(
+        focus,
+        "window_resolution",
+        window_resolution_start.elapsed(),
+        SYNC_WINDOW_RESOLUTION_BUDGET,
+        auto_start_mode,
+    );
 
     // Diagnostic: log pane count at key checkpoints to find where stashed panes reappear
     if let Some(w) = window {
@@ -2366,7 +2431,15 @@ fn run_with_options(
         ));
     }
 
+    let prune_start = Instant::now();
     let _ = resync::prune_with_tmux(tmux); // Clean stale entries before layout calculation
+    log_sync_latency(
+        focus,
+        "prune",
+        prune_start.elapsed(),
+        SYNC_PRUNE_BUDGET,
+        auto_start_mode,
+    );
 
     if let Some(w) = window {
         let pane_list: Vec<String> = tmux.list_window_panes(w).unwrap_or_default();
@@ -2498,6 +2571,7 @@ fn run_with_options(
     // checks. Safe-passive mode keeps those same checks, but only provisions
     // when the latest session log proves the prior owner already closed.
     {
+        let ownership_proof_start = Instant::now();
         let mut auto_started_panes: Vec<(String, String)> = Vec::new();
         let claimed_sync_panes: RefCell<std::collections::HashMap<String, PathBuf>> =
             RefCell::new(std::collections::HashMap::new());
@@ -3227,6 +3301,13 @@ fn run_with_options(
 
         // Post-auto_start stash removed: the tmux_router reconciler now always runs
         // the full reconcile path (no early exits), so it handles stashing excess panes.
+        log_sync_latency(
+            focus,
+            "ownership_proof",
+            ownership_proof_start.elapsed(),
+            SYNC_OWNERSHIP_PROOF_BUDGET,
+            auto_start_mode,
+        );
     }
 
     // Log pane count before tmux_router::sync
@@ -3325,6 +3406,7 @@ fn run_with_options(
     // Only open-cycle panes are protected during DETACH. This is narrower than the
     // older generic busy-process guard and preserves fail-closed closeout state
     // without broadly blocking same-column layout reconciliation.
+    let router_start = Instant::now();
     let result = tmux_router::sync_with_options(
         col_args,
         window,
@@ -3334,6 +3416,13 @@ fn run_with_options(
         &resolve_file,
         &tmux_router_options,
     )?;
+    log_sync_latency(
+        focus,
+        "tmux_router",
+        router_start.elapsed(),
+        SYNC_ROUTER_BUDGET,
+        auto_start_mode,
+    );
 
     // Log pane count after tmux_router::sync
     if let Some(w) = window {
@@ -3416,6 +3505,16 @@ fn run_with_options(
     // cross-session panes — resync --fix would kill them (lesson: context_session override).
     if let Err(e) = resync::run(false, None, None) {
         eprintln!("[sync] warning: post-sync resync failed: {}", e);
+    }
+
+    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        log_sync_latency(
+            focus,
+            "safe_passive_total",
+            sync_total_start.elapsed(),
+            SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
+            auto_start_mode,
+        );
     }
 
     Ok(())
@@ -7012,6 +7111,27 @@ mod tests {
             matching_line.starts_with('['),
             "log line should start with timestamp bracket, got: {matching_line}"
         );
+    }
+
+    #[test]
+    fn sync_latency_message_marks_budget_status() {
+        let ok = sync_latency_message(
+            "tmux_router",
+            Duration::from_millis(999),
+            Duration::from_secs(1),
+            AutoStartMode::SafePassive,
+        );
+        assert!(ok.contains("status=ok"), "{ok}");
+        assert!(ok.contains("mode=safe-passive"), "{ok}");
+
+        let slow = sync_latency_message(
+            "safe_passive_total",
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            AutoStartMode::SafePassive,
+        );
+        assert!(slow.contains("status=over_budget"), "{slow}");
+        assert!(slow.contains("elapsed_ms=1000"), "{slow}");
     }
 
     // --- File rename detection tests ---

@@ -140,7 +140,7 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::harness::HarnessConfig;
 use crate::sessions::Tmux;
@@ -267,6 +267,58 @@ impl RoutedDispatchStartProof {
             Self::HookPromptMatched => "consumption",
             Self::HookStateAdvanced => "submission",
         }
+    }
+}
+
+fn route_latency_status(elapsed: Duration, budget: Duration) -> &'static str {
+    if elapsed >= budget {
+        "over_budget"
+    } else {
+        "ok"
+    }
+}
+
+fn route_latency_message(
+    phase: &str,
+    elapsed: Duration,
+    budget: Duration,
+    pane: &str,
+    harness: &HarnessConfig,
+    outcome: &str,
+) -> String {
+    format!(
+        "route_latency phase={} elapsed_ms={} budget_ms={} status={} pane={} harness={} outcome={}",
+        phase,
+        elapsed.as_millis(),
+        budget.as_millis(),
+        route_latency_status(elapsed, budget),
+        pane,
+        harness.binary,
+        outcome
+    )
+}
+
+fn log_route_latency(
+    file: &Path,
+    phase: &str,
+    elapsed: Duration,
+    budget: Duration,
+    pane: &str,
+    harness: &HarnessConfig,
+    outcome: &str,
+) {
+    let message = route_latency_message(phase, elapsed, budget, pane, harness, outcome);
+    crate::ops_log::log_op(file, &message);
+    if route_latency_status(elapsed, budget) == "over_budget" {
+        eprintln!(
+            "[route] latency budget exceeded: phase {} took {}ms (budget {}ms, pane={}, harness={}, outcome={})",
+            phase,
+            elapsed.as_millis(),
+            budget.as_millis(),
+            pane,
+            harness.binary,
+            outcome
+        );
     }
 }
 
@@ -3583,12 +3635,22 @@ fn dispatch_via_supervisor_ipc_with_mode(
     let method = IpcMethod::Inject {
         bytes: routed_trigger_submit_payload(&payload),
     };
+    let submit_start = Instant::now();
     let response = crate::supervisor::ipc::send_command(&sock, &method).with_context(|| {
         format!(
             "failed to dispatch authoritative actor trigger for {} via supervisor IPC",
             file.display()
         )
     })?;
+    log_route_latency(
+        file,
+        "supervisor_ipc_submit",
+        submit_start.elapsed(),
+        Duration::from_millis(500),
+        pane,
+        harness,
+        if response.ok { "accepted" } else { "rejected" },
+    );
     if !response.ok {
         let message = response
             .error
@@ -3618,7 +3680,17 @@ fn dispatch_via_supervisor_ipc_with_mode(
     };
 
     let timeout = routed_dispatch_start_timeout();
+    let proof_start = Instant::now();
     if let Some(proof) = wait_for_routed_dispatch_start(file, &tracker, timeout)? {
+        log_route_latency(
+            file,
+            "dispatch_start_proof",
+            proof_start.elapsed(),
+            timeout,
+            pane,
+            harness,
+            proof.dispatch_stage_label(),
+        );
         crate::ops_log::log_op(
             file,
             &format!(
@@ -3633,6 +3705,15 @@ fn dispatch_via_supervisor_ipc_with_mode(
         return Ok(proof);
     }
 
+    log_route_latency(
+        file,
+        "dispatch_start_proof",
+        proof_start.elapsed(),
+        timeout,
+        pane,
+        harness,
+        "unproven_but_accepted",
+    );
     crate::ops_log::log_op(
         file,
         &format!(
@@ -3959,13 +4040,37 @@ fn dispatch_routed_reopen_with_mode(
     print_unproven_progress: bool,
 ) -> Result<RoutedDispatchStartProof> {
     let tracker = build_routed_dispatch_start_tracker(file, file_path, harness)?;
+    let submit_start = Instant::now();
     let status = send_command_checked(tmux, pane, file_path, harness)?;
+    let submit_outcome = match status {
+        CommandDispatchStatus::Accepted => "accepted",
+        CommandDispatchStatus::TimedOut => "timed_out",
+    };
+    log_route_latency(
+        file,
+        "direct_pane_submit",
+        submit_start.elapsed(),
+        Duration::from_millis(750),
+        pane,
+        harness,
+        submit_outcome,
+    );
     let Some(tracker) = tracker else {
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     };
 
     let timeout = routed_dispatch_start_timeout();
+    let proof_start = Instant::now();
     if let Some(proof) = wait_for_routed_dispatch_start(file, &tracker, timeout)? {
+        log_route_latency(
+            file,
+            "dispatch_start_proof",
+            proof_start.elapsed(),
+            timeout,
+            pane,
+            harness,
+            proof.dispatch_stage_label(),
+        );
         crate::ops_log::log_op(
             file,
             &format!(
@@ -3982,6 +4087,15 @@ fn dispatch_routed_reopen_with_mode(
 
     match status {
         CommandDispatchStatus::Accepted => {
+            log_route_latency(
+                file,
+                "dispatch_start_proof",
+                proof_start.elapsed(),
+                timeout,
+                pane,
+                harness,
+                "unproven_but_accepted",
+            );
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -4003,13 +4117,24 @@ fn dispatch_routed_reopen_with_mode(
             }
             Ok(RoutedDispatchStartProof::CommandAcceptedOnly)
         }
-        CommandDispatchStatus::TimedOut => anyhow::bail!(
-            "routed {} trigger for {} left the bare reopen drafted in pane {} and still showed no routed submission proof after waiting {}s",
-            harness.binary,
-            file.display(),
-            pane,
-            timeout.as_secs()
-        ),
+        CommandDispatchStatus::TimedOut => {
+            log_route_latency(
+                file,
+                "dispatch_start_proof",
+                proof_start.elapsed(),
+                timeout,
+                pane,
+                harness,
+                "submit_timed_out_without_proof",
+            );
+            anyhow::bail!(
+                "routed {} trigger for {} left the bare reopen drafted in pane {} and still showed no routed submission proof after waiting {}s",
+                harness.binary,
+                file.display(),
+                pane,
+                timeout.as_secs()
+            )
+        }
     }
 }
 
@@ -4698,8 +4823,18 @@ fn require_routed_cycle_ack(
             marker
         );
     }
+    let ack_start = Instant::now();
     match wait_for_start_ack(file, baseline, ack_timeout) {
         Some(state) => {
+            log_route_latency(
+                file,
+                "cycle_start_ack",
+                ack_start.elapsed(),
+                ack_timeout,
+                pane,
+                harness,
+                "acknowledged",
+            );
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -4717,6 +4852,15 @@ fn require_routed_cycle_ack(
             Ok(None)
         }
         None => {
+            log_route_latency(
+                file,
+                "cycle_start_ack",
+                ack_start.elapsed(),
+                ack_timeout,
+                pane,
+                harness,
+                "missing",
+            );
             let optimistic_allowed =
                 should_optimistically_accept_missing_cycle_ack(harness, live_child_for_file);
             if live_child_for_file
@@ -7410,6 +7554,32 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     #[test]
     fn fresh_route_start_ack_timeout_allows_restart_slack() {
         assert_eq!(fresh_route_start_ack_timeout(), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn route_latency_message_marks_budget_status() {
+        let harness = HarnessConfig::codex();
+        let ok = route_latency_message(
+            "dispatch_start_proof",
+            Duration::from_millis(999),
+            Duration::from_secs(1),
+            "%1",
+            &harness,
+            "submitted",
+        );
+        assert!(ok.contains("status=ok"), "{ok}");
+        assert!(ok.contains("elapsed_ms=999"), "{ok}");
+
+        let slow = route_latency_message(
+            "dispatch_start_proof",
+            Duration::from_secs(10),
+            Duration::from_secs(10),
+            "%1",
+            &harness,
+            "unproven_but_accepted",
+        );
+        assert!(slow.contains("status=over_budget"), "{slow}");
+        assert!(slow.contains("outcome=unproven_but_accepted"), "{slow}");
     }
 
     #[test]

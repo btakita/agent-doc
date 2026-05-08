@@ -1042,7 +1042,8 @@ fn test_codex_skill_install_writes_hook_artifacts() {
 
     let config: toml::Value =
         toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-    assert_eq!(config["features"]["codex_hooks"].as_bool(), Some(true));
+    assert_eq!(config["features"]["hooks"].as_bool(), Some(true));
+    assert!(config["features"].get("codex_hooks").is_none());
 }
 
 #[test]

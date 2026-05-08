@@ -511,7 +511,8 @@ fn merge_codex_config(path: &Path) -> Result<()> {
     let features_table = features
         .as_table_mut()
         .context("Codex config `features` must be a table")?;
-    features_table.insert("codex_hooks".to_string(), toml::Value::Boolean(true));
+    features_table.remove("codex_hooks");
+    features_table.insert("hooks".to_string(), toml::Value::Boolean(true));
 
     std::fs::write(path, toml::to_string_pretty(&root)?)
         .with_context(|| format!("write {}", path.display()))?;
@@ -953,7 +954,8 @@ mod tests {
 
         let config: toml::Value =
             toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-        assert_eq!(config["features"]["codex_hooks"].as_bool(), Some(true));
+        assert_eq!(config["features"]["hooks"].as_bool(), Some(true));
+        assert!(config["features"].get("codex_hooks").is_none());
     }
 
     #[test]
@@ -1012,7 +1014,8 @@ mod tests {
             config["sandbox"]["default"].as_str(),
             Some("workspace-write")
         );
-        assert_eq!(config["features"]["codex_hooks"].as_bool(), Some(true));
+        assert_eq!(config["features"]["hooks"].as_bool(), Some(true));
+        assert!(config["features"].get("codex_hooks").is_none());
     }
 
     #[test]

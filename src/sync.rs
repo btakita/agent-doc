@@ -194,6 +194,7 @@ const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
 const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const SAFE_PASSIVE_STASH_CLEANUP_THROTTLE: Duration = Duration::from_secs(2);
 
 fn latency_budget_status(elapsed: Duration, budget: Duration) -> &'static str {
     if elapsed >= budget {
@@ -2095,6 +2096,80 @@ fn layout_state_path_for_sync(col_args: &[String], focus: Option<&str>) -> PathB
     base.join(".agent-doc").join("last_layout.json")
 }
 
+fn sync_prune_state_path_for_sync(col_args: &[String], focus: Option<&str>) -> PathBuf {
+    let base = sync_scope_root(col_args, focus)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    base.join(".agent-doc").join("sync-prune-state.json")
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct SyncPruneState {
+    fingerprint: String,
+    last_full_cleanup_ms: u64,
+}
+
+fn epoch_millis_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+fn sync_prune_fingerprint(col_args: &[String], window: Option<&str>) -> String {
+    serde_json::json!({
+        "window": window.unwrap_or(""),
+        "columns": col_args,
+    })
+    .to_string()
+}
+
+fn safe_passive_prune_cleanup_mode_at(
+    state_path: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    now_ms: u64,
+) -> resync::PruneCleanupMode {
+    let fingerprint = sync_prune_fingerprint(col_args, window);
+    let throttle_ms = SAFE_PASSIVE_STASH_CLEANUP_THROTTLE.as_millis() as u64;
+    let fresh_unchanged = std::fs::read_to_string(state_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<SyncPruneState>(&raw).ok())
+        .is_some_and(|state| {
+            state.fingerprint == fingerprint
+                && now_ms.saturating_sub(state.last_full_cleanup_ms) < throttle_ms
+        });
+
+    if fresh_unchanged {
+        return resync::PruneCleanupMode::SkipExpensiveStashCleanup;
+    }
+
+    if let Some(parent) = state_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let state = SyncPruneState {
+        fingerprint,
+        last_full_cleanup_ms: now_ms,
+    };
+    if let Ok(raw) = serde_json::to_string(&state) {
+        let _ = std::fs::write(state_path, raw);
+    }
+    resync::PruneCleanupMode::Full
+}
+
+fn safe_passive_prune_cleanup_mode(
+    auto_start_mode: AutoStartMode,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+) -> resync::PruneCleanupMode {
+    if !matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        return resync::PruneCleanupMode::Full;
+    }
+    let state_path = sync_prune_state_path_for_sync(col_args, focus);
+    safe_passive_prune_cleanup_mode_at(&state_path, col_args, window, epoch_millis_now())
+}
+
 fn effective_sync_columns(
     col_args: &[String],
     saved_layout: &[String],
@@ -2444,7 +2519,15 @@ fn run_with_options(
     }
 
     let prune_start = Instant::now();
-    let prune_timings = match resync::prune_with_tmux_timed(tmux) {
+    let prune_cleanup_mode =
+        safe_passive_prune_cleanup_mode(auto_start_mode, col_args, window, focus);
+    if matches!(
+        prune_cleanup_mode,
+        resync::PruneCleanupMode::SkipExpensiveStashCleanup
+    ) {
+        sync_log("safe_passive_prune_cleanup_skipped reason=unchanged_recent_layout");
+    }
+    let prune_timings = match resync::prune_with_tmux_timed_in_mode(tmux, prune_cleanup_mode) {
         Ok((_removed, timings)) => timings,
         Err(err) => {
             eprintln!("[sync] warning: prune failed: {}", err);
@@ -7285,6 +7368,79 @@ mod tests {
             "{controller}"
         );
         assert!(controller.contains("status=over_budget"), "{controller}");
+    }
+
+    #[test]
+    fn safe_passive_prune_cleanup_throttles_unchanged_layout() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state_path = tmp.path().join(".agent-doc/sync-prune-state.json");
+        let cols = vec!["tasks/a.md,tasks/b.md".to_string()];
+
+        let first = safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_000);
+        assert_eq!(first, resync::PruneCleanupMode::Full);
+
+        let second = safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_500);
+        assert_eq!(second, resync::PruneCleanupMode::SkipExpensiveStashCleanup);
+    }
+
+    #[test]
+    fn safe_passive_prune_cleanup_ignores_focus_only_changes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(tmp.path());
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("tasks")).unwrap();
+        std::fs::write(tmp.path().join("tasks/a.md"), "").unwrap();
+        std::fs::write(tmp.path().join("tasks/b.md"), "").unwrap();
+        let cols = vec!["tasks/a.md,tasks/b.md".to_string()];
+
+        assert_eq!(
+            safe_passive_prune_cleanup_mode(
+                AutoStartMode::SafePassive,
+                &cols,
+                Some("agent:1"),
+                Some("tasks/a.md")
+            ),
+            resync::PruneCleanupMode::Full
+        );
+
+        let same_layout_with_other_focus = safe_passive_prune_cleanup_mode(
+            AutoStartMode::SafePassive,
+            &cols,
+            Some("agent:1"),
+            Some("tasks/b.md"),
+        );
+        assert_eq!(
+            same_layout_with_other_focus,
+            resync::PruneCleanupMode::SkipExpensiveStashCleanup
+        );
+    }
+
+    #[test]
+    fn safe_passive_prune_cleanup_resets_on_layout_change_or_expiry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state_path = tmp.path().join(".agent-doc/sync-prune-state.json");
+        let cols = vec!["tasks/a.md,tasks/b.md".to_string()];
+        let changed_cols = vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()];
+
+        assert_eq!(
+            safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_000),
+            resync::PruneCleanupMode::Full
+        );
+        assert_eq!(
+            safe_passive_prune_cleanup_mode_at(&state_path, &changed_cols, Some("agent:1"), 1_100),
+            resync::PruneCleanupMode::Full
+        );
+
+        let expired_ms = 1_100 + SAFE_PASSIVE_STASH_CLEANUP_THROTTLE.as_millis() as u64;
+        assert_eq!(
+            safe_passive_prune_cleanup_mode_at(
+                &state_path,
+                &changed_cols,
+                Some("agent:1"),
+                expired_ms
+            ),
+            resync::PruneCleanupMode::Full
+        );
     }
 
     #[test]

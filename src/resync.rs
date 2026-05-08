@@ -388,6 +388,12 @@ pub(crate) struct PrunePhaseTiming {
     pub(crate) elapsed: Duration,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PruneCleanupMode {
+    Full,
+    SkipExpensiveStashCleanup,
+}
+
 fn record_prune_phase<T>(
     timings: &mut Vec<PrunePhaseTiming>,
     phase: &'static str,
@@ -535,6 +541,13 @@ pub fn prune_with_tmux(tmux: &Tmux) -> Result<usize> {
 }
 
 pub(crate) fn prune_with_tmux_timed(tmux: &Tmux) -> Result<(usize, Vec<PrunePhaseTiming>)> {
+    prune_with_tmux_timed_in_mode(tmux, PruneCleanupMode::Full)
+}
+
+pub(crate) fn prune_with_tmux_timed_in_mode(
+    tmux: &Tmux,
+    cleanup_mode: PruneCleanupMode,
+) -> Result<(usize, Vec<PrunePhaseTiming>)> {
     tracing::debug!("resync::prune start");
     let mut timings = Vec::new();
     let registry_path = sessions::registry_path();
@@ -545,11 +558,19 @@ pub(crate) fn prune_with_tmux_timed(tmux: &Tmux) -> Result<(usize, Vec<PrunePhas
         tracing::debug!(removed, "resync: pruned stale sessions");
         eprintln!("resync: pruned {} stale session(s)", removed);
     }
+    let skip_expensive_stash_cleanup =
+        cleanup_mode == PruneCleanupMode::SkipExpensiveStashCleanup && removed == 0;
 
-    // Fetch all metadata once (2 subprocess calls total instead of ~20-40)
-    let windows = record_prune_phase(&mut timings, "prune_fetch_windows", || {
-        fetch_all_window_metadata(tmux)
-    });
+    // Fetch metadata once. Repeated safe-passive no-op syncs can skip window
+    // metadata and stash cleanup while still pruning the registry and retained
+    // dead non-stash panes.
+    let windows = if skip_expensive_stash_cleanup {
+        record_prune_phase(&mut timings, "prune_fetch_windows", WindowMeta::new)
+    } else {
+        record_prune_phase(&mut timings, "prune_fetch_windows", || {
+            fetch_all_window_metadata(tmux)
+        })
+    };
     let panes = record_prune_phase(&mut timings, "prune_fetch_panes", || {
         fetch_all_pane_metadata(tmux)
     });
@@ -559,12 +580,17 @@ pub(crate) fn prune_with_tmux_timed(tmux: &Tmux) -> Result<(usize, Vec<PrunePhas
     // it caused a stash-bounce loop: sync stashes unwanted panes → prune returns them
     // → next sync stashes them again. Active panes should stay in stash until the
     // reconciler explicitly needs them. Use `agent-doc resync --fix` for manual recovery.
-    record_prune_phase(&mut timings, "prune_stash_windows", || {
-        purge_stash_windows_bulk(tmux, &windows, &panes)
-    });
-    record_prune_phase(&mut timings, "prune_stash_panes", || {
-        purge_unregistered_stash_panes_bulk(tmux, &windows, &panes)
-    });
+    if skip_expensive_stash_cleanup {
+        record_prune_phase(&mut timings, "prune_stash_windows", || {});
+        record_prune_phase(&mut timings, "prune_stash_panes", || {});
+    } else {
+        record_prune_phase(&mut timings, "prune_stash_windows", || {
+            purge_stash_windows_bulk(tmux, &windows, &panes)
+        });
+        record_prune_phase(&mut timings, "prune_stash_panes", || {
+            purge_unregistered_stash_panes_bulk(tmux, &windows, &panes)
+        });
+    }
     record_prune_phase(&mut timings, "prune_dead_non_stash", || {
         purge_unregistered_dead_non_stash_panes_bulk(tmux, &panes)
     });

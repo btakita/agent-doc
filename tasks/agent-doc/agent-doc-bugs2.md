@@ -19,7 +19,7 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
-<!-- normalization -->
+do [#tigerfault]. spec-test-build-install-commit-push
 <!-- /agent:status -->
 
 ## Exchange
@@ -53,7 +53,7 @@ Committed and pushed:
 
 - `btakita/agent-doc` `20260422/codex-agent-backend`: `66973da test: add closeout simulator fault injection`
 - parent `btakita/agent-loop` `main`: `964b9c26f chore: update agent-doc submodule`
-<!-- agent:boundary:189ac24d -->
+<!-- agent:boundary:61b40b38 -->
 <!-- /agent:exchange -->
 ###
 

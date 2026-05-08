@@ -111,7 +111,30 @@ Committed and pushed:
 
 - `btakita/agent-doc` `20260422/codex-agent-backend`: `3e469a0 test: simulate route controller schedules`
 - parent `btakita/agent-loop` `main`: `d044b2802 chore: update agent-doc submodule`
-<!-- agent:boundary:02657dfd -->
+❯ do [#tigerci]. spec-test-build-install-commit-push
+### Re: #tigerci — gpt-5
+
+Implemented Phase 5 CI integration for the deterministic simulator.
+
+Changed `src/agent-doc/src/sim_world.rs` to make the simulator seed corpora explicit, add runtime budget tracking, keep the `cargo test` fast corpus at seeds `0..512` with `24` commands per seed, and add an ignored medium corpus covering seeds `0..2048` with `32` commands per seed. The corpus runner now reports schedule count, command count, elapsed time, and budget when tests are run with captured output visible.
+
+Updated `src/agent-doc/Makefile` so `make check` runs the medium ignored simulator corpus through a new `sim-medium` target after the normal test target. Updated `src/agent-doc/specs/12-deterministic-simulation.md` with the fast/medium budgets plus the local replay and seed-promotion workflow.
+
+Verification passed:
+
+- `cargo test closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes -- --nocapture` -> fast corpus ran 12,288 commands in 463 ms against a 3 s budget.
+- `cargo test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget -- --ignored --nocapture` -> medium corpus ran 65,536 commands in 2.598 s against a 12 s budget.
+- `cargo test sim_world`
+- `cargo test`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+
+- `btakita/agent-doc` `20260422/codex-agent-backend`: `8c6dfd5 test: wire simulator seed corpora into check`
+- parent `btakita/agent-loop` `main`: `e5c917880 chore: update agent-doc submodule`
+<!-- agent:boundary:ed7e3d5f -->
 <!-- /agent:exchange -->
 ###
 
@@ -129,7 +152,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#tigerci] Implement Phase 5 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: wire fast fixed-seed simulator coverage into cargo test, add a wider deterministic make check budget if runtime stays acceptable, document seed-range replay/promotion, and track generated-coverage runtime budgets.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -155,6 +177,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#tigerfault] Implement Phase 3 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: add deterministic crash and fault injection points around snapshot save, fallback patch write, IPC delivery, template merge, working-tree write, index update, git commit, post-commit boundary reposition, and session-check.
 - 2026-05-08 [#harnessprompt] Implement tasks/agent-doc/plan-harness-prompt-no-changes-closeout.md: make harness-native agent-doc turns fail closed when preflight reports no markdown changes but the chat prompt contains actionable text that was never persisted to the exchange.
 - 2026-05-08 [#tigerroute] Implement Phase 4 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: extend SimWorld with route/controller schedules, session actor generations, supervisor lifecycle facts, dispatch acceptance/proof, stale/missing pane observations, and projection-drift invariants.
+- 2026-05-08 [#tigerci] Implement Phase 5 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: wire fast fixed-seed simulator coverage into cargo test, add a wider deterministic make check budget if runtime stays acceptable, document seed-range replay/promotion, and track generated-coverage runtime budgets.
 <!-- /agent:pending-done -->
 
 

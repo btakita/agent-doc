@@ -86,7 +86,29 @@ The next steps should attack the measured latency in priority order:
 3. `#syncproof` — reduce repeated proof overhead after the lock is acquired. Cache unchanged controller/session facts and avoid ownership proof on no-op safe-passive syncs while keeping phase-level budgets visible.
 
 I added those backlog items in that order. Top backlog item: `#synclock`.
-<!-- agent:boundary:d9b972db -->
+❯ do [#syncproof]. spec-test-build-install-commit-push
+### Re: syncproof — gpt-5
+
+Implemented `#syncproof` in `src/agent-doc`.
+
+What changed:
+- Added a per-sync ownership proof cache so repeated checks for the same document/session/pane reuse already-proven controller actor bindings and live-owner results within the cycle.
+- Routed pre-reconcile ownership checks, synthetic tmux-router registry construction, and post-router registry projection through the shared cache.
+- Added a regression covering per-cycle actor lookup reuse.
+- Updated the sync/tmux spec and `VERSIONS.md` entry for the `#syncproof` closeout.
+
+Verification passed:
+- `cargo test -p agent-doc sync_proof_cache_reuses_actor_lookup_within_one_sync_cycle`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `make check`
+
+Commit / push:
+- `src/agent-doc` commit `326552f` pushed to `origin/20260422/codex-agent-backend`
+
+Marked `#syncproof` done.
+<!-- agent:boundary:3686d10c -->
 <!-- /agent:exchange -->
 ###
 
@@ -113,7 +135,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#syncproof] [recommended] Reduce safe-passive proof overhead after lock acquisition: cache cheap controller/session facts for unchanged editor selection, avoid repeated ownership proof on no-op syncs, and keep controller_actor_lookup plus ownership_proof inside explicit latency budgets.
 - [ ] [#syncprune] [recommended] Shorten no-op prune work: skip or incrementally rate-limit stale/stash pane pruning when the active file/session mapping is unchanged, and keep prune_stash_panes under its 250ms subphase budget.
 - [ ] [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
 <!-- /agent:backlog -->
@@ -145,6 +166,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#autosync] Implement Phase 1 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: fix editor selection autosync so changing focused markdown files applies the same tmux pane/focus result as manual Sync Tmux Layout, with editor and CLI regressions.
 - 2026-05-08 [#synclag] Implement Phase 2 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: capture slow manual sync runs, split sync/controller latency buckets, keep warm-controller safe-passive sync under budget, and surface the exact over-budget phase.
 - 2026-05-08 [#tmuxbudget] Implement Phase 3 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: inventory slow tmux-backed edge tests, keep only real tmux smoke coverage, and migrate pure ownership/controller schedules into deterministic SimWorld traces with runtime-budget tracking.
+- 2026-05-08 [#syncproof] [recommended] Reduce safe-passive proof overhead after lock acquisition: cache cheap controller/session facts for unchanged editor selection, avoid repeated ownership proof on no-op syncs, and keep controller_actor_lookup plus ownership_proof inside explicit latency budgets.
 <!-- /agent:pending-done -->
 
 

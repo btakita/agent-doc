@@ -54,8 +54,26 @@ Phase-by-phase expectation:
 - Phase D is the main performance win: `start`, `route`, and `sync` stop electing owners from tmux/process/log evidence on the normal path. `sync` should consume controller bindings and then ask tmux-router only to reconcile layout. That is the version where no-op sync should be sub-second again.
 - Phase E mainly improves operator commands and diagnostics. It helps explain slowness, but it is not the primary fast path fix.
 
+❯ So I would treat the current >10s behavior as a transitional regression, not as evidence that Project Controller -> Session Actor -> Harness Supervisor -> Harness Child is too slow. The design should reduce work because it replaces repeated distributed inference with one local IPC lookup plus a cached actor state transition. The follow-up is already captured as `#pcperf`: if no-op safe-passive sync still spends 10s in prune/proof after Phase D, then the implementation failed the architecture's purpose.
+### Re: Project Controller latency — gpt-5
+
+
+Short answer: the architecture is not inherently slow, but the current transition path is paying a lot of "prove who owns this pane" cost on every route/sync. Phase A-E should improve that, with the biggest speedup coming in Phase D, provided we treat performance as an explicit acceptance criterion rather than assuming the cleanup automatically makes things faster.
+
+The local logs support your concern. Recent safe-passive syncs for this workspace show `post-window-resolution` at `1778208718` and `post-prune` at `1778208730`, then another at `1778208838` to `1778208849`. In both cases the actual tmux-router reconcile immediately hit `FAST_PATH: layout already correct`. So the >10s sync lag is not layout math. It is happening before tmux-router, in the current prune / ownership-proof / projection-safety path.
+
+There is a separate route symptom too: `ops.log` repeatedly records `route_dispatch_start_unproven_but_accepted ... timeout_secs=10` and `route_dispatch_only_submit_unproven ... timeout_secs=10` for this document. That means the command was typed into the pane, but Codex did not produce the proof the route path now waits for. From the user's seat that feels like the selected pane took >10s to respond, even when the terminal submit may already have happened.
+
+Phase-by-phase expectation:
+
+- Phase A probably will not fix the lag by itself. It adds the controller shell, singleton socket/lock, and status path. It must be kept cheap, but it mostly creates the place where the later optimization can live.
+- Phase B can help if actor state reads become one authoritative lookup instead of loading multiple JSON/session projections and re-deriving ownership. Dual-writing projections must not stay on the hot path longer than necessary.
+- Phase C should help route readiness because the supervisor reports `ready`, `busy`, `waiting_input`, `blocked`, and `closed` directly. That should reduce pane scraping and ambiguous "is this alive?" checks.
+- Phase D is the main performance win: `start`, `route`, and `sync` stop electing owners from tmux/process/log evidence on the normal path. `sync` should consume controller bindings and then ask tmux-router only to reconcile layout. That is the version where no-op sync should be sub-second again.
+- Phase E mainly improves operator commands and diagnostics. It helps explain slowness, but it is not the primary fast path fix.
+
 So I would treat the current >10s behavior as a transitional regression, not as evidence that Project Controller -> Session Actor -> Harness Supervisor -> Harness Child is too slow. The design should reduce work because it replaces repeated distributed inference with one local IPC lookup plus a cached actor state transition. The follow-up is already captured as `#pcperf`: if no-op safe-passive sync still spends 10s in prune/proof after Phase D, then the implementation failed the architecture's purpose.
-<!-- agent:boundary:12d0afdf -->
+<!-- agent:boundary:33dd5953 -->
 <!-- /agent:exchange -->
 ###
 

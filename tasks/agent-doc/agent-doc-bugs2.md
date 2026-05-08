@@ -120,7 +120,30 @@ Commit / push:
 - root `agent-loop` branch `main`: `53d6a1f72` (`chore: update agent-doc submodule`)
 
 I left the pre-existing unrelated root workspace changes untouched. No actionable follow-up items came out of this implementation.
-<!-- agent:boundary:2d4fdf25 -->
+❯ do [#tigersim]. spec-test-build-install-commit-push
+### Re: #tigersim — gpt-5
+
+Implemented, verified, installed, committed, and pushed.
+
+What changed:
+- Added a test-only deterministic closeout simulator, `SimWorld`, with seeded command schedules for prompt edits, response capture/write, fake commit success/failure, malformed backlog items, duplicate visible responses, and boundary repair.
+- The simulator delegates to production pure seams where possible: diff prompt classification, template patch parsing/application, component parsing, pending malformed-line detection, and boundary repositioning.
+- Added fixed-seed corpus coverage plus focused regressions for later unresolved prompts, malformed tracked checklist lines, captured-but-uncommitted responses, and boundary drift cleanup.
+- Added `specs/12-deterministic-simulation.md` and indexed it from `SPEC.md`.
+
+Verification:
+- `cargo test closeout_sim` passed.
+- `cargo build` passed.
+- `make check` passed: clippy, 1961 unit tests, and all integration tests.
+- `make install` completed.
+- `agent-doc --version` -> `agent-doc 0.33.16`.
+
+Commit / push:
+- `src/agent-doc` branch `20260422/codex-agent-backend`: `95d8019` (`test: add deterministic closeout simulator`)
+- root `agent-loop` branch `main`: `a13ab6d58` (`chore: update agent-doc submodule`)
+
+I left the pre-existing unrelated root workspace changes untouched. No actionable follow-up items came out of this implementation.
+<!-- agent:boundary:55fff0bf -->
 <!-- /agent:exchange -->
 ###
 
@@ -138,7 +161,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#tigersim] [recommended] Implement Phase 1-2 from tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: inventory pure closeout seams, build the first SimWorld closeout simulator, and promote fixed seeds for recent closeout/pending/snapshot bugs.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -160,6 +182,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#ctrlsock] Implement tasks/agent-doc/plan-controller-stalled-client-start-hang.md: make project controller RPCs robust to stalled clients so a stuck sync/no-autostart or closed prior pane cannot make agent-doc start/session status hang; fail closed with stale-pane diagnostics instead.
 - 2026-05-08 [#tigertest] [recommended] Create a TigerBeetle-inspired deterministic simulation/property-test plan for agent-doc: model session-cycle state, generate concurrent document edits and crash/fault schedules, assert closeout/pending/git invariants, and keep most cases in fast pure tests.
 - 2026-05-08 [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
+- 2026-05-08 [#tigersim] [recommended] Implement Phase 1-2 from tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: inventory pure closeout seams, build the first SimWorld closeout simulator, and promote fixed seeds for recent closeout/pending/snapshot bugs.
 <!-- /agent:pending-done -->
 
 

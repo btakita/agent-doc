@@ -29,7 +29,28 @@ Planned editor autosync, sync latency, and tmux test-budget follow-ups.
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-214856.md`*
-<!-- agent:boundary:45543006 -->
+❯ When I switch to the opposite editor pane, autosync + `Sync Tmux Layout` takes over 5s for the tmux pane to change.
+❯ Why does the sync take so long?
+### Re: sync latency — gpt-5
+
+It is not tmux pane switching itself taking 5s. The recent `ops.log` entries show the slow path is mostly serialized sync overhead before tmux-router gets to reconcile the layout.
+
+The latest safe-passive run I found was:
+
+- `sync_lock_wait`: about 3004ms, over the 100ms budget
+- `prune_stash_panes`: about 1055ms, over the 250ms subphase budget
+- total `prune`: about 1075ms, over the 1000ms budget
+- `controller_actor_lookup`: about 59ms and 84ms
+- `ownership_proof`: about 347ms
+- `tmux_router`: about 19ms
+- `safe_passive_total`: about 5295ms, over the 1000ms budget
+
+So the visible delay is mainly two things: autosync/manual sync contention on `.agent-doc/sync.lock`, which can burn the full 3s wait budget when another sync is already running, plus conservative stale/stash pane cleanup during prune. The actual tmux layout reconcile phase is fast in this trace.
+
+That also explains why it shows up when switching panes in the editor: editor autosync can already be running, then a manual `Sync Tmux Layout` or another selection event queues behind it. The queued command still does its own prune/proof/reconcile after the lock wait, so the end-to-end time lands around 5s even though the final pane selection is quick.
+
+The current tree has already started making this accountable: sync now emits phase-level timings (`sync_lock_wait`, prune subphases, `controller_actor_lookup`, `projection_refresh`, `ownership_proof`, `tmux_router`, and total safe-passive time). The remaining optimization target is to avoid holding/contending the sync lock for routine selection churn and to shorten or skip expensive stash-pane prune work on the no-op safe-passive path.
+<!-- agent:boundary:d4afbb13 -->
 <!-- /agent:exchange -->
 ###
 

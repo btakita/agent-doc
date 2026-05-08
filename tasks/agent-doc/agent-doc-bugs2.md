@@ -34,7 +34,26 @@ Active backlog:
 - [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - 3 more active item(s)
-<!-- agent:boundary:df935024 -->
+❯ do [#pathmove]. spec-test-build-install-commit-push
+### Re: pathmove — gpt-5
+
+Completed `#pathmove`.
+
+Implemented the defense-in-depth fix in `src/agent-doc`: explicit-baseline closeout now recovers when `--baseline-file` points at the old hash after a session document move. The write path first tries the supplied path, then runs rename migration if needed and reads the current document hash's migrated baseline before failing. `preflight` now uses the shared baseline path resolver so baseline path computation stays consistent.
+
+Updated the closeout/snapshot specs plus `SPEC.md` and `VERSIONS.md`, and added the regression `missing_explicit_baseline_reads_migrated_baseline_after_document_move`.
+
+Verification completed:
+- `cargo test missing_explicit_baseline_reads_migrated_baseline_after_document_move`
+- `cargo test` (1935 unit tests, integration tests, and doc tests passed; 3 existing debounce timing tests ignored)
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits created:
+- `src/agent-doc`: `78afa02 fix: preserve baseline after document moves` and pushed to `origin/20260422/codex-agent-backend`
+- superproject: `4fa6bace5 chore: update agent-doc baseline move fix` locally; per the session-doc closeout rule, I will push `main` after this finalize commit lands.
+<!-- agent:boundary:a2476f61 -->
 <!-- /agent:exchange -->
 ###
 
@@ -52,7 +71,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 - [ ] [#commenttail] Preserve user edits inside the plain HTML comment directly below `agent:exchange` during closeout; plan: tasks/agent-doc/plan-comment-tail-edit-loss.md
-- [ ] [#pathmove] baseline invalidation when session document path changes via git mv — plan: tasks/agent-doc/plan-path-change-baseline-invalidation.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

@@ -143,7 +143,15 @@ Commit / push:
 - root `agent-loop` branch `main`: `a13ab6d58` (`chore: update agent-doc submodule`)
 
 I left the pre-existing unrelated root workspace changes untouched. No actionable follow-up items came out of this implementation.
-<!-- agent:boundary:55fff0bf -->
+❯ What are #next-step?
+### Re: next steps — gpt-5
+
+I read `#next-step` as the `#next-steps` prompt.
+
+There is no active top backlog item right now: `agent:backlog` is empty. The previously active work, including `#closeguard` and `#tigersim`, has been reaped into completed items.
+
+The practical next step is to add or promote a new backlog item before running another `do #id` cycle. Preflight also warned that this document has recent no-op closeout churn, so compacting with `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit` would be reasonable before the next large turn.
+<!-- agent:boundary:b7a6f4c2 -->
 <!-- /agent:exchange -->
 ###
 

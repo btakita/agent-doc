@@ -88,6 +88,7 @@ mod plan;
 mod plugin;
 mod preflight;
 mod project_config;
+mod project_controller;
 mod prompt;
 mod prompt_context;
 mod prompt_contract;
@@ -982,6 +983,40 @@ enum Commands {
         #[command(subcommand)]
         action: Option<SessionAction>,
     },
+    /// Manage the project-local controller shell
+    Controller {
+        #[command(subcommand)]
+        action: ControllerAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ControllerAction {
+    /// Show project controller status as JSON
+    Status {
+        /// Project root to inspect (defaults to nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Lazily launch the controller before reading status
+        #[arg(long)]
+        ensure: bool,
+    },
+    /// Run the controller server loop
+    #[command(hide = true)]
+    Serve {
+        /// Project root to serve (defaults to nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Bootstrap launch mode to persist in controller state
+        #[arg(long, default_value = "managed")]
+        launch_mode: String,
+    },
+    /// Stop the project controller if it is running
+    Shutdown {
+        /// Project root to inspect (defaults to nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1846,6 +1881,19 @@ fn main() -> anyhow::Result<()> {
                 session_actor_cmd::doctor(&file, repair)
             }
             None => session_cmd::show(),
+        },
+        Commands::Controller { action } => match action {
+            ControllerAction::Status {
+                project_root,
+                ensure,
+            } => project_controller::run_status(project_root.as_deref(), ensure),
+            ControllerAction::Serve {
+                project_root,
+                launch_mode,
+            } => project_controller::run_serve(project_root.as_deref(), &launch_mode),
+            ControllerAction::Shutdown { project_root } => {
+                project_controller::run_shutdown(project_root.as_deref())
+            }
         },
         Commands::Hook { action } => match action {
             HookAction::Fire {

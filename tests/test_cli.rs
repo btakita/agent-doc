@@ -75,6 +75,63 @@ fn test_cli_help() {
 }
 
 #[test]
+fn test_cli_controller_status_reports_inactive_without_launching() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.args([
+        "controller",
+        "status",
+        "--project-root",
+        tmp.path().to_str().unwrap(),
+    ]);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let status: serde_json::Value = serde_json::from_slice(&output).unwrap();
+
+    assert_eq!(status["active"], false);
+    assert_eq!(
+        status["socket_path"],
+        tmp.path()
+            .join(".agent-doc/controller.sock")
+            .to_string_lossy()
+            .as_ref()
+    );
+    assert!(!tmp.path().join(".agent-doc/controller-state.json").exists());
+}
+
+#[test]
+fn test_cli_controller_status_ensure_lazy_launches_and_persists_bootstrap() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.args([
+        "controller",
+        "status",
+        "--ensure",
+        "--project-root",
+        tmp.path().to_str().unwrap(),
+    ]);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let status: serde_json::Value = serde_json::from_slice(&output).unwrap();
+
+    assert_eq!(status["active"], true);
+    assert_eq!(status["launch_mode"], "lazy");
+    assert!(status["bootstrap_epoch"].as_u64().unwrap() > 0);
+    assert!(tmp.path().join(".agent-doc/controller-state.json").exists());
+
+    let mut shutdown = agent_doc_cmd();
+    shutdown.args([
+        "controller",
+        "shutdown",
+        "--project-root",
+        tmp.path().to_str().unwrap(),
+    ]);
+    shutdown.assert().success();
+}
+
+#[test]
 fn test_cli_no_args_shows_error() {
     let mut cmd = agent_doc_cmd();
     cmd.assert().failure();

@@ -212,3 +212,29 @@ The session-targeting precedence is shared across start/route/sync/session-aware
 4. Harness fallback only for start/route when no live tmux session exists
 
 Windowless sync must prefer the live project pin over the caller's currently attached tmux session.
+
+## controller
+
+`agent-doc controller status [--project-root ROOT] [--ensure]` reports the
+project-local controller bootstrap as JSON. Without `--ensure`, status is
+read-only: it attempts the controller socket and, if inactive, reports the
+last persisted bootstrap state from `.agent-doc/controller-state.json` without
+launching a process. With `--ensure`, the command runs the lazy
+connect-or-launch path before printing status.
+
+The Phase A controller shell owns only project-level bootstrap identity:
+
+- socket: `.agent-doc/controller.sock`
+- launch lock: `.agent-doc/locks/controller-launch.lock`
+- bootstrap state: `.agent-doc/controller-state.json`
+
+Lazy startup must connect first, acquire the launch lock only when needed,
+recheck the socket after acquiring the lock, launch the detached controller,
+and wait for bounded readiness before returning a client connection. The
+persisted bootstrap records `project_root`, `socket_path`, `launch_mode`,
+`bootstrap_epoch`, and `pid`.
+
+Phase A must not change `start`, `route`, or `sync` ownership behavior. Those
+commands continue to use the existing actor/registry/supervisor paths until
+later controller migration phases explicitly move their authority behind the
+controller.

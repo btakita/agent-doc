@@ -2934,15 +2934,7 @@ fn is_exchange_response_heading_for_prefix_repair(trimmed: &str) -> bool {
 }
 
 fn starts_prompt_run_after_response(trimmed: &str, is_target: bool) -> bool {
-    let unprefixed = trimmed
-        .strip_prefix("❯ ")
-        .map(str::trim_start)
-        .unwrap_or(trimmed);
-    let already_prefixed = unprefixed.len() != trimmed.len();
-
-    crate::diff::line_looks_like_fresh_prompt_after_response(unprefixed)
-        || ((already_prefixed || is_target)
-            && !crate::diff::line_looks_like_plain_response_after_prompt(unprefixed))
+    crate::diff::line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
 }
 
 fn exchange_prompt_prefix_eligible_lines<'a>(
@@ -8644,7 +8636,7 @@ spec-test-build-install-commit-push
 
 Done.
 
-❯ follow-up
+❯ Why follow up?
 ❯ spec-test-build-install-commit-push
 <!-- agent:boundary:committed -->
 <!-- /agent:exchange -->
@@ -8657,7 +8649,7 @@ Done.
 
 Done.
 
-❯ follow-up
+❯ Why follow up?
 spec-test-build-install-commit-push
 <!-- agent:boundary:working -->
 <!-- /agent:exchange -->
@@ -8681,7 +8673,7 @@ spec-test-build-install-commit-push
 
 Done.
 
-❯ follow-up
+❯ Why follow up?
 spec-test-build-install-commit-push
 <!-- agent:boundary:working -->
 <!-- /agent:exchange -->
@@ -8872,6 +8864,39 @@ Commit / push:
         assert!(
             !targets.iter().any(|target| target == "Commit / push:"),
             "assistant evidence label must not become a prefix repair target: {targets:?}"
+        );
+    }
+
+    #[test]
+    fn extract_post_commit_targets_ignores_prefixed_assistant_prose_before_next_heading() {
+        let committed = "\
+<!-- agent:exchange patch=append -->
+### Re: sync latency — gpt-5
+
+❯ The current tree has already started making this accountable.
+### Re: closeout guard — gpt-5
+
+Done.
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: sync latency — gpt-5
+
+The current tree has already started making this accountable.
+### Re: closeout guard — gpt-5 (HEAD)
+
+Done.
+<!-- agent:boundary:def -->
+<!-- /agent:exchange -->
+";
+
+        let targets = extract_post_commit_normalization_targets(committed, working);
+
+        assert!(
+            targets.is_empty(),
+            "a stale prefixed assistant sentence must not become a repair target: {targets:?}"
         );
     }
 

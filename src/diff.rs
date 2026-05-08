@@ -426,6 +426,22 @@ pub(crate) fn line_looks_like_soft_prompt_request(trimmed: &str) -> bool {
         || lower.starts_with("need you to ")
 }
 
+pub(crate) fn line_looks_like_prompt_prefix_repair_start(trimmed: &str, is_target: bool) -> bool {
+    let unprefixed = trimmed
+        .strip_prefix("❯ ")
+        .or_else(|| trimmed.strip_prefix('❯'))
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+
+    if unprefixed.is_empty() || line_looks_like_plain_response_after_prompt(unprefixed) {
+        return false;
+    }
+
+    is_target
+        || line_looks_like_fresh_prompt_after_response(unprefixed)
+        || line_looks_like_soft_prompt_request(unprefixed)
+}
+
 pub(crate) fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool {
     if trimmed.is_empty() {
         return false;

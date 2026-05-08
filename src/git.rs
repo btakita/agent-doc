@@ -584,38 +584,17 @@ fn prefix_prompt_line(line: &str) -> Option<String> {
     Some(format!("{}❯ {}", &line[..indent_len], trimmed))
 }
 
-fn answered_prompt_prelude_should_be_prefixed(lines: &[&str]) -> bool {
-    let Some(first) = lines.iter().find_map(|line| {
-        let trimmed = line.trim();
-        (!trimmed.is_empty()).then_some(trimmed)
-    }) else {
-        return false;
-    };
-
-    first.starts_with('❯')
-        || crate::diff::text_line_looks_like_prompt_target(first)
-        || !crate::diff::line_looks_like_plain_response_after_prompt(first)
-}
-
 fn answered_prompt_prelude_start(lines: &[&str]) -> Option<usize> {
-    let mut first_meaningful = None;
-
     for (idx, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        first_meaningful.get_or_insert(idx);
-        if trimmed.starts_with('❯')
-            || crate::diff::text_line_looks_like_prompt_target(trimmed)
-            || crate::diff::line_looks_like_fresh_prompt_after_response(trimmed)
-        {
+        if crate::diff::line_looks_like_prompt_prefix_repair_start(trimmed, false) {
             return Some(idx);
         }
     }
-
-    let first_idx = first_meaningful?;
-    answered_prompt_prelude_should_be_prefixed(lines).then_some(first_idx)
+    None
 }
 
 fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
@@ -3644,7 +3623,7 @@ mod tests {
             .output()
             .unwrap();
 
-        let cycle = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n\nI restarted Codex. Deploy 503 fixes again.\n### Re: retry production deploy — gpt-5\nNo state change.\n<!-- /agent:exchange -->\n";
+        let cycle = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n### Re: older\nold body\n\nPlease restart Codex and deploy the 503 fixes again.\n### Re: retry production deploy — gpt-5\nNo state change.\n<!-- /agent:exchange -->\n";
         fs::write(&doc, cycle).unwrap();
         fs::write(&snap_abs, cycle).unwrap();
 
@@ -3658,23 +3637,23 @@ mod tests {
         assert!(show.status.success(), "git show HEAD:session.md failed");
         let blob = String::from_utf8_lossy(&show.stdout);
         assert!(
-            blob.contains("❯ I restarted Codex. Deploy 503 fixes again.\n"),
+            blob.contains("❯ Please restart Codex and deploy the 503 fixes again.\n"),
             "committed blob should preserve the user prompt prefix:\n{blob}"
         );
         assert!(
-            !blob.contains("\nI restarted Codex. Deploy 503 fixes again.\n"),
+            !blob.contains("\nPlease restart Codex and deploy the 503 fixes again.\n"),
             "committed blob must not keep the bare prompt line:\n{blob}"
         );
 
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
-            working.contains("❯ I restarted Codex. Deploy 503 fixes again.\n"),
+            working.contains("❯ Please restart Codex and deploy the 503 fixes again.\n"),
             "working tree should preserve the user prompt prefix after closeout:\n{working}"
         );
 
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(
-            snap.contains("❯ I restarted Codex. Deploy 503 fixes again.\n"),
+            snap.contains("❯ Please restart Codex and deploy the 503 fixes again.\n"),
             "snapshot should preserve the user prompt prefix after closeout:\n{snap}"
         );
     }
@@ -3739,6 +3718,39 @@ mod tests {
         assert!(
             !blob.contains("\n❯ There were no actionable follow-up items to capture.\n"),
             "assistant tail must not be rewritten as a prompt:\n{blob}"
+        );
+    }
+
+    #[test]
+    fn canonicalize_answered_prompt_prefixes_uses_opt_in_prompt_start() {
+        let exchange = "\
+### Re: sync latency — gpt-5
+
+The current tree has already started making this accountable.
+### Re: closeout guard — gpt-5
+
+No additional prompt-bearing change was present.
+Please rerun the deploy check.
+### Re: deploy check — gpt-5
+
+Done.
+";
+
+        let normalized = canonicalize_answered_prompt_prefixes(exchange);
+
+        assert!(
+            normalized
+                .contains("\nThe current tree has already started making this accountable.\n"),
+            "plain assistant prose before the next response heading must stay bare:\n{normalized}"
+        );
+        assert!(
+            !normalized
+                .contains("\n❯ The current tree has already started making this accountable.\n"),
+            "assistant prose must not become a prompt by default:\n{normalized}"
+        );
+        assert!(
+            normalized.contains("\n❯ Please rerun the deploy check.\n"),
+            "soft prompt requests before a response heading should still be canonicalized:\n{normalized}"
         );
     }
 

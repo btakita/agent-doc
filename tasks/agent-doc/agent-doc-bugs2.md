@@ -27,70 +27,11 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-053115.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-064414.md`*
 
 Active backlog:
-- [ ] [#pcroutes] Implement Phase D from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: convert start, route, and sync to read/dispatch through controller authority and keep tmux-router as layout reconciliation only.
-- [ ] [#pcops] Implement Phase E from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: wire status/history/attach/restart/clear/doctor through controller clients, keep destructive recovery behind doctor --repair, and expose stage-specific editor diagnostics.
-❯ do [#pcroutes]. spec-test-build-install-commit-push
-### Re: pcroutes — gpt-5
-
-Implemented `#pcroutes` for Project Controller Phase D and closed it as done.
-
-What changed:
-- `route` and `sync` now request actor bindings through project controller IPC instead of reading the actor projection directly.
-- `route` records controller-owned dispatch attempts before actor-pane managed or dispatch-only submits, with stale session/pane/generation rejection before input is sent.
-- `sync` keeps controller actor lookup on the normal actor-backed path while preserving the existing supervisor-backed registry compatibility fallback needed by the current suite.
-- Specs, README, and VERSIONS now describe the Phase D controller boundary and the remaining compatibility evidence.
-
-Verification:
-- `cargo check`
-- `cargo test project_controller`
-- `cargo test authoritative_actor`
-- `cargo test registered_pane_proves_live_owner`
-- `make check`
-- `make build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commit / push:
-- `src/agent-doc`: `e92e48f` (`feat: route through project controller authority`) pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `0aa8c5d78` (`agent-doc: route through project controller authority`) pushed to `origin/main`
-
-I left the pre-existing unrelated dirty change in `src/agent-doc/src/agent/claude.rs` unstaged, and kept the active session document out of the manual repo commits.
-❯ do [#pcops]. spec-test-build-install-commit-push
-### Re: pcops and closeout repair — gpt-5
-
-Preflight recovered the stale `preflight_started` cycle from the incorrectly closed previous turn, then I completed `#pcops` instead of treating the document as closed.
-
-Implemented Project Controller Phase E:
-- `session status/history` now read controller-owned actor state, durable transitions, supervisor leases, recent command attempts, and projection diagnostics.
-- `session attach` creates the manual handoff generation through controller IPC, then refreshes `sessions.json` as a projection only.
-- `session restart` and `session clear` record controller operator-command acceptance or stage-specific rejection before touching supervisor IPC or tmux input.
-- `session doctor` now reports controller projection drift and recent failed command stages alongside actor/registry/supervisor drift.
-- Specs and `VERSIONS.md` document the Phase E operator boundary.
-
-I also captured the closeout bug from this chat prompt in `tasks/agent-doc/plan-closeout-active-prompt-guard.md` and left backlog item `#closeguard` open for the guard work.
-
-
-Verification:
-- `cargo check`
-- `cargo test project_controller`
-- `cargo test session_actor_cmd`
-- `cargo test`
-- `cargo fmt --check`
-- `make check`
-- `make build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commit / push:
-- `src/agent-doc`: `aef4929` (`feat: route session ops through controller`) pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `ddc88f35d` (`agent-doc: route session ops through controller`) pushed to `origin/main`
-- parent repo: `98a072410` (`agent-doc: plan active prompt closeout guard`) pushed to `origin/main`
-
-I left unrelated pre-existing parent/sibling dirty changes unstaged, repaired the malformed `#pcops` checklist prefix, and kept the active session document out of the manual commits so `finalize` owns this response closeout.
-<!-- agent:boundary:65c34835 -->
+- [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
+<!-- agent:boundary:dacd7ef8 -->
 <!-- /agent:exchange -->
 ###
 

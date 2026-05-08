@@ -27,32 +27,12 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-045037.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-053115.md`*
 
 Active backlog:
-- [ ] [#pcsuper] Implement Phase C from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: make Harness Supervisor startup register with the controller and report ready/busy/waiting-input/blocked/closed lifecycle facts through controller-owned actor transitions.
 - [ ] [#pcroutes] Implement Phase D from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: convert start, route, and sync to read/dispatch through controller authority and keep tmux-router as layout reconciliation only.
 - [ ] [#pcops] Implement Phase E from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: wire status/history/attach/restart/clear/doctor through controller clients, keep destructive recovery behind doctor --repair, and expose stage-specific editor diagnostics.
-❯ do [#pcsuper]. spec-test-build-install-commit-push
-### Re: pcsuper — gpt-5
-
-Implemented `#pcsuper`: Harness Supervisor startup now lazy-connects to the project controller, records the starting actor generation through controller IPC, registers the supervisor pid/socket lease, and reports ready/busy/waiting-input/blocked/closed lifecycle facts through controller-owned actor transitions. Stale lifecycle reports now fail closed on session, pane, or generation mismatch.
-
-Updated specs/tests for the Phase C contract, including controller registration/lifecycle regressions and docs in `SPEC.md`, `README.md`, `VERSIONS.md`, `specs/08a-session-actor-contract.md`, and `specs/supervisor.md`. I also fixed the full-suite failure where Claude streaming setup could return `BrokenPipe` before the iterator surfaced the actual child exit.
-
-Verification/build/install completed:
-
-- `cargo check`
-- `cargo test` (1946 passed; integration suites passed; 3 ignored debounce plan tests)
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Committed and pushed:
-
-- `src/agent-doc` commit `f40d2e609` (`feat: route supervisor lifecycle through controller`) pushed to `origin/20260422/codex-agent-backend`
-- root submodule pointer commit `b01a9205e` (`chore: update agent-doc submodule`) pushed to `origin/main`
-<!-- agent:boundary:cdaf0e19 -->
+<!-- agent:boundary:23fc0d2b -->
 <!-- /agent:exchange -->
 ###
 

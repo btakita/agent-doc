@@ -101,7 +101,31 @@ Verification:
 Commit / push:
 - `src/agent-doc`: `5cb3e2b` (`fix: use passive sync for editor autosync`) pushed to `origin/20260422/codex-agent-backend`
 - parent repo: `610c32887` (`agent-doc: update editor autosync`) pushed to `origin/main`
-<!-- agent:boundary:1cc39ce8 -->
+❯ do [#synclag]. spec-test-build-install-commit-push
+### Re: sync latency — gpt-5
+
+Implemented `#synclag` and completed the requested spec-test-build-install-commit-push cycle.
+
+Changed `src/agent-doc` to make sync latency accountable instead of relying on broad buckets:
+- `sync` now logs `sync_lock_wait`, prune subphases, `controller_actor_lookup`, and `projection_refresh` alongside window resolution, prune, ownership proof, tmux-router, and safe-passive total.
+- `resync` now returns prune subphase timings and avoids the repeated process-resampling sleep for obvious stash-pane classifications by using the already-fetched `pane_current_command` metadata.
+- The session/tmux spec and `VERSIONS.md` document the new latency contract.
+- I also tightened one tmux-backed route test helper after full-suite verification exposed a parked mock launch command race.
+
+Verification run:
+- `cargo fmt --check` after formatting
+- focused tests for the new latency/classification paths and the route regression
+- `cargo build`
+- full `cargo test`
+- full `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- live `agent-doc sync --no-autostart ...` trace confirmed the new phase logs: `sync_lock_wait=3004ms`, `prune_stash_panes=2016ms`, `controller_actor_lookup=232ms`, `tmux_router=69ms`, `safe_passive_total=6261ms`.
+
+Committed and pushed:
+- `src/agent-doc`: `1dad929` (`fix: split sync latency diagnostics`) to `origin/20260422/codex-agent-backend`
+- parent repo: `cdaa07c7a` (`agent-doc: update sync latency diagnostics`) to `origin/main`
+<!-- agent:boundary:75e10431 -->
 <!-- /agent:exchange -->
 ###
 
@@ -125,7 +149,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#synclag] Implement Phase 2 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: capture slow manual sync runs, split sync/controller latency buckets, keep warm-controller safe-passive sync under budget, and surface the exact over-budget phase.
 - [ ] [#tmuxbudget] Implement Phase 3 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: inventory slow tmux-backed edge tests, keep only real tmux smoke coverage, and migrate pure ownership/controller schedules into deterministic SimWorld traces with runtime-budget tracking.
 <!-- /agent:backlog -->
 
@@ -154,6 +177,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#tigerroute] Implement Phase 4 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: extend SimWorld with route/controller schedules, session actor generations, supervisor lifecycle facts, dispatch acceptance/proof, stale/missing pane observations, and projection-drift invariants.
 - 2026-05-08 [#tigerci] Implement Phase 5 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: wire fast fixed-seed simulator coverage into cargo test, add a wider deterministic make check budget if runtime stays acceptable, document seed-range replay/promotion, and track generated-coverage runtime budgets.
 - 2026-05-08 [#autosync] Implement Phase 1 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: fix editor selection autosync so changing focused markdown files applies the same tmux pane/focus result as manual Sync Tmux Layout, with editor and CLI regressions.
+- 2026-05-08 [#synclag] Implement Phase 2 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: capture slow manual sync runs, split sync/controller latency buckets, keep warm-controller safe-passive sync under budget, and surface the exact over-budget phase.
 <!-- /agent:pending-done -->
 
 

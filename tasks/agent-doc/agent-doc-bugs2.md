@@ -19,7 +19,8 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
-Fixed protected-layout tmux sync replacement; built, installed, committed, and pushed.
+
+Planned editor autosync, sync latency, and tmux test-budget follow-ups.
 <!-- /agent:status -->
 
 ## Exchange
@@ -55,11 +56,33 @@ Note: root `make check` still fails before running project checks because the ro
 Committed and pushed:
 - `ee05a20` in `src/agent-doc`: `fix: unblock protected layout sync replacement`
 - `174cc0052` in `agent-loop`: `agent-doc: update protected sync replacement`
-<!-- agent:boundary:c425a975 -->
+- Changing editor files does not sync the tmux pane. `Sync Tmux Layout` does change the tmux pane.
+- `Sync Tmux Layout` has a few second lag...which was introduced when we moved to the Controller architecture.
+- With the new SimWorld + Tiger Beetle style of testing, do we still need so many slow tmux integration tests for edge cases?
+
+❯ Please plan #next-steps for the 3 items.
+### Re: next steps — gpt-5
+
+Created `tasks/agent-doc/plan-editor-autosync-latency-test-budget.md` and committed it as `35e25f751`.
+
+Priority order:
+
+1. `#autosync` - fix editor selection autosync correctness first. Manual `Sync Tmux Layout` working means the immediate gap is likely in the automatic editor path, its focus-vs-sync planning, dedup/generation guard, or how passive preserve/reselect output is treated.
+2. `#synclag` - make the controller-era sync lag accountable second. The plan calls for real slow-run traces, phase-level `sync_latency`/controller buckets, and a warm-controller budget so a multi-second sync names its exact cause.
+3. `#tmuxbudget` - reduce slow tmux integration coverage third. We should keep real tmux tests for pane/window/shell/process mechanics, but pure ownership schedules, stale generations, projection drift, missing panes, and dispatch-proof combinations should move into deterministic SimWorld traces once the behavior contract is stable.
+
+Top of backlog: `#autosync`.
+<!-- agent:boundary:5ffe72b6 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+Running one turn on a document should not prevent another document from syncing in any step. The syncs should be "snappy".
+```
+Sync deferred: another visible agent-doc pane is mid-closeout, so the current tmux layout was preserved. Try again after that closeout finishes. Blocked pane(s): %268 preflight_started /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+```
+spec-test-build-install-commit-push
+---
 "❯ Commit / push:" should not have the `❯ ` prefix since this was the agent response. #agent-doc-bug
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
@@ -73,6 +96,9 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#autosync] Implement Phase 1 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: fix editor selection autosync so changing focused markdown files applies the same tmux pane/focus result as manual Sync Tmux Layout, with editor and CLI regressions.
+- [ ] [#synclag] Implement Phase 2 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: capture slow manual sync runs, split sync/controller latency buckets, keep warm-controller safe-passive sync under budget, and surface the exact over-budget phase.
+- [ ] [#tmuxbudget] Implement Phase 3 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: inventory slow tmux-backed edge tests, keep only real tmux smoke coverage, and migrate pure ownership/controller schedules into deterministic SimWorld traces with runtime-budget tracking.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

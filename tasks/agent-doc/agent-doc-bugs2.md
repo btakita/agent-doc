@@ -102,7 +102,28 @@ For `#coordspike`, I would phrase the target as:
 `session controller with single-owner session actors`
 
 That makes the all-sessions vs one-session split explicit.
-<!-- agent:boundary:bf1d5fc1 -->
+❯ But all of these processes use the actor pattern?
+### Re: actor pattern boundary — gpt-5
+
+They can all use actor-pattern mechanics, but I would not name all of them `Actor`.
+
+The distinction I would keep:
+
+- `Session Controller`: may be implemented as an actor. It has one mailbox/API for fleet-level commands like lookup, create, attach, recover, and shutdown.
+- `Session Actor`: definitely an actor. It is the serialized authority for one document session and owns generation/state transitions.
+- `Session Supervisor`: can be actor-like internally, but should be named for its job: supervising one harness process. It should not be an ownership authority unless the design explicitly moves the session actor role into it.
+
+So yes, the implementation can be actor-pattern throughout: message in, serialized state transition, event out. But the names should communicate responsibility, not implementation technique.
+
+A clean model would be:
+
+`Session Controller` receives fleet-level requests.
+`Session Controller` routes a request to the right `Session Actor`.
+`Session Actor` decides the authoritative transition.
+`Session Supervisor` executes child-process work requested by that actor and reports observations back.
+
+That keeps the important invariant intact: only the session actor decides ownership. The controller coordinates actors; the supervisor performs runtime work.
+<!-- agent:boundary:144bda87 -->
 <!-- /agent:exchange -->
 ###
 

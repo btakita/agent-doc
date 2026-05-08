@@ -19,8 +19,7 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Captured #harnessprompt plan/backlog for missed harness prompt closeout.
+Completed #harnessprompt: Codex same-line agent-doc directive bodies are tracked, verified, installed, committed, and pushed.
 <!-- /agent:status -->
 
 ## Exchange
@@ -67,7 +66,31 @@ Committed the plan file separately before this session closeout:
 - `30083b1d4 agent-doc: plan harness prompt no-change closeout`
 
 No spec/test/build/install work was run in this cycle because the planner explicitly constrained the turn to backlog/plan capture rather than implementation.
-<!-- agent:boundary:f3797e83 -->
+❯ do [#harnessprompt]. spec-test-build-install-commit-push
+### Re: #harnessprompt — gpt-5
+
+Implemented the remaining harness-prompt fix for Codex `UserPromptSubmit` tracking.
+
+The root gap was that the hook recognized `agent-doc <FILE>` only when the invocation line had exactly two tokens. That meant documented same-line prompts like `agent-doc <FILE> #code-review` were not tracked, so `preflight` and `plan` could not synthesize the harness-only prompt diff when the markdown snapshot itself had no changes.
+
+Changed `src/agent-doc/src/codex_hook.rs` so the hook accepts trailing directive text after session, claim, and compact invocations while still resolving the file token from the correct position. Added regressions proving same-line `agent-doc <FILE> #code-review` is tracked, exposed through `harness_prompt::prompt_body_for_file`, and resolved as the active document. Updated `src/agent-doc/specs/09-git-integration.md` to specify the bare-invocation vs directive-body behavior.
+
+Verification passed:
+
+- `cargo test user_prompt_submit_tracks_same_line_agent_doc_body`
+- `cargo test resolve_agent_doc_path_accepts_session_invocation_with_trailing_body`
+- `cargo test preflight_opens_cycle_from_harness_prompt_when_document_has_no_diff`
+- `cargo test build_plan_uses_harness_prompt_when_snapshot_matches_document`
+- `cargo test`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+
+- `btakita/agent-doc` `20260422/codex-agent-backend`: `076bb3c fix: track codex agent-doc prompt bodies`
+- parent `btakita/agent-loop` `main`: `b76401ed2 chore: update agent-doc submodule`
+<!-- agent:boundary:d9468a42 -->
 <!-- /agent:exchange -->
 ###
 
@@ -85,7 +108,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#harnessprompt] Implement tasks/agent-doc/plan-harness-prompt-no-changes-closeout.md: make harness-native agent-doc turns fail closed when preflight reports no markdown changes but the chat prompt contains actionable text that was never persisted to the exchange.
 - [ ] [#tigerroute] Implement Phase 4 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: extend SimWorld with route/controller schedules, session actor generations, supervisor lifecycle facts, dispatch acceptance/proof, stale/missing pane observations, and projection-drift invariants.
 - [ ] [#tigerci] Implement Phase 5 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: wire fast fixed-seed simulator coverage into cargo test, add a wider deterministic make check budget if runtime stays acceptable, document seed-range replay/promotion, and track generated-coverage runtime budgets.
 <!-- /agent:backlog -->
@@ -111,6 +133,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
 - 2026-05-08 [#tigersim] [recommended] Implement Phase 1-2 from tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: inventory pure closeout seams, build the first SimWorld closeout simulator, and promote fixed seeds for recent closeout/pending/snapshot bugs.
 - 2026-05-08 [#tigerfault] Implement Phase 3 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: add deterministic crash and fault injection points around snapshot save, fallback patch write, IPC delivery, template merge, working-tree write, index update, git commit, post-commit boundary reposition, and session-check.
+- 2026-05-08 [#harnessprompt] Implement tasks/agent-doc/plan-harness-prompt-no-changes-closeout.md: make harness-native agent-doc turns fail closed when preflight reports no markdown changes but the chat prompt contains actionable text that was never persisted to the exchange.
 <!-- /agent:pending-done -->
 
 

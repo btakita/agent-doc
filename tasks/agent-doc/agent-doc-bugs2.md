@@ -32,7 +32,33 @@ prompt_presets:
 Active backlog:
 - [ ] [#pcroutes] Implement Phase D from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: convert start, route, and sync to read/dispatch through controller authority and keep tmux-router as layout reconciliation only.
 - [ ] [#pcops] Implement Phase E from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: wire status/history/attach/restart/clear/doctor through controller clients, keep destructive recovery behind doctor --repair, and expose stage-specific editor diagnostics.
-<!-- agent:boundary:23fc0d2b -->
+❯ do [#pcroutes]. spec-test-build-install-commit-push
+### Re: pcroutes — gpt-5
+
+Implemented `#pcroutes` for Project Controller Phase D and closed it as done.
+
+What changed:
+- `route` and `sync` now request actor bindings through project controller IPC instead of reading the actor projection directly.
+- `route` records controller-owned dispatch attempts before actor-pane managed or dispatch-only submits, with stale session/pane/generation rejection before input is sent.
+- `sync` keeps controller actor lookup on the normal actor-backed path while preserving the existing supervisor-backed registry compatibility fallback needed by the current suite.
+- Specs, README, and VERSIONS now describe the Phase D controller boundary and the remaining compatibility evidence.
+
+Verification:
+- `cargo check`
+- `cargo test project_controller`
+- `cargo test authoritative_actor`
+- `cargo test registered_pane_proves_live_owner`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commit / push:
+- `src/agent-doc`: `e92e48f` (`feat: route through project controller authority`) pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `0aa8c5d78` (`agent-doc: route through project controller authority`) pushed to `origin/main`
+
+I left the pre-existing unrelated dirty change in `src/agent-doc/src/agent/claude.rs` unstaged, and kept the active session document out of the manual repo commits.
+<!-- agent:boundary:6ada8dcb -->
 <!-- /agent:exchange -->
 ###
 
@@ -50,7 +76,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#pcroutes] Implement Phase D from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: convert start, route, and sync to read/dispatch through controller authority and keep tmux-router as layout reconciliation only.
 - [ ] [#pcops] Implement Phase E from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: wire status/history/attach/restart/clear/doctor through controller clients, keep destructive recovery behind doctor --repair, and expose stage-specific editor diagnostics.
 <!-- /agent:backlog -->
 
@@ -67,6 +92,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-07 [#pcctrl] Implement Phase A from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: add the project-local controller shell, singleton socket/launch lock, lazy connect-or-launch helper, controller status command, and bootstrap epoch/launch-mode persistence without changing route/start behavior yet.
 - 2026-05-08 [#pcstore] Implement Phase B from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: move actor-record load/store behind controller commands, write SQLite first, emit session-actors.json and sessions.json as projections, and add projection drift diagnostics.
 - 2026-05-08 [#pcsuper] Implement Phase C from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: make Harness Supervisor startup register with the controller and report ready/busy/waiting-input/blocked/closed lifecycle facts through controller-owned actor transitions.
+- 2026-05-08 [#pcroutes] Implement Phase D from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: convert start, route, and sync to read/dispatch through controller authority and keep tmux-router as layout reconciliation only.
 <!-- /agent:pending-done -->
 
 

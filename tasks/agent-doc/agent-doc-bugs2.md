@@ -34,7 +34,26 @@ Active backlog:
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 1 more active item(s)
-<!-- agent:boundary:79b10006 -->
+❯ do [#tmuxcoord]
+### Re: #tmuxcoord — gpt-5
+
+Completed `#tmuxcoord`.
+
+I inspected the current `tsift.md` session state, tmux pane layout, the saved editor route error, the route/sync/session-actor code, and the existing route simplification / single-owner actor plans.
+
+Findings:
+
+- `tsift.md` is healthy now. `agent-doc session doctor tasks/software/tsift.md` reports actor generation `67`, pane `%208`, state `ready`, healthy supervisor, no startup-miss marker, and a committed latest document cycle.
+- The saved editor-route error captures the old non-responsive shape: `authoritative actor generation 61 for tasks/software/tsift.md owns pane %188 but route will not inject a new trigger because the authoritative actor is still starting`.
+- That points to stale or stuck session ownership state, not a tmux-router ordering failure. The visible/stash/three-pane shape was a symptom: different projections could disagree about which pane was authoritative, and route trusted the actor `starting` state enough to refuse `Run Agent Doc`.
+- The tmux-router side should remain responsible for deterministic layout operations: ordered panes, split-left/split-right behavior, guarded join/stash behavior, and no destructive reconciliation. The current route tests already cover the important three-pane ordering cases.
+- The real fix belongs in `agent-doc` session ownership: the actor record must be the only normal-path authority for document -> pane -> generation, and `starting` must either advance to `ready`, transition to `blocked`/`closed`, or be replaced through an explicit generation transition. A coordinator/daemon helps only if it becomes that authority; as a passive watcher it would just add another stale source.
+- The current code and logs show the newer direction is working for tsift: recent `Run Agent Doc` events used `route_dispatch_only_via_actor_direct_pane_submit` against `%208` and recorded `proof=consumed`.
+
+Decision: do not put the primary repair in tmux-router pane reconciliation. Keep tmux-router as a layout primitive, continue moving ownership into the single-owner session actor, and use the existing `#coordspike` item to design the coordinator/actor MVP around that authority boundary.
+
+I did not add a duplicate backlog item. The next backlog item should be `#coordspike`.
+<!-- agent:boundary:4b3204a2 -->
 <!-- /agent:exchange -->
 ###
 
@@ -51,7 +70,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.

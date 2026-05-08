@@ -76,7 +76,17 @@ Root `make check` exits immediately because the root Makefile references a missi
 
 Commit / push:
 - `src/agent-doc` commit `fdc9177` pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:3bba7671 -->
+❯ What are the #next-steps to reduce the sync command latency?
+### Re: sync latency next steps — gpt-5
+
+The next steps should attack the measured latency in priority order:
+
+1. `#synclock` — remove the 3s lock-wait path for routine editor selection churn. Autosync and manual `Sync Tmux Layout` should coalesce, supersede, or join equivalent safe-passive syncs instead of serializing a redundant run behind `.agent-doc/sync.lock`.
+2. `#syncprune` — make no-op sync prune work cheap. The trace showed `prune_stash_panes` around 1055ms, so stale/stash pane cleanup should be skipped, cached, or rate-limited when the selected markdown/session mapping has not changed.
+3. `#syncproof` — reduce repeated proof overhead after the lock is acquired. Cache unchanged controller/session facts and avoid ownership proof on no-op safe-passive syncs while keeping phase-level budgets visible.
+
+I added those backlog items in that order. Top backlog item: `#synclock`.
+<!-- agent:boundary:d9b972db -->
 <!-- /agent:exchange -->
 ###
 
@@ -103,6 +113,9 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#syncproof] [recommended] Reduce safe-passive proof overhead after lock acquisition: cache cheap controller/session facts for unchanged editor selection, avoid repeated ownership proof on no-op syncs, and keep controller_actor_lookup plus ownership_proof inside explicit latency budgets.
+- [ ] [#syncprune] [recommended] Shorten no-op prune work: skip or incrementally rate-limit stale/stash pane pruning when the active file/session mapping is unchanged, and keep prune_stash_panes under its 250ms subphase budget.
+- [ ] [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

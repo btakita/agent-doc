@@ -1797,11 +1797,10 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             start_generation
         ),
     );
-    let controller_stream = crate::project_controller::connect_or_launch(
+    crate::project_controller::ensure_controller_running(
         &project_root,
         crate::project_controller::LaunchMode::Lazy,
     )?;
-    drop(controller_stream);
     let actor_record = crate::project_controller::start_session(
         &project_root,
         crate::project_controller::StartSessionRequest {

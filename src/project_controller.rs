@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use interprocess::local_socket::{
-    GenericFilePath, ListenerOptions, ToFsName,
+    GenericFilePath, ListenerNonblockingMode, ListenerOptions, ToFsName,
     traits::{Listener as _, Stream as _},
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -15,9 +15,13 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const SOCKET_FILE: &str = "controller.sock";
@@ -27,6 +31,11 @@ const ACTOR_PROJECTION_FILE: &str = "session-actors.json";
 const LOCK_FILE: &str = "controller-launch.lock";
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
 const CONNECT_POLL: Duration = Duration::from_millis(50);
+#[cfg(not(test))]
+const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_millis(250);
+const CONTROLLER_IDLE_CLIENT_TIMEOUT: Duration = CONTROLLER_RPC_TIMEOUT;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1050,6 +1059,9 @@ fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
 
 fn request(project_root: &Path, command: &str) -> Result<String> {
     let stream = connect(project_root)?;
+    stream
+        .set_recv_timeout(Some(CONTROLLER_RPC_TIMEOUT))
+        .context("failed to set project controller response timeout")?;
     let (reader_half, mut writer_half) = stream.split();
     let mut request = serde_json::to_string(&serde_json::json!({ "command": command }))?;
     request.push('\n');
@@ -1058,10 +1070,20 @@ fn request(project_root: &Path, command: &str) -> Result<String> {
 
     let mut reader = BufReader::new(reader_half);
     let mut response = String::new();
-    reader
-        .read_line(&mut response)
-        .context("failed to read project controller response")?;
+    read_controller_response_line(&mut reader, &mut response)?;
     Ok(response.trim().to_string())
+}
+
+fn read_controller_response_line<R: BufRead>(reader: &mut R, response: &mut String) -> Result<()> {
+    match reader.read_line(response) {
+        Ok(0) => anyhow::bail!("project controller closed connection without a response"),
+        Ok(_) => Ok(()),
+        Err(err) if is_timeout_error(&err) => anyhow::bail!(
+            "timed out after {:.1}s waiting for project controller response",
+            CONTROLLER_RPC_TIMEOUT.as_secs_f32()
+        ),
+        Err(err) => Err(err).context("failed to read project controller response"),
+    }
 }
 
 fn request_controller<T: DeserializeOwned>(
@@ -1069,6 +1091,9 @@ fn request_controller<T: DeserializeOwned>(
     request: ControllerRequest,
 ) -> Result<T> {
     let stream = connect_or_launch(project_root, LaunchMode::Lazy)?;
+    stream
+        .set_recv_timeout(Some(CONTROLLER_RPC_TIMEOUT))
+        .context("failed to set project controller response timeout")?;
     let (reader_half, mut writer_half) = stream.split();
     let mut raw = serde_json::to_string(&request)?;
     raw.push('\n');
@@ -1077,9 +1102,7 @@ fn request_controller<T: DeserializeOwned>(
 
     let mut reader = BufReader::new(reader_half);
     let mut response = String::new();
-    reader
-        .read_line(&mut response)
-        .context("failed to read project controller response")?;
+    read_controller_response_line(&mut reader, &mut response)?;
     let envelope: ControllerEnvelope<T> = serde_json::from_str(response.trim())
         .context("failed to parse project controller response envelope")?;
     if envelope.ok {
@@ -1437,6 +1460,12 @@ pub fn connect_or_launch(
     wait_for_controller(project_root)
 }
 
+pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
+    let stream = connect_or_launch(project_root, launch_mode)?;
+    drop(stream);
+    Ok(())
+}
+
 fn launch_detached(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
     let exe = std::env::current_exe().context("failed to locate current agent-doc binary")?;
     Command::new(exe)
@@ -1484,27 +1513,75 @@ pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
         .name(name)
         .create_sync()
         .with_context(|| format!("failed to listen on {}", sock.display()))?;
+    listener
+        .set_nonblocking(ListenerNonblockingMode::Accept)
+        .context("failed to set project controller listener nonblocking")?;
 
-    loop {
-        let mut should_stop = false;
-        let stream = listener
-            .accept()
-            .context("failed to accept project controller client")?;
-        let (reader_half, mut writer_half) = stream.split();
-        let mut reader = BufReader::new(reader_half);
-        let mut line = String::new();
-        while reader.read_line(&mut line)? > 0 {
-            let response = handle_request(&line, &bootstrap, &mut should_stop)?;
-            writer_half.write_all(response.as_bytes())?;
-            writer_half.write_all(b"\n")?;
-            writer_half.flush()?;
-            line.clear();
-            if should_stop {
-                let _ = std::fs::remove_file(&sock);
-                return Ok(());
+    let should_stop = Arc::new(AtomicBool::new(false));
+    while !should_stop.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok(stream) => {
+                let bootstrap = bootstrap.clone();
+                let should_stop = Arc::clone(&should_stop);
+                let sock = sock.clone();
+                std::thread::spawn(move || {
+                    if let Err(err) = serve_client(stream, &bootstrap, &should_stop, &sock) {
+                        eprintln!("[controller] client error: {err}");
+                    }
+                });
             }
+            Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                std::thread::sleep(CONNECT_POLL);
+            }
+            Err(err) => return Err(err).context("failed to accept project controller client"),
         }
     }
+    let _ = std::fs::remove_file(&sock);
+    Ok(())
+}
+
+fn serve_client(
+    stream: interprocess::local_socket::Stream,
+    bootstrap: &ControllerBootstrap,
+    should_stop: &AtomicBool,
+    sock: &Path,
+) -> Result<()> {
+    stream
+        .set_recv_timeout(Some(CONTROLLER_IDLE_CLIENT_TIMEOUT))
+        .context("failed to set project controller client read timeout")?;
+    let (reader_half, mut writer_half) = stream.split();
+    let mut reader = BufReader::new(reader_half);
+    let mut line = String::new();
+    loop {
+        match reader.read_line(&mut line) {
+            Ok(0) => return Ok(()),
+            Ok(_) => {
+                let mut request_should_stop = false;
+                let response = handle_request(&line, bootstrap, &mut request_should_stop)?;
+                writer_half.write_all(response.as_bytes())?;
+                writer_half.write_all(b"\n")?;
+                writer_half.flush()?;
+                line.clear();
+                if request_should_stop {
+                    should_stop.store(true, Ordering::SeqCst);
+                    let _ = std::fs::remove_file(sock);
+                    return Ok(());
+                }
+            }
+            Err(err) if is_timeout_error(&err) => {
+                eprintln!(
+                    "[controller] closing idle client after {:.1}s without a complete request",
+                    CONTROLLER_IDLE_CLIENT_TIMEOUT.as_secs_f32()
+                );
+                return Ok(());
+            }
+            Err(err) => return Err(err).context("failed to read project controller request"),
+        }
+    }
+}
+
+fn is_timeout_error(err: &std::io::Error) -> bool {
+    matches!(err.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock)
 }
 
 fn handle_request(
@@ -1975,7 +2052,7 @@ fn project_root_from_arg(root: Option<&Path>) -> Result<PathBuf> {
 pub fn run_status(root: Option<&Path>, ensure: bool) -> Result<()> {
     let project_root = project_root_from_arg(root)?;
     if ensure {
-        let _stream = connect_or_launch(&project_root, LaunchMode::Lazy)?;
+        ensure_controller_running(&project_root, LaunchMode::Lazy)?;
     }
     println!("{}", serde_json::to_string_pretty(&status(&project_root)?)?);
     Ok(())
@@ -2167,6 +2244,65 @@ mod tests {
         assert!(status.active);
         assert_eq!(status.controller_binary, bootstrap.controller_binary);
         assert!(controller_status_matches_current_binary(&status).unwrap());
+    }
+
+    #[test]
+    fn controller_client_response_read_times_out() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sock = socket_path(dir.path());
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let name = sock.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let handle = std::thread::spawn(move || {
+            let _stream = listener.accept().unwrap();
+            std::thread::sleep(CONTROLLER_RPC_TIMEOUT * 2);
+        });
+
+        let started = Instant::now();
+        let err = request(dir.path(), "status").unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "controller request should fail within the bounded timeout"
+        );
+        assert!(
+            err.to_string().contains("timed out") || format!("{err:#}").contains("timed out"),
+            "{err:#}"
+        );
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn idle_controller_client_does_not_block_later_status_request() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let server_root = project_root.clone();
+        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        wait_for_test_controller(&project_root);
+
+        let idle_stream = connect(&project_root).unwrap();
+        let response = request(&project_root, "status").unwrap();
+        let status: ControllerStatus = serde_json::from_str(&response).unwrap();
+        assert!(status.active);
+        assert_eq!(status.project_root, project_root);
+
+        drop(idle_stream);
+        let shutdown = request(&project_root, "shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        handle.join().unwrap();
+    }
+
+    fn wait_for_test_controller(project_root: &Path) {
+        let started = Instant::now();
+        loop {
+            if connect(project_root).is_ok() {
+                return;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "test controller did not start"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]

@@ -87,6 +87,10 @@ Later phases may refine caller values without changing the field names.
   stale writer must not overwrite a newer generation.
 - Same-generation state transitions must also fail closed when the caller's
   `session_id` or `pane_id` no longer matches the authoritative record.
+- Controller IPC must be resilient to stalled peers. Server-side request reads
+  and client-side response reads are bounded, each accepted client is handled
+  independently, and readiness checks must release any idle controller stream
+  before issuing a real RPC.
 - The phase-3 supervisor path reports these actor transitions through the
   project controller IPC, not by independently rewriting actor files:
   `start_session`, `register_supervisor`, `prompt_ready`, `ipc_inject` /

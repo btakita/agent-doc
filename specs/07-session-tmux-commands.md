@@ -248,6 +248,11 @@ connection. This keeps local installs or rebuilds from leaving a stale
 controller process that rejects newly-added controller RPCs as unknown
 commands. The persisted bootstrap records `project_root`, `socket_path`,
 `launch_mode`, `bootstrap_epoch`, `pid`, and the startup binary identity.
+Controller request and response reads are bounded: a stalled client connection
+must close with a timeout diagnostic instead of monopolizing the server, and a
+client waiting for a response must fail closed rather than blocking
+indefinitely. `status --ensure` may use the connect-or-launch path only as a
+readiness check; it must close that stream before issuing the status RPC.
 
 `agent-doc start` creates owner generations through the controller. `route`
 and `sync` read actor bindings through the controller before consulting

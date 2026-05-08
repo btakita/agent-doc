@@ -79,7 +79,15 @@ The TigerBeetle pieces I would avoid copying literally are the storage-engine co
 A practical shape would be a `SimWorld` test harness with fake filesystem/git/clock/controller adapters, plus a command DSL such as `EditDoc`, `Preflight`, `Plan`, `Finalize`, `CrashAt`, `Repair`, `RoutePrompt`, and `SessionCheck`. CI can run a short fixed-seed corpus plus a small randomized budget; nightly or local stress can run larger seed ranges. When a bug is found, promote that seed into the corpus.
 
 I added a recommended backlog item for a concrete plan, because this is worth designing deliberately before scattering property tests across the current suite.
-<!-- agent:boundary:43913836 -->
+❯ do [#tigertest]
+### Re: #tigertest — gpt-5
+
+Created and committed the plan: `tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md`.
+
+The plan defines a TigerBeetle-inspired deterministic simulation/property-test layer for `agent-doc`: a pure `SimWorld`, an explicit command DSL, closeout and session invariants, seeded replay/minimization, fault injection, and split fast/medium/stress test budgets. It scopes the first implementation to closeout/template/pending/snapshot failures, then extends to route/controller schedules once the session actor architecture stabilizes.
+
+I committed the non-session plan file separately as `e0a784d25` (`docs: plan deterministic simulation testing`). No code or test suite changed, so I did not run the full Rust verification suite for this planning-only item.
+<!-- agent:boundary:5b5807a3 -->
 <!-- /agent:exchange -->
 ###
 
@@ -97,7 +105,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#tigertest] [recommended] Create a TigerBeetle-inspired deterministic simulation/property-test plan for agent-doc: model session-cycle state, generate concurrent document edits and crash/fault schedules, assert closeout/pending/git invariants, and keep most cases in fast pure tests.
 - [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
 <!-- /agent:backlog -->
 
@@ -118,6 +125,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#pcops] Implement Phase E from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: wire status/history/attach/restart/clear/doctor through controller clients, keep destructive recovery behind doctor --repair, and expose stage-specific editor diagnostics.
 - 2026-05-08 [#ctrlreload] [recommended] Add controller binary-generation/version invalidation so agent-doc restarts a stale project controller after local install/update instead of surfacing unknown controller command errors for newly-added controller RPCs.
 - 2026-05-08 [#ctrlsock] Implement tasks/agent-doc/plan-controller-stalled-client-start-hang.md: make project controller RPCs robust to stalled clients so a stuck sync/no-autostart or closed prior pane cannot make agent-doc start/session status hang; fail closed with stale-pane diagnostics instead.
+- 2026-05-08 [#tigertest] [recommended] Create a TigerBeetle-inspired deterministic simulation/property-test plan for agent-doc: model session-cycle state, generate concurrent document edits and crash/fault schedules, assert closeout/pending/git invariants, and keep most cases in fast pure tests.
 <!-- /agent:pending-done -->
 
 

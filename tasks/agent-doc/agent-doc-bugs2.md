@@ -27,55 +27,11 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-073511.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-082333.md`*
 
 Active backlog:
-- [ ] [#ctrlsock] Implement tasks/agent-doc/plan-controller-stalled-client-start-hang.md: make project controller RPCs robust to stalled clients so a stuck sync/no-autostart or closed prior pane cannot make agent-doc start/session status hang; fail closed with stale-pane diagnostics instead.
 - [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
-❯ do [#ctrlsock]. spec-test-build-install-commit-push
-### Re: #ctrlsock — gpt-5
-
-Implemented and pushed `#ctrlsock`.
-
-Changed:
-- controller clients now set bounded response timeouts and return fail-closed timeout errors instead of blocking indefinitely
-- controller server accepts clients nonblocking and serves each accepted socket independently, with idle client read timeouts
-- `status --ensure` now uses an explicit readiness helper and drops the idle stream before issuing the status RPC
-- added controller regressions for a no-response peer and an idle accepted client that must not block a later status request
-- updated README, SPEC, command spec, session actor contract, and VERSIONS
-
-Verification:
-- `cargo test -p agent-doc project_controller -- --nocapture`
-- `cargo test -p agent-doc start -- --nocapture`
-- `RUST_TEST_THREADS=1 cargo test -p agent-doc sync -- --nocapture`
-- `cargo build -p agent-doc`
-- `cargo install --path . --force`
-- `make check`
-
-Commit / push:
-- `src/agent-doc`: `67ca478 fix: bound controller IPC against stalled clients`, pushed to `origin/20260422/codex-agent-backend`
-- superproject: `dbe259d53 agent-doc: bound controller IPC against stalls`, pushed to `origin/main`
-❯ Selecting agent-doc-bugs2.md in the editor or running `Sync Tmux Layout` does not start agent-doc on agent-doc-bugs2.md
-❯ spec-test-build-install-commit-push
-### Re: sync startup contention — gpt-5
-
-Implemented and pushed the startup/sync lock contention fix for `agent-doc-bugs2.md`.
-
-Changed:
-- `sync` lock acquisition now uses a bounded wait budget instead of blocking indefinitely behind an older stuck or orphaned sync process.
-- On contention timeout, sync logs a warning and continues to ownership proof and auto-start decisions, so selecting `agent-doc-bugs2.md` or running `Sync Tmux Layout` can still route/start the document.
-- Added regression coverage for a held `.agent-doc/sync.lock` timing out quickly.
-- Updated README, SPEC, and the tmux command spec for the bounded contention behavior.
-
-Verification:
-- `cargo build`
-- `make check`
-- `cargo install --path . --force`
-
-Commit / push:
-- `src/agent-doc`: `875032e fix: bound sync lock contention`, pushed to `origin/20260422/codex-agent-backend`
-- superproject: `dce2648e2 agent-doc: bound sync lock contention`, pushed to `origin/main`
-<!-- agent:boundary:df1b124a -->
+<!-- agent:boundary:d7929f95 -->
 <!-- /agent:exchange -->
 ###
 

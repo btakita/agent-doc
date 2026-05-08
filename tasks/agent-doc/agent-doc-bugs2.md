@@ -145,7 +145,29 @@ Recommended final vocabulary:
 `Session Supervisor` -> executes and observes one live harness process.
 
 That vocabulary should age better in logs, errors, specs, and code review.
-<!-- agent:boundary:3f9906f6 -->
+❯ How about "Fleet Actor", "Session Actor", "Agent Actor" or "Agent Supervisor"?
+### Re: Fleet Actor / Agent Actor naming — gpt-5
+
+I would avoid `Fleet Actor` and `Agent Actor`.
+
+`Fleet Actor` has the same problem as `Fleet Commander`, just with actor terminology attached: it tells us implementation style, but not responsibility. It also risks implying one actor owns every state transition for every document. That can be true as a top-level mailbox, but the important design invariant is still per-session ownership.
+
+`Agent Actor` is ambiguous in this codebase. `agent` can mean Codex/Claude, the agent-doc session document agent, the harness process, or the user-facing assistant. I would not use it for architecture boundaries.
+
+`Agent Supervisor` is better than `Agent Actor` if the process is specifically supervising Codex/Claude, but `Session Supervisor` is still clearer because the supervised thing is the live session, not the model identity. It also keeps the name stable if the harness is Codex today, Claude tomorrow, or another agent later.
+
+I would keep the final set as:
+
+`Session Controller` -> fleet-level API/mailbox and lifecycle coordinator.
+`Session Actor` -> one authoritative owner for one document session.
+`Session Supervisor` -> runtime wrapper for the live harness process owned by that session actor.
+
+If we want to emphasize actor-pattern implementation in docs, phrase it as:
+
+`The Session Controller and each Session Actor are implemented as actors. Session Supervisors are subordinate runtime workers that may expose an actor-like command interface.`
+
+That avoids putting `Actor` into every noun while still documenting the concurrency model precisely.
+<!-- agent:boundary:124c4933 -->
 <!-- /agent:exchange -->
 ###
 

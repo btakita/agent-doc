@@ -19,7 +19,8 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
-do [#tigerfault]. spec-test-build-install-commit-push
+
+Captured #harnessprompt plan/backlog for missed harness prompt closeout.
 <!-- /agent:status -->
 
 ## Exchange
@@ -53,7 +54,20 @@ Committed and pushed:
 
 - `btakita/agent-doc` `20260422/codex-agent-backend`: `66973da test: add closeout simulator fault injection`
 - parent `btakita/agent-loop` `main`: `964b9c26f chore: update agent-doc submodule`
-<!-- agent:boundary:61b40b38 -->
+### Re: missed prompt / #tigerfault — gpt-5
+
+You were right: I treated the prior `agent-doc <FILE>` turn as a pure no-op after `preflight.no_changes=true`, but the live harness prompt still mattered. That is now captured as a bug plan at `tasks/agent-doc/plan-harness-prompt-no-changes-closeout.md`.
+
+I did not rerun `#tigerfault` because the session already shows it completed and pushed in the previous exchange. Because this cycle planned as `execution_scope=plan_backlog_only`, I kept the implementation deferred and added a new backlog item:
+
+- `#harnessprompt` — implement the guard for harness-native prompts that would otherwise be lost when the markdown diff is empty.
+
+Committed the plan file separately before this session closeout:
+
+- `30083b1d4 agent-doc: plan harness prompt no-change closeout`
+
+No spec/test/build/install work was run in this cycle because the planner explicitly constrained the turn to backlog/plan capture rather than implementation.
+<!-- agent:boundary:f3797e83 -->
 <!-- /agent:exchange -->
 ###
 
@@ -71,6 +85,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#harnessprompt] Implement tasks/agent-doc/plan-harness-prompt-no-changes-closeout.md: make harness-native agent-doc turns fail closed when preflight reports no markdown changes but the chat prompt contains actionable text that was never persisted to the exchange.
 - [ ] [#tigerroute] Implement Phase 4 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: extend SimWorld with route/controller schedules, session actor generations, supervisor lifecycle facts, dispatch acceptance/proof, stale/missing pane observations, and projection-drift invariants.
 - [ ] [#tigerci] Implement Phase 5 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: wire fast fixed-seed simulator coverage into cargo test, add a wider deterministic make check budget if runtime stays acceptable, document seed-range replay/promotion, and track generated-coverage runtime budgets.
 <!-- /agent:backlog -->

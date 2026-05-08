@@ -27,65 +27,12 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-064414.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-073511.md`*
 
 Active backlog:
+- [ ] [#ctrlsock] Implement tasks/agent-doc/plan-controller-stalled-client-start-hang.md: make project controller RPCs robust to stalled clients so a stuck sync/no-autostart or closed prior pane cannot make agent-doc start/session status hang; fail closed with stale-pane diagnostics instead.
 - [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
-❯ `Clear Session Context` resulted with JB Plugin surfacing:
-```
-agent-doc command failed (exit 1): Error: unknown controller command: session_status
-```
-### Re: Clear Session Context `session_status` failure — gpt-5
-
-This was a stale project-controller process, not the JetBrains plugin calling the wrong command.
-
-Evidence:
-- The installed CLI is `/home/brian/.cargo/bin/agent-doc`, version `0.33.16`.
-- The live controller for `/home/brian/work/btakita/agent-loop` had PID `3351602` and was started around `01:54`.
-- The installed binary was updated at `02:36`.
-- The current source and CLI surface include `agent-doc session status`, and the source controller dispatch table includes the `session_status` RPC, but the old already-running controller did not know that RPC and returned `unknown controller command: session_status`.
-
-I restarted the project controller with:
-
-```bash
-agent-doc controller shutdown --project-root /home/brian/work/btakita/agent-loop
-```
-
-After that, the same operator path worked:
-
-```bash
-agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-```
-
-It returned the actor/session status successfully. I also verified the reported action path directly:
-
-```bash
-agent-doc session clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-```
-
-That now succeeds with `controller stage operator_ready`.
-
-I added a recommended backlog item for the real product fix: controller startup/client calls should detect a stale controller binary generation after local install/update and restart it automatically, instead of letting newly-added RPCs fail as unknown commands.
-❯ do [#ctrlreload]. spec-test-build-install-commit-push
-### Re: #ctrlreload — gpt-5.5
-
-Completed `#ctrlreload`.
-
-Implemented stale project-controller binary invalidation in `src/agent-doc`: controller bootstrap/status now records the startup binary identity (`path`, version, size, and mtime), and controller clients compare the active controller against the current caller before RPC dispatch. Missing or mismatched identity now shuts down the stale controller and relaunches before returning a client stream, so old controller processes no longer surface newly-added RPCs like `session_status` as unknown commands after local install/update.
-
-No additional follow-up backlog is needed for this item.
-
-Verification:
-- `cargo test project_controller -- --nocapture`
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Committed and pushed:
-- `src/agent-doc` `800fa85 fix: restart stale project controllers` to `origin/20260422/codex-agent-backend`
-- `agent-loop` `ca8086496 agent-doc: restart stale project controllers` to `origin/main`
-<!-- /patch -->
-<!-- agent:boundary:1c19ba8f -->
+<!-- agent:boundary:e33c50e8 -->
 <!-- /agent:exchange -->
 ###
 

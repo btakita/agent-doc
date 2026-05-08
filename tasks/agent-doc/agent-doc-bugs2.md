@@ -31,15 +31,40 @@ prompt_presets:
 
 Active backlog:
 - [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
-<!-- agent:boundary:d7929f95 -->
+❯ The test suite is taking a long time to complete. Please increase the parallelization. Apply other safe ways to improve test suite performance.
+❯ Why are the "the expected ignored debounce tests" ignored? If these tests should be passing, please fix.
+❯ spec-test-build-install-commit-push
+### Re: debounce tests and test-suite parallelization — gpt-5
+
+Fixed and pushed.
+
+The ignored debounce tests were old gap-plan placeholders, not tests that should remain skipped. One was waiting on private status-file path access, and two assumed a direct preflight execution seam plus new frontmatter wiring. I converted them into passing executable coverage:
+
+- `test_status_file_write_includes_current_timestamp` now verifies `set_status()` through the public API and the documented `.agent-doc/status` output.
+- `test_preflight_timing_1500ms_is_configurable` now enforces that preflight reads `agent_doc_debounce` and passes `debounce_ms` to the typing-indicator check instead of the stale hardcoded `1500`.
+- `test_preflight_3s_timeout_is_sufficient_for_debounce` now enforces the existing dynamic max-wait behavior for debounce values above 3s.
+
+The actual bug was in `src/preflight.rs`: preflight already read `agent_doc_debounce` for the mtime-settling path, but the cross-process typing-indicator path still used `1500`. That now uses the configured `debounce_ms` too.
+
+For suite performance, `make test` now prefers `cargo-nextest` when it is installed, then runs doctests separately. If `cargo-nextest` is unavailable, it falls back to Cargo's own test runner with explicit test threads. I avoided keeping the custom direct executable runner because it did not preserve Cargo's integration-test environment such as `CARGO_BIN_EXE_agent-doc`, which made it unsafe for this suite.
+
+Verification completed:
+
+- `cargo test --test debounce_gaps_test_plan -- --include-ignored` passed: 15 passed, 0 ignored.
+- `make check` passed.
+- `make install` completed and `agent-doc --version` reports `agent-doc 0.33.16`.
+
+Commits pushed:
+
+- `src/agent-doc` branch `20260422/codex-agent-backend`: `a5b6b6e` (`fix: wire configurable preflight debounce`)
+- root `agent-loop` branch `main`: `3986b066e` (`chore: update agent-doc submodule`)
+
+I left the pre-existing unrelated root worktree changes alone; only the `src/agent-doc` code changes and the root submodule pointer were committed manually.
+<!-- agent:boundary:028520ed -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-The test suite is taking a long time to complete. Please increase the parallelization. Apply other safe ways to improve test suite performance.
-Why are the "the expected ignored debounce tests" ignored? If these tests should be passing, please fix.
-spec-test-build-install-commit-push
----
 "❯ Commit / push:" should not have the `❯ ` prefix since this was the agent response. #agent-doc-bug
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex

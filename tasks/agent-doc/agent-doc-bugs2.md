@@ -66,7 +66,26 @@ agent-doc session clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agen
 That now succeeds with `controller stage operator_ready`.
 
 I added a recommended backlog item for the real product fix: controller startup/client calls should detect a stale controller binary generation after local install/update and restart it automatically, instead of letting newly-added RPCs fail as unknown commands.
-<!-- agent:boundary:57d33c16 -->
+❯ do [#ctrlreload]. spec-test-build-install-commit-push
+### Re: #ctrlreload — gpt-5.5
+
+Completed `#ctrlreload`.
+
+Implemented stale project-controller binary invalidation in `src/agent-doc`: controller bootstrap/status now records the startup binary identity (`path`, version, size, and mtime), and controller clients compare the active controller against the current caller before RPC dispatch. Missing or mismatched identity now shuts down the stale controller and relaunches before returning a client stream, so old controller processes no longer surface newly-added RPCs like `session_status` as unknown commands after local install/update.
+
+No additional follow-up backlog is needed for this item.
+
+Verification:
+- `cargo test project_controller -- --nocapture`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+- `src/agent-doc` `800fa85 fix: restart stale project controllers` to `origin/20260422/codex-agent-backend`
+- `agent-loop` `ca8086496 agent-doc: restart stale project controllers` to `origin/main`
+<!-- /patch -->
+<!-- agent:boundary:1c19ba8f -->
 <!-- /agent:exchange -->
 ###
 

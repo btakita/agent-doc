@@ -207,7 +207,24 @@ The Project Controller and each Session Actor are implemented as actors. Harness
 ```
 
 I also updated `#coordspike` to use this terminology so the next plan does not keep carrying `coordinator actor` forward. That item remains open; this turn only clarified the naming direction.
-<!-- agent:boundary:51602765 -->
+❯ Agreed. Update plans and backlog with `Project Controller -> Session Actor -> Harness Supervisor -> Harness Child`.
+### Re: hierarchy updates — gpt-5
+
+Agreed. I updated the active planning surfaces to use:
+
+```text
+Project Controller -> Session Actor -> Harness Supervisor -> Harness Child
+```
+
+Changes made:
+
+- Updated `tasks/agent-doc/plan-single-owner-session-actor-transition.md` so the target model starts with the accepted hierarchy and defines the scope of each layer.
+- Updated phase 3 in that plan from vague supervisor ownership language to harness-supervisor lifecycle reporting into the session actor.
+- Updated `tasks/agent-doc/plan-sqlite-session-store-concurrency.md` so sqlite evaluation keeps authority on the `Session Actor` record and does not blur it into the `Project Controller` or `Harness Supervisor`.
+- Updated the live `#coordspike` backlog item to name the exact hierarchy in the MVP plan title.
+
+I left the old `coordinator actor` wording inside the compacted exchange summary alone because that is historical transcript context, not the active backlog. There is no new follow-up backlog item from this turn; this was an update to the existing plan and backlog surfaces.
+<!-- agent:boundary:89051e86 -->
 <!-- /agent:exchange -->
 ###
 
@@ -224,7 +241,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#coordspike] [recommended] Draft a project-controller/session-actor/harness-supervisor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, harness-supervisor client protocol, and tmux reconciliation tests.
+- [ ] [#coordspike] [recommended] Draft a Project Controller -> Session Actor -> Harness Supervisor -> Harness Child MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, harness-supervisor client protocol, and tmux reconciliation tests.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 

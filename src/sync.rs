@@ -1032,17 +1032,25 @@ fn safe_passive_visible_layout_blockers(
     }
 
     let mut protected_unwanted = Vec::new();
+    let mut detachable_unwanted = Vec::new();
     for pane in tmux.list_window_panes(window).unwrap_or_default() {
+        let registered_file =
+            registered_file_for_pane(tmux, &pane).map(|path| path.canonicalize().unwrap_or(path));
+        if registered_file
+            .as_ref()
+            .is_some_and(|file| requested_files.contains(file))
+        {
+            continue;
+        }
+
         let Some(protected) = open_cycle_protected_pane_state(tmux, &pane) else {
+            detachable_unwanted.push(pane);
             continue;
         };
         let canonical = protected
             .file
             .canonicalize()
             .unwrap_or(protected.file.clone());
-        if requested_files.contains(&canonical) {
-            continue;
-        }
         protected_unwanted.push(format!(
             "{}:{}:{}",
             pane,
@@ -1051,6 +1059,9 @@ fn safe_passive_visible_layout_blockers(
         ));
     }
     if protected_unwanted.is_empty() {
+        return None;
+    }
+    if missing_requested.len() <= detachable_unwanted.len() {
         return None;
     }
 
@@ -9137,6 +9148,126 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             iso.pane_window(&pane_c).unwrap(),
             pane_c_window,
             "manual sync should leave the requested hidden pane in its original window when moving it would expand the visible projection"
+        );
+    }
+
+    fn sync_replaces_detachable_visible_pane_while_protected_pane_remains(
+        mode: AutoStartMode,
+        test_name: &str,
+    ) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let protected_doc = root.join("tasks/protected.md");
+        let detached_doc = root.join("tasks/detached.md");
+        let requested_doc = root.join("tasks/requested.md");
+        for (path, session) in [
+            (&protected_doc, "sync-replace-protected"),
+            (&detached_doc, "sync-replace-detached"),
+            (&requested_doc, "sync-replace-requested"),
+        ] {
+            std::fs::write(
+                path,
+                format!(
+                    "---\nagent_doc_session: {session}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let iso = IsolatedTmux::new(test_name);
+        let protected_pane = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let detached_pane = iso.split_window(&protected_pane, root, "-dh").unwrap();
+        let target_window = iso.pane_window(&protected_pane).unwrap();
+        let requested_pane = iso.new_window("test", root).unwrap();
+
+        sessions::register_full_with_cwd(
+            "sync-replace-protected",
+            &protected_pane,
+            &protected_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &protected_pane).unwrap(),
+            &target_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd(
+            "sync-replace-detached",
+            &detached_pane,
+            &detached_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &detached_pane).unwrap(),
+            &target_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        sessions::register_full_with_cwd(
+            "sync-replace-requested",
+            &requested_pane,
+            &requested_doc.to_string_lossy(),
+            pane_pid_from_tmux(&iso, &requested_pane).unwrap(),
+            &iso.pane_window(&requested_pane).unwrap(),
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+
+        let protected_content = std::fs::read_to_string(&protected_doc).unwrap();
+        crate::cycle_state::start_preflight(
+            &protected_doc,
+            Some(&protected_content),
+            Some(&protected_content),
+        )
+        .unwrap();
+
+        run_with_options(
+            &[requested_doc.to_string_lossy().to_string()],
+            None,
+            Some(requested_doc.to_string_lossy().as_ref()),
+            mode,
+            &iso,
+        )
+        .unwrap();
+
+        let ordered = iso.list_panes_ordered(&target_window).unwrap();
+        assert!(
+            ordered.contains(&protected_pane),
+            "protected open-cycle pane must remain visible"
+        );
+        assert!(
+            ordered.contains(&requested_pane),
+            "requested hidden pane should be brought into the visible agent-doc window"
+        );
+        assert!(
+            !ordered.contains(&detached_pane),
+            "detachable visible pane should be displaced instead of making sync a no-op"
+        );
+        assert_eq!(
+            iso.active_pane("test").unwrap(),
+            requested_pane,
+            "sync should focus the requested pane after replacing a detachable visible pane"
+        );
+    }
+
+    #[test]
+    fn safe_passive_sync_replaces_detachable_visible_pane_while_protected_pane_remains() {
+        sync_replaces_detachable_visible_pane_while_protected_pane_remains(
+            AutoStartMode::SafePassive,
+            "sync-safe-passive-replace-detachable",
+        );
+    }
+
+    #[test]
+    fn manual_sync_replaces_detachable_visible_pane_while_protected_pane_remains() {
+        sync_replaces_detachable_visible_pane_while_protected_pane_remains(
+            AutoStartMode::Full,
+            "sync-manual-replace-detachable",
         );
     }
 

@@ -128,10 +128,12 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   `write_applied` cycle, sync must warn and preserve that pane instead of
   stashing it mid-closeout.
 - If a requested projection is missing from the visible `agent-doc` window and
-  satisfying it would attach or create another pane around an already-visible
-  protected open-cycle pane, both manual sync and passive `--no-autostart` sync
-  must preserve the current visible pane cardinality and warn instead of
-  expanding the window beyond the editor-visible projection. The warning must
+  a visible pane is protected by an open closeout cycle, both manual sync and
+  passive `--no-autostart` sync must first try to satisfy the request by
+  displacing unprotected unwanted visible panes. Sync must preserve-and-warn
+  only when the missing requested panes outnumber those detachable panes,
+  because satisfying the request would otherwise require detaching the
+  protected closeout owner or expanding the visible pane set. The warning must
   explain that the visible pane cannot be detached because it still owns an
   open closeout cycle.
 - Sync serialization is bounded: a contended `.agent-doc/sync.lock` may delay a

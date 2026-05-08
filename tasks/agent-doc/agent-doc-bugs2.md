@@ -54,7 +54,23 @@ Phase-by-phase expectation:
 - Phase E mainly improves operator commands and diagnostics. It helps explain slowness, but it is not the primary fast path fix.
 
 So I would treat the current >10s behavior as a transitional regression, not as evidence that Project Controller -> Session Actor -> Harness Supervisor -> Harness Child is too slow. The design should reduce work because it replaces repeated distributed inference with one local IPC lookup plus a cached actor state transition. The follow-up is already captured as `#pcperf`: if no-op safe-passive sync still spends 10s in prune/proof after Phase D, then the implementation failed the architecture's purpose.
-<!-- agent:boundary:f0a287fd -->
+❯ do [#pcperf]
+### Re: #pcperf — gpt-5
+
+Implemented `#pcperf`.
+
+- Added `sync_latency` instrumentation with phase budgets for window resolution, prune, ownership proof, tmux-router reconciliation, and safe-passive total runtime.
+- Added `route_latency` instrumentation for direct pane submit, supervisor IPC submit, dispatch-start proof wait, and routed cycle ack wait. The Codex proof timeout now records `phase=dispatch_start_proof` with `outcome=unproven_but_accepted`, so a 10s pane delay is visible as dispatch-proof latency instead of being confused with tmux-router or controller latency.
+- Updated `tasks/agent-doc/plan-project-controller-session-actor-mvp.md` with the rollout performance guardrails and acceptance check for Phase D no-op safe-passive sync.
+- Added focused tests for sync and route latency budget status formatting.
+
+Verification passed:
+
+- `cargo test latency_message_marks_budget_status`
+- `make check`
+
+I did not create a manual code commit or push because this document directive only said `do [#pcperf]`; the session response/backlog update is being committed by `agent-doc finalize`.
+<!-- agent:boundary:4dc61543 -->
 <!-- /agent:exchange -->
 ###
 
@@ -72,7 +88,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#pcperf] [recommended] Add sync/route latency instrumentation and budgets to the Project Controller rollout: measure prune/proof/router/dispatch-ack phases, keep no-op safe-passive sync on the fast path, and surface when a 10s dispatch-proof wait is the reason a pane appears non-responsive.
 - [ ] [#pcctrl] Implement Phase A from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: add the project-local controller shell, singleton socket/launch lock, lazy connect-or-launch helper, controller status command, and bootstrap epoch/launch-mode persistence without changing route/start behavior yet.
 - [ ] [#pcstore] Implement Phase B from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: move actor-record load/store behind controller commands, write SQLite first, emit session-actors.json and sessions.json as projections, and add projection drift diagnostics.
 - [ ] [#pcsuper] Implement Phase C from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: make Harness Supervisor startup register with the controller and report ready/busy/waiting-input/blocked/closed lifecycle facts through controller-owned actor transitions.
@@ -89,6 +104,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-07 [#backlogreap] [recommended] Make completed/reaped backlog items visible in the session document or closeout response so items like #commenttail, #tmuxcoord, and #coordspike do not look silently removed after --pending-done.
 - 2026-05-07 [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 2026-05-07 [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
+- 2026-05-07 [#pcperf] [recommended] Add sync/route latency instrumentation and budgets to the Project Controller rollout: measure prune/proof/router/dispatch-ack phases, keep no-op safe-passive sync on the fast path, and surface when a 10s dispatch-proof wait is the reason a pane appears non-responsive.
 <!-- /agent:pending-done -->
 
 

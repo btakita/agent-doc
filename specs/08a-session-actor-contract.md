@@ -85,9 +85,16 @@ Later phases may refine caller values without changing the field names.
   stale writer must not overwrite a newer generation.
 - Same-generation state transitions must also fail closed when the caller's
   `session_id` or `pane_id` no longer matches the authoritative record.
-- The phase-3 supervisor path reports these actor transitions explicitly:
-  `prompt_ready`, `ipc_inject` / `auto_trigger_inject` busy dispatch, clean-exit
-  `waiting_input`, `supervisor_halted`, and final `closed`.
+- The phase-3 supervisor path reports these actor transitions through the
+  project controller IPC, not by independently rewriting actor files:
+  `start_session`, `register_supervisor`, `prompt_ready`, `ipc_inject` /
+  `auto_trigger_inject` busy dispatch, clean-exit `waiting_input`,
+  `supervisor_halted`, and final `closed`.
+- Lifecycle updates must include the caller's session id, pane id, and
+  generation. The controller rejects stale lifecycle reports when any of those
+  fields no longer match the authoritative actor record, and it updates
+  `supervisor_leases` with the latest runtime state while preserving the
+  registered supervisor pid/socket across state-only reports.
 - `prompt_visible_once` remains a child-lifecycle fact for restart heuristics, but
   prompt-driven `busy -> ready` recovery must fire after every later routed or
   auto-trigger dispatch that returns the same child to an idle prompt; it is not
@@ -131,7 +138,9 @@ Later phases may refine caller values without changing the field names.
   entries to the actor binding; if either `session-actors.json` or
   `sessions.json` cannot be emitted or drifts from SQLite, the actor state stays
   authoritative and the controller records projection diagnostics.
-- Session logs are the source of transition provenance and generation history.
+- Session logs and `ops.log` are transition provenance outputs. The controller
+  persists actor state first, then emits projection/log diagnostics from that
+  committed state.
 - Startup-miss, route, sync, and closeout recovery may read those logs, but
   they must not infer authority from multiple competing mutable sources once a
   newer generation is recorded.

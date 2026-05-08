@@ -1128,9 +1128,11 @@ type SharedWriter = Mutex<Option<Arc<Mutex<SharedPtyWriter>>>>;
 
 #[derive(Debug, Clone)]
 struct SessionActorRuntime {
+    project_root: PathBuf,
     file: PathBuf,
     session_id: String,
     pane_id: String,
+    generation: u64,
 }
 
 impl SessionActorRuntime {
@@ -1140,13 +1142,17 @@ impl SessionActorRuntime {
         caller: &str,
         reason: &str,
     ) -> Result<crate::session_actor::ActorRecord> {
-        crate::session_actor::transition_state(
-            &self.file,
-            &self.session_id,
-            &self.pane_id,
-            state,
-            caller,
-            reason,
+        crate::project_controller::mark_lifecycle(
+            &self.project_root,
+            crate::project_controller::LifecycleRequest {
+                file: self.file.clone(),
+                session_id: self.session_id.clone(),
+                pane_id: self.pane_id.clone(),
+                generation: self.generation,
+                state,
+                caller: caller.to_string(),
+                reason: reason.to_string(),
+            },
         )
     }
 }
@@ -1744,6 +1750,11 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
 
     // Open session log
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let project_root = snapshot::find_project_root(&canonical).unwrap_or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
+    });
     let mut session_log = open_session_log(&canonical, &session_id);
     let start_generation = if prior_entry
         .as_ref()
@@ -1786,13 +1797,29 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
             start_generation
         ),
     );
-    crate::session_actor::record_session_start(
-        &canonical,
-        &session_id,
-        &pane_id,
-        pane_window.as_str(),
-        start_generation,
+    let controller_stream = crate::project_controller::connect_or_launch(
+        &project_root,
+        crate::project_controller::LaunchMode::Lazy,
     )?;
+    drop(controller_stream);
+    let actor_record = crate::project_controller::start_session(
+        &project_root,
+        crate::project_controller::StartSessionRequest {
+            file: canonical.clone(),
+            session_id: session_id.clone(),
+            pane_id: pane_id.clone(),
+            window_id: pane_window.clone(),
+            generation: start_generation,
+        },
+    )?;
+    log_event(
+        &mut session_log,
+        &format!(
+            "controller_session_start generation={} state={}",
+            actor_record.generation,
+            actor_record.state.as_str()
+        ),
+    );
 
     // Fire document-level session_start hooks
     let harness_name = agent_doc::model_tier::detect_harness();
@@ -1912,13 +1939,12 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         }
     };
 
-    // Find project root for IPC socket placement
-    let project_root =
-        snapshot::find_project_root(&canonical).unwrap_or_else(|| resolved_cwd.path.clone());
     let actor_runtime = SessionActorRuntime {
+        project_root: project_root.clone(),
         file: canonical.clone(),
         session_id: session_id.clone(),
         pane_id: pane_id.clone(),
+        generation: actor_record.generation,
     };
 
     // Create shared state for IPC handler
@@ -1938,6 +1964,27 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
     log_event(
         &mut session_log,
         &format!("ipc_started project_root={}", project_root.display()),
+    );
+    let supervisor_socket = crate::supervisor::ipc::socket_path(&project_root, &session_id)
+        .to_string_lossy()
+        .to_string();
+    crate::project_controller::register_supervisor(
+        &project_root,
+        crate::project_controller::SupervisorRegistration {
+            file: canonical.clone(),
+            session_id: session_id.clone(),
+            pane_id: pane_id.clone(),
+            generation: actor_record.generation,
+            supervisor_pid: std::process::id(),
+            supervisor_socket,
+            runtime_state: crate::session_actor::ActorState::Starting
+                .as_str()
+                .to_string(),
+        },
+    )?;
+    log_event(
+        &mut session_log,
+        "controller_supervisor_registered state=starting",
     );
 
     // Crash policy state machine

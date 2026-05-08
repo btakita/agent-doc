@@ -348,7 +348,7 @@ pub fn project_binding_in(
     })
 }
 
-pub fn record_session_start(
+pub(crate) fn record_session_start_direct(
     file: &Path,
     session_id: &str,
     pane_id: &str,
@@ -380,10 +380,22 @@ pub fn record_session_start(
     )
 }
 
-pub fn transition_state(
+#[allow(dead_code)] // Compatibility API for direct callers; supervisor path uses controller IPC.
+pub fn record_session_start(
     file: &Path,
     session_id: &str,
     pane_id: &str,
+    window_id: &str,
+    generation: u64,
+) -> Result<ActorRecord> {
+    record_session_start_direct(file, session_id, pane_id, window_id, generation)
+}
+
+pub(crate) fn transition_state_direct(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    expected_generation: Option<u64>,
     state: ActorState,
     caller: &str,
     reason: &str,
@@ -409,6 +421,16 @@ pub fn transition_state(
             session_id,
             current.generation,
             current.session_id
+        );
+    }
+    if let Some(expected) = expected_generation
+        && current.generation != expected
+    {
+        anyhow::bail!(
+            "stale actor transition for {}: generation {} is no longer current (current generation {})",
+            canonical.display(),
+            expected,
+            current.generation
         );
     }
     if current.pane_id != pane_id {
@@ -440,6 +462,18 @@ pub fn transition_state(
             expected_prior_generation: Some(current.generation),
         },
     )
+}
+
+#[allow(dead_code)] // Compatibility API for direct callers; supervisor path uses controller IPC.
+pub fn transition_state(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    state: ActorState,
+    caller: &str,
+    reason: &str,
+) -> Result<ActorRecord> {
+    transition_state_direct(file, session_id, pane_id, None, state, caller, reason)
 }
 
 pub fn infer_latest_generation_from_content(content: &str) -> u64 {

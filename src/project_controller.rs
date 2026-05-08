@@ -12,6 +12,7 @@ use interprocess::local_socket::{
     traits::{Listener as _, Stream as _},
 };
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
@@ -71,9 +72,57 @@ pub struct ControllerStatus {
     pub pid: Option<u32>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
+pub struct StartSessionRequest {
+    pub file: PathBuf,
+    pub session_id: String,
+    pub pane_id: String,
+    pub window_id: String,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SupervisorRegistration {
+    pub file: PathBuf,
+    pub session_id: String,
+    pub pane_id: String,
+    pub generation: u64,
+    pub supervisor_pid: u32,
+    pub supervisor_socket: String,
+    pub runtime_state: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LifecycleRequest {
+    pub file: PathBuf,
+    pub session_id: String,
+    pub pane_id: String,
+    pub generation: u64,
+    pub state: crate::session_actor::ActorState,
+    pub caller: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct ControllerRequest {
     command: String,
+    file: Option<PathBuf>,
+    session_id: Option<String>,
+    pane_id: Option<String>,
+    window_id: Option<String>,
+    generation: Option<u64>,
+    state: Option<String>,
+    caller: Option<String>,
+    reason: Option<String>,
+    supervisor_pid: Option<u32>,
+    supervisor_socket: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ControllerEnvelope<T> {
+    ok: bool,
+    data: Option<T>,
+    error: Option<String>,
 }
 
 pub struct LaunchLock {
@@ -433,6 +482,43 @@ fn upsert_actor_document(
     Ok(())
 }
 
+fn upsert_supervisor_lease(
+    project_root: &Path,
+    record: &crate::session_actor::ActorRecord,
+    supervisor_pid: Option<u32>,
+    supervisor_socket: Option<&str>,
+    runtime_state: &str,
+) -> Result<()> {
+    let conn = open_state_db(project_root)?;
+    conn.execute(
+        r#"
+        INSERT INTO supervisor_leases (
+            document_id,
+            generation,
+            supervisor_pid,
+            supervisor_socket,
+            last_heartbeat,
+            runtime_state
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(document_id, generation) DO UPDATE SET
+            supervisor_pid = COALESCE(excluded.supervisor_pid, supervisor_leases.supervisor_pid),
+            supervisor_socket = COALESCE(excluded.supervisor_socket, supervisor_leases.supervisor_socket),
+            last_heartbeat = excluded.last_heartbeat,
+            runtime_state = excluded.runtime_state
+        "#,
+        params![
+            record.document_id,
+            sqlite_i64(record.generation, "generation")?,
+            supervisor_pid.map(i64::from),
+            supervisor_socket,
+            sqlite_i64(timestamp_secs(), "supervisor heartbeat timestamp")?,
+            runtime_state,
+        ],
+    )?;
+    Ok(())
+}
+
 pub fn load_actor_store(
     project_root: &Path,
 ) -> Result<BTreeMap<String, crate::session_actor::ActorRecord>> {
@@ -666,6 +752,104 @@ fn request(project_root: &Path, command: &str) -> Result<String> {
     Ok(response.trim().to_string())
 }
 
+fn request_controller<T: DeserializeOwned>(
+    project_root: &Path,
+    request: ControllerRequest,
+) -> Result<T> {
+    let stream = connect_or_launch(project_root, LaunchMode::Lazy)?;
+    let (reader_half, mut writer_half) = stream.split();
+    let mut raw = serde_json::to_string(&request)?;
+    raw.push('\n');
+    writer_half.write_all(raw.as_bytes())?;
+    writer_half.flush()?;
+
+    let mut reader = BufReader::new(reader_half);
+    let mut response = String::new();
+    reader
+        .read_line(&mut response)
+        .context("failed to read project controller response")?;
+    let envelope: ControllerEnvelope<T> = serde_json::from_str(response.trim())
+        .context("failed to parse project controller response envelope")?;
+    if envelope.ok {
+        envelope
+            .data
+            .context("project controller returned ok response without data")
+    } else {
+        anyhow::bail!(
+            "{}",
+            envelope
+                .error
+                .unwrap_or_else(|| "project controller request failed".to_string())
+        )
+    }
+}
+
+pub fn start_session(
+    project_root: &Path,
+    request: StartSessionRequest,
+) -> Result<crate::session_actor::ActorRecord> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(request.file),
+            session_id: Some(request.session_id),
+            pane_id: Some(request.pane_id),
+            window_id: Some(request.window_id),
+            generation: Some(request.generation),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+        },
+    )
+}
+
+pub fn register_supervisor(
+    project_root: &Path,
+    registration: SupervisorRegistration,
+) -> Result<crate::session_actor::ActorRecord> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "register_supervisor".to_string(),
+            file: Some(registration.file),
+            session_id: Some(registration.session_id),
+            pane_id: Some(registration.pane_id),
+            window_id: None,
+            generation: Some(registration.generation),
+            state: Some(registration.runtime_state),
+            caller: None,
+            reason: None,
+            supervisor_pid: Some(registration.supervisor_pid),
+            supervisor_socket: Some(registration.supervisor_socket),
+        },
+    )
+}
+
+pub fn mark_lifecycle(
+    project_root: &Path,
+    request: LifecycleRequest,
+) -> Result<crate::session_actor::ActorRecord> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(request.file),
+            session_id: Some(request.session_id),
+            pane_id: Some(request.pane_id),
+            window_id: None,
+            generation: Some(request.generation),
+            state: Some(request.state.as_str().to_string()),
+            caller: Some(request.caller),
+            reason: Some(request.reason),
+            supervisor_pid: None,
+            supervisor_socket: None,
+        },
+    )
+}
+
 pub fn status(project_root: &Path) -> Result<ControllerStatus> {
     match request(project_root, "status") {
         Ok(response) => {
@@ -794,11 +978,176 @@ fn handle_request(
             *should_stop = true;
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
+        "start_session" => controller_envelope(handle_start_session(bootstrap, request)),
+        "register_supervisor" => {
+            controller_envelope(handle_register_supervisor(bootstrap, request))
+        }
+        "mark_lifecycle" => controller_envelope(handle_mark_lifecycle(bootstrap, request)),
         other => Ok(serde_json::to_string(&serde_json::json!({
             "ok": false,
             "error": format!("unknown controller command: {other}")
         }))?),
     }
+}
+
+fn controller_envelope<T: Serialize>(result: Result<T>) -> Result<String> {
+    match result {
+        Ok(data) => Ok(serde_json::to_string(&serde_json::json!({
+            "ok": true,
+            "data": data
+        }))?),
+        Err(err) => Ok(serde_json::to_string(&serde_json::json!({
+            "ok": false,
+            "error": err.to_string()
+        }))?),
+    }
+}
+
+fn request_file(request: &ControllerRequest) -> Result<PathBuf> {
+    request
+        .file
+        .clone()
+        .context("controller request missing file")
+}
+
+fn request_string(value: &Option<String>, name: &str) -> Result<String> {
+    value
+        .clone()
+        .with_context(|| format!("controller request missing {name}"))
+}
+
+fn request_u64(value: Option<u64>, name: &str) -> Result<u64> {
+    value.with_context(|| format!("controller request missing {name}"))
+}
+
+fn handle_start_session(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<crate::session_actor::ActorRecord> {
+    let file = request_file(&request)?;
+    let session_id = request_string(&request.session_id, "session_id")?;
+    let pane_id = request_string(&request.pane_id, "pane_id")?;
+    let window_id = request_string(&request.window_id, "window_id")?;
+    let generation = request_u64(request.generation, "generation")?;
+    let record = crate::session_actor::record_session_start_direct(
+        &file,
+        &session_id,
+        &pane_id,
+        &window_id,
+        generation,
+    )
+    .with_context(|| {
+        format!(
+            "controller failed to start session actor for {}",
+            file.display()
+        )
+    })?;
+    let _ = project_sessions_projection_for_actor(&bootstrap.project_root, &record.document_id);
+    crate::ops_log::log_op(
+        &file,
+        &format!(
+            "controller_session_start session={} pane={} generation={} state={}",
+            session_id,
+            pane_id,
+            record.generation,
+            record.state.as_str()
+        ),
+    );
+    Ok(record)
+}
+
+fn handle_register_supervisor(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<crate::session_actor::ActorRecord> {
+    let file = request_file(&request)?;
+    let session_id = request_string(&request.session_id, "session_id")?;
+    let pane_id = request_string(&request.pane_id, "pane_id")?;
+    let generation = request_u64(request.generation, "generation")?;
+    let runtime_state = request
+        .state
+        .as_deref()
+        .unwrap_or(crate::session_actor::ActorState::Starting.as_str());
+    let document_id = crate::session_actor::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    let record = load_actor_record(&bootstrap.project_root, &document_id)?
+        .with_context(|| format!("missing actor record for supervisor {}", file.display()))?;
+    if record.session_id != session_id
+        || record.pane_id != pane_id
+        || record.generation != generation
+    {
+        anyhow::bail!(
+            "stale supervisor registration for {}: requested session={} pane={} generation={}, current session={} pane={} generation={}",
+            file.display(),
+            session_id,
+            pane_id,
+            generation,
+            record.session_id,
+            record.pane_id,
+            record.generation
+        );
+    }
+    upsert_supervisor_lease(
+        &bootstrap.project_root,
+        &record,
+        request.supervisor_pid,
+        request.supervisor_socket.as_deref(),
+        runtime_state,
+    )?;
+    crate::ops_log::log_op(
+        &file,
+        &format!(
+            "controller_supervisor_registered session={} pane={} generation={} state={}",
+            session_id, pane_id, generation, runtime_state
+        ),
+    );
+    Ok(record)
+}
+
+fn handle_mark_lifecycle(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<crate::session_actor::ActorRecord> {
+    let file = request_file(&request)?;
+    let session_id = request_string(&request.session_id, "session_id")?;
+    let pane_id = request_string(&request.pane_id, "pane_id")?;
+    let generation = request_u64(request.generation, "generation")?;
+    let state_raw = request_string(&request.state, "state")?;
+    let state = crate::session_actor::ActorState::parse(&state_raw)
+        .with_context(|| format!("unknown lifecycle state: {state_raw}"))?;
+    let caller = request_string(&request.caller, "caller")?;
+    let reason = request_string(&request.reason, "reason")?;
+    let record = crate::session_actor::transition_state_direct(
+        &file,
+        &session_id,
+        &pane_id,
+        Some(generation),
+        state,
+        &caller,
+        &reason,
+    )?;
+    upsert_supervisor_lease(
+        &bootstrap.project_root,
+        &record,
+        request.supervisor_pid,
+        request.supervisor_socket.as_deref(),
+        state.as_str(),
+    )?;
+    crate::ops_log::log_op(
+        &file,
+        &format!(
+            "controller_lifecycle session={} pane={} generation={} state={} caller={} reason={}",
+            session_id,
+            pane_id,
+            generation,
+            state.as_str(),
+            caller,
+            reason
+        ),
+    );
+    Ok(record)
 }
 
 fn project_root_from_arg(root: Option<&Path>) -> Result<PathBuf> {
@@ -992,5 +1341,167 @@ mod tests {
             read.socket_path,
             dir.path().join(".agent-doc/controller.sock")
         );
+    }
+
+    fn test_bootstrap(dir: &tempfile::TempDir) -> ControllerBootstrap {
+        ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 123,
+            pid: 456,
+        }
+    }
+
+    #[test]
+    fn controller_start_register_and_lifecycle_update_actor_and_lease() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/test.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-controller\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let start = ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-controller".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: Some("@1".to_string()),
+            generation: Some(1),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&start).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let record = envelope.data.unwrap();
+        assert_eq!(record.state, crate::session_actor::ActorState::Starting);
+
+        let register = ControllerRequest {
+            command: "register_supervisor".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-controller".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("starting".to_string()),
+            caller: None,
+            reason: None,
+            supervisor_pid: Some(999),
+            supervisor_socket: Some("/tmp/agent-doc-test.sock".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&register).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let lifecycle = ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-controller".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("ready".to_string()),
+            caller: Some("supervisor".to_string()),
+            reason: Some("prompt_ready".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let record = envelope.data.unwrap();
+        assert_eq!(record.state, crate::session_actor::ActorState::Ready);
+        assert_eq!(record.last_transition.reason, "prompt_ready");
+
+        let conn = Connection::open(state_db_path(dir.path())).unwrap();
+        let (pid, socket, runtime_state): (i64, String, String) = conn
+            .query_row(
+                "SELECT supervisor_pid, supervisor_socket, runtime_state FROM supervisor_leases WHERE document_id = ?1 AND generation = 1",
+                params![doc.to_string_lossy().to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(pid, 999);
+        assert_eq!(socket, "/tmp/agent-doc-test.sock");
+        assert_eq!(runtime_state, "ready");
+    }
+
+    #[test]
+    fn controller_lifecycle_rejects_stale_generation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/stale.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-stale\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(&doc, "session-stale", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+            "session-stale",
+            "%42",
+            "@2",
+            "sync",
+            "recover_owner",
+        )
+        .unwrap();
+
+        let lifecycle = ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-stale".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("ready".to_string()),
+            caller: Some("supervisor".to_string()),
+            reason: Some("prompt_ready".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(!envelope.ok);
+        assert!(envelope.error.unwrap().contains("no longer current"));
     }
 }

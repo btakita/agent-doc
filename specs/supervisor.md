@@ -2,7 +2,7 @@
 name: supervisor
 status: living
 date: 2026-04-13
-updated: 2026-05-05
+updated: 2026-05-08
 ---
 
 # agent-doc Supervisor Spec
@@ -28,6 +28,7 @@ The supervisor graduates `start.rs` into a process that **owns** claude as a chi
 | `supervisor/state.rs` | **landed** | Crash classification, restart cadence, waiting-input prompts, and halted-state handling are live. |
 | `supervisor/ipc.rs` | **landed** | Per-session supervisor IPC serves `inject`, `restart`, `state`, `pid`, and `stop`. |
 | `start.rs` wire-up | **landed** | The production `agent-doc start` path owns the supervisor lifecycle inline in `start.rs` while delegating focused pieces to `supervisor/*` modules. |
+| Project controller registration | **landed** | Supervisor startup lazy-launches the project controller, registers the actor generation and supervisor lease, and reports lifecycle transitions through controller IPC. |
 
 The original rollout plan in this document is retained for architectural context,
 but the supervisor stack is now shipping. Current behavior should be read from
@@ -72,6 +73,8 @@ The supervisor is a single process that:
 2. Forks claude with the slave as its tty, with a deterministic CWD and env.
 3. Runs three threads: stdin→pty, pty→stdout, IPC socket accept loop.
 4. Wait-loop on the child; on exit, applies restart policy.
+5. Reports actor lifecycle facts to the project controller so the session actor
+   owns authoritative state transitions.
 
 ## Core Invariants
 
@@ -104,6 +107,23 @@ The supervisor is a single process that:
 - Pty is allocated before claude spawns and destroyed after claude exits + IPC socket closes.
 - SIGWINCH on the tmux pane → forwarded to the pty master so claude sees resize.
 - On supervisor exit (user `q`), pty slave closes, claude gets SIGHUP.
+
+### Actor lifecycle reporting
+
+- Startup calls the project controller before the child launches:
+  `start_session` records the actor generation in `starting`, and
+  `register_supervisor` records the supervisor pid/socket lease.
+- Prompt observation reports `ready` with reason `prompt_ready`. This happens on
+  the first prompt for a child and after later `busy` dispatches return to an
+  idle prompt.
+- Supervisor-owned dispatch paths report `busy` before injection, using
+  `ipc_inject` for routed IPC and `auto_trigger_inject` for restart-triggered
+  reopen commands.
+- Clean exits that require operator input report `waiting_input`; flap halts
+  report `blocked`; supervisor shutdown reports `closed`.
+- Every lifecycle report carries the session id, pane id, and generation. The
+  controller rejects stale reports instead of letting an old supervisor mutate a
+  newer actor owner.
 
 ## IPC Socket
 

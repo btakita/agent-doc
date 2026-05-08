@@ -59,6 +59,72 @@ enum SimCommand {
     DuplicateVisibleResponse,
     CrashAt(FaultPoint),
     Recover,
+    BindRouteOwner,
+    SupervisorReady,
+    SupervisorWaitingInput,
+    SupervisorBlocked,
+    SupervisorClosed,
+    DispatchRoutePrompt,
+    ProveDispatchAccepted,
+    StaleSupervisorUpdate,
+    ObserveStalePane,
+    ObserveMissingPane,
+    DriftProjection,
+    RepairProjection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SupervisorLifecycle {
+    Starting,
+    Ready,
+    WaitingInput,
+    Blocked,
+    Closed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActorState {
+    generation: u64,
+    session_id: String,
+    pane_id: Option<String>,
+    lifecycle: SupervisorLifecycle,
+}
+
+impl ActorState {
+    fn initial() -> Self {
+        Self {
+            generation: 1,
+            session_id: "session-1".to_string(),
+            pane_id: Some("%1".to_string()),
+            lifecycle: SupervisorLifecycle::Starting,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DispatchReceipt {
+    generation: u64,
+    session_id: String,
+    pane_id: String,
+    proved: bool,
+}
+
+#[derive(Debug, Clone)]
+struct RouteModel {
+    durable: ActorState,
+    projection: ActorState,
+    pending_dispatch: Option<DispatchReceipt>,
+}
+
+impl RouteModel {
+    fn new() -> Self {
+        let durable = ActorState::initial();
+        Self {
+            projection: durable.clone(),
+            durable,
+            pending_dispatch: None,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -72,6 +138,15 @@ struct Coverage {
     fault_recoveries: usize,
     fault_noops: usize,
     fault_points_hit: BTreeSet<FaultPoint>,
+    route_generation_rebinds: usize,
+    supervisor_lifecycle_updates: usize,
+    route_dispatch_acceptances: usize,
+    route_dispatch_proofs: usize,
+    stale_generation_blocks: usize,
+    stale_pane_blocks: usize,
+    missing_pane_blocks: usize,
+    projection_drift_blocks: usize,
+    projection_repairs: usize,
     commits: usize,
 }
 
@@ -94,6 +169,18 @@ impl Coverage {
         if message.contains("fault point") {
             self.fault_fail_closed += 1;
         }
+        if message.contains("stale actor generation") {
+            self.stale_generation_blocks += 1;
+        }
+        if message.contains("stale pane observation") {
+            self.stale_pane_blocks += 1;
+        }
+        if message.contains("missing pane observation") {
+            self.missing_pane_blocks += 1;
+        }
+        if message.contains("projection drift") {
+            self.projection_drift_blocks += 1;
+        }
     }
 
     fn merge(&mut self, other: Coverage) {
@@ -106,6 +193,15 @@ impl Coverage {
         self.fault_recoveries += other.fault_recoveries;
         self.fault_noops += other.fault_noops;
         self.fault_points_hit.extend(other.fault_points_hit);
+        self.route_generation_rebinds += other.route_generation_rebinds;
+        self.supervisor_lifecycle_updates += other.supervisor_lifecycle_updates;
+        self.route_dispatch_acceptances += other.route_dispatch_acceptances;
+        self.route_dispatch_proofs += other.route_dispatch_proofs;
+        self.stale_generation_blocks += other.stale_generation_blocks;
+        self.stale_pane_blocks += other.stale_pane_blocks;
+        self.missing_pane_blocks += other.missing_pane_blocks;
+        self.projection_drift_blocks += other.projection_drift_blocks;
+        self.projection_repairs += other.projection_repairs;
         self.commits += other.commits;
     }
 }
@@ -119,6 +215,7 @@ struct SimWorld {
     phase: CyclePhase,
     captured_response: Option<String>,
     pending_fault: Option<FaultPoint>,
+    route: RouteModel,
     next_prompt: usize,
     coverage: Coverage,
 }
@@ -134,6 +231,7 @@ impl SimWorld {
             phase: CyclePhase::Idle,
             captured_response: None,
             pending_fault: None,
+            route: RouteModel::new(),
             next_prompt: 1,
             coverage: Coverage::default(),
         }
@@ -143,7 +241,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(21) {
+            let command = match rng.next_usize(32) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -158,7 +256,19 @@ impl SimWorld {
                     let index = rng.next_usize(FaultPoint::ALL.len());
                     SimCommand::CrashAt(FaultPoint::ALL[index])
                 }
-                _ => SimCommand::Recover,
+                19 => SimCommand::Recover,
+                20 => SimCommand::BindRouteOwner,
+                21 => SimCommand::SupervisorReady,
+                22 => SimCommand::SupervisorWaitingInput,
+                23 => SimCommand::SupervisorBlocked,
+                24 => SimCommand::SupervisorClosed,
+                25 => SimCommand::DispatchRoutePrompt,
+                26 => SimCommand::ProveDispatchAccepted,
+                27 => SimCommand::StaleSupervisorUpdate,
+                28 => SimCommand::ObserveStalePane,
+                29 => SimCommand::ObserveMissingPane,
+                30 => SimCommand::DriftProjection,
+                _ => SimCommand::RepairProjection,
             };
             world.apply(command)?;
             world.assert_structural_invariants()?;
@@ -240,8 +350,214 @@ impl SimWorld {
                     self.coverage.record_block(&err.to_string());
                 }
             }
+            SimCommand::BindRouteOwner => {
+                self.bind_route_owner();
+            }
+            SimCommand::SupervisorReady => {
+                if let Err(err) = self.transition_supervisor(
+                    self.route.durable.generation,
+                    SupervisorLifecycle::Ready,
+                ) {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::SupervisorWaitingInput => {
+                if let Err(err) = self.transition_supervisor(
+                    self.route.durable.generation,
+                    SupervisorLifecycle::WaitingInput,
+                ) {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::SupervisorBlocked => {
+                if let Err(err) = self.transition_supervisor(
+                    self.route.durable.generation,
+                    SupervisorLifecycle::Blocked,
+                ) {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::SupervisorClosed => {
+                if let Err(err) = self.transition_supervisor(
+                    self.route.durable.generation,
+                    SupervisorLifecycle::Closed,
+                ) {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::DispatchRoutePrompt => {
+                if let Err(err) = self.dispatch_route_prompt() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::ProveDispatchAccepted => {
+                if let Err(err) = self.prove_dispatch_accepted() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::StaleSupervisorUpdate => {
+                let stale_generation = self.route.durable.generation.saturating_sub(1);
+                if let Err(err) =
+                    self.transition_supervisor(stale_generation, SupervisorLifecycle::Ready)
+                {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::ObserveStalePane => {
+                self.route.projection.pane_id = Some("%stale".to_string());
+            }
+            SimCommand::ObserveMissingPane => {
+                self.route.projection.pane_id = None;
+            }
+            SimCommand::DriftProjection => {
+                self.route.projection.generation = self.route.durable.generation + 1;
+            }
+            SimCommand::RepairProjection => {
+                self.route.projection = self.route.durable.clone();
+                self.coverage.projection_repairs += 1;
+            }
         }
         Ok(())
+    }
+
+    fn bind_route_owner(&mut self) {
+        let generation = self.route.durable.generation + 1;
+        self.route.durable = ActorState {
+            generation,
+            session_id: format!("session-{generation}"),
+            pane_id: Some(format!("%{generation}")),
+            lifecycle: SupervisorLifecycle::Starting,
+        };
+        self.route.projection = self.route.durable.clone();
+        self.route.pending_dispatch = None;
+        self.coverage.route_generation_rebinds += 1;
+    }
+
+    fn transition_supervisor(
+        &mut self,
+        generation: u64,
+        lifecycle: SupervisorLifecycle,
+    ) -> Result<()> {
+        if generation != self.route.durable.generation {
+            bail!(
+                "stale actor generation rejected: observed={} current={}; seed={} trace={:?}",
+                generation,
+                self.route.durable.generation,
+                self.seed,
+                self.trace
+            );
+        }
+        let projection_was_current = self.projection_identity_matches_durable();
+        self.route.durable.lifecycle = lifecycle;
+        if projection_was_current {
+            self.route.projection.lifecycle = lifecycle;
+        }
+        self.coverage.supervisor_lifecycle_updates += 1;
+        Ok(())
+    }
+
+    fn dispatch_route_prompt(&mut self) -> Result<()> {
+        let pane_id = self.current_dispatch_pane()?;
+        if self.route.durable.lifecycle != SupervisorLifecycle::Ready {
+            bail!(
+                "supervisor lifecycle {:?} cannot accept route dispatch; seed={} trace={:?}",
+                self.route.durable.lifecycle,
+                self.seed,
+                self.trace
+            );
+        }
+        self.route.pending_dispatch = Some(DispatchReceipt {
+            generation: self.route.durable.generation,
+            session_id: self.route.durable.session_id.clone(),
+            pane_id,
+            proved: false,
+        });
+        self.coverage.route_dispatch_acceptances += 1;
+        Ok(())
+    }
+
+    fn prove_dispatch_accepted(&mut self) -> Result<()> {
+        let Some(receipt) = self.route.pending_dispatch.as_mut() else {
+            return Ok(());
+        };
+        if receipt.generation != self.route.durable.generation
+            || receipt.session_id != self.route.durable.session_id
+            || Some(&receipt.pane_id) != self.route.durable.pane_id.as_ref()
+        {
+            bail!(
+                "stale pane observation blocks dispatch proof: receipt={:?} durable={:?}; seed={} trace={:?}",
+                receipt,
+                self.route.durable,
+                self.seed,
+                self.trace
+            );
+        }
+        receipt.proved = true;
+        self.coverage.route_dispatch_proofs += 1;
+        Ok(())
+    }
+
+    fn current_dispatch_pane(&self) -> Result<String> {
+        match (
+            self.route.durable.pane_id.as_ref(),
+            self.route.projection.pane_id.as_ref(),
+        ) {
+            (Some(durable), Some(projected))
+                if self.route.projection.generation == self.route.durable.generation
+                    && self.route.projection.session_id == self.route.durable.session_id
+                    && durable != projected =>
+            {
+                bail!(
+                    "stale pane observation blocks route dispatch: durable={} projected={}; seed={} trace={:?}",
+                    durable,
+                    projected,
+                    self.seed,
+                    self.trace
+                )
+            }
+            (Some(_), None)
+                if self.route.projection.generation == self.route.durable.generation
+                    && self.route.projection.session_id == self.route.durable.session_id =>
+            {
+                bail!(
+                    "missing pane observation blocks route dispatch: durable={:?} projected={:?}; seed={} trace={:?}",
+                    self.route.durable,
+                    self.route.projection,
+                    self.seed,
+                    self.trace
+                )
+            }
+            (None, _) => {
+                bail!(
+                    "missing pane observation blocks route dispatch: durable={:?}; seed={} trace={:?}",
+                    self.route.durable,
+                    self.seed,
+                    self.trace
+                )
+            }
+            _ => {}
+        }
+
+        if !self.projection_identity_matches_durable() {
+            bail!(
+                "projection drift between durable actor state and projection: durable={:?} projection={:?}; seed={} trace={:?}",
+                self.route.durable,
+                self.route.projection,
+                self.seed,
+                self.trace
+            );
+        }
+        self.route
+            .durable
+            .pane_id
+            .clone()
+            .ok_or_else(|| anyhow!("missing pane observation blocks route dispatch"))
+    }
+
+    fn projection_identity_matches_durable(&self) -> bool {
+        self.route.projection.generation == self.route.durable.generation
+            && self.route.projection.session_id == self.route.durable.session_id
+            && self.route.projection.pane_id == self.route.durable.pane_id
     }
 
     fn apply_captured_response(&mut self) -> Result<()> {
@@ -623,6 +939,42 @@ fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
         FaultPoint::ALL.len(),
         "seed corpus must inject every named closeout fault point"
     );
+    assert!(
+        coverage.route_generation_rebinds > 0,
+        "seed corpus must exercise route owner generation changes"
+    );
+    assert!(
+        coverage.supervisor_lifecycle_updates > 0,
+        "seed corpus must exercise supervisor lifecycle facts"
+    );
+    assert!(
+        coverage.route_dispatch_acceptances > 0,
+        "seed corpus must exercise accepted route dispatch"
+    );
+    assert!(
+        coverage.route_dispatch_proofs > 0,
+        "seed corpus must exercise dispatch proof"
+    );
+    assert!(
+        coverage.stale_generation_blocks > 0,
+        "seed corpus must reject stale actor generations"
+    );
+    assert!(
+        coverage.stale_pane_blocks > 0,
+        "seed corpus must block stale pane observations"
+    );
+    assert!(
+        coverage.missing_pane_blocks > 0,
+        "seed corpus must block missing pane observations"
+    );
+    assert!(
+        coverage.projection_drift_blocks > 0,
+        "seed corpus must diagnose projection drift"
+    );
+    assert!(
+        coverage.projection_repairs > 0,
+        "seed corpus must repair projection drift from durable actor state"
+    );
 }
 
 #[test]
@@ -732,4 +1084,54 @@ fn closeout_sim_fault_points_fail_closed_then_recover() {
             assert_eq!(world.snapshot, world.doc);
         }
     }
+}
+
+#[test]
+fn route_sim_accepts_dispatch_only_after_current_supervisor_ready() {
+    let mut world = SimWorld::new(2_001);
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn route_sim_rejects_stale_generation_and_pane_observations() {
+    let mut world = SimWorld::new(2_002);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::StaleSupervisorUpdate).unwrap();
+    assert_eq!(world.coverage.stale_generation_blocks, 1);
+
+    world.apply(SimCommand::ObserveStalePane).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.stale_pane_blocks, 1);
+
+    world.apply(SimCommand::RepairProjection).unwrap();
+    world.apply(SimCommand::ObserveMissingPane).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.missing_pane_blocks, 1);
+}
+
+#[test]
+fn route_sim_repairs_projection_drift_from_durable_actor_state() {
+    let mut world = SimWorld::new(2_003);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::DriftProjection).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.projection_drift_blocks, 1);
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+
+    world.apply(SimCommand::RepairProjection).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+    assert_eq!(world.coverage.projection_repairs, 1);
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
 }

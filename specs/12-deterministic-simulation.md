@@ -33,6 +33,18 @@ RepairBoundary
 DuplicateVisibleResponse
 CrashAt(FaultPoint)
 Recover
+BindRouteOwner
+SupervisorReady
+SupervisorWaitingInput
+SupervisorBlocked
+SupervisorClosed
+DispatchRoutePrompt
+ProveDispatchAccepted
+StaleSupervisorUpdate
+ObserveStalePane
+ObserveMissingPane
+DriftProjection
+RepairProjection
 ```
 
 Every generated failure must include a stable seed and command trace. Fixed
@@ -69,6 +81,23 @@ Closeout invariants currently exercised by the simulator:
 - Boundary cleanup leaves at most one live exchange boundary marker.
 - Each named closeout fault point has an explicit fail-closed, recovery, or
   no-op outcome.
+
+The simulator also covers route/controller schedules with a deliberately small
+actor model:
+
+- Durable actor state is the only authority for the active session actor
+  generation, session id, pane id, and supervisor lifecycle.
+- JSON/tmux-style projection state is a compatibility projection. Drift is
+  diagnostic and must be repairable by copying from durable actor state; it
+  must not become independent routing authority.
+- Supervisor lifecycle facts can move through starting, ready, waiting-input,
+  blocked, and closed states. Route dispatch is accepted only for the current
+  ready generation.
+- Dispatch proof must match the same durable generation, session, and pane that
+  accepted the dispatch.
+- Stale actor generation updates, stale pane observations, and missing pane
+  observations block dispatch/proof instead of silently creating duplicate
+  authoritative owners or sending prompts to stale panes.
 
 When a generated seed exposes a production bug, reduce the trace and promote it
 to the fixed corpus before or with the bug fix.

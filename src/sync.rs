@@ -1515,7 +1515,7 @@ fn load_live_authoritative_actor_record(
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
     let base_dir = crate::snapshot::find_project_root(&canonical)?;
-    let record = crate::session_actor::load_record_in(&base_dir, &canonical.to_string_lossy())
+    let record = crate::project_controller::authoritative_actor_binding(&base_dir, &canonical)
         .ok()
         .flatten()?;
     if record.session_id != session_id || !tmux.pane_alive(&record.pane_id) {

@@ -1898,7 +1898,8 @@ fn load_authoritative_actor_binding(
     }
 
     let base_dir = registry_base_dir_for_dispatch(file_path);
-    let Some(record) = crate::session_actor::load_record_in(&base_dir, file_path)? else {
+    let Some(record) = crate::project_controller::authoritative_actor_binding(&base_dir, file)?
+    else {
         return Ok(None);
     };
     if record.session_id != session_id {
@@ -1927,6 +1928,28 @@ fn load_authoritative_actor_binding(
 
     let runtime = query_supervisor_runtime(file, session_id);
     Ok(Some(AuthoritativeActorDispatchTarget { record, runtime }))
+}
+
+fn authorize_controller_dispatch(
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    actor: &AuthoritativeActorDispatchTarget,
+    command_kind: &str,
+    diagnostic_payload: &str,
+) -> Result<crate::project_controller::DispatchAuthorization> {
+    let base_dir = registry_base_dir_for_dispatch(file_path);
+    crate::project_controller::authorize_dispatch(
+        &base_dir,
+        crate::project_controller::DispatchRequest {
+            file: file.to_path_buf(),
+            session_id: session_id.to_string(),
+            pane_id: actor.record.pane_id.clone(),
+            generation: actor.record.generation,
+            command_kind: command_kind.to_string(),
+            diagnostic_payload: diagnostic_payload.to_string(),
+        },
+    )
 }
 
 fn load_authoritative_actor_dispatch_target(
@@ -2033,6 +2056,18 @@ fn route_via_authoritative_actor(
                 actor_state.as_str(),
                 dispatch_pane
             );
+            let _authorization = authorize_controller_dispatch(
+                file,
+                session_id,
+                file_path,
+                &actor,
+                "dispatch_only_reopen",
+                &format!(
+                    "submit=direct_pane actor_state={} harness={}",
+                    actor_state.as_str(),
+                    harness.binary
+                ),
+            )?;
             return dispatch_only_send_reopen(
                 tmux,
                 file,
@@ -2076,6 +2111,18 @@ fn route_via_authoritative_actor(
                 dispatch_pane,
                 harness.binary
             );
+            let _authorization = authorize_controller_dispatch(
+                file,
+                session_id,
+                file_path,
+                &actor,
+                "managed_reopen",
+                &format!(
+                    "submit=supervisor_ipc actor_state={} harness={}",
+                    actor_state.as_str(),
+                    harness.binary
+                ),
+            )?;
             let dispatch_start = dispatch_via_supervisor_ipc(
                 tmux,
                 file,
@@ -2108,6 +2155,18 @@ fn route_via_authoritative_actor(
     }
 
     if dispatch_only {
+        let _authorization = authorize_controller_dispatch(
+            file,
+            session_id,
+            file_path,
+            &actor,
+            "dispatch_only_reopen",
+            &format!(
+                "submit=direct_pane actor_state={} harness={}",
+                actor_state.as_str(),
+                harness.binary
+            ),
+        )?;
         dispatch_only_send_reopen(
             tmux,
             file,
@@ -2130,6 +2189,18 @@ fn route_via_authoritative_actor(
         return Ok(dispatch_pane);
     }
 
+    let _authorization = authorize_controller_dispatch(
+        file,
+        session_id,
+        file_path,
+        &actor,
+        "managed_reopen",
+        &format!(
+            "submit=supervisor_ipc actor_state={} harness={}",
+            actor_state.as_str(),
+            harness.binary
+        ),
+    )?;
     let dispatch_start =
         dispatch_via_supervisor_ipc(tmux, file, &dispatch_pane, session_id, file_path, harness)?;
 
@@ -2315,6 +2386,17 @@ fn resolve_or_create_pane_dispatch_only(
                 reason
             );
             rescue_target(&actor.record.pane_id);
+            let _authorization = authorize_controller_dispatch(
+                file,
+                session_id,
+                file_path,
+                actor,
+                "dispatch_only_reopen",
+                &format!(
+                    "submit=direct_pane_degraded supervisor_reason={} harness={}",
+                    reason, harness.binary
+                ),
+            )?;
             return dispatch_only_reopen_existing_pane(
                 tmux,
                 file,

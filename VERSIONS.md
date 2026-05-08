@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Project Controller Phase D moves actor-backed route/sync authority behind controller IPC.** Route and sync now request the document actor binding from the project controller before consulting supervisor-backed registry compatibility evidence, and route records controller `dispatch` attempts before managed or dispatch-only submits to the actor pane. Stale session, pane, or generation requests fail closed before input is sent; `session-actors.json`, session-log, registry-rebind, and process-tree evidence remain projection or repair diagnostics. Specs and controller regressions cover actor binding lookup, accepted dispatch attempts, and stale-generation rejection. This closes `#pcroutes` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Project Controller Phase C now routes supervisor lifecycle facts through controller IPC.** `agent-doc start` lazy-launches the project controller, records the starting actor generation through `start_session`, registers the supervisor pid/socket lease, and reports prompt-ready, busy dispatch, waiting-input, blocked, and closed transitions through controller-owned actor updates. Stale lifecycle reports now fail closed on session/pane/generation mismatch, supervisor leases keep runtime state current, and specs/tests cover the controller registration path. This closes `#pcsuper` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Claude streaming prompt writes now tolerate early child exit.** If the child exits before reading stdin, a `BrokenPipe` during prompt write is treated as normal subprocess termination so the streaming iterator can surface the real nonzero exit status and stderr diagnostics.

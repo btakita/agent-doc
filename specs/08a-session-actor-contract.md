@@ -74,8 +74,10 @@ Later phases may refine caller values without changing the field names.
   pane/window binding, harness, state, and last transition id, while
   `actor_transitions` records each monotonic ownership or lifecycle transition.
 - `.agent-doc/session-actors.json` is now a projection emitted from committed
-  SQLite state for compatibility with the existing route/start/sync migration
-  boundary. It must not become an independent write authority again.
+  SQLite state for compatibility. Route/start/sync must ask the project
+  controller for the actor binding before consulting legacy compatibility
+  evidence; the JSON projection must not become an independent write authority
+  again.
 - Actor-record `harness` values use canonical ids rather than raw binary names:
   `claude` normalizes to `claude-code`, `codex` stays `codex`, and empty values
   collapse to `default`. Normal-path route/start/sync checks must compare
@@ -99,18 +101,17 @@ Later phases may refine caller values without changing the field names.
   prompt-driven `busy -> ready` recovery must fire after every later routed or
   auto-trigger dispatch that returns the same child to an idle prompt; it is not
   a spawn-only one-shot transition.
-- The phase-4 route path now consumes that authoritative actor record directly
-  when the supervisor is healthy: it dispatches the bare reopen through
-  supervisor IPC to the actor-owned pane, waits for the normal routed
-  acknowledgment window, and only refreshes `sessions.json` as a projection of
-  the actor binding. Prompt-bearing reroutes must still allow one optimistic
-  supervisor-side queue attempt while the authoritative actor reports
-  `starting` or `busy`; only `waiting_input`, `blocked`, and `closed` remain
-  hard fail-closed states for duplicate reopen injection.
-- The phase-5 sync/focus path also consumes that authoritative actor record
-  directly when the actor pane is still alive: sync rescues/reconciles layout
-  around the actor-owned pane and focus selects it without re-electing
-  ownership from a stale `sessions.json` projection.
+- The phase-4 route path now consumes the authoritative actor binding through
+  project controller IPC. Before submitting a managed or dispatch-only reopen
+  into an actor-owned pane, route records a controller `dispatch` attempt for
+  the current session id, pane id, generation, and command kind. Stale
+  session/pane/generation requests fail closed before pane input is submitted,
+  while accepted dispatches record the stage (`ready`, `starting_queue`,
+  `busy_queue`, or `waiting_input_recovery`) in `dispatch_attempts`.
+- The phase-5 sync/focus path also consumes that authoritative actor binding
+  through the controller when the actor pane is still alive: sync
+  rescues/reconciles layout around the actor-owned pane and focus selects it
+  before falling back to supervisor-backed registry compatibility evidence.
 - The phase-6 operator surface is actor-backed as well: `session status`,
   `history`, `attach`, `restart`, `clear`, and `doctor` read or mutate the same
   authoritative record and supervisor IPC path instead of inventing separate

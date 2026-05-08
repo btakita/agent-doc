@@ -20,8 +20,8 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 `agent-doc route <FILE> [--pane P] [--debounce MS]`
 
 - Routes a harness-native reopen command into the authoritative pane for the document.
-- When `.agent-doc/session-actors.json` has a healthy authoritative record for the document, route must treat that actor generation as the owner-of-record and dispatch through supervisor IPC instead of re-electing a pane from tmux/process heuristics.
-- Normal-path ownership proof is the authoritative actor record first, then the supervisor-backed registered binding from `sessions.json`.
+- Route must ask the project controller for the document's authoritative actor binding before consulting legacy supervisor-backed registry compatibility evidence. `.agent-doc/session-actors.json` is a projection, not an independent ownership input.
+- Before route submits a managed or dispatch-only reopen to an actor-owned pane, it must record a controller `dispatch` attempt for the current session id, pane id, generation, and command kind. Stale session, pane, or generation requests fail closed before input is submitted.
 - Existing managed reroutes must use supervisor IPC for the reopen path; they must not fall back to typing directly into a live Claude/Codex pane.
 - Actor-backed reroutes may refresh `sessions.json` as a projection of the actor pane, but they must not opportunistically steal another same-file pane or re-register to a heuristic winner while the authoritative actor is healthy.
 - Session-log owners, `registry_rebind` successors, and generic same-file process-tree matches are repair/diagnostic signals only; route must fail closed with explicit inspect/claim/kill guidance instead of promoting them back to authority on the normal path.
@@ -108,7 +108,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - When `.agent-doc/session-actors.json` has a live authoritative record for a
   visible document, sync must treat that actor-owned pane as the owner-of-record
   and refresh `sessions.json` only as a projection of that binding.
-- An alive pane is not reusable solely because the pane id exists; normal sync may reuse only the authoritative actor pane or the supervisor-backed registered binding for that specific document.
+- An alive pane is not reusable solely because the pane id exists; normal sync may reuse the live authoritative actor pane returned by the controller, then supervisor-backed registry compatibility evidence for that specific document.
 - When ownership falls back to legacy associated-pane evidence (`session-log`, `registry_rebind`, generic same-file process tree), sync must fail closed and require explicit claim/repair instead of choosing a winner automatically.
 - When ownership proof weakens but the alive pane still contains protected Codex drafted input or still appears as the newest open pane in the session log, sync must fail closed for that file instead of fabricating `registered_pane_missing`.
 - If two visible files point at the same pane, sync must either find one decisive owner or drop the duplicate from the synthetic registry so tmux-router cannot alias both files onto one pane.
@@ -222,7 +222,8 @@ last persisted bootstrap state from `.agent-doc/controller-state.json` without
 launching a process. With `--ensure`, the command runs the lazy
 connect-or-launch path before printing status.
 
-The Phase A controller shell owns only project-level bootstrap identity:
+The controller owns project-level bootstrap identity and the live actor
+authority used by route/start/sync:
 
 - socket: `.agent-doc/controller.sock`
 - launch lock: `.agent-doc/locks/controller-launch.lock`
@@ -234,7 +235,8 @@ and wait for bounded readiness before returning a client connection. The
 persisted bootstrap records `project_root`, `socket_path`, `launch_mode`,
 `bootstrap_epoch`, and `pid`.
 
-Phase A must not change `start`, `route`, or `sync` ownership behavior. Those
-commands continue to use the existing actor/registry/supervisor paths until
-later controller migration phases explicitly move their authority behind the
-controller.
+`agent-doc start` creates owner generations through the controller. `route`
+and `sync` read actor bindings through the controller before consulting
+supervisor-backed registry compatibility evidence. `session-actors.json`,
+tmux-router state, and session logs remain projections or diagnostic inputs.
+Destructive or heuristic recovery belongs behind explicit operator repair flows.

@@ -1,9 +1,8 @@
 //! Project-local controller shell.
 //!
-//! Phase A intentionally keeps this controller out of the `start`, `route`, and
-//! `sync` normal paths. It establishes the singleton socket, launch lock,
-//! lazy connect-or-launch helper, status protocol, and bootstrap state that
-//! later phases can move session actor authority behind.
+//! The controller is the live authority for document session actor lookup,
+//! generation changes, lifecycle reports, and routed dispatch acceptance.
+//! `sessions.json` and tmux state remain projections and layout inputs.
 
 use anyhow::{Context, Result};
 use fs2::FileExt;
@@ -103,6 +102,22 @@ pub struct LifecycleRequest {
     pub reason: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct DispatchRequest {
+    pub file: PathBuf,
+    pub session_id: String,
+    pub pane_id: String,
+    pub generation: u64,
+    pub command_kind: String,
+    pub diagnostic_payload: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DispatchAuthorization {
+    pub record: crate::session_actor::ActorRecord,
+    pub accepted_stage: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ControllerRequest {
     command: String,
@@ -116,6 +131,8 @@ struct ControllerRequest {
     reason: Option<String>,
     supervisor_pid: Option<u32>,
     supervisor_socket: Option<String>,
+    command_kind: Option<String>,
+    diagnostic_payload: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -519,6 +536,42 @@ fn upsert_supervisor_lease(
     Ok(())
 }
 
+fn insert_dispatch_attempt_record(
+    project_root: &Path,
+    document_id: &str,
+    generation: u64,
+    command_kind: &str,
+    accepted_stage: Option<&str>,
+    failed_stage: Option<&str>,
+    diagnostic_payload: &str,
+) -> Result<()> {
+    let conn = open_state_db(project_root)?;
+    conn.execute(
+        r#"
+        INSERT INTO dispatch_attempts (
+            document_id,
+            generation,
+            command_kind,
+            accepted_stage,
+            failed_stage,
+            diagnostic_payload,
+            timestamp
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#,
+        params![
+            document_id,
+            sqlite_i64(generation, "generation")?,
+            command_kind,
+            accepted_stage,
+            failed_stage,
+            diagnostic_payload,
+            sqlite_i64(timestamp_secs(), "dispatch attempt timestamp")?,
+        ],
+    )?;
+    Ok(())
+}
+
 pub fn load_actor_store(
     project_root: &Path,
 ) -> Result<BTreeMap<String, crate::session_actor::ActorRecord>> {
@@ -802,6 +855,8 @@ pub fn start_session(
             reason: Some("session_start".to_string()),
             supervisor_pid: None,
             supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
         },
     )
 }
@@ -824,6 +879,8 @@ pub fn register_supervisor(
             reason: None,
             supervisor_pid: Some(registration.supervisor_pid),
             supervisor_socket: Some(registration.supervisor_socket),
+            command_kind: None,
+            diagnostic_payload: None,
         },
     )
 }
@@ -846,6 +903,96 @@ pub fn mark_lifecycle(
             reason: Some(request.reason),
             supervisor_pid: None,
             supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn authoritative_actor_binding(
+    project_root: &Path,
+    file: &Path,
+) -> Result<Option<crate::session_actor::ActorRecord>> {
+    #[cfg(test)]
+    {
+        let document_id =
+            crate::session_actor::canonical_document_id_in(project_root, &file.to_string_lossy());
+        return load_actor_record(project_root, &document_id);
+    }
+
+    #[cfg(not(test))]
+    {
+        request_controller(
+            project_root,
+            ControllerRequest {
+                command: "actor_binding".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        )
+    }
+}
+
+pub fn authorize_dispatch(
+    project_root: &Path,
+    request: DispatchRequest,
+) -> Result<DispatchAuthorization> {
+    #[cfg(test)]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+        };
+        return handle_dispatch(
+            &bootstrap,
+            ControllerRequest {
+                command: "dispatch".to_string(),
+                file: Some(request.file),
+                session_id: Some(request.session_id),
+                pane_id: Some(request.pane_id),
+                window_id: None,
+                generation: Some(request.generation),
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: Some(request.command_kind),
+                diagnostic_payload: Some(request.diagnostic_payload),
+            },
+        );
+    }
+
+    #[cfg(not(test))]
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(request.file),
+            session_id: Some(request.session_id),
+            pane_id: Some(request.pane_id),
+            window_id: None,
+            generation: Some(request.generation),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(request.command_kind),
+            diagnostic_payload: Some(request.diagnostic_payload),
         },
     )
 }
@@ -983,6 +1130,8 @@ fn handle_request(
             controller_envelope(handle_register_supervisor(bootstrap, request))
         }
         "mark_lifecycle" => controller_envelope(handle_mark_lifecycle(bootstrap, request)),
+        "actor_binding" => controller_envelope(handle_actor_binding(bootstrap, request)),
+        "dispatch" => controller_envelope(handle_dispatch(bootstrap, request)),
         other => Ok(serde_json::to_string(&serde_json::json!({
             "ok": false,
             "error": format!("unknown controller command: {other}")
@@ -1148,6 +1297,127 @@ fn handle_mark_lifecycle(
         ),
     );
     Ok(record)
+}
+
+fn handle_actor_binding(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<Option<crate::session_actor::ActorRecord>> {
+    let file = request_file(&request)?;
+    let document_id = crate::session_actor::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    load_actor_record(&bootstrap.project_root, &document_id)
+}
+
+fn handle_dispatch(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<DispatchAuthorization> {
+    let file = request_file(&request)?;
+    let session_id = request_string(&request.session_id, "session_id")?;
+    let pane_id = request_string(&request.pane_id, "pane_id")?;
+    let generation = request_u64(request.generation, "generation")?;
+    let command_kind = request_string(&request.command_kind, "command_kind")?;
+    let diagnostic_payload = request
+        .diagnostic_payload
+        .as_deref()
+        .unwrap_or_default()
+        .to_string();
+    let document_id = crate::session_actor::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    let record = load_actor_record(&bootstrap.project_root, &document_id)?
+        .with_context(|| format!("missing actor record for dispatch {}", file.display()))?;
+    let mut failed_stage = None;
+    let mut failure = None;
+    if record.session_id != session_id {
+        failed_stage = Some("stale_session");
+        failure = Some(format!(
+            "dispatch rejected for {}: requested session {}, current session {}",
+            file.display(),
+            session_id,
+            record.session_id
+        ));
+    } else if record.pane_id != pane_id {
+        failed_stage = Some("stale_pane");
+        failure = Some(format!(
+            "dispatch rejected for {}: requested pane {}, current pane {}",
+            file.display(),
+            pane_id,
+            record.pane_id
+        ));
+    } else if record.generation != generation {
+        failed_stage = Some("stale_generation");
+        failure = Some(format!(
+            "dispatch rejected for {}: requested generation {}, current generation {}",
+            file.display(),
+            generation,
+            record.generation
+        ));
+    } else if matches!(
+        record.state,
+        crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
+    ) {
+        failed_stage = Some(record.state.as_str());
+        failure = Some(format!(
+            "dispatch rejected for {}: authoritative actor generation {} is {}",
+            file.display(),
+            generation,
+            record.state.as_str()
+        ));
+    }
+
+    if let Some(message) = failure {
+        let stage = failed_stage.unwrap_or("rejected");
+        let _ = insert_dispatch_attempt_record(
+            &bootstrap.project_root,
+            &document_id,
+            generation,
+            &command_kind,
+            None,
+            Some(stage),
+            &diagnostic_payload,
+        );
+        anyhow::bail!(message);
+    }
+
+    let accepted_stage = match record.state {
+        crate::session_actor::ActorState::Ready => "ready",
+        crate::session_actor::ActorState::Starting => "starting_queue",
+        crate::session_actor::ActorState::Busy => "busy_queue",
+        crate::session_actor::ActorState::WaitingInput => "waiting_input_recovery",
+        crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed => {
+            unreachable!("blocked/closed dispatch rejected above")
+        }
+    };
+    insert_dispatch_attempt_record(
+        &bootstrap.project_root,
+        &document_id,
+        record.generation,
+        &command_kind,
+        Some(accepted_stage),
+        None,
+        &diagnostic_payload,
+    )?;
+    crate::ops_log::log_op(
+        &file,
+        &format!(
+            "controller_dispatch_accepted session={} pane={} generation={} state={} kind={} stage={}",
+            session_id,
+            pane_id,
+            generation,
+            record.state.as_str(),
+            command_kind,
+            accepted_stage
+        ),
+    );
+    Ok(DispatchAuthorization {
+        record,
+        accepted_stage: accepted_stage.to_string(),
+    })
 }
 
 fn project_root_from_arg(root: Option<&Path>) -> Result<PathBuf> {
@@ -1379,6 +1649,8 @@ mod tests {
             reason: Some("session_start".to_string()),
             supervisor_pid: None,
             supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&start).unwrap() + "\n"),
@@ -1404,6 +1676,8 @@ mod tests {
             reason: None,
             supervisor_pid: Some(999),
             supervisor_socket: Some("/tmp/agent-doc-test.sock".to_string()),
+            command_kind: None,
+            diagnostic_payload: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&register).unwrap() + "\n"),
@@ -1427,6 +1701,8 @@ mod tests {
             reason: Some("prompt_ready".to_string()),
             supervisor_pid: None,
             supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -1492,6 +1768,8 @@ mod tests {
             reason: Some("prompt_ready".to_string()),
             supervisor_pid: None,
             supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
         };
         let response = handle_request(
             &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
@@ -1503,5 +1781,116 @@ mod tests {
             serde_json::from_str(&response).unwrap();
         assert!(!envelope.ok);
         assert!(envelope.error.unwrap().contains("no longer current"));
+    }
+
+    #[test]
+    fn controller_actor_binding_and_dispatch_use_authoritative_generation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/route.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-route\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(&doc, "session-route", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-route",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let binding = ControllerRequest {
+            command: "actor_binding".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&binding).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<Option<crate::session_actor::ActorRecord>> =
+            serde_json::from_str(&response).unwrap();
+        assert_eq!(envelope.data.unwrap().unwrap().pane_id, "%41");
+
+        let dispatch = ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-route".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("managed_reopen".to_string()),
+            diagnostic_payload: Some("test dispatch".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&dispatch).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        assert_eq!(envelope.data.unwrap().accepted_stage, "ready");
+
+        let stale = ControllerRequest {
+            generation: Some(0),
+            ..dispatch
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&stale).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(!envelope.ok);
+        assert!(envelope.error.unwrap().contains("requested generation 0"));
+
+        let conn = Connection::open(state_db_path(dir.path())).unwrap();
+        let accepted: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts WHERE accepted_stage = 'ready'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let failed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts WHERE failed_stage = 'stale_generation'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(accepted, 1);
+        assert_eq!(failed, 1);
     }
 }

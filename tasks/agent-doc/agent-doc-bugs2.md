@@ -55,11 +55,35 @@ Verification:
 Commit / push:
 - `src/agent-doc`: `67ca478 fix: bound controller IPC against stalled clients`, pushed to `origin/20260422/codex-agent-backend`
 - superproject: `dbe259d53 agent-doc: bound controller IPC against stalls`, pushed to `origin/main`
-<!-- agent:boundary:a1440e4b -->
+❯ Selecting agent-doc-bugs2.md in the editor or running `Sync Tmux Layout` does not start agent-doc on agent-doc-bugs2.md
+❯ spec-test-build-install-commit-push
+### Re: sync startup contention — gpt-5
+
+Implemented and pushed the startup/sync lock contention fix for `agent-doc-bugs2.md`.
+
+Changed:
+- `sync` lock acquisition now uses a bounded wait budget instead of blocking indefinitely behind an older stuck or orphaned sync process.
+- On contention timeout, sync logs a warning and continues to ownership proof and auto-start decisions, so selecting `agent-doc-bugs2.md` or running `Sync Tmux Layout` can still route/start the document.
+- Added regression coverage for a held `.agent-doc/sync.lock` timing out quickly.
+- Updated README, SPEC, and the tmux command spec for the bounded contention behavior.
+
+Verification:
+- `cargo build`
+- `make check`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `875032e fix: bound sync lock contention`, pushed to `origin/20260422/codex-agent-backend`
+- superproject: `dce2648e2 agent-doc: bound sync lock contention`, pushed to `origin/main`
+<!-- agent:boundary:df1b124a -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+The test suite is taking a long time to complete. Please increase the parallelization. Apply other safe ways to improve test suite performance.
+Why are the "the expected ignored debounce tests" ignored? If these tests should be passing, please fix.
+spec-test-build-install-commit-push
+---
 "❯ Commit / push:" should not have the `❯ ` prefix since this was the agent response. #agent-doc-bug
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex

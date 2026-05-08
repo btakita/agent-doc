@@ -733,6 +733,7 @@ fn filter_duplicate_synthetic_registry_candidates(
 fn build_tmux_router_sync_registry(
     tmux: &Tmux,
     col_args: &[String],
+    proof_cache: &SyncProofCache,
 ) -> Result<Option<NamedTempFile>> {
     let mut candidates = Vec::new();
 
@@ -763,8 +764,13 @@ fn build_tmux_router_sync_registry(
         let Some((_, project_root, _)) = registry_location_for_file(path) else {
             continue;
         };
-        let live_owner_match =
-            sync_actor_or_live_owner_matches(tmux, path, &session_id, &entry.pane);
+        let live_owner_match = sync_actor_or_live_owner_matches_cached(
+            tmux,
+            path,
+            &session_id,
+            &entry.pane,
+            proof_cache,
+        );
         let pane_root_match =
             pane_assignment_matches_document_root(tmux, &entry.pane, &project_root);
         candidates.push(SyntheticRegistryCandidate {
@@ -832,16 +838,27 @@ fn reserve_sync_pane(
         .insert(pane_id.to_string(), file_path.to_path_buf());
 }
 
+#[derive(Default)]
+struct SyncProofCache {
+    actor_records: RefCell<HashMap<(PathBuf, String), Option<crate::session_actor::ActorRecord>>>,
+    live_owner_matches: RefCell<HashMap<(PathBuf, String, String), bool>>,
+}
+
+fn sync_proof_file_key(file: &Path) -> PathBuf {
+    file.canonicalize().unwrap_or_else(|_| file.to_path_buf())
+}
+
 fn registered_pane_proves_live_owner(
     tmux: &Tmux,
     file_path: &Path,
     session_id: &str,
     pane_id: &str,
+    proof_cache: &SyncProofCache,
 ) -> bool {
     if !tmux.pane_alive(pane_id) {
         return false;
     }
-    sync_actor_or_live_owner_matches(tmux, file_path, session_id, pane_id)
+    sync_actor_or_live_owner_matches_cached(tmux, file_path, session_id, pane_id, proof_cache)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1436,7 +1453,7 @@ impl AutoStartMode {
     }
 }
 
-fn load_live_authoritative_actor_record(
+fn load_live_authoritative_actor_record_uncached(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
@@ -1455,12 +1472,42 @@ fn load_live_authoritative_actor_record(
     Some(record)
 }
 
+fn load_live_authoritative_actor_record_cached(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    proof_cache: &SyncProofCache,
+) -> Option<crate::session_actor::ActorRecord> {
+    let key = (sync_proof_file_key(file), session_id.to_string());
+    if let Some(record) = proof_cache.actor_records.borrow().get(&key) {
+        return record.clone();
+    }
+
+    let record = load_live_authoritative_actor_record_uncached(tmux, file, session_id);
+    proof_cache
+        .actor_records
+        .borrow_mut()
+        .insert(key, record.clone());
+    record
+}
+
 pub(crate) fn authoritative_actor_pane_for_document(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
 ) -> Option<String> {
-    load_live_authoritative_actor_record(tmux, file, session_id).map(|record| record.pane_id)
+    load_live_authoritative_actor_record_uncached(tmux, file, session_id)
+        .map(|record| record.pane_id)
+}
+
+fn authoritative_actor_pane_for_document_cached(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    proof_cache: &SyncProofCache,
+) -> Option<String> {
+    load_live_authoritative_actor_record_cached(tmux, file, session_id, proof_cache)
+        .map(|record| record.pane_id)
 }
 
 fn project_authoritative_actor_binding(
@@ -1469,9 +1516,10 @@ fn project_authoritative_actor_binding(
     session_id: &str,
     focus: Option<&str>,
     auto_start_mode: AutoStartMode,
+    proof_cache: &SyncProofCache,
 ) -> Option<String> {
     let lookup_start = Instant::now();
-    let record = load_live_authoritative_actor_record(tmux, file, session_id);
+    let record = load_live_authoritative_actor_record_cached(tmux, file, session_id, proof_cache);
     log_sync_latency(
         focus,
         "controller_actor_lookup",
@@ -1524,15 +1572,43 @@ fn project_authoritative_actor_binding(
     Some(actor_pane)
 }
 
+#[cfg(test)]
 fn sync_actor_or_live_owner_matches(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
     pane_id: &str,
 ) -> bool {
-    authoritative_actor_pane_for_document(tmux, file, session_id).as_deref() == Some(pane_id)
+    let proof_cache = SyncProofCache::default();
+    sync_actor_or_live_owner_matches_cached(tmux, file, session_id, pane_id, &proof_cache)
+}
+
+fn sync_actor_or_live_owner_matches_cached(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    proof_cache: &SyncProofCache,
+) -> bool {
+    let key = (
+        sync_proof_file_key(file),
+        session_id.to_string(),
+        pane_id.to_string(),
+    );
+    if let Some(matches) = proof_cache.live_owner_matches.borrow().get(&key) {
+        return *matches;
+    }
+
+    let matches = authoritative_actor_pane_for_document_cached(tmux, file, session_id, proof_cache)
+        .as_deref()
+        == Some(pane_id)
         || find_normal_path_owner_pane_excluding_quiet(tmux, file, session_id, None).as_deref()
-            == Some(pane_id)
+            == Some(pane_id);
+    proof_cache
+        .live_owner_matches
+        .borrow_mut()
+        .insert(key, matches);
+    matches
 }
 
 fn passive_autostart_skip_reason(
@@ -2404,6 +2480,7 @@ fn run_with_options(
     }
 
     let registry_path = sessions::registry_path();
+    let proof_cache = SyncProofCache::default();
     // Track session_id → file path for post-sync claim updates
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
     let blocked_unresolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
@@ -2562,6 +2639,7 @@ fn run_with_options(
                 &session_id,
                 focus,
                 auto_start_mode,
+                &proof_cache,
             );
             let registered_entry = lookup_registry_entry_for_file_session(file_path, &session_id);
             let registered_pane = authoritative_actor_pane
@@ -2617,7 +2695,13 @@ fn run_with_options(
             if matches!(auto_start_mode, AutoStartMode::SafePassive)
                 && let Some(pane_id) = registered_pane.as_ref()
                 && claimed_owner.is_none()
-                && registered_pane_proves_live_owner(tmux, file_path, &session_id, pane_id)
+                && registered_pane_proves_live_owner(
+                    tmux,
+                    file_path,
+                    &session_id,
+                    pane_id,
+                    &proof_cache,
+                )
             {
                 eprintln!(
                     "[sync] safe passive sync reusing authoritative actor or supervisor-backed registered pane {} for {}",
@@ -2633,7 +2717,7 @@ fn run_with_options(
                 continue;
             }
             let registered_live_owner = registered_pane.as_ref().is_some_and(|pane| {
-                registered_pane_proves_live_owner(tmux, file_path, &session_id, pane)
+                registered_pane_proves_live_owner(tmux, file_path, &session_id, pane, &proof_cache)
             });
             if let Some(pane) = registered_pane.as_ref()
                 && tmux.pane_alive(pane)
@@ -3268,7 +3352,7 @@ fn run_with_options(
         ));
     }
 
-    let tmux_router_registry = match build_tmux_router_sync_registry(tmux, col_args) {
+    let tmux_router_registry = match build_tmux_router_sync_registry(tmux, col_args, &proof_cache) {
         Ok(registry) => registry,
         Err(err) => {
             let warning = format!(
@@ -3457,7 +3541,12 @@ fn run_with_options(
     // Post-sync: register/update claims for all synced files using the
     // file→pane assignments from tmux-router. This ensures autoclaim works
     // for files arranged by sync, even if they were never individually claimed.
-    register_synced_files(tmux, &session_files.borrow(), &result.file_panes);
+    register_synced_files_with_cache(
+        tmux,
+        &session_files.borrow(),
+        &result.file_panes,
+        &proof_cache,
+    );
 
     // Post-sync: validate session state (report only, no kill).
     // Disabled --fix because auto_start with context_session intentionally places
@@ -3484,10 +3573,21 @@ fn run_with_options(
 /// Uses the file→pane assignments from `SyncResult::file_panes` to create
 /// registry entries for files that don't have one yet, and update file paths
 /// for existing entries.
+#[cfg(test)]
 fn register_synced_files(
     tmux: &Tmux,
     session_files: &[(String, PathBuf)],
     file_panes: &[(PathBuf, String)],
+) {
+    let proof_cache = SyncProofCache::default();
+    register_synced_files_with_cache(tmux, session_files, file_panes, &proof_cache);
+}
+
+fn register_synced_files_with_cache(
+    tmux: &Tmux,
+    session_files: &[(String, PathBuf)],
+    file_panes: &[(PathBuf, String)],
+    proof_cache: &SyncProofCache,
 ) {
     if session_files.is_empty() || file_panes.is_empty() {
         return;
@@ -3526,8 +3626,13 @@ fn register_synced_files(
                     && entry.pane == pane_id
                     && registry_entry_matches_document_root(&entry, &project_root)
             });
-        let live_owner_matches =
-            sync_actor_or_live_owner_matches(tmux, file_path, session_id, pane_id);
+        let live_owner_matches = sync_actor_or_live_owner_matches_cached(
+            tmux,
+            file_path,
+            session_id,
+            pane_id,
+            proof_cache,
+        );
         if pane_assignment_matches_document_root(tmux, pane_id, &project_root)
             || registry_root_matches
             || live_owner_matches
@@ -3559,8 +3664,13 @@ fn register_synced_files(
             ));
             continue;
         }
-        let live_owner_matches =
-            sync_actor_or_live_owner_matches(tmux, file_path, session_id, pane_id);
+        let live_owner_matches = sync_actor_or_live_owner_matches_cached(
+            tmux,
+            file_path,
+            session_id,
+            pane_id,
+            proof_cache,
+        );
         let fail_closed_binding_guard = crate::startup_miss::load(file_path)
             .ok()
             .flatten()
@@ -5183,6 +5293,78 @@ mod tests {
         assert!(
             sync_actor_or_live_owner_matches(&iso, &doc, "actor-owner", &actor_pane),
             "sync should treat the authoritative actor pane as a live owner even when generic route heuristics still point elsewhere"
+        );
+    }
+
+    #[test]
+    fn sync_proof_cache_reuses_actor_lookup_within_one_sync_cycle() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd_guard = ScopedCurrentDir::set(root);
+
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: cached-actor\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-proof-cache-actor");
+        let first_pane = iso.new_session("test", root).unwrap();
+        let second_pane = iso.split_window(&first_pane, root, "-dh").unwrap();
+        let first_window = iso.pane_window(&first_pane).unwrap();
+        let second_window = iso.pane_window(&second_pane).unwrap();
+
+        crate::session_actor::project_binding_in(
+            root,
+            &doc.to_string_lossy(),
+            "cached-actor",
+            &first_pane,
+            &first_window,
+            "sync",
+            "first_actor_projection",
+        )
+        .unwrap();
+
+        let proof_cache = SyncProofCache::default();
+        assert!(
+            sync_actor_or_live_owner_matches_cached(
+                &iso,
+                &doc,
+                "cached-actor",
+                &first_pane,
+                &proof_cache,
+            ),
+            "the first lookup should populate the per-sync proof cache"
+        );
+
+        crate::session_actor::project_binding_in(
+            root,
+            &doc.to_string_lossy(),
+            "cached-actor",
+            &second_pane,
+            &second_window,
+            "sync",
+            "second_actor_projection",
+        )
+        .unwrap();
+
+        assert_eq!(
+            authoritative_actor_pane_for_document(&iso, &doc, "cached-actor").as_deref(),
+            Some(second_pane.as_str()),
+            "the uncached actor lookup should see the later projection"
+        );
+        assert!(
+            sync_actor_or_live_owner_matches_cached(
+                &iso,
+                &doc,
+                "cached-actor",
+                &first_pane,
+                &proof_cache,
+            ),
+            "one sync cycle should reuse already-proven actor facts instead of re-querying the controller/session store"
         );
     }
 
@@ -8347,7 +8529,8 @@ mod tests {
             .to_string_lossy()
             .to_string();
         let cols = vec![root_col.clone(), child_col.clone()];
-        let synthetic_registry = build_tmux_router_sync_registry(&iso, &cols)
+        let proof_cache = SyncProofCache::default();
+        let synthetic_registry = build_tmux_router_sync_registry(&iso, &cols, &proof_cache)
             .unwrap()
             .expect("cross-root sync should synthesize a router registry");
         let resolve_file = |path: &Path| {
@@ -8497,7 +8680,13 @@ mod tests {
         let pane = iso.new_session("test", tmp.path()).unwrap();
 
         assert!(
-            !registered_pane_proves_live_owner(&iso, &doc, "owned-session", &pane),
+            !registered_pane_proves_live_owner(
+                &iso,
+                &doc,
+                "owned-session",
+                &pane,
+                &SyncProofCache::default(),
+            ),
             "a merely alive pane should not count as a live owner without ownership proof"
         );
     }
@@ -8525,7 +8714,13 @@ mod tests {
         .unwrap();
 
         assert!(
-            !registered_pane_proves_live_owner(&iso, &doc, "owned-rebind-session", &pane),
+            !registered_pane_proves_live_owner(
+                &iso,
+                &doc,
+                "owned-rebind-session",
+                &pane,
+                &SyncProofCache::default(),
+            ),
             "a live registry-rebind successor should not count as normal-path ownership proof without an authoritative actor record or supervisor-backed registry binding"
         );
     }

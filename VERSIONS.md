@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Sync ownership proof now reuses per-cycle controller/live-owner facts.** A single sync run no longer re-queries the same document/session/pane actor binding and supervisor-backed live-owner proof across pre-reconcile ownership checks, synthetic tmux-router registry construction, and post-router registry projection. Added a regression for the per-cycle cache and updated the sync spec. This closes `#syncproof` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Cross-document sync no longer waits behind another document's closeout pane.** Manual `Sync Tmux Layout` and passive editor autosync still protect panes that own open `preflight_started`, `response_captured`, or `write_applied` cycles from DETACH, but a protected pane no longer turns a different requested document into a deferred no-op. Sync now attaches/focuses the requested pane immediately around the protected closeout owner, accepting temporary visible pane growth instead of blocking editor navigation. Updated tmux regressions and the sync specs for the `agent-doc-bugs2.md` repro.
 
 - **Protected sync edge coverage now has deterministic SimWorld traces and fewer default-suite tmux variants.** Added named `#tmuxbudget` simulator traces for protected-layout handling, detachable-pane replacement, and preserve-layout focus handoff, plus simulator corpus coverage counters for sync protected/replacement/focus decisions. The default suite keeps safe-passive real-tmux smokes for pane/window movement, but duplicate manual protected-layout tmux variants are ignored behind the matching simulator traces and documented in the deterministic simulation spec.

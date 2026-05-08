@@ -110,6 +110,8 @@ mod session_actor_cmd;
 mod session_check;
 mod session_cmd;
 mod sessions;
+#[cfg(test)]
+mod sim_world;
 mod skill;
 mod snapshot;
 mod start;

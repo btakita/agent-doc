@@ -99,7 +99,8 @@ Notable invariants:
 | 9 | [Git Integration](specs/09-git-integration.md) | Commit/branch/squash and hook system |
 | 10 | [Security](specs/10-security.md) | Threat model, known risks, recommendations |
 | 11 | [Debounce](specs/11-debounce.md) | Debounce system gaps, limitations, and improvements |
-| 12 | [Codex Support](specs/codex-support.md) | Harness-specific differences for Codex vs Claude Code |
+| 12 | [Deterministic Simulation Testing](specs/12-deterministic-simulation.md) | Fast seeded workflow simulation for closeout edge cases |
+| 13 | [Codex Support](specs/codex-support.md) | Harness-specific differences for Codex vs Claude Code |
 
 Command sub-specs:
 - [Core Commands](specs/07-core-commands.md)

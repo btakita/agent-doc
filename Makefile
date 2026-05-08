@@ -1,4 +1,4 @@
-.PHONY: build build-release release test clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
+.PHONY: build build-release release test sim-medium clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -37,6 +37,11 @@ test:
 		$(CARGO_CLEAN_ENV) cargo test --all-targets -- --test-threads="$(TEST_THREADS)"; \
 	fi
 
+# Wider deterministic simulator budget. Kept outside normal cargo test via
+# #[ignore], but make check runs it explicitly so CI exercises more schedules.
+sim-medium:
+	$(CARGO_CLEAN_ENV) cargo test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget -- --ignored --test-threads="$(TEST_THREADS)"
+
 # Lint
 clippy:
 	cargo clippy -- -D warnings
@@ -72,8 +77,8 @@ plugin-version-check:
 		fi; \
 	fi
 
-# clippy + test + version sync
-check: clippy test version-sync
+# clippy + test + deterministic medium simulator corpus + version sync
+check: clippy test sim-medium version-sync
 
 # Pre-commit: clippy + test + audit-docs + plugin version check
 precommit: check plugin-version-check

@@ -47,10 +47,31 @@ DriftProjection
 RepairProjection
 ```
 
-Every generated failure must include a stable seed and command trace. Fixed
-seed corpora run in normal `cargo test`; wider randomized or real-integration
-stress may live in slower `make check` or local-only loops after runtime budgets
-are known.
+Every generated failure must include a stable seed and command trace. The
+normal fast corpus runs in `cargo test`; the wider deterministic corpus is an
+ignored test that `make check` runs explicitly after the normal suite.
+
+Current deterministic budgets:
+
+- Fast corpus: seeds `0..512`, `24` commands per seed, budget `3s`, always run
+  by `cargo test`.
+- Medium corpus: seeds `0..2048`, `32` commands per seed, budget `12s`, run by
+  `make check`.
+
+To replay one seed while reducing a failure, run a focused test with the seed
+mentioned in the panic trace and temporarily promote that schedule into a named
+regression test in `src/sim_world.rs`. To validate the wider budget locally
+without the full check suite, run:
+
+```sh
+cargo test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget -- --ignored
+```
+
+When a generated seed exposes a production bug, reduce the trace, add the
+minimized command sequence as a focused regression, and keep the original seed
+covered by the fixed fast corpus if it is cheap enough. If the fix needs a
+larger generated range, adjust the corpus constants and this budget section in
+the same change.
 
 The closeout simulator also supports named Phase 3 fault points:
 
@@ -99,5 +120,6 @@ actor model:
   observations block dispatch/proof instead of silently creating duplicate
   authoritative owners or sending prompts to stale panes.
 
-When a generated seed exposes a production bug, reduce the trace and promote it
-to the fixed corpus before or with the bug fix.
+The simulator tests print schedule count, command count, elapsed time, and the
+active budget for each corpus so CI logs show when generated coverage starts to
+approach the budget.

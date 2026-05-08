@@ -7,6 +7,14 @@
 use anyhow::{Result, anyhow, bail};
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::time::{Duration, Instant};
+
+const FAST_CORPUS_SEEDS: std::ops::Range<u64> = 0..512;
+const FAST_CORPUS_STEPS: usize = 24;
+const FAST_CORPUS_BUDGET: Duration = Duration::from_secs(3);
+const MEDIUM_CORPUS_SEEDS: std::ops::Range<u64> = 0..2_048;
+const MEDIUM_CORPUS_STEPS: usize = 32;
+const MEDIUM_CORPUS_BUDGET: Duration = Duration::from_secs(12);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CyclePhase {
@@ -277,6 +285,25 @@ impl SimWorld {
             world.coverage.record_block(&err.to_string());
         }
         Ok(world.coverage)
+    }
+
+    fn run_seed_corpus(seeds: std::ops::Range<u64>, steps: usize) -> Result<CorpusRun> {
+        let started = Instant::now();
+        let mut coverage = Coverage::default();
+        let mut schedules = 0usize;
+        for seed in seeds {
+            let seed_coverage = SimWorld::run_seed(seed, steps).unwrap_or_else(|err| {
+                panic!("seed {seed} failed structurally: {err}");
+            });
+            coverage.merge(seed_coverage);
+            schedules += 1;
+        }
+        Ok(CorpusRun {
+            coverage,
+            schedules,
+            steps,
+            elapsed: started.elapsed(),
+        })
     }
 
     fn apply(&mut self, command: SimCommand) -> Result<()> {
@@ -888,15 +915,42 @@ fn fallback_response(topic: &str) -> String {
     format!("### Re: {topic} — gpt-5\n\nImplemented and verified through fallback.\n")
 }
 
+#[derive(Debug)]
+struct CorpusRun {
+    coverage: Coverage,
+    schedules: usize,
+    steps: usize,
+    elapsed: Duration,
+}
+
+impl CorpusRun {
+    fn command_count(&self) -> usize {
+        self.schedules * self.steps
+    }
+
+    fn assert_within_budget(&self, budget: Duration, label: &str) {
+        eprintln!(
+            "{label}: schedules={} steps={} commands={} elapsed_ms={} budget_ms={}",
+            self.schedules,
+            self.steps,
+            self.command_count(),
+            self.elapsed.as_millis(),
+            budget.as_millis()
+        );
+        assert!(
+            self.elapsed <= budget,
+            "{label} exceeded runtime budget: elapsed={:?} budget={:?}",
+            self.elapsed,
+            budget
+        );
+    }
+}
+
 #[test]
 fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
-    let mut coverage = Coverage::default();
-    for seed in 0..512 {
-        let seed_coverage = SimWorld::run_seed(seed, 24).unwrap_or_else(|err| {
-            panic!("seed {seed} failed structurally: {err}");
-        });
-        coverage.merge(seed_coverage);
-    }
+    let run = SimWorld::run_seed_corpus(FAST_CORPUS_SEEDS, FAST_CORPUS_STEPS).unwrap();
+    run.assert_within_budget(FAST_CORPUS_BUDGET, "fast simulator corpus");
+    let coverage = run.coverage;
 
     assert!(
         coverage.commits > 0,
@@ -974,6 +1028,31 @@ fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
     assert!(
         coverage.projection_repairs > 0,
         "seed corpus must repair projection drift from durable actor state"
+    );
+}
+
+#[test]
+#[ignore = "run by `make check` as the medium deterministic simulator corpus"]
+fn closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget() {
+    let run = SimWorld::run_seed_corpus(MEDIUM_CORPUS_SEEDS, MEDIUM_CORPUS_STEPS).unwrap();
+    run.assert_within_budget(MEDIUM_CORPUS_BUDGET, "medium simulator corpus");
+    let coverage = run.coverage;
+
+    assert!(
+        coverage.commits >= 10,
+        "medium seed corpus should include many valid committed closeouts"
+    );
+    assert!(
+        coverage.fault_points_hit.len() == FaultPoint::ALL.len(),
+        "medium seed corpus must keep every named closeout fault point covered"
+    );
+    assert!(
+        coverage.route_dispatch_acceptances > 0 && coverage.route_dispatch_proofs > 0,
+        "medium seed corpus must keep route dispatch/proof coverage"
+    );
+    assert!(
+        coverage.projection_drift_blocks > 0 && coverage.projection_repairs > 0,
+        "medium seed corpus must keep projection drift and repair coverage"
     );
 }
 

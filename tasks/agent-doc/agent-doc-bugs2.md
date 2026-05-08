@@ -87,7 +87,15 @@ Created and committed the plan: `tasks/agent-doc/plan-tigerbeetle-style-simulati
 The plan defines a TigerBeetle-inspired deterministic simulation/property-test layer for `agent-doc`: a pure `SimWorld`, an explicit command DSL, closeout and session invariants, seeded replay/minimization, fault injection, and split fast/medium/stress test budgets. It scopes the first implementation to closeout/template/pending/snapshot failures, then extends to route/controller schedules once the session actor architecture stabilizes.
 
 I committed the non-session plan file separately as `e0a784d25` (`docs: plan deterministic simulation testing`). No code or test suite changed, so I did not run the full Rust verification suite for this planning-only item.
-<!-- agent:boundary:5b5807a3 -->
+❯ #next-steps
+### Re: next steps — gpt-5
+
+Top backlog item: `#closeguard`.
+
+I kept `#closeguard` first because it protects the core closeout invariant: a session must not close successfully while a newer prompt-bearing exchange line or malformed matching backlog item remains unresolved.
+
+I added one recommended follow-up after it: `#tigersim`, to implement Phase 1-2 from `tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md`. That keeps the TigerBeetle-style simulator work available without putting it ahead of the immediate closeout guard bug.
+<!-- agent:boundary:84fdc6bb -->
 <!-- /agent:exchange -->
 ###
 
@@ -106,6 +114,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 <!-- agent:backlog -->
 
 - [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
+- [ ] [#tigersim] [recommended] Implement Phase 1-2 from tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: inventory pure closeout seams, build the first SimWorld closeout simulator, and promote fixed seeds for recent closeout/pending/snapshot bugs.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

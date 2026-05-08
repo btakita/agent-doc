@@ -90,7 +90,28 @@ Committed and pushed:
 
 - `btakita/agent-doc` `20260422/codex-agent-backend`: `076bb3c fix: track codex agent-doc prompt bodies`
 - parent `btakita/agent-loop` `main`: `b76401ed2 chore: update agent-doc submodule`
-<!-- agent:boundary:d9468a42 -->
+❯ do [#tigerroute]. spec-test-build-install-commit-push
+### Re: #tigerroute — gpt-5
+
+Implemented Phase 4 route/controller schedules for the deterministic simulator.
+
+Changed `src/agent-doc/src/sim_world.rs` to add a small in-memory route model with durable actor state, projection state, session actor generations, supervisor lifecycle facts, route dispatch acceptance/proof, stale generation rejection, stale/missing pane observations, and projection drift repair. The fixed seed corpus now asserts coverage for the new route/controller schedule classes, and focused route simulator tests cover ready-only dispatch, stale generation/pane blocking, missing pane blocking, and projection repair from durable actor authority.
+
+Updated `src/agent-doc/specs/12-deterministic-simulation.md` with the Phase 4 command set and invariants: durable actor state is the only routing authority, projection drift is diagnostic/recoverable, dispatch proof must match the accepted generation/session/pane, and stale or missing pane observations fail closed.
+
+Verification passed:
+
+- `cargo test sim_world`
+- `cargo test`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+
+- `btakita/agent-doc` `20260422/codex-agent-backend`: `3e469a0 test: simulate route controller schedules`
+- parent `btakita/agent-loop` `main`: `d044b2802 chore: update agent-doc submodule`
+<!-- agent:boundary:02657dfd -->
 <!-- /agent:exchange -->
 ###
 
@@ -108,7 +129,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#tigerroute] Implement Phase 4 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: extend SimWorld with route/controller schedules, session actor generations, supervisor lifecycle facts, dispatch acceptance/proof, stale/missing pane observations, and projection-drift invariants.
 - [ ] [#tigerci] Implement Phase 5 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: wire fast fixed-seed simulator coverage into cargo test, add a wider deterministic make check budget if runtime stays acceptable, document seed-range replay/promotion, and track generated-coverage runtime budgets.
 <!-- /agent:backlog -->
 
@@ -134,6 +154,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#tigersim] [recommended] Implement Phase 1-2 from tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: inventory pure closeout seams, build the first SimWorld closeout simulator, and promote fixed seeds for recent closeout/pending/snapshot bugs.
 - 2026-05-08 [#tigerfault] Implement Phase 3 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: add deterministic crash and fault injection points around snapshot save, fallback patch write, IPC delivery, template merge, working-tree write, index update, git commit, post-commit boundary reposition, and session-check.
 - 2026-05-08 [#harnessprompt] Implement tasks/agent-doc/plan-harness-prompt-no-changes-closeout.md: make harness-native agent-doc turns fail closed when preflight reports no markdown changes but the chat prompt contains actionable text that was never persisted to the exchange.
+- 2026-05-08 [#tigerroute] Implement Phase 4 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: extend SimWorld with route/controller schedules, session actor generations, supervisor lifecycle facts, dispatch acceptance/proof, stale/missing pane observations, and projection-drift invariants.
 <!-- /agent:pending-done -->
 
 

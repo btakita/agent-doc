@@ -28,44 +28,13 @@ Planned editor autosync, sync latency, and tmux test-budget follow-ups.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-211859.md`*
-❯ Running one turn on a document should not prevent another document from syncing in any step. The syncs should be "snappy".
-```
-Sync deferred: another visible agent-doc pane is mid-closeout, so the current tmux layout was preserved. Try again after that closeout finishes. Blocked pane(s): %268 preflight_started /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-```
-```
-Sync deferred: another visible agent-doc pane is mid-closeout, so the current tmux layout was preserved. Try again after that closeout finishes. Blocked pane(s): %268 preflight_started /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-```
-❯ spec-test-build-install-commit-push
-### Re: cross-document sync during closeout — gpt-5
-
-Implemented the sync behavior change so another document can sync immediately while a visible pane is mid-closeout.
-
-What changed:
-- Removed the `agent-doc` pre-router guard that turned protected open-cycle panes into preserve-layout/deferred-sync no-ops.
-- Extended `tmux-router` protection so protected panes are skipped by the SWAP fast path as well as DETACH. That lets sync attach the requested pane around the protected closeout owner instead of swapping the owner out.
-- Treated layouts with protected extra panes as successful verification, not router errors.
-- Updated SimWorld, tmux-backed regressions, README/spec/plugin docs, and version notes to describe the new contract.
-
-Verification completed:
-- `cargo test -p tmux-router`
-- `cargo test -p agent-doc`
-- `make check`
-- `make install`
-
-Committed and pushed:
-- `btakita/tmux-router@22a608b` — `fix: protect closeout panes from sync swap`
-- `btakita/agent-doc@f917ed4` — `fix: keep cross-document sync moving`
-- `btakita/agent-loop@06219839d` — `chore: update sync submodules`
-
-No actionable follow-up items remain for backlog capture.
-<!-- agent:boundary:19f519c0 -->
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-214856.md`*
+<!-- agent:boundary:45543006 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
 Comments after a run starts are deleted by agent-doc.
-s
 ---
 "❯ Commit / push:" should not have the `❯ ` prefix since this was the agent response. #agent-doc-bug
 ---

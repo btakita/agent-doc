@@ -27,42 +27,13 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-042116.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-045037.md`*
 
 Active backlog:
-- [ ] [#pcstore] Implement Phase B from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: move actor-record load/store behind controller commands, write SQLite first, emit session-actors.json and sessions.json as projections, and add projection drift diagnostics.
 - [ ] [#pcsuper] Implement Phase C from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: make Harness Supervisor startup register with the controller and report ready/busy/waiting-input/blocked/closed lifecycle facts through controller-owned actor transitions.
 - [ ] [#pcroutes] Implement Phase D from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: convert start, route, and sync to read/dispatch through controller authority and keep tmux-router as layout reconciliation only.
-- 1 more active item(s)
-❯ do [#pcstore]. spec-test-build-install-commit-push
-### Re: #pcstore — gpt-5
-
-Implemented Phase B from `tasks/agent-doc/plan-project-controller-session-actor-mvp.md` in `src/agent-doc` and pushed it.
-
-What changed:
-
-- Moved session actor record load/store through `project_controller.rs`.
-- Added `.agent-doc/state.db` schema for `documents`, `actor_transitions`, `supervisor_leases`, `dispatch_attempts`, and `projection_diagnostics`.
-- Made actor writes commit SQLite first, then emit `session-actors.json` from committed state.
-- Reconciled existing `sessions.json` entries as compatibility projections without changing their existing `file` field shape.
-- Added drift diagnostics when projections are missing, malformed, unwritable, or out of sync.
-- Kept route/start/sync behavior at the Phase B migration boundary; Phase C/D remain separate backlog items.
-- Updated `SPEC.md`, `specs/08a-session-actor-contract.md`, and `VERSIONS.md`.
-
-Verification completed:
-
-- `cargo test session_actor`
-- `cargo test project_controller`
-- Targeted regressions for the initially failing sessions/sync compatibility cases
-- Full `cargo test`: `1944` unit tests plus integration/doc tests passed
-- `cargo build`
-- `cargo install --path . --force`
-
-Commit and push:
-
-- `57fb0d4 feat: persist actor store through controller sqlite`
-- Pushed to `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:bdbe895e -->
+- [ ] [#pcops] Implement Phase E from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: wire status/history/attach/restart/clear/doctor through controller clients, keep destructive recovery behind doctor --repair, and expose stage-specific editor diagnostics.
+<!-- agent:boundary:388670c4 -->
 <!-- /agent:exchange -->
 ###
 

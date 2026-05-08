@@ -60,7 +60,26 @@ Commits pushed:
 - root `agent-loop` branch `main`: `3986b066e` (`chore: update agent-doc submodule`)
 
 I left the pre-existing unrelated root worktree changes alone; only the `src/agent-doc` code changes and the root submodule pointer were committed manually.
-<!-- agent:boundary:028520ed -->
+❯ We need a way to have extreme edge case coverage and fast tests. Are any testing and architectural principles from Tiger Beetle useful for agent-doc?
+### Re: TigerBeetle-style testing for agent-doc — gpt-5
+
+Yes. The most useful TigerBeetle idea for `agent-doc` is not a specific implementation detail; it is the testing posture: make the workflow a small deterministic state machine, attack it with generated edge cases, and treat every failure as a reproducible seed.
+
+The best fit for `agent-doc` would be:
+
+- Deterministic simulation around the response cycle. Model the document, baseline, snapshot, git index, pending list, claims, controller/session state, and assistant response as explicit state. Then generate sequences like user edit, preflight, plan, write, commit, crash, repair, new prompt, pending mutation, stale actor, and route retry.
+- Strong invariants instead of example-only tests. Examples: a prompt-bearing exchange line must receive exactly one committed response; finalize must fail if a newer unresolved prompt appears; pending `do #id` must end in done/gated/open-with-reason; session docs must not leak into manual repo commits; recovery must not synthesize duplicate assistant patchbacks.
+- Fault injection at every boundary. Kill or error after snapshot creation, after document write, before commit, after staging, during session-check, during controller RPC, and during route/start handoff. Those are where this system actually gets weird.
+- Seeded, minimized repros. Every generated failure should print the random seed, command trace, document tail, git state summary, and expected vs actual invariant. That gives us small bug reports instead of one-off stories.
+- A fast pure core. Keep parsing, diff classification, planning, pending transitions, and merge decisions mostly pure and tested without shelling out. Reserve slower integration tests for git/filesystem/tmux/controller boundaries.
+- Append-only facts plus derived projections where possible. This matches the controller direction: record durable lifecycle facts, derive `sessions.json`/status/projections, and test projection drift as an invariant.
+
+The TigerBeetle pieces I would avoid copying literally are the storage-engine constraints and extreme static-memory discipline. `agent-doc` is a CLI/workflow coordinator, not a database. The useful transfer is architectural: reduce hidden ambient state, make state transitions explicit, make time/concurrency/failure injectable, and run huge numbers of deterministic schedules quickly.
+
+A practical shape would be a `SimWorld` test harness with fake filesystem/git/clock/controller adapters, plus a command DSL such as `EditDoc`, `Preflight`, `Plan`, `Finalize`, `CrashAt`, `Repair`, `RoutePrompt`, and `SessionCheck`. CI can run a short fixed-seed corpus plus a small randomized budget; nightly or local stress can run larger seed ranges. When a bug is found, promote that seed into the corpus.
+
+I added a recommended backlog item for a concrete plan, because this is worth designing deliberately before scattering property tests across the current suite.
+<!-- agent:boundary:43913836 -->
 <!-- /agent:exchange -->
 ###
 
@@ -78,6 +97,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#tigertest] [recommended] Create a TigerBeetle-inspired deterministic simulation/property-test plan for agent-doc: model session-cycle state, generate concurrent document edits and crash/fault schedules, assert closeout/pending/git invariants, and keep most cases in fast pure tests.
 - [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
 <!-- /agent:backlog -->
 

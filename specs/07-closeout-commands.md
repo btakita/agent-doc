@@ -64,6 +64,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 
 - Strict happy-path closeout for session responses.
 - Validates git-backed context before mutation, runs the normal write pipeline, forces `git::commit(<FILE>)` even after partial write errors, and fails unless the final cycle state is `committed`.
+- When `--baseline-file` points at a missing hash-keyed preflight baseline because the session document was moved after preflight, closeout must retry the current document hash's migrated baseline before failing. This preserves the explicit baseline contract across `git mv` / rename migration.
 - Empty normalization-only template payloads are invalid; the response must contain real response-body proof.
 - The same pre-write pending-capture, backlog-required, and pending-done gates apply here before the document mutates.
 - A bare `compact exchange` request blocks ordinary finalize/write closeout and must route through `agent-doc compact <FILE> --commit` instead.

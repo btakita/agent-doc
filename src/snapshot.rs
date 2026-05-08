@@ -85,6 +85,7 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
 const SNAP_DIR: &str = ".agent-doc/snapshots";
+const BASELINE_DIR: &str = ".agent-doc/baselines";
 const LOCK_DIR: &str = ".agent-doc/locks";
 const PENDING_DIR: &str = ".agent-doc/pending";
 const CRDT_DIR: &str = ".agent-doc/crdt";
@@ -204,6 +205,16 @@ pub fn path_for(doc: &Path) -> Result<PathBuf> {
     }
     // Fallback: relative path (legacy behavior for tests without .agent-doc/)
     Ok(PathBuf::from(SNAP_DIR).join(filename))
+}
+
+/// Compute the preflight baseline file path for a given document.
+/// Returns `<project_root>/.agent-doc/baselines/<hash>.md`.
+pub fn baseline_path_for(doc: &Path) -> Result<PathBuf> {
+    let hash = doc_hash(doc)?;
+    let canonical = doc.canonicalize()?;
+    let project_root = find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    Ok(project_root.join(BASELINE_DIR).join(format!("{}.md", hash)))
 }
 
 /// Load the snapshot content under an exclusive lock.

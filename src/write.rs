@@ -466,6 +466,63 @@ fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -
     )
 }
 
+fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<Option<String>> {
+    let Some(path) = baseline_file else {
+        return Ok(None);
+    };
+
+    match std::fs::read_to_string(path) {
+        Ok(content) => return Ok(Some(content)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(e)
+                .with_context(|| format!("failed to read baseline file {}", path.display()));
+        }
+    }
+
+    if let Err(e) = crate::snapshot::try_migrate_renamed(file) {
+        eprintln!("[write] warning: rename migration before baseline fallback failed: {e}");
+    }
+
+    let migrated_path = crate::snapshot::baseline_path_for(file).with_context(|| {
+        format!(
+            "failed to resolve migrated baseline path for {}",
+            file.display()
+        )
+    })?;
+    if migrated_path == path {
+        anyhow::bail!(
+            "failed to read baseline file {}: file not found",
+            path.display()
+        );
+    }
+
+    match std::fs::read_to_string(&migrated_path) {
+        Ok(content) => {
+            eprintln!(
+                "[write] baseline file {} was missing; using migrated baseline {}",
+                path.display(),
+                migrated_path.display()
+            );
+            Ok(Some(content))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            anyhow::bail!(
+                "failed to read baseline file {}: file not found; migrated baseline {} was also missing",
+                path.display(),
+                migrated_path.display()
+            )
+        }
+        Err(e) => Err(e).with_context(|| {
+            format!(
+                "failed to read migrated baseline file {} after {} was missing",
+                migrated_path.display(),
+                path.display()
+            )
+        }),
+    }
+}
+
 fn is_session_document(file: &Path) -> Result<bool> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -628,12 +685,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         rerun_command_base: build_rerun_command_base(&options, commit_mode),
     };
 
-    let baseline = options
-        .baseline_file
-        .as_ref()
-        .map(std::fs::read_to_string)
-        .transpose()
-        .context("failed to read baseline file")?;
+    let baseline = read_explicit_baseline(file, options.baseline_file.as_deref())?;
 
     let current_content =
         std::fs::read_to_string(file).context("failed to read document for pre-write guards")?;
@@ -5926,6 +5978,54 @@ mod tests {
             snapshot::load_pre_response(&doc).unwrap().unwrap(),
             "updated while waiting\n"
         );
+    }
+
+    #[test]
+    fn missing_explicit_baseline_reads_migrated_baseline_after_document_move() {
+        let dir = TempDir::new().unwrap();
+        for subdir in [
+            "snapshots",
+            "baselines",
+            "locks",
+            "pending",
+            "crdt",
+            "pre-response",
+        ] {
+            fs::create_dir_all(dir.path().join(".agent-doc").join(subdir)).unwrap();
+        }
+
+        let session_uuid = "moved-baseline-session";
+        let old_doc = dir.path().join("old.md");
+        let doc_content = format!(
+            "---\nagent_doc_session: {}\nagent_doc_format: template\n---\n\nBody\n",
+            session_uuid
+        );
+        fs::write(&old_doc, &doc_content).unwrap();
+
+        let old_hash = snapshot::doc_hash(&old_doc).unwrap();
+        let old_snapshot = dir
+            .path()
+            .join(".agent-doc/snapshots")
+            .join(format!("{}.md", old_hash));
+        fs::write(&old_snapshot, &doc_content).unwrap();
+        let old_baseline = dir
+            .path()
+            .join(".agent-doc/baselines")
+            .join(format!("{}.md", old_hash));
+        fs::write(&old_baseline, "preflight baseline\n").unwrap();
+
+        let new_doc = dir.path().join("new.md");
+        fs::rename(&old_doc, &new_doc).unwrap();
+
+        assert!(snapshot::try_migrate_renamed(&new_doc).unwrap());
+        assert!(!old_baseline.exists());
+        let migrated_baseline = snapshot::baseline_path_for(&new_doc).unwrap();
+        assert!(migrated_baseline.exists());
+
+        let baseline = read_explicit_baseline(&new_doc, Some(&old_baseline))
+            .unwrap()
+            .expect("baseline should be recovered from migrated hash");
+        assert_eq!(baseline, "preflight baseline\n");
     }
 
     #[test]

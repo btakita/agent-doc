@@ -35,5 +35,11 @@ If an orphaned snapshot is found, all state files are migrated from the old hash
 hash: snapshots, baselines, locks, pending, CRDT, and pre-response. The sessions registry is
 also updated.
 
+Explicit preflight baseline paths are part of the active closeout contract. If a document
+is moved after preflight and rename migration moves `.agent-doc/baselines/<old-hash>.md`
+to the new path hash, `finalize` / `write --commit` must recover by reading the migrated
+current-hash baseline instead of falling back to `content_ours` or failing on the missing
+old path.
+
 **Fallback:** `agent-doc rename <old> <new>` performs the same migration explicitly when
 the old path is known.

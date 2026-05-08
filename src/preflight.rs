@@ -2455,13 +2455,16 @@ fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) -> S
 }
 
 fn save_baseline_file(file: &Path) -> Option<String> {
-    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let hash = snapshot::doc_hash(&canonical).unwrap_or_else(|_| "unknown".to_string());
-    let baseline_dir = snapshot::find_project_root(&canonical)
-        .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf())
-        .join(".agent-doc/baselines");
-    let _ = std::fs::create_dir_all(&baseline_dir);
-    let baseline_path = baseline_dir.join(format!("{}.md", hash));
+    let baseline_path = match snapshot::baseline_path_for(file) {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("[preflight] failed to resolve baseline path: {}", e);
+            return None;
+        }
+    };
+    if let Some(parent) = baseline_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     match std::fs::read_to_string(file) {
         Ok(content) => {
             let _ = std::fs::write(&baseline_path, &content);

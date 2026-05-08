@@ -125,7 +125,31 @@ Verification run:
 Committed and pushed:
 - `src/agent-doc`: `1dad929` (`fix: split sync latency diagnostics`) to `origin/20260422/codex-agent-backend`
 - parent repo: `cdaa07c7a` (`agent-doc: update sync latency diagnostics`) to `origin/main`
-<!-- agent:boundary:75e10431 -->
+❯ do [#tmuxbudget]. spec-test-build-install-commit-push
+### Re: tmux budget — gpt-5
+
+Implemented `#tmuxbudget` and completed the requested spec-test-build-install-commit-push cycle.
+
+Changed `src/agent-doc`:
+- Added deterministic `SimWorld` sync-layout coverage for the protected-layout preserve case, detachable-pane replacement, and preserve-layout focus handoff: `sync_sim_tmuxbudget_seed_3001...`, `sync_sim_tmuxbudget_seed_3002...`, and `sync_sim_tmuxbudget_seed_3003...`.
+- Extended simulator corpus coverage counters so the fast and medium corpora assert sync preserve/replacement/focus coverage, not only closeout and route/controller coverage.
+- Retired the duplicate manual protected-layout tmux variants from the default suite with `#[ignore]` markers pointing at the matching simulator traces, while keeping the safe-passive real tmux smokes for pane/window movement and focus behavior.
+- Updated the session/tmux spec, deterministic simulation spec, `VERSIONS.md`, and the Phase 3 plan note.
+
+Verification:
+- `cargo fmt`
+- `cargo test sync_sim_tmuxbudget -- --nocapture`
+- `cargo test closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes -- --nocapture` -> fast corpus `512` schedules / `12288` commands in `456ms` under the `3s` budget
+- `cargo build`
+- `cargo test` -> `1971` passed, `0` failed, `3` ignored
+- `make check` -> passed clippy, full tests, medium simulator corpus; medium corpus completed in `2.49s`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+- `src/agent-doc`: `a7d53f6` (`test: move protected sync edges to simulator`) to `origin/20260422/codex-agent-backend`
+- parent repo: `9a10140ac` (`agent-doc: update tmux test budget`) to `origin/main`
+<!-- agent:boundary:eb131e03 -->
 <!-- /agent:exchange -->
 ###
 
@@ -149,7 +173,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#tmuxbudget] Implement Phase 3 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: inventory slow tmux-backed edge tests, keep only real tmux smoke coverage, and migrate pure ownership/controller schedules into deterministic SimWorld traces with runtime-budget tracking.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -178,6 +201,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#tigerci] Implement Phase 5 from /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-tigerbeetle-style-simulation-testing.md: wire fast fixed-seed simulator coverage into cargo test, add a wider deterministic make check budget if runtime stays acceptable, document seed-range replay/promotion, and track generated-coverage runtime budgets.
 - 2026-05-08 [#autosync] Implement Phase 1 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: fix editor selection autosync so changing focused markdown files applies the same tmux pane/focus result as manual Sync Tmux Layout, with editor and CLI regressions.
 - 2026-05-08 [#synclag] Implement Phase 2 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: capture slow manual sync runs, split sync/controller latency buckets, keep warm-controller safe-passive sync under budget, and surface the exact over-budget phase.
+- 2026-05-08 [#tmuxbudget] Implement Phase 3 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: inventory slow tmux-backed edge tests, keep only real tmux smoke coverage, and migrate pure ownership/controller schedules into deterministic SimWorld traces with runtime-budget tracking.
 <!-- /agent:pending-done -->
 
 

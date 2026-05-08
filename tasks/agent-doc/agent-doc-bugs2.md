@@ -31,7 +31,42 @@ prompt_presets:
 
 Active backlog:
 - [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
-<!-- agent:boundary:dacd7ef8 -->
+❯ `Clear Session Context` resulted with JB Plugin surfacing:
+```
+agent-doc command failed (exit 1): Error: unknown controller command: session_status
+```
+### Re: Clear Session Context `session_status` failure — gpt-5
+
+This was a stale project-controller process, not the JetBrains plugin calling the wrong command.
+
+Evidence:
+- The installed CLI is `/home/brian/.cargo/bin/agent-doc`, version `0.33.16`.
+- The live controller for `/home/brian/work/btakita/agent-loop` had PID `3351602` and was started around `01:54`.
+- The installed binary was updated at `02:36`.
+- The current source and CLI surface include `agent-doc session status`, and the source controller dispatch table includes the `session_status` RPC, but the old already-running controller did not know that RPC and returned `unknown controller command: session_status`.
+
+I restarted the project controller with:
+
+```bash
+agent-doc controller shutdown --project-root /home/brian/work/btakita/agent-loop
+```
+
+After that, the same operator path worked:
+
+```bash
+agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+```
+
+It returned the actor/session status successfully. I also verified the reported action path directly:
+
+```bash
+agent-doc session clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+```
+
+That now succeeds with `controller stage operator_ready`.
+
+I added a recommended backlog item for the real product fix: controller startup/client calls should detect a stale controller binary generation after local install/update and restart it automatically, instead of letting newly-added RPCs fail as unknown commands.
+<!-- agent:boundary:83013ccf -->
 <!-- /agent:exchange -->
 ###
 
@@ -49,6 +84,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#ctrlreload] [recommended] Add controller binary-generation/version invalidation so agent-doc restarts a stale project controller after local install/update instead of surfacing unknown controller command errors for newly-added controller RPCs.
 - [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
 <!-- /agent:backlog -->
 

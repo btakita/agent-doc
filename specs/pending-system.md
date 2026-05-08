@@ -115,7 +115,11 @@ On every preflight run:
    - If a completed item still lacks an id (legacy/manual form such as `- [x] shipped` or `- [x] [#] shipped`), backfill its hash first, then reap/archive that canonicalized item in the same pass. Reap must never silently drop a done line that cannot be referenced in the archive or logs.
    - Remove the line from the component.
    - `[ ]` and `[/]` are never auto-reaped. `[/]` explicitly survives forever until an operator moves it to `[x]`. No TTL on gated state — the operator owns the gate.
-   - (Optional, deferred) Append an archive entry to `agent:backlog-done` if the component exists.
+   - Append an archive entry to `agent:pending-done`. If the component does not
+     already exist, create a visible `## Completed / Reaped` section after the
+     tracked work components first, then append the entry. Completed tracked work
+     must remain grep-visible in the session document instead of disappearing
+     from the live backlog without a local record.
    - Persistence invariant: the reap must land in both the working tree document and the snapshot that the commit boundary stages. If preflight cannot persist that synchronized reap safely, it must fail closed instead of continuing with completed tracked-work items still present in backlog or icebox.
 - Same-cycle resurrection invariant: once a cycle reaps a tracked `[#id]`, closeout must fail closed if that same id reappears in the live `agent:backlog` or `agent:icebox` before commit. Do not silently treat the stale rewrite as generic local drift.
 - Same-cycle completion invariant: when preflight/repair reap a user-authored `[x]` tracked item directly from the document, that id counts as intentionally resolved for the current cycle's history-replay guards even if no explicit `--pending-done <id>` flag was recorded. Do not restore the older `[ ]` or `[/]` history entry just because the completion came from a manual document edit.

@@ -2119,9 +2119,12 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     })
 }
 
-/// Archive reaped pending items to `agent:pending-done` if the component
-/// exists. Returns `Some(new_content)` when archival happened, `None` when
-/// the archive component is absent (silent no-op per spec §3 step 3).
+/// Archive reaped pending items to `agent:pending-done`.
+///
+/// When the archive component is absent, create a visible
+/// `## Completed / Reaped` section after the tracked work components before
+/// appending the entries. Returns `Some(new_content)` when archival happened,
+/// `None` only when there is no tracked-work anchor to place the archive.
 ///
 /// Entry format: `- YYYY-MM-DD [#id] text` — ISO date prefix for chronology,
 /// hash preserved so the archive is grep-compatible with the live list, text
@@ -2137,9 +2140,14 @@ pub(crate) fn archive_pending_done(
     if removed.is_empty() {
         return None;
     }
-    let components = crate::component::parse(content).ok()?;
+    let mut content_with_archive = content.to_string();
+    let components = crate::component::parse(&content_with_archive).ok()?;
+    if !components.iter().any(|c| c.name == "pending-done") {
+        content_with_archive = insert_pending_done_component(&content_with_archive)?;
+    }
+    let components = crate::component::parse(&content_with_archive).ok()?;
     let archive = components.into_iter().find(|c| c.name == "pending-done")?;
-    let existing_body = &content[archive.open_end..archive.close_start];
+    let existing_body = &content_with_archive[archive.open_end..archive.close_start];
 
     // Use the `date` command so we stay on agent-doc's no-chrono policy
     // (see git.rs::chrono_timestamp). Fallback to "unknown-date" if the
@@ -2169,7 +2177,29 @@ pub(crate) fn archive_pending_done(
         }
     }
 
-    Some(archive.replace_content(content, &new_body))
+    Some(archive.replace_content(&content_with_archive, &new_body))
+}
+
+fn insert_pending_done_component(content: &str) -> Option<String> {
+    let components = crate::component::parse(content).ok()?;
+    let anchor = components
+        .iter()
+        .filter(|c| crate::component::is_tracked_work_component(&c.name))
+        .max_by_key(|c| c.close_end)?;
+    let insert_at = anchor.close_end;
+    let mut result = String::with_capacity(content.len() + 96);
+    result.push_str(&content[..insert_at]);
+    if !result.ends_with("\n\n") {
+        if !result.ends_with('\n') {
+            result.push('\n');
+        }
+        result.push('\n');
+    }
+    result.push_str(
+        "## Completed / Reaped\n\n<!-- agent:pending-done -->\n<!-- /agent:pending-done -->\n",
+    );
+    result.push_str(&content[insert_at..]);
+    Some(result)
 }
 
 /// Read the claims log and truncate it. Returns lines as a `Vec<String>`.
@@ -2860,12 +2890,32 @@ mod tests {
         assert_eq!(gated_count, 0);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        assert!(!file_after.contains("[#reap1]"));
+        let file_backlog_after = crate::component::parse(&file_after)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "backlog")
+            .unwrap()
+            .content(&file_after)
+            .to_string();
+        assert!(!file_backlog_after.contains("[#reap1]"));
         assert!(file_after.contains("[#keep1]"));
+        assert!(file_after.contains("## Completed / Reaped"));
+        assert!(file_after.contains("<!-- agent:pending-done -->"));
+        assert!(file_after.contains("[#reap1] Reap me"));
 
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
-        assert!(!snapshot_after.contains("[#reap1]"));
+        let snapshot_backlog_after = crate::component::parse(&snapshot_after)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "backlog")
+            .unwrap()
+            .content(&snapshot_after)
+            .to_string();
+        assert!(!snapshot_backlog_after.contains("[#reap1]"));
         assert!(snapshot_after.contains("[#keep1]"));
+        assert!(snapshot_after.contains("## Completed / Reaped"));
+        assert!(snapshot_after.contains("<!-- agent:pending-done -->"));
+        assert!(snapshot_after.contains("[#reap1] Reap me"));
     }
 
     #[test]
@@ -2935,12 +2985,30 @@ mod tests {
         assert_eq!(gated_count, 0);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        assert!(!file_after.contains("[#ice01]"));
+        let file_icebox_after = crate::component::parse(&file_after)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "icebox")
+            .unwrap()
+            .content(&file_after)
+            .to_string();
+        assert!(!file_icebox_after.contains("[#ice01]"));
         assert!(file_after.contains("[#keep2]"));
+        assert!(file_after.contains("## Completed / Reaped"));
+        assert!(file_after.contains("[#ice01] Reap me from icebox"));
 
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
-        assert!(!snapshot_after.contains("[#ice01]"));
+        let snapshot_icebox_after = crate::component::parse(&snapshot_after)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "icebox")
+            .unwrap()
+            .content(&snapshot_after)
+            .to_string();
+        assert!(!snapshot_icebox_after.contains("[#ice01]"));
         assert!(snapshot_after.contains("[#keep2]"));
+        assert!(snapshot_after.contains("## Completed / Reaped"));
+        assert!(snapshot_after.contains("[#ice01] Reap me from icebox"));
     }
 
     #[test]

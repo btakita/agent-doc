@@ -562,11 +562,19 @@ fn finalize_accepts_hash_prefixed_pending_done_id() {
     let content = fs::read_to_string(&doc).unwrap();
     assert!(!content.contains("- [ ] [#done1] Close the loop"));
     assert!(content.contains("### Re: #done1 close the loop — gpt-5"));
+    assert!(content.contains("## Completed / Reaped"));
+    assert!(content.contains("<!-- agent:pending-done -->"));
+    assert!(content.contains("[#done1] Close the loop"));
 
     let head_text = head_blob(tmp.path());
     assert!(
         !head_text.contains("- [ ] [#done1] Close the loop"),
         "HEAD backlog should not keep the completed item open when --pending-done uses #id"
+    );
+    assert!(
+        head_text.contains("<!-- agent:pending-done -->")
+            && head_text.contains("[#done1] Close the loop"),
+        "HEAD should create a completed/reaped archive when the session did not already have one"
     );
 }
 

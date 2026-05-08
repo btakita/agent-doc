@@ -54,7 +54,19 @@ Decision: prototype one project-root `.agent-doc/state.db`, but only as the dura
 The right split is: Project Controller serializes project-wide decisions; Session Actor owns each document generation and transition contract; SQLite persists the actor state, generation CAS, transition history, uniqueness checks, dispatch attempts, and projection drift diagnostics; `sessions.json`, `session-actors.json`, tmux-router state, and text logs remain projections or diagnostics during migration.
 
 I recorded that in the SQLite plan by changing its status to `Accepted / scoped behind Project Controller` and adding a `Decision` section. Verification for this doc-only change: `git diff --check -- tasks/agent-doc/plan-sqlite-session-store-concurrency.md` passed.
-<!-- agent:boundary:2345e04d -->
+❯ What are the #next-steps for Project Controller -> Session Actor -> Harness Supervisor -> Harness Child?
+### Re: next steps — gpt-5
+
+The next steps should follow the controller plan phases in order, because each layer depends on the one above it being real enough to own authority.
+
+1. `#pcctrl`: build the Project Controller shell first: singleton IPC endpoint, launch lock, lazy connect-or-launch helper, `agent-doc controller status`, and persisted controller epoch/launch mode. This should not change route/start behavior yet.
+2. `#pcstore`: put the actor store behind the controller: SQLite-first authoritative writes, `session-actors.json` / `sessions.json` projections, and drift diagnostics.
+3. `#pcsuper`: make Harness Supervisors register with the controller and report lifecycle facts into actor transitions instead of mutating ownership-adjacent state directly.
+4. `#pcroutes`: move `start`, `route`, and `sync` onto controller authority, leaving tmux-router as layout reconciliation only.
+5. `#pcops`: wire operator/editor commands through controller clients and keep destructive repair behind explicit `doctor --repair`-style surfaces.
+
+I added those as backlog items in that priority order. Top backlog item: `#pcctrl`.
+<!-- agent:boundary:9a1bb6c7 -->
 <!-- /agent:exchange -->
 ###
 
@@ -72,6 +84,11 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#pcctrl] Implement Phase A from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: add the project-local controller shell, singleton socket/launch lock, lazy connect-or-launch helper, controller status command, and bootstrap epoch/launch-mode persistence without changing route/start behavior yet.
+- [ ] [#pcstore] Implement Phase B from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: move actor-record load/store behind controller commands, write SQLite first, emit session-actors.json and sessions.json as projections, and add projection drift diagnostics.
+- [ ] [#pcsuper] Implement Phase C from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: make Harness Supervisor startup register with the controller and report ready/busy/waiting-input/blocked/closed lifecycle facts through controller-owned actor transitions.
+- [ ] [#pcroutes] Implement Phase D from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: convert start, route, and sync to read/dispatch through controller authority and keep tmux-router as layout reconciliation only.
+- [ ] [#pcops] Implement Phase E from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: wire status/history/attach/restart/clear/doctor through controller clients, keep destructive recovery behind doctor --repair, and expose stage-specific editor diagnostics.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

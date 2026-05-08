@@ -690,6 +690,67 @@ fn finalize_fails_closed_on_concurrent_prompt_added_after_baseline() {
         ));
 }
 
+#[test]
+fn finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let shaped = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:exchange -->\n\n<!-- agent:pending -->",
+        "<!-- /agent:exchange -->\n###\n\n<!--\nold parked note\n-->\n\n<!-- agent:pending -->",
+    );
+    fs::write(&doc, shaped).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let current_after_preflight = fs::read_to_string(&doc).unwrap();
+    let concurrent = current_after_preflight.replace("old parked note", "edited parked note");
+    fs::write(&doc, concurrent).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--stream",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: Please reply — gpt-5\nAnswered the original prompt.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: Please reply — gpt-5"));
+    assert!(
+        content.contains("edited parked note"),
+        "late comment-tail edit must remain visible after closeout"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(head.contains("### Re: Please reply — gpt-5"));
+    assert!(
+        !head.contains("edited parked note"),
+        "late non-component edit must remain outside the assistant closeout commit"
+    );
+    assert!(
+        head.contains("old parked note"),
+        "committed closeout snapshot should keep the pre-response comment tail"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
 // --- Phase 3: Queue consumption integration tests ---
 
 fn queue_doc_content() -> String {

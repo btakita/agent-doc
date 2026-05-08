@@ -1315,6 +1315,10 @@ private fun normalizeAnsweredPromptPrefixesForCompare(content: String): String {
 }
 
 internal fun shouldPreferCommittedDiskContentForRepositionUtil(editorContent: String, diskContent: String): Boolean {
+    if (!outsideComponentContentMatchesExactly(editorContent, diskContent, "exchange")) {
+        return false
+    }
+
     fun normalize(content: String): String =
         stripReHeadingAttributionForCompare(
             normalizeAnsweredPromptPrefixesForCompare(stripTransientHeadMarkers(content))
@@ -1324,6 +1328,14 @@ internal fun shouldPreferCommittedDiskContentForRepositionUtil(editorContent: St
         )
 
     return normalize(editorContent) == normalize(diskContent)
+}
+
+private fun outsideComponentContentMatchesExactly(left: String, right: String, component: String): Boolean {
+    val leftRange = findComponentRangeUtil(left, component) ?: return left == right
+    val rightRange = findComponentRangeUtil(right, component) ?: return false
+
+    return left.substring(0, leftRange.first) == right.substring(0, rightRange.first) &&
+        left.substring(leftRange.second) == right.substring(rightRange.second)
 }
 
 private fun collectReHeadingsUtil(content: String): Set<String> {

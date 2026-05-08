@@ -116,10 +116,10 @@
 //!   `final_content` (the actual post-merge disk state), not `content_ours`.
 //!   This eliminates ghost diffs caused by stale baselines (e.g. streaming
 //!   checkpoints with an outdated baseline). Narrow exception: when the caller
-//!   supplied an explicit baseline and concurrent user edits changed the merged
-//!   disk state, the snapshot stays at `content_ours` so those late user edits
-//!   remain visible to the next diff cycle instead of being folded into the
-//!   just-finished turn.
+//!   supplied an explicit baseline and concurrent prompt-bearing or
+//!   non-`agent:exchange` user edits changed the merged disk state, the snapshot
+//!   stays at `content_ours` so those late user edits remain visible to the next
+//!   diff cycle instead of being folded into the just-finished turn.
 //! - Once a response survives strict pre-write closeout gates, it is saved to
 //!   the pending store before any document mutation and cleared only after a
 //!   successful write, so an interrupted write is recoverable.
@@ -321,12 +321,44 @@ fn snapshot_persist_mode_with_current(
 ) -> SnapshotPersistMode {
     if baseline.is_some()
         && strip_boundary_for_dedup(base) != strip_boundary_for_dedup(content_current)
-        && has_prompt_bearing_user_drift(base, content_current)
+        && (has_prompt_bearing_user_drift(base, content_current)
+            || has_non_exchange_user_drift(base, content_current))
     {
         return SnapshotPersistMode::ContentOurs;
     }
 
     snapshot_persist_mode(baseline, content_ours, final_content)
+}
+
+fn has_non_exchange_user_drift(base: &str, current: &str) -> bool {
+    let base_norm = strip_boundary_for_dedup(base);
+    let current_norm = strip_boundary_for_dedup(current);
+    if base_norm == current_norm {
+        return false;
+    }
+
+    outside_component_content_changed(&base_norm, &current_norm, "exchange")
+}
+
+fn outside_component_content_changed(left: &str, right: &str, component_name: &str) -> bool {
+    let left_component = match component::parse(left) {
+        Ok(components) => components.into_iter().find(|c| c.name == component_name),
+        Err(_) => return left != right,
+    };
+    let right_component = match component::parse(right) {
+        Ok(components) => components.into_iter().find(|c| c.name == component_name),
+        Err(_) => return left != right,
+    };
+
+    let Some(left_component) = left_component else {
+        return left != right;
+    };
+    let Some(right_component) = right_component else {
+        return true;
+    };
+
+    left[..left_component.open_end] != right[..right_component.open_end]
+        || left[left_component.close_start..] != right[right_component.close_start..]
 }
 
 fn has_prompt_bearing_user_drift(base: &str, current: &str) -> bool {
@@ -6306,6 +6338,40 @@ mod tests {
         assert_eq!(
             snapshot_content_to_persist(
                 snapshot_persist_mode(baseline, content_ours, final_content),
+                content_ours,
+                final_content
+            ),
+            content_ours
+        );
+    }
+
+    #[test]
+    fn explicit_baseline_preserves_concurrent_comment_tail_for_next_cycle() {
+        let baseline = Some("baseline");
+        let base = "<!-- agent:exchange -->\n❯ prompt\n<!-- /agent:exchange -->\n###\n\n<!--\nold note\n-->\n";
+        let content_current = "<!-- agent:exchange -->\n❯ prompt\n<!-- /agent:exchange -->\n###\n\n<!--\nedited note\n-->\n";
+        let content_ours = "<!-- agent:exchange -->\n❯ prompt\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n###\n\n<!--\nold note\n-->\n";
+        let final_content = "<!-- agent:exchange -->\n❯ prompt\n### Re: answer\nDone.\n<!-- /agent:exchange -->\n###\n\n<!--\nedited note\n-->\n";
+
+        assert_eq!(
+            snapshot_persist_mode_with_current(
+                baseline,
+                base,
+                content_current,
+                content_ours,
+                final_content
+            ),
+            SnapshotPersistMode::ContentOurs
+        );
+        assert_eq!(
+            snapshot_content_to_persist(
+                snapshot_persist_mode_with_current(
+                    baseline,
+                    base,
+                    content_current,
+                    content_ours,
+                    final_content
+                ),
                 content_ours,
                 final_content
             ),

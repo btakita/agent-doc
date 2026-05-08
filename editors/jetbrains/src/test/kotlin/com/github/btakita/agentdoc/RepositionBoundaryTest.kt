@@ -175,6 +175,44 @@ User prompt.
     }
 
     @Test
+    fun `reposition preserves comment tail below exchange`() {
+        val doc = """
+<!-- agent:exchange patch=append -->
+Response.
+<!-- agent:boundary:aaa11111 -->
+User prompt.
+<!-- /agent:exchange -->
+###
+
+<!--
+parked note
+-->
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+""".trimStart()
+
+        val result = repositionBoundaryToEndUtil(doc, "exchange", "fresh1234")
+        assertNotNull(result)
+        assertTrue(result!!.contains("User prompt.\n<!-- agent:boundary:fresh1234 -->"))
+        assertTrue(
+            result.contains(
+                """
+<!-- /agent:exchange -->
+###
+
+<!--
+parked note
+-->
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+""".trimStart()
+            )
+        )
+    }
+
+    @Test
     fun `extractBooleanField parses preserve_head from IPC JSON`() {
         val json = """{"type":"reposition","file":"/tmp/doc.md","boundary_id":"abc12345","preserve_head":true}"""
         assertTrue(extractBooleanField(json, "preserve_head"))
@@ -314,6 +352,64 @@ Answer.
 User follow-up.
 <!-- agent:boundary:stale9999 -->
 <!-- /agent:exchange -->
+""".trimStart()
+
+        assertFalse(shouldPreferCommittedDiskContentForRepositionUtil(editor, disk))
+    }
+
+    @Test
+    fun `does not prefer disk content when comment tail differs outside exchange`() {
+        val disk = """
+<!-- agent:exchange patch=append -->
+### Re: topic — gpt-5
+Answer.
+<!-- agent:boundary:committed123 -->
+<!-- /agent:exchange -->
+###
+
+<!--
+old parked note
+-->
+""".trimStart()
+        val editor = """
+<!-- agent:exchange patch=append -->
+### Re: topic — codex (HEAD)
+Answer.
+<!-- agent:boundary:stale9999 -->
+<!-- /agent:exchange -->
+###
+
+<!--
+edited parked note
+-->
+""".trimStart()
+
+        assertFalse(shouldPreferCommittedDiskContentForRepositionUtil(editor, disk))
+    }
+
+    @Test
+    fun `does not prefer disk content when markdown tail differs outside exchange`() {
+        val disk = """
+<!-- agent:exchange patch=append -->
+### Re: topic — gpt-5
+Answer.
+<!-- agent:boundary:committed123 -->
+<!-- /agent:exchange -->
+
+## Notes
+
+old note
+""".trimStart()
+        val editor = """
+<!-- agent:exchange patch=append -->
+### Re: topic — codex (HEAD)
+Answer.
+<!-- agent:boundary:stale9999 -->
+<!-- /agent:exchange -->
+
+## Notes
+
+edited note
 """.trimStart()
 
         assertFalse(shouldPreferCommittedDiskContentForRepositionUtil(editor, disk))

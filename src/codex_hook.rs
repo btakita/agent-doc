@@ -487,11 +487,11 @@ fn resolve_agent_doc_path(prompt: &str, cwd: &Path) -> Option<PathBuf> {
 fn parse_agent_doc_invocation_line(line: &str) -> Option<&str> {
     let tokens: Vec<&str> = line.split_whitespace().collect();
     match tokens.as_slice() {
-        ["agent-doc", file] | ["/agent-doc", file] => Some(*file),
-        ["agent-doc", "claim", file] | ["/agent-doc", "claim", file] => Some(*file),
-        ["agent-doc", "compact", file] | ["/agent-doc", "compact", file] => Some(*file),
-        ["agent-doc", "compact", "exchange", file]
-        | ["/agent-doc", "compact", "exchange", file] => Some(*file),
+        ["agent-doc", "claim", file, ..] | ["/agent-doc", "claim", file, ..] => Some(*file),
+        ["agent-doc", "compact", "exchange", file, ..]
+        | ["/agent-doc", "compact", "exchange", file, ..] => Some(*file),
+        ["agent-doc", "compact", file, ..] | ["/agent-doc", "compact", file, ..] => Some(*file),
+        ["agent-doc", file, ..] | ["/agent-doc", file, ..] => Some(*file),
         _ => None,
     }
 }
@@ -823,6 +823,40 @@ mod tests {
     }
 
     #[test]
+    fn user_prompt_submit_tracks_same_line_agent_doc_body() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: format!("agent-doc {} #code-review", doc.display()),
+        })
+        .unwrap();
+
+        let root = project_root_for(dir.path()).unwrap();
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(PathBuf::from(&state.doc_path), doc);
+        assert_eq!(
+            state.last_prompt,
+            format!("agent-doc {} #code-review", doc.display())
+        );
+
+        let _lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("CODEX_THREAD_ID").ok();
+        unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
+        let loaded = crate::harness_prompt::prompt_body_for_file(&doc).unwrap();
+        if let Some(value) = prev {
+            unsafe { std::env::set_var("CODEX_THREAD_ID", value) };
+        } else {
+            unsafe { std::env::remove_var("CODEX_THREAD_ID") };
+        }
+
+        assert_eq!(loaded, Some("#code-review".to_string()));
+    }
+
+    #[test]
     fn resolve_agent_doc_path_prefers_real_invocation_after_instruction_preamble() {
         let dir = setup_project();
         let doc = write_doc(&dir);
@@ -840,6 +874,17 @@ agent-doc {}\n",
             dir.path().display(),
             doc.display()
         );
+
+        let resolved = resolve_agent_doc_path(&prompt, dir.path()).expect("doc path");
+
+        assert_eq!(resolved, doc);
+    }
+
+    #[test]
+    fn resolve_agent_doc_path_accepts_session_invocation_with_trailing_body() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let prompt = format!("agent-doc {} #agent-doc-bug", doc.display());
 
         let resolved = resolve_agent_doc_path(&prompt, dir.path()).expect("doc path");
 

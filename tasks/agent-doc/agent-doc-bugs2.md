@@ -34,7 +34,32 @@ Active backlog:
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
 - 2 more active item(s)
-<!-- agent:boundary:9d726ed3 -->
+❯ do [#commenttail]. spec-test-build-install-commit-push
+### Re: commenttail — gpt-5
+
+Implemented `#commenttail`.
+
+What changed:
+- `src/agent-doc` commit `fdcf2cc` tightens explicit-baseline closeout snapshot selection so concurrent non-`agent:exchange` edits, including the comment tail below exchange, remain visible but stay outside the assistant closeout commit.
+- JetBrains reposition now refuses to prefer committed disk content when any bytes outside `agent:exchange` differ, so comment/markdown tails cannot be clobbered by stale disk text during boundary cleanup.
+- Added Rust and JetBrains regressions for the comment-tail shape, plus the closeout spec rule that non-component edits are preserved outside assistant-response ownership.
+- Bumped the JetBrains plugin patch version to `0.2.100` and built signed/unsigned plugin zips.
+- Parent repo commit `bcc66eba9` records the `src/agent-doc` pointer and completed plan `tasks/agent-doc/plan-comment-tail-edit-loss.md`.
+
+Verification completed:
+- `cargo test --test finalize_integration finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted`
+- `cargo test explicit_baseline_preserves_concurrent_comment_tail_for_next_cycle`
+- `./gradlew test --tests com.github.btakita.agentdoc.RepositionBoundaryTest`
+- `make bump-plugin`
+- `make check`
+- `./gradlew test buildPlugin signPlugin`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Pushed:
+- `btakita/agent-doc` `20260422/codex-agent-backend`: `fdcf2cc`
+- `btakita/agent-loop` `main`: `bcc66eba9`
+<!-- agent:boundary:ae718d93 -->
 <!-- /agent:exchange -->
 ###
 
@@ -51,7 +76,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#commenttail] Preserve user edits inside the plain HTML comment directly below `agent:exchange` during closeout; plan: tasks/agent-doc/plan-comment-tail-edit-loss.md
 - [ ] [#tmuxcoord] [recommended] Investigate tsift.md three-pane agent-doc tmux state and decide whether the fix belongs in tmux-router pane reconciliation, session ownership, or a coordinator daemon/actor model.
 - [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.

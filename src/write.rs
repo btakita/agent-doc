@@ -1394,6 +1394,13 @@ fn precommit_pending_done_check(file: &Path) -> Result<()> {
     }
 
     let response_text = crate::session_check::response_text_for_guards(&capture.response_body);
+    let malformed = crate::session_check::malformed_tracked_item_refs(file, Some(&response_text))?;
+    if !malformed.is_empty() {
+        anyhow::bail!(
+            "[finalize] pre-commit gate: {}",
+            crate::session_check::malformed_tracked_item_message(&malformed)
+        );
+    }
     let missing = crate::session_check::detect_missing_pending_done_ids(
         file,
         &response_text,
@@ -1443,6 +1450,13 @@ fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFl
     }
 
     let response_text = crate::session_check::response_text_for_guards(response_body);
+    let malformed = crate::session_check::malformed_tracked_item_refs(file, Some(&response_text))?;
+    if !malformed.is_empty() {
+        anyhow::bail!(
+            "[finalize] pre-write gate: {}",
+            crate::session_check::malformed_tracked_item_message(&malformed)
+        );
+    }
     let missing = crate::session_check::detect_missing_pending_done_ids(
         file,
         &response_text,

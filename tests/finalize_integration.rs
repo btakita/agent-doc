@@ -477,6 +477,38 @@ fn finalize_blocks_session_closeout_when_completed_pending_lacks_pending_done() 
 }
 
 #[test]
+fn finalize_fails_before_write_when_completed_pending_line_is_malformed() {
+    let (tmp, doc) = setup_session_template_doc();
+    insert_pending_item(&doc, "_- [ ] [#pcops] Project controller ops\n");
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["finalize", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #pcops — gpt-5\nImplemented #pcops.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("[finalize] pre-write gate"))
+        .stderr(predicates::str::contains(
+            "malformed tracked checklist item",
+        ))
+        .stderr(predicates::str::contains("#pcops"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("### Re: #pcops"),
+        "strict malformed-item rejection should leave the response out of the working tree"
+    );
+    let head_text = head_blob(tmp.path());
+    assert!(
+        !head_text.contains("### Re: #pcops"),
+        "HEAD must not contain a response when the malformed-item pre-write gate blocks closeout"
+    );
+}
+
+#[test]
 fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
     let (tmp, doc) = setup_session_template_doc();
     insert_pending_item(

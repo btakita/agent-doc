@@ -68,6 +68,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - When `--baseline-file` points at a missing hash-keyed preflight baseline because the session document was moved after preflight, closeout must retry the current document hash's migrated baseline before failing. This preserves the explicit baseline contract across `git mv` / rename migration.
 - Empty normalization-only template payloads are invalid; the response must contain real response-body proof.
 - The same pre-write pending-capture, backlog-required, and pending-done gates apply here before the document mutates.
+- If a response appears to complete a tracked backlog/icebox item whose live line has a malformed checklist prefix, strict closeout must fail before writing the response. A damaged line such as `_- [ ] [#id] ...` is document corruption, not proof that the item is absent or complete.
 - A bare `compact exchange` request blocks ordinary finalize/write closeout and must route through `agent-doc compact <FILE> --commit` instead.
 
 ## repair
@@ -108,4 +109,5 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Must fail closed when the repaired tail would still include a bare prompt target or typed-component drift.
 - Optional closeout sidecars such as cycle-state, capture, startup-miss, and ops-log files are advisory; if one disappears between discovery and read, session-check treats it as absent state instead of surfacing a transient `ENOENT`.
 - Runs the pending-capture, pending-done, backlog-shadow, backlog-replay, completed-item reap, and snapshot-vs-HEAD closeout guards after a committed cycle.
+- Fails closed when a live backlog/icebox line looks like a tracked checklist item with an id but is not parseable as a canonical pending item. This prevents malformed prefixes from hiding an open item from the pending-done guard.
 - The Codex/direct-exec harness path is expected to run this immediately after `finalize` or strict `write --commit`, and must fail closed if the check reports an open or bypassed cycle.

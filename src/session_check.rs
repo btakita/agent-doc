@@ -134,6 +134,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
+        match check_malformed_tracked_item_guard(file)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
         match check_backlog_replay_guard(file)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
@@ -365,6 +373,49 @@ fn format_shadow_refs(items: &[crate::pending::ShadowPendingItem]) -> String {
         .map(crate::pending::ShadowPendingItem::reference)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn check_malformed_tracked_item_guard(file: &Path) -> Result<GuardResult> {
+    let refs = malformed_tracked_item_refs(file, None)?;
+    if refs.is_empty() {
+        return Ok(GuardResult::None);
+    }
+
+    Ok(GuardResult::Error(malformed_tracked_item_message(&refs)))
+}
+
+pub(crate) fn malformed_tracked_item_refs(
+    file: &Path,
+    completed_by_response: Option<&str>,
+) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(file)?;
+    let Ok(components) = crate::component::parse(&content) else {
+        return Ok(Vec::new());
+    };
+    let malformed = components
+        .into_iter()
+        .filter(|component| is_tracked_work_component(&component.name))
+        .flat_map(|component| {
+            let name = component.name.clone();
+            crate::pending::detect_malformed_item_lines(component.content(&content))
+                .into_iter()
+                .map(move |item| (name.clone(), item))
+        })
+        .filter(|(_, item)| {
+            completed_by_response
+                .map(|response| response_clearly_completes_pending_id(response, &item.id))
+                .unwrap_or(true)
+        })
+        .map(|(name, item)| format!("{} {}", name, item.reference()))
+        .collect::<Vec<_>>();
+    Ok(malformed)
+}
+
+pub(crate) fn malformed_tracked_item_message(refs: &[String]) -> String {
+    format!(
+        "[session-check] INTERRUPTED: malformed tracked checklist item(s) in live backlog/icebox: {}. Repair the checklist prefix before closeout so pending guards can prove the item state",
+        refs.join("; ")
+    )
 }
 
 fn check_backlog_replay_guard(file: &Path) -> Result<GuardResult> {
@@ -3302,6 +3353,29 @@ Body\n\
                 assert!(message.contains("pending_done_guard = \"warn\""));
             }
             other => panic!("expected default strict-mode failure for session doc, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_check_blocks_malformed_tracked_item_before_done_guard() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: #pcops — gpt-5\n\nImplemented #pcops.\nVerification:\n- cargo test\n",
+            false,
+            Some("_- [ ] [#pcops] Project controller ops\n"),
+            &[],
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        match report.status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("malformed tracked checklist item"));
+                assert!(message.contains("#pcops"));
+                assert!(message.contains("_- [ ] [#pcops]"));
+            }
+            other => panic!("expected malformed tracked-item failure, got {other:?}"),
         }
     }
 

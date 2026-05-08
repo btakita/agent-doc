@@ -385,6 +385,69 @@ pub struct ShadowPendingReport {
     pub shadow_only: Vec<ShadowPendingItem>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MalformedPendingItemLine {
+    pub id: String,
+    pub line: usize,
+    pub text: String,
+}
+
+impl MalformedPendingItemLine {
+    pub fn reference(&self) -> String {
+        format!("#{} (line {}): {}", self.id, self.line, self.text)
+    }
+}
+
+/// Find lines that look like tracked checklist items but are not parseable as
+/// live pending items. These lines are dangerous during closeout because guards
+/// that operate on parsed items would otherwise treat the matching id as absent.
+pub fn detect_malformed_item_lines(body: &str) -> Vec<MalformedPendingItemLine> {
+    body.lines()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            if parse_item_line(line).is_some() {
+                return None;
+            }
+            let trimmed = line.trim();
+            let (id, id_start) = find_valid_hash_id(trimmed)?;
+            let prefix = &trimmed[..id_start];
+            if !prefix_contains_task_checkbox(prefix) {
+                return None;
+            }
+            Some(MalformedPendingItemLine {
+                id: id.to_string(),
+                line: idx + 1,
+                text: trimmed.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn find_valid_hash_id(line: &str) -> Option<(&str, usize)> {
+    let start = line.find("[#")?;
+    let after = &line[start + 2..];
+    let close = after.find(']')?;
+    let id = &after[..close];
+    is_valid_pending_id(id).then_some((id, start))
+}
+
+fn prefix_contains_task_checkbox(prefix: &str) -> bool {
+    prefix.contains("[ ]")
+        || prefix.contains("[/]")
+        || prefix.contains("[x]")
+        || prefix.contains("[X]")
+        || prefix
+            .split("[/")
+            .nth(1)
+            .and_then(|tail| tail.split(']').next())
+            .is_some_and(|gate| {
+                !gate.is_empty()
+                    && gate
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            })
+}
+
 /// Parse the pending component body into (prelude, items, postlude).
 ///
 /// - Prelude: leading non-list lines (whitespace, non tracked parent lines).
@@ -1722,6 +1785,22 @@ mod tests {
         assert_eq!(items[0].text, "first");
         assert_eq!(items[1].id, "b1c4");
         assert_eq!(items[1].state, PendingState::Done);
+    }
+
+    #[test]
+    fn detects_malformed_tracked_checklist_lines() {
+        let body = concat!(
+            "_- [ ] [#pcops] damaged prefix\n",
+            "- [ ] [#keep1] valid item\n",
+            "plain note mentioning [#note1]\n",
+        );
+
+        let malformed = detect_malformed_item_lines(body);
+
+        assert_eq!(malformed.len(), 1);
+        assert_eq!(malformed[0].id, "pcops");
+        assert_eq!(malformed[0].line, 1);
+        assert!(malformed[0].text.contains("damaged prefix"));
     }
 
     #[test]

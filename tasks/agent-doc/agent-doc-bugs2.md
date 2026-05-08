@@ -56,14 +56,37 @@ That also explains why it shows up when switching panes in the editor: editor au
 ### Re: comment-only drift — gpt-5
 
 A follow-up preflight still found no prompt-bearing document change after stripping comments. I am closing this as comment-only drift; the substantive sync-latency answer above remains the response for the user question.
-<!-- agent:boundary:0be2a132 -->
+### Re: prefix repair opt-in — gpt-5
+
+Yes. The recurring prefix loss was brittle opt-out behavior: after an agent response heading, post-commit repair treated an existing `❯ ` as enough evidence to reopen a prompt run inside agent prose. That meant one stale or misplaced prefix could keep making assistant text look like a user prompt.
+
+I changed the repair path to opt-in criteria. A line inside an agent response block is now eligible only when it is an explicit current normalization target, or when the line independently looks like a prompt, question, imperative, or soft request. A bare existing `❯ ` is not enough anymore.
+
+Implemented in `src/agent-doc/src/diff.rs`, `src/agent-doc/src/git.rs`, and `src/agent-doc/src/write.rs`; the invariant is documented in `src/agent-doc/specs/07-closeout-commands.md`.
+
+Verification passed:
+- `cargo test -p agent-doc prefix`
+- `cargo test -p agent-doc duplicate_missing_lines`
+- `cargo test`
+- `cargo build`
+- `cargo install --path . --force`
+- `make check` from `src/agent-doc`
+
+Root `make check` exits immediately because the root Makefile references a missing `instruction-files` directory; the crate-local suite completed successfully.
+
+Commit / push:
+- `src/agent-doc` commit `fdc9177` pushed to `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:3bba7671 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
-`❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is 
+`❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?
+spec-test-build-install-commit-push
+---
+If I type in text into a html-style comment, agent-doc thinks the prompt is being extended. Please ensure the document is parsed so html-style comments are properly recognized. 
 ---
 Comments after a run starts are deleted by agent-doc.
 ---

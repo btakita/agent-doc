@@ -32,7 +32,30 @@ prompt_presets:
 Active backlog:
 - [ ] [#ctrlsock] Implement tasks/agent-doc/plan-controller-stalled-client-start-hang.md: make project controller RPCs robust to stalled clients so a stuck sync/no-autostart or closed prior pane cannot make agent-doc start/session status hang; fail closed with stale-pane diagnostics instead.
 - [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
-<!-- agent:boundary:e33c50e8 -->
+❯ do [#ctrlsock]. spec-test-build-install-commit-push
+### Re: #ctrlsock — gpt-5
+
+Implemented and pushed `#ctrlsock`.
+
+Changed:
+- controller clients now set bounded response timeouts and return fail-closed timeout errors instead of blocking indefinitely
+- controller server accepts clients nonblocking and serves each accepted socket independently, with idle client read timeouts
+- `status --ensure` now uses an explicit readiness helper and drops the idle stream before issuing the status RPC
+- added controller regressions for a no-response peer and an idle accepted client that must not block a later status request
+- updated README, SPEC, command spec, session actor contract, and VERSIONS
+
+Verification:
+- `cargo test -p agent-doc project_controller -- --nocapture`
+- `cargo test -p agent-doc start -- --nocapture`
+- `RUST_TEST_THREADS=1 cargo test -p agent-doc sync -- --nocapture`
+- `cargo build -p agent-doc`
+- `cargo install --path . --force`
+- `make check`
+
+Commit / push:
+- `src/agent-doc`: `67ca478 fix: bound controller IPC against stalled clients`, pushed to `origin/20260422/codex-agent-backend`
+- superproject: `dbe259d53 agent-doc: bound controller IPC against stalls`, pushed to `origin/main`
+<!-- agent:boundary:a1440e4b -->
 <!-- /agent:exchange -->
 ###
 
@@ -50,7 +73,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#ctrlsock] Implement tasks/agent-doc/plan-controller-stalled-client-start-hang.md: make project controller RPCs robust to stalled clients so a stuck sync/no-autostart or closed prior pane cannot make agent-doc start/session status hang; fail closed with stale-pane diagnostics instead.
 - [ ] [#closeguard] Implement tasks/agent-doc/plan-closeout-active-prompt-guard.md: fail closeout when a committed response is followed by a newer unresolved prompt-bearing exchange line or when the matching pending item has a malformed checklist prefix.
 <!-- /agent:backlog -->
 
@@ -70,6 +92,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#pcroutes] Implement Phase D from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: convert start, route, and sync to read/dispatch through controller authority and keep tmux-router as layout reconciliation only.
 - 2026-05-08 [#pcops] Implement Phase E from tasks/agent-doc/plan-project-controller-session-actor-mvp.md: wire status/history/attach/restart/clear/doctor through controller clients, keep destructive recovery behind doctor --repair, and expose stage-specific editor diagnostics.
 - 2026-05-08 [#ctrlreload] [recommended] Add controller binary-generation/version invalidation so agent-doc restarts a stale project controller after local install/update instead of surfacing unknown controller command errors for newly-added controller RPCs.
+- 2026-05-08 [#ctrlsock] Implement tasks/agent-doc/plan-controller-stalled-client-start-hang.md: make project controller RPCs robust to stalled clients so a stuck sync/no-autostart or closed prior pane cannot make agent-doc start/session status hang; fail closed with stale-pane diagnostics instead.
 <!-- /agent:pending-done -->
 
 

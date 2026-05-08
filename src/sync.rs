@@ -171,6 +171,7 @@
 use anyhow::{Context, Result};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
@@ -187,6 +188,8 @@ const SYNC_PRUNE_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_OWNERSHIP_PROOF_BUDGET: Duration = Duration::from_millis(750);
 const SYNC_ROUTER_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
+const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
+const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 fn latency_budget_status(elapsed: Duration, budget: Duration) -> &'static str {
     if elapsed >= budget {
@@ -210,6 +213,54 @@ fn sync_latency_message(
         latency_budget_status(elapsed, budget),
         auto_start_mode.log_label()
     )
+}
+
+fn acquire_sync_lock(lock_path: &Path, wait_budget: Duration) -> Option<File> {
+    if let Some(parent) = lock_path.parent()
+        && let Err(err) = std::fs::create_dir_all(parent)
+    {
+        sync_log(&format!(
+            "sync lock unavailable — failed to create {}: {}",
+            parent.display(),
+            err
+        ));
+        return None;
+    }
+
+    let file = match OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path)
+    {
+        Ok(file) => file,
+        Err(err) => {
+            sync_log(&format!(
+                "sync lock unavailable — failed to open {}: {}",
+                lock_path.display(),
+                err
+            ));
+            return None;
+        }
+    };
+
+    let started = Instant::now();
+    loop {
+        use fs2::FileExt;
+        match file.try_lock_exclusive() {
+            Ok(()) => return Some(file),
+            Err(err) if started.elapsed() >= wait_budget => {
+                sync_log(&format!(
+                    "sync lock contention exceeded {}ms at {}: {}; proceeding without lock",
+                    wait_budget.as_millis(),
+                    lock_path.display(),
+                    err
+                ));
+                return None;
+            }
+            Err(_) => std::thread::sleep(SYNC_LOCK_POLL_INTERVAL),
+        }
+    }
 }
 
 fn log_sync_latency(
@@ -2317,32 +2368,10 @@ fn run_with_options(
     let sync_total_start = Instant::now();
 
     // Serialize sync calls via file lock. Concurrent syncs (from rapid tab switches)
-    // race against each other's stash operations, causing pane bouncing. A second sync
-    // that arrives while the first is running will block briefly then see the correct state.
+    // race against each other's stash operations, causing pane bouncing. Contention
+    // is bounded so a stuck prior editor sync cannot starve later selections forever.
     let lock_path = std::path::Path::new(".agent-doc/sync.lock");
-    if let Some(parent) = lock_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let lock_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(lock_path);
-    let _lock_guard = lock_file.as_ref().ok().map(|f| {
-        use fs2::FileExt;
-        // Try to acquire exclusive lock. If another sync holds it, wait up to 3s.
-        // On timeout, proceed anyway (better than blocking forever).
-        match f.try_lock_exclusive() {
-            Ok(()) => Some(()),
-            Err(_) => {
-                sync_log("sync lock contention — waiting for previous sync");
-                // Block for up to 3 seconds
-                let _ = f.lock_exclusive();
-                sync_log("sync lock acquired after wait");
-                Some(())
-            }
-        }
-    });
+    let _lock_guard = acquire_sync_lock(lock_path, SYNC_LOCK_WAIT_BUDGET);
 
     // Check for new build and clear stale caches
     check_build_stamp();
@@ -7132,6 +7161,35 @@ mod tests {
         );
         assert!(slow.contains("status=over_budget"), "{slow}");
         assert!(slow.contains("elapsed_ms=1000"), "{slow}");
+    }
+
+    #[test]
+    fn acquire_sync_lock_times_out_when_lock_is_held() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lock_path = tmp.path().join(".agent-doc/sync.lock");
+        std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+
+        let holder = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        fs2::FileExt::lock_exclusive(&holder).unwrap();
+
+        let start = Instant::now();
+        let acquired = acquire_sync_lock(&lock_path, Duration::from_millis(120));
+        let elapsed = start.elapsed();
+
+        fs2::FileExt::unlock(&holder).unwrap();
+        assert!(
+            acquired.is_none(),
+            "contended sync lock should time out instead of blocking"
+        );
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "sync lock timeout should be bounded, elapsed={elapsed:?}"
+        );
     }
 
     // --- File rename detection tests ---

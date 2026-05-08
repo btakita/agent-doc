@@ -5,6 +5,7 @@
 //! parsers/classifiers wherever possible.
 
 use anyhow::{Result, anyhow, bail};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,7 +14,35 @@ enum CyclePhase {
     PreflightStarted,
     ResponseCaptured,
     WriteApplied,
+    Interrupted(FaultPoint),
     Committed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum FaultPoint {
+    SnapshotSave,
+    FallbackPatchWrite,
+    IpcDelivery,
+    TemplateMerge,
+    WorkingTreeWrite,
+    IndexUpdate,
+    GitCommit,
+    PostCommitBoundaryReposition,
+    SessionCheck,
+}
+
+impl FaultPoint {
+    const ALL: [FaultPoint; 9] = [
+        FaultPoint::SnapshotSave,
+        FaultPoint::FallbackPatchWrite,
+        FaultPoint::IpcDelivery,
+        FaultPoint::TemplateMerge,
+        FaultPoint::WorkingTreeWrite,
+        FaultPoint::IndexUpdate,
+        FaultPoint::GitCommit,
+        FaultPoint::PostCommitBoundaryReposition,
+        FaultPoint::SessionCheck,
+    ];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,11 +51,14 @@ enum SimCommand {
     EditLaterPrompt,
     AddMalformedBacklogItem,
     CaptureResponse,
+    CaptureFallbackResponse,
     ApplyCapturedResponse,
     Commit,
     FailCommit,
     RepairBoundary,
     DuplicateVisibleResponse,
+    CrashAt(FaultPoint),
+    Recover,
 }
 
 #[derive(Debug, Default)]
@@ -36,6 +68,10 @@ struct Coverage {
     uncommitted_response_blocks: usize,
     duplicate_patchback_blocks: usize,
     boundary_repairs: usize,
+    fault_fail_closed: usize,
+    fault_recoveries: usize,
+    fault_noops: usize,
+    fault_points_hit: BTreeSet<FaultPoint>,
     commits: usize,
 }
 
@@ -55,6 +91,9 @@ impl Coverage {
         if message.contains("duplicate response patchback") {
             self.duplicate_patchback_blocks += 1;
         }
+        if message.contains("fault point") {
+            self.fault_fail_closed += 1;
+        }
     }
 
     fn merge(&mut self, other: Coverage) {
@@ -63,6 +102,10 @@ impl Coverage {
         self.uncommitted_response_blocks += other.uncommitted_response_blocks;
         self.duplicate_patchback_blocks += other.duplicate_patchback_blocks;
         self.boundary_repairs += other.boundary_repairs;
+        self.fault_fail_closed += other.fault_fail_closed;
+        self.fault_recoveries += other.fault_recoveries;
+        self.fault_noops += other.fault_noops;
+        self.fault_points_hit.extend(other.fault_points_hit);
         self.commits += other.commits;
     }
 }
@@ -75,6 +118,7 @@ struct SimWorld {
     snapshot: String,
     phase: CyclePhase,
     captured_response: Option<String>,
+    pending_fault: Option<FaultPoint>,
     next_prompt: usize,
     coverage: Coverage,
 }
@@ -89,6 +133,7 @@ impl SimWorld {
             doc,
             phase: CyclePhase::Idle,
             captured_response: None,
+            pending_fault: None,
             next_prompt: 1,
             coverage: Coverage::default(),
         }
@@ -98,16 +143,22 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(9) {
+            let command = match rng.next_usize(21) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
                 3 => SimCommand::CaptureResponse,
-                4 => SimCommand::ApplyCapturedResponse,
-                5 => SimCommand::Commit,
-                6 => SimCommand::FailCommit,
-                7 => SimCommand::RepairBoundary,
-                _ => SimCommand::DuplicateVisibleResponse,
+                4 => SimCommand::CaptureFallbackResponse,
+                5 => SimCommand::ApplyCapturedResponse,
+                6 => SimCommand::Commit,
+                7 => SimCommand::FailCommit,
+                8 => SimCommand::RepairBoundary,
+                9 => SimCommand::DuplicateVisibleResponse,
+                10..=18 => {
+                    let index = rng.next_usize(FaultPoint::ALL.len());
+                    SimCommand::CrashAt(FaultPoint::ALL[index])
+                }
+                _ => SimCommand::Recover,
             };
             world.apply(command)?;
             world.assert_structural_invariants()?;
@@ -147,8 +198,14 @@ impl SimWorld {
                 self.captured_response = Some(response_patch("sim closeout"));
                 self.phase = CyclePhase::ResponseCaptured;
             }
+            SimCommand::CaptureFallbackResponse => {
+                self.captured_response = Some(fallback_response("sim closeout"));
+                self.phase = CyclePhase::ResponseCaptured;
+            }
             SimCommand::ApplyCapturedResponse => {
-                self.apply_captured_response()?;
+                if let Err(err) = self.apply_captured_response() {
+                    self.coverage.record_block(&err.to_string());
+                }
             }
             SimCommand::Commit => match self.try_commit() {
                 Ok(()) => self.coverage.commits += 1,
@@ -174,32 +231,134 @@ impl SimWorld {
                 let duplicate = "### Re: sim closeout — gpt-5\n\nDuplicate visible response.\n";
                 self.append_to_exchange(duplicate)?;
             }
+            SimCommand::CrashAt(fault) => {
+                self.pending_fault = Some(fault);
+                self.coverage.fault_points_hit.insert(fault);
+            }
+            SimCommand::Recover => {
+                if let Err(err) = self.recover_after_fault() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
         }
         Ok(())
     }
 
     fn apply_captured_response(&mut self) -> Result<()> {
+        if self.take_fault(FaultPoint::TemplateMerge) {
+            self.phase = CyclePhase::Interrupted(FaultPoint::TemplateMerge);
+            bail!(
+                "fault point {:?} interrupted template merge; seed={} trace={:?}",
+                FaultPoint::TemplateMerge,
+                self.seed,
+                self.trace
+            );
+        }
         let response = self.captured_response.clone().unwrap_or_default();
         if response.is_empty() {
             return Ok(());
         }
         let (patches, unmatched) = crate::template::parse_patches(&response)?;
-        self.doc =
+        let next_doc =
             crate::template::apply_patches(&self.doc, &patches, &unmatched, Path::new("sim.md"))?;
+        if patches.is_empty() && self.take_fault(FaultPoint::FallbackPatchWrite) {
+            self.phase = CyclePhase::Interrupted(FaultPoint::FallbackPatchWrite);
+            bail!(
+                "fault point {:?} interrupted fallback patch write; seed={} trace={:?}",
+                FaultPoint::FallbackPatchWrite,
+                self.seed,
+                self.trace
+            );
+        }
+        if self.take_fault(FaultPoint::WorkingTreeWrite) {
+            self.phase = CyclePhase::Interrupted(FaultPoint::WorkingTreeWrite);
+            bail!(
+                "fault point {:?} interrupted working-tree write; seed={} trace={:?}",
+                FaultPoint::WorkingTreeWrite,
+                self.seed,
+                self.trace
+            );
+        }
+        self.doc = next_doc;
         self.phase = CyclePhase::WriteApplied;
         Ok(())
     }
 
     fn try_commit(&mut self) -> Result<()> {
-        self.strict_closeout_invariants()?;
+        self.pre_commit_invariants()?;
+        if self.take_fault(FaultPoint::IndexUpdate) {
+            self.phase = CyclePhase::Interrupted(FaultPoint::IndexUpdate);
+            bail!(
+                "fault point {:?} interrupted index update; seed={} trace={:?}",
+                FaultPoint::IndexUpdate,
+                self.seed,
+                self.trace
+            );
+        }
+        if self.take_fault(FaultPoint::GitCommit) {
+            self.phase = CyclePhase::Interrupted(FaultPoint::GitCommit);
+            bail!(
+                "fault point {:?} interrupted git commit; seed={} trace={:?}",
+                FaultPoint::GitCommit,
+                self.seed,
+                self.trace
+            );
+        }
         self.doc =
             crate::template::reposition_boundary_to_end_clean_with_id(&self.doc, Some("committed"));
+        if self.take_fault(FaultPoint::PostCommitBoundaryReposition) {
+            self.phase = CyclePhase::Interrupted(FaultPoint::PostCommitBoundaryReposition);
+            bail!(
+                "fault point {:?} interrupted post-commit boundary reposition; seed={} trace={:?}",
+                FaultPoint::PostCommitBoundaryReposition,
+                self.seed,
+                self.trace
+            );
+        }
+        if self.take_fault(FaultPoint::SnapshotSave) {
+            self.phase = CyclePhase::Interrupted(FaultPoint::SnapshotSave);
+            bail!(
+                "fault point {:?} interrupted snapshot save; seed={} trace={:?}",
+                FaultPoint::SnapshotSave,
+                self.seed,
+                self.trace
+            );
+        }
         self.snapshot = self.doc.clone();
+        if self.take_fault(FaultPoint::SessionCheck) {
+            self.phase = CyclePhase::Interrupted(FaultPoint::SessionCheck);
+            bail!(
+                "fault point {:?} interrupted session-check; seed={} trace={:?}",
+                FaultPoint::SessionCheck,
+                self.seed,
+                self.trace
+            );
+        }
+        if self.take_fault(FaultPoint::IpcDelivery) {
+            self.coverage.fault_noops += 1;
+        }
         self.phase = CyclePhase::Committed;
         Ok(())
     }
 
     fn strict_closeout_invariants(&self) -> Result<()> {
+        self.closeout_invariants(true)
+    }
+
+    fn pre_commit_invariants(&self) -> Result<()> {
+        self.closeout_invariants(false)
+    }
+
+    fn closeout_invariants(&self, require_committed: bool) -> Result<()> {
+        if let CyclePhase::Interrupted(fault) = self.phase {
+            bail!(
+                "fault point {:?} left closeout interrupted; seed={} trace={:?}",
+                fault,
+                self.seed,
+                self.trace
+            );
+        }
+
         match self.phase {
             CyclePhase::ResponseCaptured => {
                 bail!(
@@ -259,7 +418,7 @@ impl SimWorld {
             }
         }
 
-        if matches!(self.phase, CyclePhase::WriteApplied) {
+        if require_committed && matches!(self.phase, CyclePhase::WriteApplied) {
             bail!(
                 "response write applied but not committed; seed={} trace={:?}",
                 self.seed,
@@ -267,6 +426,56 @@ impl SimWorld {
             );
         }
         Ok(())
+    }
+
+    fn recover_after_fault(&mut self) -> Result<()> {
+        let fault = match self.phase {
+            CyclePhase::Interrupted(fault) => fault,
+            _ => {
+                if self.pending_fault.take().is_some() {
+                    self.coverage.fault_noops += 1;
+                }
+                return Ok(());
+            }
+        };
+
+        match fault {
+            FaultPoint::TemplateMerge
+            | FaultPoint::FallbackPatchWrite
+            | FaultPoint::WorkingTreeWrite => {
+                self.phase = CyclePhase::ResponseCaptured;
+                self.apply_captured_response()?;
+                self.try_commit()?;
+            }
+            FaultPoint::IndexUpdate
+            | FaultPoint::GitCommit
+            | FaultPoint::PostCommitBoundaryReposition => {
+                self.phase = CyclePhase::WriteApplied;
+                self.try_commit()?;
+            }
+            FaultPoint::SnapshotSave => {
+                self.snapshot = self.doc.clone();
+                self.phase = CyclePhase::Committed;
+            }
+            FaultPoint::SessionCheck => {
+                self.phase = CyclePhase::Committed;
+            }
+            FaultPoint::IpcDelivery => {
+                self.phase = CyclePhase::Committed;
+                self.coverage.fault_noops += 1;
+            }
+        }
+        self.coverage.fault_recoveries += 1;
+        Ok(())
+    }
+
+    fn take_fault(&mut self, fault: FaultPoint) -> bool {
+        if self.pending_fault == Some(fault) {
+            self.pending_fault = None;
+            true
+        } else {
+            false
+        }
     }
 
     fn assert_structural_invariants(&self) -> Result<()> {
@@ -359,6 +568,10 @@ fn response_patch(topic: &str) -> String {
     )
 }
 
+fn fallback_response(topic: &str) -> String {
+    format!("### Re: {topic} — gpt-5\n\nImplemented and verified through fallback.\n")
+}
+
 #[test]
 fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
     let mut coverage = Coverage::default();
@@ -392,6 +605,23 @@ fn closeout_sim_fixed_seed_corpus_exercises_recent_failure_classes() {
     assert!(
         coverage.duplicate_patchback_blocks > 0,
         "seed corpus must exercise duplicate visible response blocks"
+    );
+    assert!(
+        coverage.fault_fail_closed > 0,
+        "seed corpus must exercise fault-triggered fail-closed interruptions"
+    );
+    assert!(
+        coverage.fault_recoveries > 0,
+        "seed corpus must exercise deterministic fault recovery"
+    );
+    assert!(
+        coverage.fault_noops > 0,
+        "seed corpus must exercise invariant-preserving fault no-ops"
+    );
+    assert_eq!(
+        coverage.fault_points_hit.len(),
+        FaultPoint::ALL.len(),
+        "seed corpus must inject every named closeout fault point"
     );
 }
 
@@ -452,4 +682,54 @@ fn closeout_sim_collapses_boundary_drift_to_single_marker() {
     world.apply(SimCommand::RepairBoundary).unwrap();
     world.assert_structural_invariants().unwrap();
     assert!(world.doc.contains("<!-- agent:boundary:sim-boundary -->"));
+}
+
+#[test]
+fn closeout_sim_fault_points_fail_closed_then_recover() {
+    for (index, fault) in FaultPoint::ALL.into_iter().enumerate() {
+        let mut world = SimWorld::new(1_000 + index as u64);
+        match fault {
+            FaultPoint::TemplateMerge | FaultPoint::WorkingTreeWrite => {
+                world.apply(SimCommand::CaptureResponse).unwrap();
+                world.apply(SimCommand::CrashAt(fault)).unwrap();
+                world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+            }
+            FaultPoint::FallbackPatchWrite => {
+                world.apply(SimCommand::CaptureFallbackResponse).unwrap();
+                world.apply(SimCommand::CrashAt(fault)).unwrap();
+                world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+            }
+            _ => {
+                world.apply(SimCommand::CaptureResponse).unwrap();
+                world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+                world.apply(SimCommand::CrashAt(fault)).unwrap();
+                world.apply(SimCommand::Commit).unwrap();
+            }
+        }
+
+        if fault == FaultPoint::IpcDelivery {
+            assert_eq!(world.phase, CyclePhase::Committed);
+            assert!(
+                world.coverage.fault_noops > 0,
+                "IPC delivery faults should be invariant-preserving no-ops"
+            );
+        } else {
+            assert!(
+                matches!(world.phase, CyclePhase::Interrupted(observed) if observed == fault),
+                "fault {fault:?} should fail closed before recovery; phase={:?}",
+                world.phase
+            );
+            assert!(
+                world.coverage.fault_fail_closed > 0,
+                "fault {fault:?} should be recorded as a fail-closed interruption"
+            );
+            world.apply(SimCommand::Recover).unwrap();
+            assert_eq!(
+                world.phase,
+                CyclePhase::Committed,
+                "fault {fault:?} should recover to a committed closeout"
+            );
+            assert_eq!(world.snapshot, world.doc);
+        }
+    }
 }

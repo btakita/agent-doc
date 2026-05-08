@@ -25,17 +25,39 @@ EditPrompt
 EditLaterPrompt
 AddMalformedBacklogItem
 CaptureResponse
+CaptureFallbackResponse
 ApplyCapturedResponse
 Commit
 FailCommit
 RepairBoundary
 DuplicateVisibleResponse
+CrashAt(FaultPoint)
+Recover
 ```
 
 Every generated failure must include a stable seed and command trace. Fixed
 seed corpora run in normal `cargo test`; wider randomized or real-integration
 stress may live in slower `make check` or local-only loops after runtime budgets
 are known.
+
+The closeout simulator also supports named Phase 3 fault points:
+
+- `SnapshotSave`
+- `FallbackPatchWrite`
+- `IpcDelivery`
+- `TemplateMerge`
+- `WorkingTreeWrite`
+- `IndexUpdate`
+- `GitCommit`
+- `PostCommitBoundaryReposition`
+- `SessionCheck`
+
+Fault outcomes are deterministic. Authoritative write/commit/session-check
+faults fail closed with an interrupted phase and a trace; `Recover` must either
+complete the closeout and align the snapshot with the committed document or
+surface the remaining invariant violation. Non-authoritative IPC delivery
+faults are modeled as invariant-preserving no-ops after the document and
+snapshot are already committed.
 
 Closeout invariants currently exercised by the simulator:
 
@@ -45,6 +67,8 @@ Closeout invariants currently exercised by the simulator:
   crosses the commit boundary.
 - Duplicate visible response patchbacks are rejected before commit.
 - Boundary cleanup leaves at most one live exchange boundary marker.
+- Each named closeout fault point has an explicit fail-closed, recovery, or
+  no-op outcome.
 
 When a generated seed exposes a production bug, reduce the trace and promote it
 to the fixed corpus before or with the bug fix.

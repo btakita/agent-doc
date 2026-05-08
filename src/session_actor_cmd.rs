@@ -81,6 +81,7 @@ struct SessionContext {
     session_id: String,
     harness: String,
     actor_record: Option<ActorRecord>,
+    operator_status: crate::project_controller::SessionOperatorStatus,
     registry_entry: Option<SessionEntry>,
     startup_miss: Option<StartupMiss>,
     log_status: Option<SessionLogStatus>,
@@ -96,6 +97,13 @@ pub fn status(file: &Path) -> Result<()> {
 
 pub fn history(file: &Path) -> Result<()> {
     let ctx = build_context(file)?;
+    if !ctx.operator_status.transitions.is_empty() {
+        for transition in &ctx.operator_status.transitions {
+            println!("{}", format_controller_transition(transition));
+        }
+        return Ok(());
+    }
+
     let path = session_log_path(&ctx.base_dir, &ctx.session_id);
     let Some(content) = crate::fs_util::read_optional_text(&path)? else {
         println!(
@@ -146,7 +154,16 @@ pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
         .with_context(|| format!("failed to read window for pane {pane_id}"))?;
     let pid = crate::sessions::pane_pid(&pane_id)
         .with_context(|| format!("failed to read pane PID for {pane_id}"))?;
-    crate::sessions::attach_with_pid_and_cwd_in(
+    crate::project_controller::attach_pane(
+        &ctx.base_dir,
+        crate::project_controller::AttachPaneRequest {
+            file: ctx.canonical_file.clone(),
+            session_id: ctx.session_id.clone(),
+            pane_id: pane_id.clone(),
+            window_id: window.clone(),
+        },
+    )?;
+    crate::sessions::attach_projection_only_in(
         &ctx.base_dir,
         &ctx.session_id,
         &pane_id,
@@ -172,6 +189,11 @@ pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
 
 pub fn restart(file: &Path, mode: RestartMode) -> Result<()> {
     let ctx = build_context(file)?;
+    let authorization = crate::project_controller::authorize_operator_command(
+        &ctx.base_dir,
+        &ctx.canonical_file,
+        "session_restart",
+    )?;
     ensure_supervisor_socket(&ctx)?;
     let response = crate::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
@@ -194,15 +216,21 @@ pub fn restart(file: &Path, mode: RestartMode) -> Result<()> {
         );
     }
     println!(
-        "Requested {} restart for {}.",
+        "Requested {} restart for {} (controller stage {}).",
         mode.as_str(),
-        ctx.canonical_file.display()
+        ctx.canonical_file.display(),
+        authorization.accepted_stage
     );
     Ok(())
 }
 
 pub fn clear(file: &Path) -> Result<()> {
     let ctx = build_context(file)?;
+    let authorization = crate::project_controller::authorize_operator_command(
+        &ctx.base_dir,
+        &ctx.canonical_file,
+        "session_clear",
+    )?;
     ensure_supervisor_socket(&ctx)?;
     let tmux = Tmux::default_server();
     if let Some((pane, pane_source)) = resolve_direct_submit_pane(&ctx, &tmux) {
@@ -255,8 +283,9 @@ pub fn clear(file: &Path) -> Result<()> {
         )?;
     }
     println!(
-        "Cleared session context for {}.",
-        ctx.canonical_file.display()
+        "Cleared session context for {} (controller stage {}).",
+        ctx.canonical_file.display(),
+        authorization.accepted_stage
     );
     Ok(())
 }
@@ -373,8 +402,9 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         &base_dir,
         &canonical_file.to_string_lossy(),
     );
-    let actor_record =
-        crate::session_actor::load_record_in(&base_dir, &canonical_file.to_string_lossy())?;
+    let operator_status =
+        crate::project_controller::session_operator_status(&base_dir, &canonical_file)?;
+    let actor_record = operator_status.record.clone();
     let registry_entry = lookup_registry_entry(&base_dir, &session_id, &canonical_file)?;
     let startup_miss = crate::startup_miss::load(&canonical_file)?;
     let log_status = crate::startup_miss::session_log_status(&canonical_file, &session_id)?;
@@ -386,6 +416,7 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         session_id,
         harness,
         actor_record,
+        operator_status,
         registry_entry,
         startup_miss,
         log_status,
@@ -531,6 +562,21 @@ fn parse_actor_state(raw: &str) -> Option<ActorState> {
     }
 }
 
+fn format_controller_transition(
+    transition: &crate::project_controller::ActorTransitionStatus,
+) -> String {
+    crate::session_actor::format_transition_event(crate::session_actor::OwnershipTransitionEvent {
+        caller: &transition.caller,
+        reason: &transition.reason,
+        prior_generation: transition.prior_generation,
+        new_generation: transition.new_generation,
+        old_pane: transition.old_pane.as_deref(),
+        new_pane: &transition.new_pane,
+        old_window: transition.old_window.as_deref(),
+        new_window: transition.new_window.as_deref(),
+    })
+}
+
 fn print_status_summary(ctx: &SessionContext) {
     println!("document: {}", ctx.canonical_file.display());
     println!("session_id: {}", ctx.session_id);
@@ -624,6 +670,45 @@ fn print_status_summary(ctx: &SessionContext) {
         ),
         None => println!("session_log: missing"),
     }
+    match &ctx.operator_status.supervisor_lease {
+        Some(lease) => println!(
+            "controller_lease: generation={} pid={} runtime_state={} heartbeat={} socket={}",
+            lease.generation,
+            lease
+                .supervisor_pid
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            lease.runtime_state.as_deref().unwrap_or("unknown"),
+            lease
+                .last_heartbeat
+                .map(crate::startup_miss::format_timestamp)
+                .unwrap_or_else(|| "unknown".to_string()),
+            lease.supervisor_socket.as_deref().unwrap_or("unknown")
+        ),
+        None => println!("controller_lease: missing"),
+    }
+    if let Some(attempt) = ctx.operator_status.dispatch_attempts.last() {
+        println!(
+            "controller_last_command: kind={} accepted_stage={} failed_stage={} at={}",
+            attempt.command_kind,
+            attempt.accepted_stage.as_deref().unwrap_or("none"),
+            attempt.failed_stage.as_deref().unwrap_or("none"),
+            crate::startup_miss::format_timestamp(attempt.timestamp)
+        );
+    } else {
+        println!("controller_last_command: none");
+    }
+    if !ctx.operator_status.projection_diagnostics.is_empty() {
+        println!("controller_projection_diagnostics:");
+        for diagnostic in &ctx.operator_status.projection_diagnostics {
+            println!(
+                "- projection={} at={} message={}",
+                diagnostic.projection,
+                crate::startup_miss::format_timestamp(diagnostic.timestamp),
+                diagnostic.message
+            );
+        }
+    }
 }
 
 fn collect_doctor_issues(ctx: &SessionContext) -> Vec<String> {
@@ -670,6 +755,20 @@ fn collect_doctor_issues(ctx: &SessionContext) -> Vec<String> {
             miss.pane_id
         ));
     }
+    for diagnostic in &ctx.operator_status.projection_diagnostics {
+        issues.push(format!(
+            "controller projection drift in {}: {}",
+            diagnostic.projection, diagnostic.message
+        ));
+    }
+    if let Some(attempt) = ctx.operator_status.dispatch_attempts.last()
+        && let Some(stage) = attempt.failed_stage.as_deref()
+    {
+        issues.push(format!(
+            "last controller command `{}` failed at stage {}",
+            attempt.command_kind, stage
+        ));
+    }
     issues
 }
 
@@ -685,6 +784,18 @@ fn empty_or_placeholder(value: &str) -> &str {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    fn empty_operator_status(
+        record: Option<crate::session_actor::ActorRecord>,
+    ) -> crate::project_controller::SessionOperatorStatus {
+        crate::project_controller::SessionOperatorStatus {
+            record,
+            transitions: Vec::new(),
+            supervisor_lease: None,
+            dispatch_attempts: Vec::new(),
+            projection_diagnostics: Vec::new(),
+        }
+    }
 
     #[test]
     fn parse_actor_state_handles_known_values() {
@@ -714,6 +825,7 @@ mod tests {
             session_id: "session-1".to_string(),
             harness: "codex".to_string(),
             actor_record: None,
+            operator_status: empty_operator_status(None),
             registry_entry: None,
             startup_miss: None,
             log_status: None,
@@ -816,27 +928,29 @@ mod tests {
         let iso = crate::sessions::IsolatedTmux::new("session-clear-pane-select-actor");
         let actor_pane = iso.new_session("test", dir.path()).unwrap();
         let registry_pane = iso.new_window("test", dir.path()).unwrap();
+        let actor_record = crate::session_actor::ActorRecord {
+            document_id: "doc".to_string(),
+            session_id: "session-clear".to_string(),
+            generation: 3,
+            pane_id: actor_pane.clone(),
+            window_id: iso.pane_window(&actor_pane).unwrap(),
+            harness: "codex".to_string(),
+            state: ActorState::Ready,
+            last_transition: crate::session_actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "actor".to_string(),
+                timestamp: 1,
+                prior_generation: 2,
+                new_generation: 3,
+            },
+        };
         let ctx = SessionContext {
             canonical_file: dir.path().join("doc.md"),
             base_dir: dir.path().to_path_buf(),
             session_id: "session-clear".to_string(),
             harness: "codex".to_string(),
-            actor_record: Some(crate::session_actor::ActorRecord {
-                document_id: "doc".to_string(),
-                session_id: "session-clear".to_string(),
-                generation: 3,
-                pane_id: actor_pane.clone(),
-                window_id: iso.pane_window(&actor_pane).unwrap(),
-                harness: "codex".to_string(),
-                state: ActorState::Ready,
-                last_transition: crate::session_actor::ActorLastTransition {
-                    caller: "test".to_string(),
-                    reason: "actor".to_string(),
-                    timestamp: 1,
-                    prior_generation: 2,
-                    new_generation: 3,
-                },
-            }),
+            actor_record: Some(actor_record.clone()),
+            operator_status: empty_operator_status(Some(actor_record)),
             registry_entry: Some(SessionEntry {
                 pane: registry_pane.clone(),
                 pid: 1,
@@ -873,27 +987,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let iso = crate::sessions::IsolatedTmux::new("session-clear-pane-select-registry");
         let registry_pane = iso.new_session("test", dir.path()).unwrap();
+        let actor_record = crate::session_actor::ActorRecord {
+            document_id: "doc".to_string(),
+            session_id: "session-clear".to_string(),
+            generation: 3,
+            pane_id: "%9999".to_string(),
+            window_id: "@9999".to_string(),
+            harness: "codex".to_string(),
+            state: ActorState::Ready,
+            last_transition: crate::session_actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "actor".to_string(),
+                timestamp: 1,
+                prior_generation: 2,
+                new_generation: 3,
+            },
+        };
         let ctx = SessionContext {
             canonical_file: dir.path().join("doc.md"),
             base_dir: dir.path().to_path_buf(),
             session_id: "session-clear".to_string(),
             harness: "codex".to_string(),
-            actor_record: Some(crate::session_actor::ActorRecord {
-                document_id: "doc".to_string(),
-                session_id: "session-clear".to_string(),
-                generation: 3,
-                pane_id: "%9999".to_string(),
-                window_id: "@9999".to_string(),
-                harness: "codex".to_string(),
-                state: ActorState::Ready,
-                last_transition: crate::session_actor::ActorLastTransition {
-                    caller: "test".to_string(),
-                    reason: "actor".to_string(),
-                    timestamp: 1,
-                    prior_generation: 2,
-                    new_generation: 3,
-                },
-            }),
+            actor_record: Some(actor_record.clone()),
+            operator_status: empty_operator_status(Some(actor_record)),
             registry_entry: Some(SessionEntry {
                 pane: registry_pane.clone(),
                 pid: 1,

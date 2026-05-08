@@ -344,6 +344,7 @@ pub fn register_with_pid_and_cwd(
     )
 }
 
+#[allow(dead_code)]
 pub fn attach_with_pid_and_cwd_in(
     base_dir: &Path,
     session_id: &str,
@@ -368,6 +369,47 @@ pub fn attach_with_pid_and_cwd_in(
         "session",
         "manual_attach",
     )
+}
+
+pub fn attach_projection_only_in(
+    base_dir: &Path,
+    session_id: &str,
+    pane_id: &str,
+    file: &str,
+    pid: u32,
+    window: &str,
+    cwd: &str,
+) -> Result<()> {
+    let _lock = RegistryLock::acquire(&registry_path_in(base_dir))?;
+    let mut registry = load_in(base_dir)?;
+    let started = chrono_now();
+    let registry_key = canonical_registry_key_in(base_dir, file);
+    let stale_keys: Vec<String> = registry
+        .iter()
+        .filter(|(key, entry)| entry.pane == pane_id && entry_session_id(key, entry) != session_id)
+        .map(|(key, _)| key.clone())
+        .collect();
+    for key in stale_keys {
+        eprintln!(
+            "[registry] removing stale session {} (was pane {})",
+            key, pane_id
+        );
+        registry.remove(&key);
+    }
+    registry.insert(
+        registry_key,
+        SessionEntry {
+            pane: pane_id.to_string(),
+            pid,
+            cwd: cwd.to_string(),
+            started,
+            session_id: session_id.to_string(),
+            file: file.to_string(),
+            window: window.to_string(),
+            supervisor_instance_id: String::new(),
+        },
+    );
+    save_in(base_dir, &registry)
 }
 
 pub fn register_supervisor(

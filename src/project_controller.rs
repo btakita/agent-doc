@@ -81,6 +81,14 @@ pub struct StartSessionRequest {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct AttachPaneRequest {
+    pub file: PathBuf,
+    pub session_id: String,
+    pub pane_id: String,
+    pub window_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct SupervisorRegistration {
     pub file: PathBuf,
     pub session_id: String,
@@ -116,6 +124,54 @@ pub struct DispatchRequest {
 pub struct DispatchAuthorization {
     pub record: crate::session_actor::ActorRecord,
     pub accepted_stage: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActorTransitionStatus {
+    pub prior_generation: u64,
+    pub new_generation: u64,
+    pub caller: String,
+    pub reason: String,
+    pub old_pane: Option<String>,
+    pub new_pane: String,
+    pub old_window: Option<String>,
+    pub new_window: Option<String>,
+    pub timestamp: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupervisorLeaseStatus {
+    pub generation: u64,
+    pub supervisor_pid: Option<u32>,
+    pub supervisor_socket: Option<String>,
+    pub last_heartbeat: Option<u64>,
+    pub runtime_state: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DispatchAttemptStatus {
+    pub generation: u64,
+    pub command_kind: String,
+    pub accepted_stage: Option<String>,
+    pub failed_stage: Option<String>,
+    pub diagnostic_payload: Option<String>,
+    pub timestamp: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectionDiagnosticStatus {
+    pub projection: String,
+    pub message: String,
+    pub timestamp: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionOperatorStatus {
+    pub record: Option<crate::session_actor::ActorRecord>,
+    pub transitions: Vec<ActorTransitionStatus>,
+    pub supervisor_lease: Option<SupervisorLeaseStatus>,
+    pub dispatch_attempts: Vec<DispatchAttemptStatus>,
+    pub projection_diagnostics: Vec<ProjectionDiagnosticStatus>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -374,6 +430,177 @@ fn load_actor_record_from_db(
     )
     .optional()
     .context("failed to load actor record from controller state")
+}
+
+fn load_actor_transitions_from_db(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<Vec<ActorTransitionStatus>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            prior_generation,
+            new_generation,
+            caller,
+            reason,
+            old_pane,
+            new_pane,
+            old_window,
+            new_window,
+            timestamp
+        FROM actor_transitions
+        WHERE document_id = ?1
+        ORDER BY id
+        "#,
+    )?;
+    let mut transitions = Vec::new();
+    for row in stmt.query_map(params![document_id], |row| {
+        let prior_generation: i64 = row.get("prior_generation")?;
+        let new_generation: i64 = row.get("new_generation")?;
+        let timestamp: i64 = row.get("timestamp")?;
+        Ok(ActorTransitionStatus {
+            prior_generation: sqlite_u64(prior_generation, "transition prior_generation")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            new_generation: sqlite_u64(new_generation, "transition new_generation")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            caller: row.get("caller")?,
+            reason: row.get("reason")?,
+            old_pane: row.get("old_pane")?,
+            new_pane: row.get("new_pane")?,
+            old_window: row.get("old_window")?,
+            new_window: row.get("new_window")?,
+            timestamp: sqlite_u64(timestamp, "transition timestamp")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        })
+    })? {
+        transitions.push(row?);
+    }
+    Ok(transitions)
+}
+
+fn load_supervisor_lease_from_db(
+    conn: &Connection,
+    document_id: &str,
+    generation: u64,
+) -> Result<Option<SupervisorLeaseStatus>> {
+    conn.query_row(
+        r#"
+        SELECT
+            generation,
+            supervisor_pid,
+            supervisor_socket,
+            last_heartbeat,
+            runtime_state
+        FROM supervisor_leases
+        WHERE document_id = ?1 AND generation = ?2
+        "#,
+        params![document_id, sqlite_i64(generation, "generation")?],
+        |row| {
+            let generation: i64 = row.get("generation")?;
+            let supervisor_pid: Option<i64> = row.get("supervisor_pid")?;
+            let last_heartbeat: Option<i64> = row.get("last_heartbeat")?;
+            Ok(SupervisorLeaseStatus {
+                generation: sqlite_u64(generation, "supervisor lease generation")
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                supervisor_pid: supervisor_pid.and_then(|pid| u32::try_from(pid).ok()),
+                supervisor_socket: row.get("supervisor_socket")?,
+                last_heartbeat: last_heartbeat
+                    .map(|value| sqlite_u64(value, "supervisor last heartbeat"))
+                    .transpose()
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                runtime_state: row.get("runtime_state")?,
+            })
+        },
+    )
+    .optional()
+    .context("failed to load supervisor lease from controller state")
+}
+
+fn load_dispatch_attempts_from_db(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<Vec<DispatchAttemptStatus>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            generation,
+            command_kind,
+            accepted_stage,
+            failed_stage,
+            diagnostic_payload,
+            timestamp
+        FROM dispatch_attempts
+        WHERE document_id = ?1
+        ORDER BY id DESC
+        LIMIT 10
+        "#,
+    )?;
+    let mut attempts = Vec::new();
+    for row in stmt.query_map(params![document_id], |row| {
+        let generation: i64 = row.get("generation")?;
+        let timestamp: i64 = row.get("timestamp")?;
+        Ok(DispatchAttemptStatus {
+            generation: sqlite_u64(generation, "dispatch generation")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            command_kind: row.get("command_kind")?,
+            accepted_stage: row.get("accepted_stage")?,
+            failed_stage: row.get("failed_stage")?,
+            diagnostic_payload: row.get("diagnostic_payload")?,
+            timestamp: sqlite_u64(timestamp, "dispatch timestamp")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        })
+    })? {
+        attempts.push(row?);
+    }
+    attempts.reverse();
+    Ok(attempts)
+}
+
+fn load_projection_diagnostics_from_db(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<Vec<ProjectionDiagnosticStatus>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT projection, message, timestamp
+        FROM projection_diagnostics
+        WHERE document_id = ?1
+        ORDER BY id DESC
+        LIMIT 10
+        "#,
+    )?;
+    let mut diagnostics = Vec::new();
+    for row in stmt.query_map(params![document_id], |row| {
+        let timestamp: i64 = row.get("timestamp")?;
+        Ok(ProjectionDiagnosticStatus {
+            projection: row.get("projection")?,
+            message: row.get("message")?,
+            timestamp: sqlite_u64(timestamp, "projection diagnostic timestamp")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        })
+    })? {
+        diagnostics.push(row?);
+    }
+    diagnostics.reverse();
+    Ok(diagnostics)
+}
+
+fn load_session_operator_status_from_db(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<SessionOperatorStatus> {
+    let record = load_actor_record_from_db(conn, document_id)?;
+    let supervisor_lease = match &record {
+        Some(record) => load_supervisor_lease_from_db(conn, document_id, record.generation)?,
+        None => None,
+    };
+    Ok(SessionOperatorStatus {
+        record,
+        transitions: load_actor_transitions_from_db(conn, document_id)?,
+        supervisor_lease,
+        dispatch_attempts: load_dispatch_attempts_from_db(conn, document_id)?,
+        projection_diagnostics: load_projection_diagnostics_from_db(conn, document_id)?,
+    })
 }
 
 fn legacy_actor_projection(
@@ -997,6 +1224,118 @@ pub fn authorize_dispatch(
     )
 }
 
+pub fn session_operator_status(project_root: &Path, file: &Path) -> Result<SessionOperatorStatus> {
+    #[cfg(test)]
+    {
+        let document_id =
+            crate::session_actor::canonical_document_id_in(project_root, &file.to_string_lossy());
+        let mut conn = open_state_db(project_root)?;
+        migrate_legacy_actor_projection(project_root, &mut conn)?;
+        return load_session_operator_status_from_db(&conn, &document_id);
+    }
+
+    #[cfg(not(test))]
+    {
+        request_controller(
+            project_root,
+            ControllerRequest {
+                command: "session_status".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        )
+    }
+}
+
+pub fn attach_pane(
+    project_root: &Path,
+    request: AttachPaneRequest,
+) -> Result<crate::session_actor::ActorRecord> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "attach_pane".to_string(),
+            file: Some(request.file),
+            session_id: Some(request.session_id),
+            pane_id: Some(request.pane_id),
+            window_id: Some(request.window_id),
+            generation: None,
+            state: None,
+            caller: Some("session".to_string()),
+            reason: Some("manual_attach".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn authorize_operator_command(
+    project_root: &Path,
+    file: &Path,
+    command_kind: &str,
+) -> Result<DispatchAuthorization> {
+    #[cfg(test)]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+        };
+        return handle_operator_command(
+            &bootstrap,
+            ControllerRequest {
+                command: "operator_command".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: Some(command_kind.to_string()),
+                diagnostic_payload: Some("session operator command".to_string()),
+            },
+        );
+    }
+
+    #[cfg(not(test))]
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "operator_command".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some(command_kind.to_string()),
+            diagnostic_payload: Some("session operator command".to_string()),
+        },
+    )
+}
+
 pub fn status(project_root: &Path) -> Result<ControllerStatus> {
     match request(project_root, "status") {
         Ok(response) => {
@@ -1132,6 +1471,9 @@ fn handle_request(
         "mark_lifecycle" => controller_envelope(handle_mark_lifecycle(bootstrap, request)),
         "actor_binding" => controller_envelope(handle_actor_binding(bootstrap, request)),
         "dispatch" => controller_envelope(handle_dispatch(bootstrap, request)),
+        "session_status" => controller_envelope(handle_session_status(bootstrap, request)),
+        "attach_pane" => controller_envelope(handle_attach_pane(bootstrap, request)),
+        "operator_command" => controller_envelope(handle_operator_command(bootstrap, request)),
         other => Ok(serde_json::to_string(&serde_json::json!({
             "ok": false,
             "error": format!("unknown controller command: {other}")
@@ -1417,6 +1759,133 @@ fn handle_dispatch(
     Ok(DispatchAuthorization {
         record,
         accepted_stage: accepted_stage.to_string(),
+    })
+}
+
+fn handle_session_status(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<SessionOperatorStatus> {
+    let file = request_file(&request)?;
+    let document_id = crate::session_actor::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    let mut conn = open_state_db(&bootstrap.project_root)?;
+    migrate_legacy_actor_projection(&bootstrap.project_root, &mut conn)?;
+    load_session_operator_status_from_db(&conn, &document_id)
+}
+
+fn handle_attach_pane(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<crate::session_actor::ActorRecord> {
+    let file = request_file(&request)?;
+    let session_id = request_string(&request.session_id, "session_id")?;
+    let pane_id = request_string(&request.pane_id, "pane_id")?;
+    let window_id = request_string(&request.window_id, "window_id")?;
+    crate::session_actor::project_binding_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+        &session_id,
+        &pane_id,
+        &window_id,
+        request.caller.as_deref().unwrap_or("session"),
+        request.reason.as_deref().unwrap_or("manual_attach"),
+    )?;
+    let document_id = crate::session_actor::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    let record = load_actor_record(&bootstrap.project_root, &document_id)?
+        .with_context(|| format!("missing actor record after attach for {}", file.display()))?;
+    let _ = project_sessions_projection_for_actor(&bootstrap.project_root, &record.document_id);
+    crate::ops_log::log_op(
+        &file,
+        &format!(
+            "controller_attach_pane session={} pane={} generation={} state={}",
+            session_id,
+            pane_id,
+            record.generation,
+            record.state.as_str()
+        ),
+    );
+    Ok(record)
+}
+
+fn handle_operator_command(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<DispatchAuthorization> {
+    let file = request_file(&request)?;
+    let command_kind = request_string(&request.command_kind, "command_kind")?;
+    let diagnostic_payload = request
+        .diagnostic_payload
+        .as_deref()
+        .unwrap_or_default()
+        .to_string();
+    let document_id = crate::session_actor::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    let Some(record) = load_actor_record(&bootstrap.project_root, &document_id)? else {
+        let _ = insert_dispatch_attempt_record(
+            &bootstrap.project_root,
+            &document_id,
+            0,
+            &command_kind,
+            None,
+            Some("missing_actor"),
+            &diagnostic_payload,
+        );
+        anyhow::bail!(
+            "operator command `{}` rejected for {}: stage=missing_actor",
+            command_kind,
+            file.display()
+        );
+    };
+    if matches!(
+        record.state,
+        crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
+    ) {
+        let failed_stage = record.state.as_str();
+        let _ = insert_dispatch_attempt_record(
+            &bootstrap.project_root,
+            &document_id,
+            record.generation,
+            &command_kind,
+            None,
+            Some(failed_stage),
+            &diagnostic_payload,
+        );
+        anyhow::bail!(
+            "operator command `{}` rejected for {}: generation {} is {}",
+            command_kind,
+            file.display(),
+            record.generation,
+            failed_stage
+        );
+    }
+    let accepted_stage = format!("operator_{}", record.state.as_str());
+    insert_dispatch_attempt_record(
+        &bootstrap.project_root,
+        &document_id,
+        record.generation,
+        &command_kind,
+        Some(&accepted_stage),
+        None,
+        &diagnostic_payload,
+    )?;
+    crate::ops_log::log_op(
+        &file,
+        &format!(
+            "controller_operator_command_accepted kind={} session={} pane={} generation={} stage={}",
+            command_kind, record.session_id, record.pane_id, record.generation, accepted_stage
+        ),
+    );
+    Ok(DispatchAuthorization {
+        record,
+        accepted_stage,
     })
 }
 
@@ -1892,5 +2361,146 @@ mod tests {
             .unwrap();
         assert_eq!(accepted, 1);
         assert_eq!(failed, 1);
+    }
+
+    #[test]
+    fn controller_session_operator_status_reports_history_and_command_stages() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/operator.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-operator\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(&doc, "session-operator", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-operator",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let operator_command = ControllerRequest {
+            command: "operator_command".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("session_clear".to_string()),
+            diagnostic_payload: Some("test operator command".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&operator_command).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        assert_eq!(envelope.data.unwrap().accepted_stage, "operator_ready");
+
+        let status = ControllerRequest {
+            command: "session_status".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&status).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<SessionOperatorStatus> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let status = envelope.data.unwrap();
+        assert_eq!(
+            status.record.unwrap().state,
+            crate::session_actor::ActorState::Ready
+        );
+        assert_eq!(status.transitions.len(), 2);
+        assert_eq!(
+            status
+                .dispatch_attempts
+                .last()
+                .unwrap()
+                .accepted_stage
+                .as_deref(),
+            Some("operator_ready")
+        );
+    }
+
+    #[test]
+    fn controller_attach_pane_creates_manual_attach_generation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/attach.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-attach\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(&doc, "session-attach", "%41", "@1", 1)
+            .unwrap();
+
+        let attach = ControllerRequest {
+            command: "attach_pane".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-attach".to_string()),
+            pane_id: Some("%42".to_string()),
+            window_id: Some("@2".to_string()),
+            generation: None,
+            state: None,
+            caller: Some("session".to_string()),
+            reason: Some("manual_attach".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&attach).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let record = envelope.data.unwrap();
+        assert_eq!(record.pane_id, "%42");
+        assert_eq!(record.window_id, "@2");
+        assert_eq!(record.generation, 2);
+        assert_eq!(record.last_transition.caller, "session");
+        assert_eq!(record.last_transition.reason, "manual_attach");
     }
 }

@@ -175,16 +175,23 @@ single-owner actor controls:
 
 - `agent-doc session status <FILE>` prints the authoritative actor record,
   registry projection, supervisor runtime state, startup-miss marker, and
-  latest session-log summary for the document.
+  latest session-log summary for the document. It must fetch the actor record,
+  supervisor lease, recent operator/dispatch attempt, and projection drift
+  diagnostics from the project controller rather than treating
+  `session-actors.json` as an authority.
 - `agent-doc session history <FILE>` prints the actor/session transition
-  history from `.agent-doc/logs/<session>.log`, filtered to ownership and
-  lifecycle boundary events.
+  history from the controller's durable `actor_transitions` store. Legacy
+  session-log filtering is only a compatibility fallback when no controller
+  transitions exist.
 - `agent-doc session attach <FILE> --pane %123` performs an explicit
-  authoritative handoff onto the requested pane, creating a new generation and
-  refreshing the registry projection from that result.
+  authoritative handoff onto the requested pane through the controller,
+  creating a new generation and refreshing the registry projection from that
+  result. The registry helper used after controller acceptance must be
+  projection-only and must not create another actor transition.
 - `agent-doc session restart <FILE> [--fresh]` requests an actor-owned
   supervisor restart through IPC instead of relying on route-side restart
-  heuristics.
+  heuristics. Before contacting the supervisor, it must record a controller
+  operator-command acceptance or fail with the rejected stage.
 - `agent-doc session clear <FILE>` injects the harness-native `/clear`
   equivalent into the authoritative session through the same canonical
   single-line submit command used by routed reopen and queued slash-command
@@ -192,15 +199,17 @@ single-owner actor controls:
   the command must submit directly through that pane's tmux input path;
   otherwise it may fall back to supervisor IPC inject. For Codex, it still
   records the clear prompt state so the next reroute can reapply the original
-  launch contract.
+  launch contract. Before contacting tmux or the supervisor, it must record a
+  controller operator-command acceptance or fail with the rejected stage.
 - Any tmux-bound command submit in this surface (`route --dispatch-only`,
   file-scoped `session clear`, queued slash-command dispatch, supervisor-owned
   reopen inject) must normalize trailing line endings once and use exactly one
   tmux literal-text submit plus short delayed `Enter` submission. These paths must not layer
   follow-up synthetic `Enter` retries on top of the first submit.
 - `agent-doc session doctor <FILE> [--repair]` reports actor/registry/supervisor
-  drift in one read-only summary, with `--repair` explicitly escalating into the
-  destructive repair path before re-checking status.
+  drift plus controller projection and recent command-stage failures in one
+  read-only summary, with `--repair` explicitly escalating into the destructive
+  repair path before re-checking status.
 
 ### Shared session resolution
 

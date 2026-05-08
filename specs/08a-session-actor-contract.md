@@ -116,6 +116,17 @@ Later phases may refine caller values without changing the field names.
   `history`, `attach`, `restart`, `clear`, and `doctor` read or mutate the same
   authoritative record and supervisor IPC path instead of inventing separate
   tmux-only heuristics in the CLI or plugins.
+- Operator commands must use the project controller as their actor boundary:
+  status/history read controller-owned SQLite rows for the actor, transitions,
+  supervisor lease, recent command attempts, and projection diagnostics; attach
+  creates the manual handoff generation through controller IPC before refreshing
+  `sessions.json` as a projection; restart and clear record an
+  `operator_<state>` acceptance or stage-specific rejection before touching the
+  supervisor socket or tmux input.
+- Operator diagnostics must preserve the failed stage. Missing actors,
+  blocked/closed actor states, stale projections, and recent failed operator
+  attempts are durable controller diagnostics that editor plugins can display
+  without scraping tmux state.
 - The phase-7 repair boundary is now explicit: normal `sync` may capture
   diagnostics and fail closed on stash/window or closeout drift, but it does
   not run hidden layout rescue or closeout replay anymore. Those mutations live

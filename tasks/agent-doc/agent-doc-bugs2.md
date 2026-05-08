@@ -44,7 +44,17 @@ Captured three current failure shapes where SQLite would have helped more direct
 3. **Non-monotonic closeout cycle state after repair/replay.** The `#stphk` shape had a committed cycle later downgraded to `response_captured` or `write_applied` by repair bookkeeping, while the capture ledger and session log already proved `commit_success`. Relevant state was split across `.agent-doc/state/cycles/*.json`, captures, snapshots, the session log, and git `HEAD`. SQLite would let closeout advance as monotonic state in one transaction: `preflight_started -> response_captured -> write_applied -> committed`, rejecting stale repair updates with a compare-and-swap instead of relying on scattered JSON guards. The session actor owns the live pane/session generation, but it does not by itself serialize document closeout phase transitions. See [VERSIONS.md](/home/brian/work/btakita/agent-loop/src/agent-doc/VERSIONS.md:266) and [SPEC.md](/home/brian/work/btakita/agent-loop/src/agent-doc/SPEC.md:24).
 
 Net: the evidence supports continuing `#sqliteeval`, but the stronger target is the Project Controller shape: one live controller serializes decisions, while SQLite persists actor state, leases, dispatch attempts, and closeout transitions transactionally. That matches the existing plan boundary in [plan-project-controller-session-actor-mvp.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md:60) and the SQLite evaluation plan's Phase 1 criteria in [plan-sqlite-session-store-concurrency.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-sqlite-session-store-concurrency.md:150).
-<!-- agent:boundary:df7d9b86 -->
+❯ do [#sqliteeval]
+### Re: sqliteeval — gpt-5
+
+Reviewed [plan-sqlite-session-store-concurrency.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-sqlite-session-store-concurrency.md) against [plan-project-controller-session-actor-mvp.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md) and the current single-owner actor rollout.
+
+Decision: prototype one project-root `.agent-doc/state.db`, but only as the durable state and journal behind the Project Controller. Do not build a direct path where all Harness Supervisors coordinate with each other through SQLite. That would make individual writes atomic, but it would still leave lease interpretation, stale-owner cleanup, prompt-state decisions, conflict resolution, and repair ordering distributed across multiple live processes.
+
+The right split is: Project Controller serializes project-wide decisions; Session Actor owns each document generation and transition contract; SQLite persists the actor state, generation CAS, transition history, uniqueness checks, dispatch attempts, and projection drift diagnostics; `sessions.json`, `session-actors.json`, tmux-router state, and text logs remain projections or diagnostics during migration.
+
+I recorded that in the SQLite plan by changing its status to `Accepted / scoped behind Project Controller` and adding a `Decision` section. Verification for this doc-only change: `git diff --check -- tasks/agent-doc/plan-sqlite-session-store-concurrency.md` passed.
+<!-- agent:boundary:2345e04d -->
 <!-- /agent:exchange -->
 ###
 
@@ -61,7 +71,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 
 <!-- /agent:backlog -->
 
@@ -73,6 +82,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 <!-- agent:pending-done -->
 - 2026-05-07 [#backlogreap] [recommended] Make completed/reaped backlog items visible in the session document or closeout response so items like #commenttail, #tmuxcoord, and #coordspike do not look silently removed after --pending-done.
 - 2026-05-07 [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
+- 2026-05-07 [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 <!-- /agent:pending-done -->
 
 

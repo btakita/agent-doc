@@ -167,7 +167,47 @@ If we want to emphasize actor-pattern implementation in docs, phrase it as:
 `The Session Controller and each Session Actor are implemented as actors. Session Supervisors are subordinate runtime workers that may expose an actor-like command interface.`
 
 That avoids putting `Actor` into every noun while still documenting the concurrency model precisely.
-<!-- agent:boundary:124c4933 -->
+❯ I'm confused over the Controller, Actor, Supervisor hierarchy. All 3 have "Session" as the prefix. Please investigate better alternatives.
+### Re: naming hierarchy — gpt-5
+
+Yes, the repeated `Session` prefix is the problem. It makes the names look like peers when they are actually different scopes.
+
+I would switch from role-only names to scope-first names:
+
+- `Project Controller` -> one project/workspace-level service. It owns the singleton socket/launch lock, finds or creates per-document session owners, handles global repair policy, and protects project-wide invariants.
+- `Session Actor` -> one authoritative owner for one document session. It owns `document_id`, `session_id`, `generation`, pane/window binding, harness, state, and transitions.
+- `Harness Supervisor` -> one runtime wrapper around one Codex/Claude child. It owns the pty, restart policy, IPC socket, CWD/env setup, and reports lifecycle observations back to the session actor.
+
+That hierarchy reads by scope:
+
+`Project Controller` manages the project fleet.
+`Session Actor` owns one document session.
+`Harness Supervisor` runs one live harness child for that session.
+
+I prefer this over `Session Controller / Session Actor / Session Supervisor` because the prefixes now communicate boundaries: project, session, harness. It also avoids the misleading idea that the supervisor owns the session. The supervisor owns a child process; the session actor owns authority.
+
+Other alternatives I considered:
+
+- `Session Manager`: clear enough, but it keeps the same `Session` prefix as `Session Actor` and can be confused with the per-session owner.
+- `Session Directory`: good if the top layer only does lookup, too weak if it owns launch locks and recovery policy.
+- `Fleet Controller`: technically accurate, but `fleet` adds a metaphor that will look noisy in logs and specs.
+- `Agent Supervisor`: better than `Session Supervisor`, but `agent` is overloaded here. It can mean Codex/Claude, the assistant, or the agent-doc document agent.
+- `Harness Runner`: good if it only spawns and forwards I/O, but weaker than `Supervisor` once restart policy and halted/waiting-input state are part of the contract.
+
+Recommended final vocabulary:
+
+```text
+Project Controller -> Session Actor -> Harness Supervisor -> Harness Child
+```
+
+And the implementation note should be:
+
+```text
+The Project Controller and each Session Actor are implemented as actors. Harness Supervisors are subordinate runtime workers that expose a control socket and report lifecycle events back to their owning Session Actor.
+```
+
+I also updated `#coordspike` to use this terminology so the next plan does not keep carrying `coordinator actor` forward. That item remains open; this turn only clarified the naming direction.
+<!-- agent:boundary:51602765 -->
 <!-- /agent:exchange -->
 ###
 
@@ -184,7 +224,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#coordspike] [recommended] Draft a coordinator actor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, supervisor client protocol, and tmux reconciliation tests.
+- [ ] [#coordspike] [recommended] Draft a project-controller/session-actor/harness-supervisor MVP plan after #tmuxcoord: singleton socket/launch lock, lazy vs managed lifecycle, SQLite journal, harness-supervisor client protocol, and tmux reconciliation tests.
 - [ ] [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - [ ] [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
 

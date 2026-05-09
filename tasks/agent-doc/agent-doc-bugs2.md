@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -53,12 +53,7 @@ Verification completed:
 - `git -C src/agent-doc push origin 20260422/codex-agent-backend`: everything up-to-date.
 
 I also left a follow-up backlog item for the separate no-capture failure shape. That should be handled as a route/preflight recovery regression, distinct from the already-fixed sidecar fallback case.
-<!-- agent:boundary:c06ae9e2 -->
-<!-- /agent:exchange -->
-###
-
-<!--
-`Run Agent Doc` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md has an error:
+❯ `Run Agent Doc` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md had an error:
 ```
 resync: stash pane %273 is registered in its own project root — skipping kill
 resync: stash pane %269 is registered in its own project root — skipping kill
@@ -72,7 +67,36 @@ Caused by:
     No such file or directory (os error 2)
 
 ```
----
+❯ spec-test-build-install-commit-push
+### Re: project controller launch ENOENT — gpt-5
+
+I fixed the `failed to launch project controller` / `No such file or directory (os error 2)` path in `src/agent-doc`.
+
+Root cause: lazy controller startup used `std::env::current_exe()` directly for the detached controller process. After a local install or rebuild replaces the binary, a still-running agent-doc process can report a stale executable path; `Command::new(stale_path).spawn()` then fails with bare `ENOENT` before the controller can start.
+
+Implemented change:
+- Controller launch and bootstrap identity now resolve a launchable agent-doc binary by preferring the live `current_exe()` path, then falling back to the invoked command or `agent-doc` on `PATH`.
+- If all candidates are missing, the failure now says it skipped the stale `current_exe()` path instead of surfacing an unexplained controller launch `ENOENT`.
+- Added focused resolver regressions for the existing-current-exe and missing-current-exe fallback cases.
+- Updated `SPEC.md`, `VERSIONS.md`, and the controller/session actor specs with the launch fallback contract.
+
+Verification completed in `src/agent-doc`:
+- `cargo test project_controller::tests::controller_binary_resolution`: passed, 2 tests.
+- `cargo test`: passed, 2,131 tests, 0 failed, 4 ignored.
+- `cargo build`: passed.
+- `cargo install --path .`: installed local `agent-doc v0.33.16` to `/home/brian/.cargo/bin/agent-doc`.
+- `agent-doc --version`: `agent-doc 0.33.16`.
+
+Committed and pushed:
+- `5e20abc fix: recover controller launch after binary replacement`
+- `git -C src/agent-doc push origin 20260422/codex-agent-backend`: pushed `5eb3764..5e20abc`.
+
+No follow-up backlog item is needed for this specific failure shape; the stale binary path now has direct code coverage and a spec contract.
+<!-- agent:boundary:d228926b -->
+<!-- /agent:exchange -->
+###
+
+<!--
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
 `❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?
@@ -89,8 +113,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 "Press Enter to restart, or 'q' to exit."
 -->
 
-<!-- agent:queue auto -->
-- do [#syncbudget-regress]. #spec-test-build-install-commit-push
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
@@ -98,7 +121,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 <!-- agent:backlog -->
 
 - [ ] [#root-empty-preflight] [recommended] Add a focused route/preflight recovery test for repeated empty preflight_started turns with no capture, using src/session-share/tasks/root.md cycle-1778336475478 as evidence: no response exists to replay, so the next invocation should fail with precise retry/restart guidance instead of repeated silent patchback misses.
-- [ ] [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -137,6 +159,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#editorswitchctl] Fix the current editor-document switch split by completing/regressing the Phase D/E controller authority boundary: tasks/software/tsift.md remains actor_state=starting with a healthy supervisor, route refuses injection, and tmux window 4 still has four agent-doc panes. Plan: tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 - 2026-05-09 [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
 - 2026-05-09 [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
+- 2026-05-09 [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
 <!-- /agent:pending-done -->
 
 

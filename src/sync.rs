@@ -197,6 +197,7 @@ const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const SAFE_PASSIVE_STASH_CLEANUP_THROTTLE: Duration = Duration::from_secs(2);
 const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER: &str =
     "[sync] safe_passive_sync_lock_contention_retry";
+const STALE_SYNC_LOCK_OWNER_AGE: Duration = Duration::from_secs(300);
 
 fn latency_budget_status(elapsed: Duration, budget: Duration) -> &'static str {
     if elapsed >= budget {
@@ -270,11 +271,17 @@ fn acquire_sync_lock(lock_path: &Path, wait_budget: Duration) -> SyncLockAcquire
     };
 
     let started = Instant::now();
+    let mut stale_owner_cleanup_attempted = false;
     loop {
         use fs2::FileExt;
         match file.try_lock_exclusive() {
             Ok(()) => return SyncLockAcquire::Acquired(file),
             Err(err) if started.elapsed() >= wait_budget => {
+                if !stale_owner_cleanup_attempted && reap_stale_orphaned_sync_lock_owners(lock_path)
+                {
+                    stale_owner_cleanup_attempted = true;
+                    continue;
+                }
                 sync_log(&format!(
                     "sync lock contention exceeded {}ms at {}: {}",
                     wait_budget.as_millis(),
@@ -286,6 +293,153 @@ fn acquire_sync_lock(lock_path: &Path, wait_budget: Duration) -> SyncLockAcquire
             Err(_) => std::thread::sleep(SYNC_LOCK_POLL_INTERVAL),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct SyncLockProcess {
+    pid: u32,
+    ppid: u32,
+    age: Duration,
+    cmdline: Vec<String>,
+    has_lock_fd: bool,
+}
+
+fn is_stale_orphaned_sync_lock_owner(process: &SyncLockProcess) -> bool {
+    process.ppid == 1
+        && process.age >= STALE_SYNC_LOCK_OWNER_AGE
+        && process.has_lock_fd
+        && process
+            .cmdline
+            .first()
+            .is_some_and(|bin| bin.ends_with("agent-doc"))
+        && process.cmdline.iter().any(|arg| arg == "sync")
+}
+
+#[cfg(target_os = "linux")]
+fn reap_stale_orphaned_sync_lock_owners(lock_path: &Path) -> bool {
+    let lock_path = lock_path
+        .canonicalize()
+        .unwrap_or_else(|_| lock_path.to_path_buf());
+    let current_pid = std::process::id();
+    let mut reaped_any = false;
+
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid == current_pid {
+            continue;
+        }
+
+        let process = sync_lock_process_from_proc(pid, &lock_path);
+        if !is_stale_orphaned_sync_lock_owner(&process) {
+            continue;
+        }
+
+        let rc = unsafe { libc::kill(process.pid as libc::pid_t, libc::SIGTERM) };
+        if rc == 0 {
+            reaped_any = true;
+            let message = format!(
+                "[sync] stale_sync_lock_owner_reaped pid={} age_ms={} cmd={}",
+                process.pid,
+                process.age.as_millis(),
+                process.cmdline.join(" ")
+            );
+            eprintln!("{}", message);
+            sync_log(&message);
+        }
+    }
+
+    reaped_any
+}
+
+#[cfg(not(target_os = "linux"))]
+fn reap_stale_orphaned_sync_lock_owners(_lock_path: &Path) -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+fn sync_lock_process_from_proc(pid: u32, lock_path: &Path) -> SyncLockProcess {
+    let proc_dir = PathBuf::from("/proc").join(pid.to_string());
+    let ppid = read_proc_ppid(&proc_dir).unwrap_or(0);
+    let age = read_proc_age(&proc_dir).unwrap_or(Duration::ZERO);
+    let cmdline = read_proc_cmdline(&proc_dir);
+    let has_lock_fd = proc_has_fd_for_path(&proc_dir, lock_path);
+
+    SyncLockProcess {
+        pid,
+        ppid,
+        age,
+        cmdline,
+        has_lock_fd,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_proc_ppid(proc_dir: &Path) -> Option<u32> {
+    let status = std::fs::read_to_string(proc_dir.join("status")).ok()?;
+    status.lines().find_map(|line| {
+        let value = line.strip_prefix("PPid:")?.trim();
+        value.parse::<u32>().ok()
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn read_proc_cmdline(proc_dir: &Path) -> Vec<String> {
+    std::fs::read(proc_dir.join("cmdline"))
+        .ok()
+        .map(|bytes| {
+            bytes
+                .split(|byte| *byte == 0)
+                .filter(|part| !part.is_empty())
+                .filter_map(|part| String::from_utf8(part.to_vec()).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(target_os = "linux")]
+fn read_proc_age(proc_dir: &Path) -> Option<Duration> {
+    let stat = std::fs::read_to_string(proc_dir.join("stat")).ok()?;
+    let after_comm = stat.rsplit_once(") ")?.1;
+    let fields: Vec<&str> = after_comm.split_whitespace().collect();
+    let start_ticks = fields.get(19)?.parse::<u64>().ok()?;
+    let uptime_secs = std::fs::read_to_string("/proc/uptime")
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse::<f64>()
+        .ok()?;
+    let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if ticks_per_second <= 0 {
+        return None;
+    }
+    let start_secs = start_ticks as f64 / ticks_per_second as f64;
+    if uptime_secs < start_secs {
+        return Some(Duration::ZERO);
+    }
+    Some(Duration::from_secs_f64(uptime_secs - start_secs))
+}
+
+#[cfg(target_os = "linux")]
+fn proc_has_fd_for_path(proc_dir: &Path, target: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(proc_dir.join("fd")) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        std::fs::read_link(entry.path())
+            .ok()
+            .map(|path| path == target)
+            .unwrap_or(false)
+    })
 }
 
 fn safe_passive_lock_contention_message(elapsed: Duration, budget: Duration) -> String {
@@ -7579,6 +7733,42 @@ mod tests {
             elapsed < Duration::from_secs(1),
             "sync lock timeout should be bounded, elapsed={elapsed:?}"
         );
+    }
+
+    #[test]
+    fn stale_orphaned_sync_lock_owner_requires_all_guards() {
+        let stale_owner = SyncLockProcess {
+            pid: 42,
+            ppid: 1,
+            age: STALE_SYNC_LOCK_OWNER_AGE + Duration::from_secs(1),
+            cmdline: vec!["/home/brian/.cargo/bin/agent-doc".into(), "sync".into()],
+            has_lock_fd: true,
+        };
+        assert!(is_stale_orphaned_sync_lock_owner(&stale_owner));
+
+        let live_parent = SyncLockProcess {
+            ppid: 100,
+            ..stale_owner.clone()
+        };
+        assert!(!is_stale_orphaned_sync_lock_owner(&live_parent));
+
+        let too_young = SyncLockProcess {
+            age: STALE_SYNC_LOCK_OWNER_AGE - Duration::from_secs(1),
+            ..stale_owner.clone()
+        };
+        assert!(!is_stale_orphaned_sync_lock_owner(&too_young));
+
+        let different_command = SyncLockProcess {
+            cmdline: vec!["/home/brian/.cargo/bin/agent-doc".into(), "route".into()],
+            ..stale_owner.clone()
+        };
+        assert!(!is_stale_orphaned_sync_lock_owner(&different_command));
+
+        let no_lock_fd = SyncLockProcess {
+            has_lock_fd: false,
+            ..stale_owner.clone()
+        };
+        assert!(!is_stale_orphaned_sync_lock_owner(&no_lock_fd));
     }
 
     #[test]

@@ -150,7 +150,9 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   later sync logs the contention and continues rather than starving selection,
   ownership proof, or auto-start handling behind an orphaned process. Sync
   latency logs must include the `sync_lock_wait` phase so contention is not
-  hidden inside the safe-passive total.
+  hidden inside the safe-passive total. When the lock is still held by stale
+  orphaned `agent-doc sync` processes for the same lock file, sync reaps those
+  lock owners and retries acquisition before reporting contention.
 - In safe-passive editor mode, `sync --no-autostart --focus <file>` must acquire
   the bounded `.agent-doc/sync.lock` before selecting a hidden controller actor
   pane for the focused document. If that lock is contended, sync returns the

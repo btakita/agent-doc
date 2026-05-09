@@ -56,13 +56,28 @@ Verification passed:
 - installed `tsift token-savings --fixture ../tagpath/fixtures/tsift-token-savings.json --fail-under --json`
 
 Committed and pushed `src/tsift` `main`: `691fac6 test: cover token savings fixture`.
-<!-- agent:boundary:70793c27 -->
+❯ Plan #next-steps for tsift to save tokens.
+### Re: #next-steps token savings plan — gpt-5
+
+Planned the token-saving follow-ups into the backlog in priority order.
+
+Top backlog item: `#ctxp`.
+
+1. `#ctxp` Add `context-pack` to the token-savings fixture/regression, including diff/test/log/next-context inputs and a fail-under threshold for its envelope preview.
+2. `#real` Add a real-session token-savings benchmark from recent tsift/agent-doc transcripts, covering `session-review` and `context-pack` paths that dominate actual prompt volume.
+3. `#budg` Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
+
+No repo code changed in this cycle. I checked the current fixture-backed savings gate with `cargo run -- token-savings --fixture ../tagpath/fixtures/tsift-token-savings.json --fail-under --json`; it still passes for `search`, `explain`, and `session-review` with an estimated 697-token delta. The main next gap is `context-pack`, which already exists but is still outside the savings fixture contract.
+<!-- agent:boundary:ba4ea489 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ctxp] Add context-pack to the token-savings fixture/regression, including diff/test/log/next-context inputs and a fail-under threshold for its envelope preview.
+- [ ] [#real] Add a real-session token-savings benchmark from recent tsift/agent-doc transcripts, covering session-review and context-pack paths that dominate actual prompt volume.
+- [ ] [#budg] Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

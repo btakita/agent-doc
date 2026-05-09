@@ -41,7 +41,6 @@ export function consumeClaimedPatch(patchId: string | undefined, filePath: strin
         if (!root) return false;
         const sentinel = path.join(root, '.agent-doc', 'claimed-patches', patchId);
         if (!fs.existsSync(sentinel)) return false;
-        fs.unlinkSync(sentinel);
         return true;
     } catch {
         return false;

@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Claimed IPC timeout patches are now durable skip signals.** When the CLI completes an IPC-timeout response by writing the document directly, `.agent-doc/claimed-patches/<patch_id>` now remains in place so every editor watcher pass skips the stale patch instead of only the first consumer. JetBrains also deletes the patch file on the inner EDT dedup path. This reduces post-closeout external edits that could replay the same response block and make later turns look duplicated. Bumped the JetBrains plugin build version to `0.2.106`.
+
 - **Managed Codex panes now prove capabilities before reuse.** Codex `start` records a `codex_capability_proof` event after successful live DNS, isolated SSH, and writable-root probes whenever the document requests network access, `required_ssh_targets`, or extra `--add-dir` roots. Route no longer trusts a ready managed Codex actor without a current proof after the latest `session_start`; it restarts fresh once with the original launch contract before rerouting, and `session status` reports whether the proof is `proven`, `missing`, or `not_required`. This closes `#codexcapstale` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Managed reroutes keep supervisor-PID recovered panes on supervisor IPC.** When a registered pane no longer exposes the document path in child argv but the healthy supervisor PID still maps to that pane, normal route now treats supervisor IPC as the readiness boundary instead of downgrading an unrecognized prompt probe to a focus-only no-op. This restores the supervisor-PID fallback regression and updates the routing specs.

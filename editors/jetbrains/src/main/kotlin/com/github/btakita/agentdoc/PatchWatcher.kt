@@ -418,6 +418,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             ApplicationManager.getApplication().invokeLater {
                 if (isClaimedByForceDisk(patch.patchId, patch.file) || isPatchAlreadyApplied(patch, patchFile)) {
                     LOG.info("[patch-watcher] dedup (inner): skipping apply for ${patchFile.name}")
+                    patchFile.delete()
                     return@invokeLater
                 }
                 // Re-check patch_id dedup under EDT (socket handler may have applied between queue and EDT dispatch)

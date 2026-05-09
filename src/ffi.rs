@@ -1095,7 +1095,8 @@ pub unsafe extern "C" fn agent_doc_write_ack_content(
 
 /// Check if --force-disk claimed this patch by writing a sentinel file.
 /// Returns true if the sentinel `.agent-doc/claimed-patches/<patch_id>` exists.
-/// Deletes the sentinel on success (one-time use).
+/// The sentinel is intentionally durable for the patch id so multiple editor
+/// watchers or repeated directory scans all skip the same locally-closed patch.
 ///
 /// # Safety
 ///
@@ -1123,7 +1124,6 @@ pub unsafe extern "C" fn agent_doc_is_claimed_by_force_disk(
             "[ffi] patch_id {} claimed by force-disk — skipping apply",
             &patch_id_str[..patch_id_str.len().min(8)]
         );
-        let _ = std::fs::remove_file(&sentinel);
         1
     } else {
         0
@@ -1728,9 +1728,12 @@ mod ack_content_tests {
             unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
         assert_eq!(claimed, 1, "should return 1 when sentinel exists");
         assert!(
-            !claimed_dir.join("test-patch-456").exists(),
-            "sentinel should be deleted after check"
+            claimed_dir.join("test-patch-456").exists(),
+            "sentinel should remain so repeated watcher passes skip the patch"
         );
+        let claimed_again =
+            unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
+        assert_eq!(claimed_again, 1, "claimed sentinel should be durable");
     }
 
     #[test]

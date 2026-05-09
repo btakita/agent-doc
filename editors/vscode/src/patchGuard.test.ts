@@ -44,7 +44,7 @@ describe('patchGuard', () => {
         }
     });
 
-    it('consumes claimed patch sentinels exactly once', () => {
+    it('keeps claimed patch sentinels durable for repeated watcher passes', () => {
         const root = makeTempDir();
         const doc = path.join(root, 'doc.md');
         const sentinel = path.join(root, '.agent-doc', 'claimed-patches', 'patch-123');
@@ -54,8 +54,8 @@ describe('patchGuard', () => {
 
         try {
             assert.strictEqual(consumeClaimedPatch('patch-123', doc), true);
-            assert.strictEqual(fs.existsSync(sentinel), false);
-            assert.strictEqual(consumeClaimedPatch('patch-123', doc), false);
+            assert.strictEqual(fs.existsSync(sentinel), true);
+            assert.strictEqual(consumeClaimedPatch('patch-123', doc), true);
         } finally {
             fs.rmSync(root, { recursive: true, force: true });
         }

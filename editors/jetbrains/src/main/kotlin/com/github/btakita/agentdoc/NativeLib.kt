@@ -196,7 +196,8 @@ interface AgentDocLib : Library {
 
     /**
      * Check if --force-disk claimed this patch by writing a sentinel file.
-     * Checks `.agent-doc/claimed-patches/<patch_id>`. Deletes sentinel if found (one-time use).
+     * Checks `.agent-doc/claimed-patches/<patch_id>`. Sentinels are durable for
+     * the patch id so repeated watcher passes all skip locally closed patches.
      *
      * @param project_root  path to the project root containing `.agent-doc/`
      * @param patch_id      UUID from the patch payload

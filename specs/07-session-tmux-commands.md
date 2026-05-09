@@ -22,7 +22,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - Routes a harness-native reopen command into the authoritative pane for the document.
 - Route must ask the project controller for the document's authoritative actor binding before consulting legacy supervisor-backed registry compatibility evidence. `.agent-doc/session-actors.json` is a projection, not an independent ownership input.
 - Before route submits a managed or dispatch-only reopen to an actor-owned pane, it must record a controller `dispatch` attempt for the current session id, pane id, generation, and command kind. Stale session, pane, or generation requests fail closed before input is submitted.
-- Existing managed reroutes must use supervisor IPC for the reopen path; they must not fall back to typing directly into a live Claude/Codex pane.
+- Existing managed reroutes must use supervisor IPC for the reopen path; they must not fall back to typing directly into a live Claude/Codex pane. If the document path disappeared from the child argv but a healthy supervisor PID still maps to the registered pane, that supervisor-owned binding is enough to keep the managed reroute on supervisor IPC even when a direct pane prompt probe cannot classify the visible prompt.
 - Actor-backed reroutes may refresh `sessions.json` as a projection of the actor pane, but they must not opportunistically steal another same-file pane or re-register to a heuristic winner while the authoritative actor is healthy.
 - Session-log owners, `registry_rebind` successors, and generic same-file process-tree matches are repair/diagnostic signals only; route must fail closed with explicit inspect/claim/kill guidance instead of promoting them back to authority on the normal path.
 - Route must fail closed on ambiguity and list concrete follow-up commands instead of guessing.
@@ -189,7 +189,10 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   markdown file, sync must expand that one-column projection from
   `last_layout.json`; when no saved layout exists, it must derive the sibling
   projection from the registered panes already visible in the target
-  `agent-doc` window and replace only the active side with the focused file.
+  `agent-doc` window. If the focused file is already in the remembered or
+  visible projection, sync must select that column rather than replacing the
+  currently active tmux pane; active-pane inference is only for true same-side
+  replacements.
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.
 - If any visible file stays blocked under passive `--no-autostart`, sync must preserve the current visible tmux layout and warn instead of reconciling the remaining foreign pane set into a new authoritative layout. This includes the live mixed-root replay shape where `tasks/agent-doc/agent-doc-bugs2.md` shares the visible `agent-doc` window with `src/session-share/tasks/claudescore-3.md`; a blocked sibling file must not let the remaining visible pane set collapse into a new authoritative layout.

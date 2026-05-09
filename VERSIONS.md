@@ -6,6 +6,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Managed reroutes keep supervisor-PID recovered panes on supervisor IPC.** When a registered pane no longer exposes the document path in child argv but the healthy supervisor PID still maps to that pane, normal route now treats supervisor IPC as the readiness boundary instead of downgrading an unrecognized prompt probe to a focus-only no-op. This restores the supervisor-PID fallback regression and updates the routing specs.
+
+- **Safe-passive focus-only sync preserves already-visible focused siblings.** When an editor focus event supplies only the focused markdown file after a turn ends on another pane, sync now prefers the remembered or visible column that already owns that file before falling back to active tmux pane replacement. This keeps `docs.md`-style sibling panes selected in place instead of collapsing/replacing the old active pane. Added pure and tmux regressions and updated the session/tmux specs.
+
 - **IPC normalization fallback now respects concurrent non-exchange edits.** When a plugin sidecar strips a prompt prefix and the binary falls back to normalized `content_ours`, the fallback first merges the current disk content against the explicit pre-response baseline. Deleting a scratch HTML comment while the response is running now stays deleted instead of being restored by prefix repair. Added a regression and updated the closeout specs.
 
 - **Safe-passive focus-only sync preserves visible splits without saved layout state.** If an editor event supplies only the focused markdown file and `.agent-doc/last_layout.json` is absent, sync now derives the sibling projection from registered panes already visible in the target `agent-doc` window before reconciling. This prevents post-turn editor sync from collapsing a visible split to one pane. Added a tmux regression and updated the session/tmux specs.

@@ -894,6 +894,36 @@ fn visible_registered_layout(tmux: &Tmux, window: Option<&str>) -> Vec<String> {
         .collect()
 }
 
+fn same_sync_file(lhs: &str, rhs: &str) -> bool {
+    let lhs = lhs.trim();
+    let rhs = rhs.trim();
+    if lhs.is_empty() || rhs.is_empty() {
+        return false;
+    }
+    if lhs == rhs {
+        return true;
+    }
+    match (
+        canonicalize_sync_file(Path::new(lhs)),
+        canonicalize_sync_file(Path::new(rhs)),
+    ) {
+        (Some(lhs), Some(rhs)) => lhs == rhs,
+        _ => false,
+    }
+}
+
+fn focused_column_index(remembered_layout: &[String], focus: Option<&str>) -> Option<usize> {
+    let focus = focus?.trim();
+    if focus.is_empty() {
+        return None;
+    }
+    remembered_layout.iter().position(|col| {
+        col.split(',')
+            .map(str::trim)
+            .any(|candidate| same_sync_file(candidate, focus))
+    })
+}
+
 fn expand_focus_only_columns_for_editor_switch(
     col_args: &[String],
     remembered_layout: &[String],
@@ -2824,12 +2854,14 @@ fn run_with_options(
         visible_registered_layout(tmux, window)
     };
     let active_column_index = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-        active_pane_column_index(
-            tmux,
-            target_session.as_deref(),
-            window,
-            remembered_layout.len(),
-        )
+        focused_column_index(&remembered_layout, focus).or_else(|| {
+            active_pane_column_index(
+                tmux,
+                target_session.as_deref(),
+                window,
+                remembered_layout.len(),
+            )
+        })
     } else {
         None
     };
@@ -7512,6 +7544,40 @@ mod tests {
     }
 
     #[test]
+    fn focus_only_switch_prefers_existing_focused_column_over_active_tmux_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let left = root.join("tasks/left.md");
+        let right = root.join("tasks/right.md");
+        std::fs::create_dir_all(left.parent().unwrap()).unwrap();
+        std::fs::write(&left, "---\nagent_doc_session: left\n---\n").unwrap();
+        std::fs::write(&right, "---\nagent_doc_session: right\n---\n").unwrap();
+
+        let left = left.canonicalize().unwrap().to_string_lossy().to_string();
+        let right = right.canonicalize().unwrap().to_string_lossy().to_string();
+        let saved_layout = vec![left.clone(), right.clone()];
+        let resolved_column = focused_column_index(&saved_layout, Some(&right))
+            .or(Some(0))
+            .expect("focused right column should resolve");
+        assert_eq!(
+            resolved_column, 1,
+            "the focused document column should beat the stale active pane column"
+        );
+        let expanded = expand_focus_only_columns_for_editor_switch(
+            std::slice::from_ref(&right),
+            &saved_layout,
+            Some(resolved_column),
+            AutoStartMode::SafePassive,
+        );
+
+        assert_eq!(
+            expanded,
+            vec![left, right],
+            "when the focused document is already visible, focus-only sync should select that column instead of replacing the currently active tmux pane"
+        );
+    }
+
+    #[test]
     fn empty_window_arg_normalized_to_none() {
         assert_eq!(normalize_scope_arg(None), None);
         assert_eq!(normalize_scope_arg(Some("")), None);
@@ -10346,6 +10412,94 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             iso.active_pane("test").unwrap(),
             new_left_pane,
             "focused replacement pane should be selected after the same-side handoff"
+        );
+    }
+
+    #[test]
+    fn safe_passive_focus_only_existing_sibling_focus_does_not_replace_active_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let bugs_doc = root.join("tasks/bugs.md");
+        let docs_doc = root.join("tasks/docs.md");
+        for (path, session) in [(&bugs_doc, "bugs-session"), (&docs_doc, "docs-session")] {
+            std::fs::write(
+                path,
+                format!(
+                    "---\nagent_doc_session: {session}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let layout_state = vec![
+            bugs_doc
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+            docs_doc
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+        ];
+        std::fs::write(
+            root.join(".agent-doc/last_layout.json"),
+            serde_json::to_string(&layout_state).unwrap(),
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-focus-only-visible-sibling");
+        let bugs_pane = iso.new_session("test", root).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        let docs_pane = iso.split_window(&bugs_pane, root, "-dh").unwrap();
+        let target_window = iso.pane_window(&bugs_pane).unwrap();
+
+        for (session, pane, doc) in [
+            ("bugs-session", &bugs_pane, &bugs_doc),
+            ("docs-session", &docs_pane, &docs_doc),
+        ] {
+            sessions::register_full_with_cwd(
+                session,
+                pane,
+                &doc.to_string_lossy(),
+                pane_pid_from_tmux(&iso, pane).unwrap(),
+                &target_window,
+                &root.to_string_lossy(),
+            )
+            .unwrap();
+        }
+        iso.select_pane(&bugs_pane).unwrap();
+
+        run_with_options(
+            &[docs_doc.to_string_lossy().to_string()],
+            None,
+            Some(docs_doc.to_string_lossy().as_ref()),
+            AutoStartMode::SafePassive,
+            &iso,
+        )
+        .unwrap();
+
+        let ordered = iso.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(
+            ordered,
+            vec![bugs_pane.clone(), docs_pane.clone()],
+            "after a turn ends on the old pane, editor focus of an already-visible sibling must not collapse or replace that pane"
+        );
+        assert_eq!(
+            iso.active_pane("test").unwrap(),
+            docs_pane,
+            "focus-only sync should select the existing focused sibling pane"
         );
     }
 

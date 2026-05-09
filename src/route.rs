@@ -3138,6 +3138,8 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     true,
                 )?;
                 register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
+                let supervisor_recovered_without_path_owner =
+                    live_owner.is_none() && matches!(supervisor_health, SupervisorHealth::Healthy);
                 match ensure_existing_pane_ready_for_dispatch(
                     tmux,
                     file,
@@ -3148,6 +3150,17 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                         .map(|context| context.marker.as_str()),
                 )? {
                     ExistingPaneDispatchReadiness::Ready => {}
+                    ExistingPaneDispatchReadiness::BusyAlreadyRunning
+                        if supervisor_recovered_without_path_owner =>
+                    {
+                        crate::ops_log::log_op(
+                            file,
+                            &format!(
+                                "route_registered_pane_dispatch_via_healthy_supervisor file={} pane={} reason=missing_path_owner_prompt_probe_not_authoritative",
+                                file_path, registered_pane
+                            ),
+                        );
+                    }
                     ExistingPaneDispatchReadiness::BusyAlreadyRunning => {
                         return Ok(registered_pane);
                     }

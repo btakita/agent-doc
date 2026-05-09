@@ -36,7 +36,35 @@ Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-<!-- agent:boundary:b4ee64e8 -->
+❯ From monsterrodholders.md
+❯ > Fix agent-doc so a resumed Codex session cannot silently downgrade from requested danger-full-access to workspace- write; it should fail loudly before doing deploy work.
+❯ spec-test-build-install-commit-push
+### Re: Codex resume sandbox policy — gpt-5
+
+Implemented the Codex resume sandbox guard in `src/agent-doc`.
+
+What changed:
+- `HarnessConfig::restart_args()` now returns a fallible result so Codex supervisor restarts can fail before spawning a resumed session when the launch contract is malformed.
+- Codex resume restarts translate `-s <mode>` / `--sandbox=<mode>` into `-c sandbox_mode="<mode>"`, matching the current Codex resume policy path instead of passing legacy sandbox flags through after `resume --last`.
+- Resume restarts strip `--add-dir` arguments that Codex resume cannot accept, preserving the existing “resume inherits writable roots from the fresh launch” contract.
+- Conflicting sandbox declarations now fail closed with a launch-policy mismatch before task work can start, so a requested `danger-full-access` session cannot silently fall back to `workspace-write`.
+- Network-policy detection now also recognizes `-c sandbox_mode="..."`, so the existing danger-full-access plus disabled-network guard still works after sandbox translation.
+- Updated `specs/codex-support.md` to document the resumed-session contract.
+
+Verification:
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml harness::tests::codex_restart_translates_sandbox_for_resume`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml agent::tests::codex_network_status_reads_config_sandbox_mode`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml harness::tests::codex_restart`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits pushed:
+- `src/agent-doc`: `0399e1f` (`fix: preserve codex resume sandbox policy`) to `origin/20260422/codex-agent-backend`
+- root `agent-loop`: `6211346e2` (`chore: update agent-doc submodule`) to `origin/main`
+<!-- agent:boundary:8f3d5711 -->
 <!-- /agent:exchange -->
 ###
 

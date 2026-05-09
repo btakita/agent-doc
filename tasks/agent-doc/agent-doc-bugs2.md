@@ -107,7 +107,14 @@ Commits pushed:
 
 - `src/agent-doc`: `978f0b5 fix: hand off stale project controllers`
 - outer `agent-loop`: `b8d069a17 chore: update agent-doc submodule`
-<!-- agent:boundary:5b146de0 -->
+❯ Please look at agent-doc-bugs5.md `### Re: repeated version-mismatch notice — gpt-5` section.
+❯ Add #next-steps to the backlog.
+### Re: next steps backlog — gpt-5
+
+I read the referenced `agent-doc-bugs5.md` section. The actionable follow-up is the stale-instructions drift: root `AGENTS.md` can keep telling Codex to reload from an older agent-doc version even when the installed Codex instructions are current.
+
+Added backlog item `#instrdrift` for that fix: make `.codex/AGENTS.md` canonical or thin/update root `AGENTS.md`, and add an audit/CI guard against future `agent-doc-version` drift.
+<!-- agent:boundary:f714b700 -->
 <!-- /agent:exchange -->
 ###
 
@@ -134,6 +141,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#instrdrift] Root AGENTS.md / installed Codex instruction drift causes repeated version-mismatch notices — make .codex/AGENTS.md the canonical generated surface or thin/update root AGENTS.md, then add an audit/CI check so future agent-doc-version bumps cannot leave stale duplicate instructions behind.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md

@@ -29,40 +29,19 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-222111.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-225908.md`*
 
 Active backlog:
-- [ ] [#codexcapstale] Managed Codex pane capability drift — ready actor/process args can show `-s danger-full-access` and expected `--add-dir` roots while the long-lived pane still lacks DNS/SSH/write access that a fresh runtime has. Plan: tasks/agent-doc/plan-codex-managed-session-capability-proof.md
+- [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - 9 more active item(s)
-❯ do [#codexcapstale]. spec-test-build-install-commit-push
-### Re: managed Codex capability proof — gpt-5
-
-Implemented `#codexcapstale` in `src/agent-doc`.
-
-Summary:
-- Managed Codex startup now proves requested capabilities before the session is considered reusable: enabled network gets a DNS probe, required SSH targets use the isolated SSH proof, and explicit `--add-dir` roots get a write probe.
-- Codex routing now refuses to trust an old ready pane when the current capability proof is missing after the latest `session_start`; it restarts fresh once, then reapplies the launch contract before dispatch.
-- `agent-doc session status` now reports `codex_capability_proof` as `not_required`, `proven`, `missing`, or `unknown(...)`.
-- Updated README/spec coverage and `VERSIONS.md`, with focused regression tests around capability requirements, writable roots, and session-log proof freshness.
-
-Verification:
-- `cargo test`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- Installed CLI reports `agent-doc 0.33.16`.
-
-Commit/push:
-- `src/agent-doc`: `6076f95` (`fix: prove managed codex capabilities before reuse`) pushed to `origin/20260422/codex-agent-backend`.
-- root repo: `3188488d6` (`agent-doc: update codex capability proof`) pushed to `origin/main`.
-<!-- agent:boundary:8c103243 -->
+<!-- agent:boundary:074b9d2b -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-If a file is externally edited, the editor prompts to whether or not to load the external changes. If there is a significant delay and the external changes are accepted, a turn response can be duplicated. Please address root cause(s) including reducing the occurences of external edits.
+External edits cause duplicate turn responses. Please address root cause(s) including reducing the occurences of external edits.
 spec-test-build-install-commit-push
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md

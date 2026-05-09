@@ -382,6 +382,39 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
     }))
 }
 
+pub fn session_log_has_event_after_latest_start(
+    file: &Path,
+    session_id: &str,
+    event_prefix: &str,
+) -> Result<bool> {
+    let Some(path) = log_path(file, session_id)? else {
+        return Ok(false);
+    };
+    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+        return Ok(false);
+    };
+    let mut found_after_latest_start = false;
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let event = line
+            .split_once("] ")
+            .map(|(_, event)| event)
+            .unwrap_or(line)
+            .trim();
+        if event.starts_with("session_start ") {
+            found_after_latest_start = false;
+            continue;
+        }
+        if event.starts_with(event_prefix) {
+            found_after_latest_start = true;
+        }
+    }
+    Ok(found_after_latest_start)
+}
+
 pub fn session_log_diagnostic(file: &Path, session_id: &str) -> Result<Option<String>> {
     let Some(status) = session_log_status(file, session_id)? else {
         return Ok(None);
@@ -714,6 +747,45 @@ mod tests {
                 "latest harness run `codex_start mode=fresh restart_count=0` on pane=%41; session log still has no later child exit or session_end"
                     .to_string()
             )
+        );
+    }
+
+    #[test]
+    fn session_log_event_after_latest_start_resets_on_new_start() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        let logs_dir = tmp.path().join(".agent-doc/logs");
+        fs::create_dir_all(&logs_dir).unwrap();
+        fs::write(
+            logs_dir.join("session-123.log"),
+            "[1] session_start file=test.md pane=%41 session=session-123 generation=1\n\
+             [2] codex_capability_proof status=proven network=proven ssh_targets=0 writable_roots=1\n\
+             [3] session_start file=test.md pane=%42 session=session-123 generation=2\n",
+        )
+        .unwrap();
+
+        assert!(
+            !session_log_has_event_after_latest_start(
+                &doc,
+                "session-123",
+                "codex_capability_proof status=proven"
+            )
+            .unwrap()
+        );
+
+        append_session_log_event(
+            &doc,
+            "session-123",
+            "codex_capability_proof status=proven network=proven ssh_targets=0 writable_roots=1",
+        )
+        .unwrap();
+        assert!(
+            session_log_has_event_after_latest_start(
+                &doc,
+                "session-123",
+                "codex_capability_proof status=proven"
+            )
+            .unwrap()
         );
     }
 

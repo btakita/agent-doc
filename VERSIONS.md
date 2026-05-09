@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Managed Codex panes now prove capabilities before reuse.** Codex `start` records a `codex_capability_proof` event after successful live DNS, isolated SSH, and writable-root probes whenever the document requests network access, `required_ssh_targets`, or extra `--add-dir` roots. Route no longer trusts a ready managed Codex actor without a current proof after the latest `session_start`; it restarts fresh once with the original launch contract before rerouting, and `session status` reports whether the proof is `proven`, `missing`, or `not_required`. This closes `#codexcapstale` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Managed reroutes keep supervisor-PID recovered panes on supervisor IPC.** When a registered pane no longer exposes the document path in child argv but the healthy supervisor PID still maps to that pane, normal route now treats supervisor IPC as the readiness boundary instead of downgrading an unrecognized prompt probe to a focus-only no-op. This restores the supervisor-PID fallback regression and updates the routing specs.
 
 - **Safe-passive focus-only sync preserves already-visible focused siblings.** When an editor focus event supplies only the focused markdown file after a turn ends on another pane, sync now prefers the remembered or visible column that already owns that file before falling back to active tmux pane replacement. This keeps `docs.md`-style sibling panes selected in place instead of collapsing/replacing the old active pane. Added pure and tmux regressions and updated the session/tmux specs.

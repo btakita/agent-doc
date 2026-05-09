@@ -738,6 +738,12 @@ fn print_status_summary(ctx: &SessionContext) {
         ),
         None => println!("session_log: missing"),
     }
+    if ctx.harness == "codex" {
+        println!(
+            "codex_capability_proof: {}",
+            codex_capability_proof_status(ctx)
+        );
+    }
     match &ctx.operator_status.supervisor_lease {
         Some(lease) => println!(
             "controller_lease: generation={} pid={} runtime_state={} heartbeat={} socket={}",
@@ -776,6 +782,33 @@ fn print_status_summary(ctx: &SessionContext) {
                 diagnostic.message
             );
         }
+    }
+}
+
+fn codex_capability_proof_status(ctx: &SessionContext) -> String {
+    let content = match std::fs::read_to_string(&ctx.canonical_file) {
+        Ok(content) => content,
+        Err(err) => return format!("unknown (failed to read document: {err})"),
+    };
+    let fm = match crate::frontmatter::parse_for_file(&content, &ctx.canonical_file) {
+        Ok((fm, _)) => fm,
+        Err(err) => return format!("unknown (failed to parse frontmatter: {err})"),
+    };
+    #[cfg(test)]
+    let global_config = crate::config::Config::default();
+    #[cfg(not(test))]
+    let global_config = crate::config::load().unwrap_or_default();
+    if !crate::agent::codex::managed_capability_contract_required_for_doc(&fm, &global_config) {
+        return "not_required".to_string();
+    }
+    match crate::startup_miss::session_log_has_event_after_latest_start(
+        &ctx.canonical_file,
+        &ctx.session_id,
+        "codex_capability_proof status=proven",
+    ) {
+        Ok(true) => "proven".to_string(),
+        Ok(false) => "missing".to_string(),
+        Err(err) => format!("unknown ({err})"),
     }
 }
 

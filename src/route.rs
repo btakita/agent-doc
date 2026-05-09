@@ -822,6 +822,125 @@ fn reapply_codex_launch_contract_after_clear(
     Ok(dispatch_pane)
 }
 
+fn codex_managed_capability_proof_missing(
+    file: &Path,
+    session_id: &str,
+    harness: &HarnessConfig,
+) -> Result<Option<String>> {
+    if harness.binary != "codex" {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let fm = frontmatter::parse_for_file(&content, file).map(|(fm, _)| fm)?;
+    #[cfg(test)]
+    let global_config = crate::config::Config::default();
+    #[cfg(not(test))]
+    let global_config = crate::config::load().unwrap_or_default();
+    if !crate::agent::codex::managed_capability_contract_required_for_doc(&fm, &global_config) {
+        return Ok(None);
+    }
+    let proven = crate::startup_miss::session_log_has_event_after_latest_start(
+        file,
+        session_id,
+        "codex_capability_proof status=proven",
+    )?;
+    if proven {
+        return Ok(None);
+    }
+    Ok(Some(
+        "managed Codex session has no current capability proof for requested network, SSH, or writable-root access".to_string(),
+    ))
+}
+
+fn reapply_codex_capability_contract_before_reuse(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    session_id: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<String> {
+    let Some(reason) = codex_managed_capability_proof_missing(file, session_id, harness)? else {
+        return Ok(pane.to_string());
+    };
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_codex_capability_restart_fresh file={} pane={} harness={} reason={}",
+            file.display(),
+            pane,
+            harness.binary,
+            reason.replace(' ', "_")
+        ),
+    );
+    eprintln!(
+        "[route] {} for {} on pane {} — restarting the live Codex session fresh once before reuse",
+        reason,
+        file.display(),
+        pane
+    );
+
+    if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
+        anyhow::bail!(
+            "{} for {} on pane {}, and route could not restart the live session fresh. Run `agent-doc start {}` manually to recover",
+            reason,
+            file.display(),
+            pane,
+            file.display()
+        );
+    }
+
+    wait_for_busy_restart_handoff(tmux, file, file_path, session_id, pane);
+    let dispatch_pane = crate::sync::find_normal_path_owner_pane(tmux, file, session_id)
+        .unwrap_or_else(|| pane.to_string());
+    if !wait_for_agent_ready(
+        tmux,
+        &dispatch_pane,
+        fresh_route_start_ack_timeout(),
+        harness,
+    ) {
+        anyhow::bail!(
+            "{} for {}, and the fresh recovery session in pane {} never became ready. Run `agent-doc start {}` manually to recover",
+            reason,
+            file.display(),
+            dispatch_pane,
+            file.display()
+        );
+    }
+    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+    Ok(dispatch_pane)
+}
+
+fn reapply_codex_launch_contract_before_reuse(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    session_id: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    respect_tracked_clear_restart: bool,
+) -> Result<String> {
+    let dispatch_pane = reapply_codex_launch_contract_after_clear(
+        tmux,
+        file,
+        pane,
+        session_id,
+        file_path,
+        harness,
+        respect_tracked_clear_restart,
+    )?;
+    reapply_codex_capability_contract_before_reuse(
+        tmux,
+        file,
+        &dispatch_pane,
+        session_id,
+        file_path,
+        harness,
+    )
+}
+
 fn startup_miss_requires_fresh_start(
     registered_pane: &str,
     live_owner: Option<&str>,
@@ -1623,7 +1742,7 @@ fn dispatch_only_reopen_existing_pane(
     pane_id: &str,
     delivery: DispatchOnlyReopenDelivery,
 ) -> Result<String> {
-    let dispatch_pane = reapply_codex_launch_contract_after_clear(
+    let dispatch_pane = reapply_codex_launch_contract_before_reuse(
         tmux, file, pane_id, session_id, file_path, harness, false,
     )?;
     let log_status = crate::startup_miss::session_log_status(file, session_id)
@@ -1947,6 +2066,19 @@ fn load_authoritative_actor_binding(
         );
     }
     if !tmux.pane_alive(&record.pane_id) {
+        return Ok(None);
+    }
+    if codex_managed_capability_proof_missing(file, session_id, harness)?.is_some() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_authoritative_actor_missing_codex_capability_proof file={} pane={} harness={} generation={}",
+                file.display(),
+                record.pane_id,
+                harness.binary,
+                record.generation
+            ),
+        );
         return Ok(None);
     }
 
@@ -3128,7 +3260,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     target_session,
                     is_first_column(file, col_args),
                 );
-                let registered_pane = reapply_codex_launch_contract_after_clear(
+                let registered_pane = reapply_codex_launch_contract_before_reuse(
                     tmux,
                     file,
                     registered_pane,

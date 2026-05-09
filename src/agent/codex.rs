@@ -52,11 +52,14 @@
 use anyhow::Result;
 use std::collections::VecDeque;
 use std::io::BufRead;
+use std::net::ToSocketAddrs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use super::streaming::{StreamChunk, StreamingAgent};
 use super::{Agent, AgentResponse};
+use crate::frontmatter::{CodexNetworkAccess, Frontmatter};
 
 #[derive(Clone)]
 pub struct Codex {
@@ -286,6 +289,151 @@ fn format_required_ssh_failure(targets: &[String], detail: &str) -> String {
         targets.join(", "),
         detail.trim()
     )
+}
+
+fn add_dirs_from_args(args: &[String]) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--add-dir" {
+            if let Some(dir) = iter.next() {
+                dirs.push(PathBuf::from(dir));
+            }
+            continue;
+        }
+        if let Some(dir) = arg.strip_prefix("--add-dir=") {
+            dirs.push(PathBuf::from(dir));
+        }
+    }
+    dirs
+}
+
+fn proof_status_label(required: bool, proven: bool) -> &'static str {
+    match (required, proven) {
+        (false, _) => "not_required",
+        (true, true) => "proven",
+        (true, false) => "failed",
+    }
+}
+
+fn env_map_as_overrides(
+    env: &std::collections::HashMap<String, String>,
+) -> Vec<(String, Option<String>)> {
+    env.iter()
+        .map(|(key, value)| (key.clone(), Some(value.clone())))
+        .collect()
+}
+
+fn prove_dns_resolution() -> Result<()> {
+    ("github.com", 443)
+        .to_socket_addrs()
+        .map_err(|e| anyhow::anyhow!("DNS probe for github.com failed: {e}"))?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("DNS probe for github.com returned no addresses"))?;
+    Ok(())
+}
+
+fn prove_writable_root(path: &Path) -> Result<()> {
+    let metadata = std::fs::metadata(path).map_err(|e| {
+        anyhow::anyhow!("writable-root probe could not stat {}: {e}", path.display())
+    })?;
+    if !metadata.is_dir() {
+        anyhow::bail!(
+            "writable-root probe expected a directory at {}",
+            path.display()
+        );
+    }
+    let probe = path.join(format!(
+        ".agent-doc-write-probe-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::write(&probe, b"agent-doc write probe").map_err(|e| {
+        anyhow::anyhow!(
+            "writable-root probe could not write {}: {e}",
+            probe.display()
+        )
+    })?;
+    std::fs::remove_file(&probe).map_err(|e| {
+        anyhow::anyhow!(
+            "writable-root probe wrote but could not remove {}: {e}",
+            probe.display()
+        )
+    })?;
+    Ok(())
+}
+
+pub(crate) fn managed_capability_contract_required_for_doc(
+    fm: &Frontmatter,
+    global_config: &crate::config::Config,
+) -> bool {
+    super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled
+        || !fm.required_ssh_targets.is_empty()
+        || fm.agent_args.as_deref().is_some_and(args_contain_add_dir)
+        || fm.codex_args.as_deref().is_some_and(args_contain_add_dir)
+        || global_config
+            .agent_args
+            .as_deref()
+            .is_some_and(args_contain_add_dir)
+        || global_config
+            .codex_args
+            .as_deref()
+            .is_some_and(args_contain_add_dir)
+}
+
+fn args_contain_add_dir(args: &str) -> bool {
+    args.split_whitespace()
+        .any(|arg| arg == "--add-dir" || arg.starts_with("--add-dir="))
+}
+
+pub(crate) fn managed_capability_contract_required(
+    args: &[String],
+    fm: &Frontmatter,
+    global_config: &crate::config::Config,
+) -> bool {
+    super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled
+        || !fm.required_ssh_targets.is_empty()
+        || !add_dirs_from_args(args).is_empty()
+}
+
+pub(crate) fn prove_managed_session_capabilities(
+    args: &[String],
+    env: &std::collections::HashMap<String, String>,
+    fm: &Frontmatter,
+    global_config: &crate::config::Config,
+) -> Result<Option<String>> {
+    if !managed_capability_contract_required(args, fm, global_config) {
+        return Ok(None);
+    }
+
+    let network_required =
+        super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled;
+    if network_required {
+        prove_dns_resolution()?;
+    }
+
+    if !fm.required_ssh_targets.is_empty() {
+        let env = env_map_as_overrides(env);
+        Codex::new(None, None)
+            .with_env(env)
+            .with_required_ssh_targets(fm.required_ssh_targets.clone())
+            .prove_required_ssh_capability()?;
+    }
+
+    let writable_roots = add_dirs_from_args(args);
+    for root in &writable_roots {
+        prove_writable_root(root)?;
+    }
+
+    Ok(Some(format!(
+        "codex_capability_proof status=proven network={} ssh_targets={} writable_roots={}",
+        proof_status_label(network_required, network_required),
+        fm.required_ssh_targets.len(),
+        writable_roots.len()
+    )))
 }
 
 pub(crate) fn default_base_args() -> Vec<String> {
@@ -1534,6 +1682,53 @@ mod tests {
                 "sandbox_mode=\"workspace-write\"",
             ]
         );
+    }
+
+    #[test]
+    fn managed_capability_contract_requires_network_ssh_or_writable_roots() {
+        let config = crate::config::Config::default();
+        let mut fm = Frontmatter::default();
+        assert!(!managed_capability_contract_required(&[], &fm, &config));
+
+        fm.codex_network_access = Some(CodexNetworkAccess::Enabled);
+        assert!(managed_capability_contract_required(&[], &fm, &config));
+
+        fm.codex_network_access = None;
+        fm.required_ssh_targets = vec!["example-host".to_string()];
+        assert!(managed_capability_contract_required(&[], &fm, &config));
+
+        fm.required_ssh_targets.clear();
+        assert!(managed_capability_contract_required(
+            &[
+                "exec".to_string(),
+                "--json".to_string(),
+                "--add-dir".to_string(),
+                "/tmp/example".to_string()
+            ],
+            &fm,
+            &config
+        ));
+    }
+
+    #[test]
+    fn managed_capability_proof_checks_writable_add_dirs() {
+        let dir = TempDir::new().unwrap();
+        let args = vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "--add-dir".to_string(),
+            dir.path().to_string_lossy().into_owned(),
+        ];
+        let fm = Frontmatter::default();
+        let env = std::collections::HashMap::new();
+
+        let event =
+            prove_managed_session_capabilities(&args, &env, &fm, &crate::config::Config::default())
+                .unwrap()
+                .unwrap();
+
+        assert!(event.contains("codex_capability_proof status=proven"));
+        assert!(event.contains("writable_roots=1"));
     }
 
     #[test]

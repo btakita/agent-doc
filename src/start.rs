@@ -1985,6 +1985,35 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
         if let Some(err) = status.mismatch_error() {
             anyhow::bail!(err);
         }
+        match crate::agent::codex::prove_managed_session_capabilities(
+            &base_args,
+            &resolved_env,
+            &fm,
+            &global_config,
+        ) {
+            Ok(Some(event)) => {
+                eprintln!("[start] managed Codex capability proof: {}", event);
+                log_event(&mut session_log, &event);
+            }
+            Ok(None) => {
+                log_event(
+                    &mut session_log,
+                    "codex_capability_proof status=not_required",
+                );
+            }
+            Err(err) => {
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "codex_capability_proof status=failed error={:?}",
+                        err.to_string()
+                    ),
+                );
+                return Err(err.context(
+                    "managed Codex capability proof failed before launching the child session",
+                ));
+            }
+        }
     }
 
     // Query initial terminal size

@@ -282,6 +282,34 @@ fn sync_managed_root_agents(root: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn audit_managed_instruction_surfaces(root: Option<&Path>) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    for env in [
+        agent_kit::detect::Environment::Generic,
+        agent_kit::detect::Environment::Codex,
+        agent_kit::detect::Environment::ClaudeCode,
+    ] {
+        let path = base.join(env.skill_rel_path("agent-doc"));
+        if !path.exists() {
+            continue;
+        }
+        let existing =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        if !looks_like_managed_root_agents(&existing) {
+            continue;
+        }
+        let expected = content_for_env(env);
+        if existing != expected {
+            anyhow::bail!(
+                "managed agent-doc instruction surface is stale: {}. Run `agent-doc skill install --all` or reinstall the active harness before release.",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 fn detect_install_env() -> agent_kit::detect::Environment {
     use agent_kit::detect::Environment;
 
@@ -919,6 +947,53 @@ mod tests {
 
         let root = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
         assert_eq!(root, custom);
+    }
+
+    #[test]
+    fn audit_managed_instruction_surfaces_rejects_stale_root_agents_mirror() {
+        let dir = tempfile::tempdir().unwrap();
+        let stale_root = super::content_for_env(Environment::Generic).replace(
+            &format!("agent-doc-version: \"{VERSION}\""),
+            "agent-doc-version: \"0.33.12\"",
+        );
+        std::fs::write(dir.path().join("AGENTS.md"), stale_root).unwrap();
+
+        let err = super::audit_managed_instruction_surfaces(Some(dir.path())).unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("managed agent-doc instruction surface is stale"));
+        assert!(message.contains("AGENTS.md"));
+        assert!(message.contains("agent-doc skill install --all"));
+    }
+
+    #[test]
+    fn audit_managed_instruction_surfaces_rejects_stale_codex_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let codex_dir = dir.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        let stale_codex = super::content_for_env(Environment::Codex).replace(
+            &format!("agent-doc-version: \"{VERSION}\""),
+            "agent-doc-version: \"0.33.12\"",
+        );
+        std::fs::write(codex_dir.join("AGENTS.md"), stale_codex).unwrap();
+
+        let err = super::audit_managed_instruction_surfaces(Some(dir.path())).unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("managed agent-doc instruction surface is stale"));
+        assert!(message.contains(".codex"));
+    }
+
+    #[test]
+    fn audit_managed_instruction_surfaces_preserves_custom_root_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("AGENTS.md"),
+            "# Custom Project Instructions\n\nKeep this file untouched.\n",
+        )
+        .unwrap();
+
+        super::audit_managed_instruction_surfaces(Some(dir.path())).unwrap();
     }
 
     #[test]

@@ -9,6 +9,9 @@
 //! - When no `root_override` is provided and the current CWD is an outer repo that contains the
 //!   running `agent-doc` crate checkout (for example `cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs`
 //!   from the monorepo root), prefers the nested crate root over the outer repo root.
+//! - Also audits generated agent-doc instruction surfaces in the explicit root or resolved install
+//!   root. Managed surfaces must match the running binary's rendered content; custom root
+//!   AGENTS.md files are ignored.
 //!
 //! ## Agentic Contracts
 //! - `run(root_override)` — performs the audit and returns `Ok(())` on success or a descriptive
@@ -22,6 +25,8 @@
 //! - root_override: alternate root provided → audit runs relative to that path, not CWD
 //! - nested_dev_crate_root_override: when current CWD contains the running crate under a nested
 //!   path, audit scopes to that crate root instead of the outer repo
+//! - managed_instruction_surface_roots: running from a submodule audits the superproject install
+//!   root instead of ignored submodule-local install artifacts
 
 use anyhow::Result;
 use instruction_files::AuditConfig;
@@ -42,7 +47,42 @@ pub fn run(root_override: Option<&Path>) -> Result<()> {
         .map(|p| p.to_path_buf())
         .or(nested_override)
         .or(fallback_root);
+    for root in managed_instruction_surface_roots(root_override) {
+        crate::skill::audit_managed_instruction_surfaces(Some(&root))?;
+    }
     instruction_files::run(&config, resolved_root.as_deref())
+}
+
+fn managed_instruction_surface_roots(root_override: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(root) = root_override {
+        push_unique_root(&mut roots, root);
+        return roots;
+    }
+    if let Some(root) = resolve_git_superproject_root() {
+        push_unique_root(&mut roots, &root);
+        return roots;
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        push_unique_root(&mut roots, &cwd);
+    }
+    roots
+}
+
+fn push_unique_root(roots: &mut Vec<PathBuf>, root: &Path) {
+    let normalized = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if !roots.iter().any(|existing| existing == &normalized) {
+        roots.push(normalized);
+    }
+}
+
+fn resolve_git_superproject_root() -> Option<PathBuf> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-superproject-working-tree"])
+        .output()
+        .ok()?;
+    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!root.is_empty()).then(|| PathBuf::from(root))
 }
 
 fn fallback_root_without_marker(config: &AuditConfig) -> Option<PathBuf> {
@@ -162,6 +202,28 @@ mod tests {
 
         let resolved = resolve_nested_dev_crate_root_override_from(&nested, Some(nested.clone()));
         assert_eq!(resolved, None);
+    }
+
+    #[test]
+    fn managed_instruction_surface_roots_deduplicates_explicit_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+
+        let roots = managed_instruction_surface_roots(Some(&root));
+
+        assert_eq!(roots, vec![root]);
+    }
+
+    #[test]
+    fn push_unique_root_deduplicates_canonical_paths() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let mut roots = Vec::new();
+
+        push_unique_root(&mut roots, tmp.path());
+        push_unique_root(&mut roots, &root);
+
+        assert_eq!(roots, vec![root]);
     }
 
     fn resolve_nested_dev_crate_root_override_from(

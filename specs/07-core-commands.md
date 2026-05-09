@@ -89,6 +89,7 @@ Two modes:
 
 - Audits instruction files such as `CLAUDE.md`, `AGENTS.md`, `README.md`, and `SKILL.md` for path accuracy, staleness, actionable content, and line budget.
 - Discovery prunes heavy skip directories before descent so audit time is spent on real instruction surfaces.
+- Generated agent-doc instruction surfaces are audited as release artifacts: if a root `AGENTS.md`, `.codex/AGENTS.md`, or `.claude/skills/agent-doc/SKILL.md` still carries the agent-doc managed frontmatter/sections, it must match the content rendered by the running binary. Custom root instruction files that do not look agent-doc-managed remain user-owned and are not rewritten or failed for content mismatch.
 
 ## prompt
 
@@ -105,6 +106,7 @@ Two modes:
 
 - The installed skill always renders `agent-doc-version` from the running binary version.
 - Harness-specific reload flows must use explicit `--harness` selection rather than environment guessing.
+- Harness installs refresh a managed root `AGENTS.md` mirror when it still looks generated, so `.codex/AGENTS.md` and the root mirror cannot drift across `agent-doc-version` bumps. Custom root `AGENTS.md` files are opt-in and must be preserved.
 - Generated Claude, Codex, and generic hot-path instruction surfaces must stay compact: the shared source template is budgeted at 140 lines, and rendered harness-specific surfaces are budgeted at 150 lines. Rare recovery detail belongs in bundled runbooks rather than the always-loaded skill body.
 
 ## outline

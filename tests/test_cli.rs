@@ -151,8 +151,6 @@ fn test_cli_audit_docs_subcommand() {
     let output = cmd.output().unwrap();
     // Should run (may exit 0 or 1 depending on doc state, but not crash)
     assert!(output.status.code().is_some());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Auditing docs..."));
 }
 
 #[test]

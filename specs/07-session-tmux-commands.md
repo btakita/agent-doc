@@ -150,6 +150,13 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   ownership proof, or auto-start handling behind an orphaned process. Sync
   latency logs must include the `sync_lock_wait` phase so contention is not
   hidden inside the safe-passive total.
+- In safe-passive editor mode, `sync --no-autostart --focus <file>` must first
+  try the narrow controller actor handoff for the focused document. If the
+  actor binding matches the document session and its pane is alive, sync selects
+  that pane before waiting on `.agent-doc/sync.lock`, prune, ownership proof, or
+  tmux-router reconciliation. If the lock is then contended, sync may return the
+  normal retry marker, but the visible tmux focus for the selected editor file
+  has already moved.
 - Sync latency diagnostics must name the phase that crossed budget. The
   top-level phases include window resolution, prune, ownership proof,
   tmux-router reconcile, and safe-passive total; prune must also emit subphase

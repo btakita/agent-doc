@@ -297,6 +297,44 @@ fn safe_passive_lock_contention_message(elapsed: Duration, budget: Duration) -> 
     )
 }
 
+fn safe_passive_focus_actor_before_sync_lock(tmux: &Tmux, focus: Option<&str>) -> Option<String> {
+    let focus = focus?.trim();
+    if focus.is_empty() {
+        return None;
+    }
+    let focus_path = Path::new(focus);
+    let session_id = frontmatter::read_session_id(focus_path)?;
+    let record = load_live_authoritative_actor_record_uncached(tmux, focus_path, &session_id)?;
+    if let Err(err) = tmux.select_pane(&record.pane_id) {
+        eprintln!(
+            "[sync] warning: failed safe-passive pre-lock focus of controller actor pane {} for {}: {}",
+            record.pane_id,
+            focus_path.display(),
+            err
+        );
+        sync_log(&format!(
+            "warning: safe_passive_prelock_actor_focus_failed file={} pane={} err={}",
+            focus_path.display(),
+            record.pane_id,
+            err
+        ));
+        return None;
+    }
+    eprintln!(
+        "[sync] safe_passive_prelock_actor_focus pane={} file={} generation={}",
+        record.pane_id,
+        focus_path.display(),
+        record.generation
+    );
+    sync_log(&format!(
+        "safe_passive_prelock_actor_focus file={} pane={} generation={}",
+        focus_path.display(),
+        record.pane_id,
+        record.generation
+    ));
+    Some(record.pane_id)
+}
+
 fn log_sync_latency(
     focus: Option<&str>,
     phase: &str,
@@ -2445,6 +2483,18 @@ fn run_with_options(
         "sync::run_with_options start"
     );
     let sync_total_start = Instant::now();
+
+    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        let focus_start = Instant::now();
+        let _ = safe_passive_focus_actor_before_sync_lock(tmux, focus);
+        log_sync_latency(
+            focus,
+            "prelock_actor_focus",
+            focus_start.elapsed(),
+            SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
+            auto_start_mode,
+        );
+    }
 
     // Serialize sync calls via file lock. Concurrent syncs (from rapid tab switches)
     // race against each other's stash operations, causing pane bouncing. Contention
@@ -7528,6 +7578,100 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(1),
             "sync lock timeout should be bounded, elapsed={elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn safe_passive_sync_focuses_controller_actor_before_contended_sync_lock() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/software")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let active_doc = root.join("tasks/active.md");
+        let stale_doc = root.join("tasks/software/tsift.md");
+        std::fs::write(
+            &active_doc,
+            "---\nagent_doc_session: active-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &stale_doc,
+            "---\nagent_doc_session: stale-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-prelock-actor-focus");
+        let stale_pane = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let active_pane = iso.split_window(&stale_pane, root, "-dh").unwrap();
+        let active_window = iso.pane_window(&active_pane).unwrap();
+
+        crate::session_actor::project_binding_in(
+            root,
+            &active_doc.to_string_lossy(),
+            "active-session",
+            &active_pane,
+            &active_window,
+            "sync",
+            "prelock_focus_test",
+        )
+        .unwrap();
+        crate::project_controller::store_actor_record(
+            root,
+            Some(0),
+            &crate::session_actor::ActorRecord {
+                document_id: crate::session_actor::canonical_document_id_in(
+                    root,
+                    &stale_doc.to_string_lossy(),
+                ),
+                session_id: "stale-session".to_string(),
+                generation: 1,
+                pane_id: stale_pane.clone(),
+                window_id: active_window.clone(),
+                harness: "codex".to_string(),
+                state: crate::session_actor::ActorState::Starting,
+                last_transition: crate::session_actor::ActorLastTransition {
+                    caller: "sync".to_string(),
+                    reason: "stale_starting_sibling_test".to_string(),
+                    timestamp: 1,
+                    prior_generation: 0,
+                    new_generation: 1,
+                },
+            },
+        )
+        .unwrap();
+        iso.select_pane(&stale_pane).unwrap();
+
+        let lock_path = root.join(".agent-doc/sync.lock");
+        let holder = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        fs2::FileExt::lock_exclusive(&holder).unwrap();
+
+        run_with_options(
+            &[active_doc.to_string_lossy().to_string()],
+            None,
+            Some(active_doc.to_string_lossy().as_ref()),
+            AutoStartMode::SafePassive,
+            &iso,
+        )
+        .unwrap();
+
+        fs2::FileExt::unlock(&holder).unwrap();
+        assert_eq!(
+            iso.active_pane("test").unwrap(),
+            active_pane,
+            "safe-passive editor sync should focus the controller actor pane before sync lock contention can defer prune/reconcile"
         );
     }
 

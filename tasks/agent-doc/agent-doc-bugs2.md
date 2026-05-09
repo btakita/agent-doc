@@ -58,7 +58,21 @@ Commit / push:
 - Superproject commit `8b99a803e` pushed to `origin/main` with the updated `src/agent-doc` pointer.
 
 I marked `#editorswitchctl` done.
-<!-- agent:boundary:bc34eda2 -->
+### Re: startup-miss routed trigger — gpt-5
+
+That text is in the bound Codex session prompt because the router accepted a pending prompt target, then the startup watchdog noticed that no document response cycle actually began. The `echo '[agent-doc] startup-miss: ...'` line is a diagnostic injected into the bound session so the operator can see the lost target and retry with `agent-doc start ...`.
+
+It was not Entered because this path is not the normal prompt-delivery path. Normal delivery should submit the prompt target to the harness and produce a managed `preflight -> plan -> finalize` cycle. In this failure path, route had already considered the trigger accepted, but the downstream cycle did not start, so the recovery code printed a shell-visible diagnostic instead of pressing Enter on the original prompt.
+
+The `spec-test-build-install-commit-push` text is there because it was part of the pending target: `do #ppct. spec-test-build-install-commit-push`. At that diagnostic layer it is still raw user shorthand, not expanded preset text. There is also a normalization bug here: this document defines the preset as `#spec-test-build-install-commit-push`, while the queue and prompt text use `spec-test-build-install-commit-push` without the leading `#`. This cycle's preflight failed before returning JSON with `document references missing prompt preset(s): spec-test-build-install-commit-push`, which confirms that at least one validator path treats those as different names.
+
+So there are two issues, not one:
+
+- startup-miss reports an accepted-but-not-entered route as a diagnostic instead of guaranteeing prompt delivery or failing before acceptance;
+- preset reference normalization is inconsistent between frontmatter keys, queue entries, and prompt-target text.
+
+The active `#controller-timeout` item is the closest existing backlog item for the first issue. The second should be covered by a focused preset normalization regression if it is not already part of that work.
+<!-- agent:boundary:0db90be8 -->
 <!-- /agent:exchange -->
 ###
 
@@ -78,6 +92,13 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ---
 "Press Enter to restart, or 'q' to exit."
 -->
+
+<!-- agent:queue auto -->
+preset spec-test-build-install-commit-push
+- do [#controller-timeout]
+- do [#sidecar-diverge]
+- do [#syncbudget-regress]
+<!-- /agent:queue -->
 
 ## Pending / Not Built
 

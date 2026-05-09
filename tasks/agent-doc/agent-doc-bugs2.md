@@ -86,7 +86,28 @@ Created and committed `tasks/agent-doc/plan-controller-singleton-zero-downtime-h
 I updated existing backlog item `#g4w2` to point at that plan instead of adding a duplicate item. `#g4w2` stays open because this cycle only planned the work; it did not implement the controller handoff.
 
 No code tests were run because this cycle only created a plan document and updated the session backlog.
-<!-- agent:boundary:ce001260 -->
+❯ do [#g4w2]. spec-test-build-install-commit-push
+### Re: controller singleton handoff — gpt-5
+
+Implemented `#g4w2`.
+
+The project controller now records controller generation and handoff metadata in `controller-state.json`, promotes stale-binary replacements through a private socket before switching `.agent-doc/controller.sock`, and reaps only verified same-project duplicate controller PIDs. `controller status --ensure` also cleans up stale duplicate controllers even when the active controller binary is already current.
+
+The active local controller was validated after install: generation `4`, `handoff_state: stable`, and `stale_duplicate_pids: []`.
+
+Verification completed:
+
+- `cargo test project_controller`
+- `make check`
+- `make build-release install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `agent-doc controller status --ensure --project-root /home/brian/work/btakita/agent-loop`
+
+Commits pushed:
+
+- `src/agent-doc`: `978f0b5 fix: hand off stale project controllers`
+- outer `agent-loop`: `b8d069a17 chore: update agent-doc submodule`
+<!-- agent:boundary:5b146de0 -->
 <!-- /agent:exchange -->
 ###
 
@@ -113,7 +134,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#g4w2] Controller singleton/handoff must allow only one authoritative same-project controller while replacing stale binaries with zero downtime; retire or reap duplicate controller processes only after a promoted replacement preserves active session actors and supervisor leases. Plan: tasks/agent-doc/plan-controller-singleton-zero-downtime-handoff.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
@@ -164,6 +184,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
 - 2026-05-09 [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
 - 2026-05-09 [#root-empty-preflight] [recommended] Add a focused route/preflight recovery test for repeated empty preflight_started turns with no capture, using src/session-share/tasks/root.md cycle-1778336475478 as evidence: no response exists to replay, so the next invocation should fail with precise retry/restart guidance instead of repeated silent patchback misses.
+- 2026-05-09 [#g4w2] Controller singleton/handoff must allow only one authoritative same-project controller while replacing stale binaries with zero downtime; retire or reap duplicate controller processes only after a promoted replacement preserves active session actors and supervisor leases. Plan: tasks/agent-doc/plan-controller-singleton-zero-downtime-handoff.md
 <!-- /agent:pending-done -->
 
 

@@ -1927,7 +1927,82 @@ fn load_authoritative_actor_binding(
     }
 
     let runtime = query_supervisor_runtime(file, session_id);
+    let (record, runtime) = promote_starting_authoritative_actor_if_dispatch_ready(
+        tmux, file, file_path, record, runtime, harness,
+    );
     Ok(Some(AuthoritativeActorDispatchTarget { record, runtime }))
+}
+
+fn promote_starting_authoritative_actor_if_dispatch_ready(
+    tmux: &Tmux,
+    file: &Path,
+    file_path: &str,
+    record: crate::session_actor::ActorRecord,
+    mut runtime: SupervisorRuntime,
+    harness: &HarnessConfig,
+) -> (crate::session_actor::ActorRecord, SupervisorRuntime) {
+    let effective_state = runtime.actor_state.unwrap_or(record.state);
+    if runtime.health != SupervisorHealth::Healthy
+        || effective_state != crate::session_actor::ActorState::Starting
+    {
+        return (record, runtime);
+    }
+
+    let _ = tmux.select_pane(&record.pane_id);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let pane_ready = tmux
+        .capture_pane(&record.pane_id, Some(80))
+        .ok()
+        .map(|content| ready_prompt_candidate(&content, harness).is_some())
+        .unwrap_or(false)
+        || wait_for_agent_ready_outcome(
+            tmux,
+            &record.pane_id,
+            std::time::Duration::from_millis(1_200),
+            harness,
+        )
+        .is_ready();
+    if !pane_ready {
+        return (record, runtime);
+    }
+
+    let base_dir = registry_base_dir_for_dispatch(file_path);
+    match crate::project_controller::mark_lifecycle(
+        &base_dir,
+        crate::project_controller::LifecycleRequest {
+            file: file.to_path_buf(),
+            session_id: record.session_id.clone(),
+            pane_id: record.pane_id.clone(),
+            generation: record.generation,
+            state: crate::session_actor::ActorState::Ready,
+            caller: "route".to_string(),
+            reason: "dispatch_ready_prompt".to_string(),
+        },
+    ) {
+        Ok(updated) => {
+            runtime.actor_state = Some(crate::session_actor::ActorState::Ready);
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_authoritative_actor_promoted_ready file={} session={} pane={} generation={} reason=dispatch_ready_prompt",
+                    file.display(),
+                    updated.session_id,
+                    updated.pane_id,
+                    updated.generation
+                ),
+            );
+            (updated, runtime)
+        }
+        Err(err) => {
+            eprintln!(
+                "[route] warning: failed to promote starting authoritative actor {} for {} after seeing a dispatch-ready prompt: {}",
+                record.pane_id,
+                file.display(),
+                err
+            );
+            (record, runtime)
+        }
+    }
 }
 
 fn authorize_controller_dispatch(
@@ -2026,6 +2101,46 @@ fn route_via_authoritative_actor(
             eprintln!(
                 "[route] warning: failed to focus pane {}: {}",
                 dispatch_pane, e
+            );
+        }
+        if dispatch_only && actor_state == crate::session_actor::ActorState::Starting {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_starting_actor_direct_pane_submit file={} pane={} harness={} generation={} actor_state={}",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    actor.record.generation,
+                    actor_state.as_str()
+                ),
+            );
+            eprintln!(
+                "[route] authoritative actor generation {} for {} still reports starting on pane {} — keeping dispatch-only reroutes on the live pane submit path",
+                actor.record.generation,
+                file.display(),
+                dispatch_pane
+            );
+            let _authorization = authorize_controller_dispatch(
+                file,
+                session_id,
+                file_path,
+                &actor,
+                "dispatch_only_reopen",
+                &format!(
+                    "submit=direct_pane actor_state={} harness={}",
+                    actor_state.as_str(),
+                    harness.binary
+                ),
+            )?;
+            return dispatch_only_send_reopen(
+                tmux,
+                file,
+                session_id,
+                &dispatch_pane,
+                file_path,
+                harness,
+                DispatchOnlyReopenDelivery::DirectPaneSubmit,
             );
         }
         if prompt_bearing_marker.is_none() {
@@ -11414,6 +11529,138 @@ Body\n\
             actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
             "dispatch-only authoritative reroute should submit through the live pane path: {actor_after}"
         );
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn resolve_or_create_pane_dispatch_only_submits_to_healthy_starting_actor_without_split_churn()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-starting-actor-ready-prompt");
+        let session = "codex";
+        let actor_pane = iso.new_session(session, dir.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "codex:0", "agent-doc"]);
+        let _ = iso.raw_cmd(&[
+            "resize-window",
+            "-t",
+            "codex:agent-doc",
+            "-x",
+            "120",
+            "-y",
+            "40",
+        ]);
+        send_keys_with_retry(&iso, &actor_pane, r#"printf '\033[2J\033[HREADYMARK\n›\n'"#);
+        let ready_output = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            "READYMARK",
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            ready_output.contains("READYMARK"),
+            "fixture command should execute before split setup: {ready_output}"
+        );
+        let sibling_one = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
+        let sibling_two = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
+        let sibling_three = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
+        iso.select_pane(&actor_pane).unwrap();
+        let window = iso.pane_window(&actor_pane).unwrap();
+        let panes_before = iso.list_window_panes(&window).unwrap();
+        assert_eq!(panes_before.len(), 4);
+
+        let doc = dir.path().join("stale-starting-ready-prompt.md");
+        let current = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-stale-starting-ready-prompt";
+        sessions::register(session_id, &actor_pane, &file_path).unwrap();
+
+        crate::project_controller::store_actor_record(
+            dir.path(),
+            None,
+            &crate::session_actor::ActorRecord {
+                document_id: crate::session_actor::canonical_document_id_in(dir.path(), &file_path),
+                session_id: session_id.to_string(),
+                generation: 1,
+                pane_id: actor_pane.clone(),
+                window_id: window.clone(),
+                harness: "codex".to_string(),
+                state: crate::session_actor::ActorState::Starting,
+                last_transition: crate::session_actor::ActorLastTransition {
+                    caller: "start".to_string(),
+                    reason: "session_start".to_string(),
+                    timestamp: 1,
+                    prior_generation: 0,
+                    new_generation: 1,
+                },
+            },
+        )
+        .unwrap();
+
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "starting",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { .. } => {
+                panic!("ready-prompt dispatch-only reroute must use direct pane submit")
+            }
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let resolved = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("dispatch-only reroute should submit to the healthy starting actor");
+        assert_eq!(resolved, actor_pane);
+
+        let actor_after = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            "[run] Nothing",
+            std::time::Duration::from_secs(5),
+        );
+        let actor_after_compact = actor_after.split_whitespace().collect::<String>();
+        assert!(
+            actor_after_compact.contains("[run]Nothingchanged"),
+            "healthy starting actor should execute the dispatch-only reopen: {actor_after}"
+        );
+        let panes_after = iso.list_window_panes(&window).unwrap();
+        assert_eq!(
+            panes_after.len(),
+            panes_before.len(),
+            "route must not create or remove panes while dispatching to the controller actor"
+        );
+        for pane in [&sibling_one, &sibling_two, &sibling_three] {
+            assert!(
+                panes_after.contains(pane),
+                "unrelated panes in the split must remain visible"
+            );
+        }
+        let record = crate::project_controller::authoritative_actor_binding(dir.path(), &doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.pane_id, actor_pane);
 
         ipc.stop();
     }

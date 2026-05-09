@@ -47,7 +47,11 @@ The Codex log is noisy with repeated plugin/skill manifest warnings, mostly inva
 Yes, deferred work in `tasks/agent-doc/plan-project-controller-session-actor-mvp.md` would fix the switching issue. The most relevant pieces are Phase C, which makes supervisors report lifecycle facts like ready/busy/blocked instead of leaving a healthy session stuck in `starting`; Phase D, which moves start/route/sync onto controller authority and makes tmux-router only reconcile layout; and the performance guardrails that budget `sync_latency` phases and make over-budget editor paths visible. Phase E then adds better editor diagnostics when a pane is stale, blocked, or accepted-but-unproven.
 
 I added the top backlog item as `#editorswitch`. It should be first because it turns the deferred controller work into the user-visible invariant: switching editor documents should quickly focus the correct tmux pane even when another session is stale or sync/prune work is slow.
-<!-- agent:boundary:bff89737 -->
+❯ do [#editorswitch]. spec-test-build-install-commit-push
+### Re: filed #finalize-do-cascade from session-share/tasks/root.md — opus-4-6
+
+Cross-session bug filed: when `do #id` triggers finalize with `--pending-done`, up to 4 attempts are needed due to conflicting `pending_capture_guard` and `pending_done_guard`. Plan at `tasks/agent-doc/plan-finalize-pending-done-cascade.md`.
+<!-- agent:boundary:911e7440 -->
 <!-- /agent:exchange -->
 ###
 
@@ -74,6 +78,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#finalize-do-cascade] finalize --pending-done cascade failure: do #id closeout requires up to 4 finalize attempts due to conflicting pending_capture_guard and pending_done_guard. Plan: tasks/agent-doc/plan-finalize-pending-done-cascade.md
 - [ ] [#editorswitch] Implement a bounded editor-document switch fast path: resolve the focused markdown file through the controller actor binding, update tmux focus without waiting on stale safe-passive sync/prune work, and add regressions for stale starting sibling sessions like tasks/software/tsift.md.
 <!-- /agent:backlog -->
 

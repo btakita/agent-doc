@@ -846,6 +846,64 @@ fn build_layout_state(col_args: &[String], saved_layout: &[String]) -> Vec<Strin
         .collect()
 }
 
+fn active_pane_column_index(
+    tmux: &Tmux,
+    target_session: Option<&str>,
+    window: Option<&str>,
+    saved_layout_len: usize,
+) -> Option<usize> {
+    if saved_layout_len < 2 {
+        return None;
+    }
+    let session = target_session?;
+    let window = window?;
+    let active = tmux.active_pane(session)?;
+    let ordered = tmux.list_panes_ordered(window).ok()?;
+    if ordered.len() < 2 {
+        return None;
+    }
+    let active_index = ordered.iter().position(|pane| pane == &active)?;
+    Some(active_index.min(saved_layout_len.saturating_sub(1)))
+}
+
+fn expand_focus_only_columns_for_editor_switch(
+    col_args: &[String],
+    saved_layout: &[String],
+    active_column_index: Option<usize>,
+    auto_start_mode: AutoStartMode,
+) -> Vec<String> {
+    if !matches!(auto_start_mode, AutoStartMode::SafePassive)
+        || col_args.len() != 1
+        || saved_layout.len() < 2
+    {
+        return col_args.to_vec();
+    }
+    let Some(active_column_index) = active_column_index.filter(|index| *index < saved_layout.len())
+    else {
+        return col_args.to_vec();
+    };
+    let focused_column = col_args[0].trim();
+    if focused_column.is_empty() {
+        return col_args.to_vec();
+    }
+
+    let mut expanded: Vec<String> = saved_layout
+        .iter()
+        .map(|col| col.trim().to_string())
+        .collect();
+    expanded[active_column_index] = focused_column.to_string();
+    for (index, col) in expanded.iter_mut().enumerate() {
+        if index != active_column_index && col == focused_column {
+            col.clear();
+        }
+    }
+    sync_log(&format!(
+        "safe_passive_focus_only_editor_switch_expanded active_column={} columns={:?}",
+        active_column_index, expanded
+    ));
+    expanded
+}
+
 fn lookup_registry_entry_for_file_session(
     file: &Path,
     session_id: &str,
@@ -2666,18 +2724,6 @@ fn run_with_options(
     }
     let _lock_guard = lock_guard;
 
-    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-        let focus_start = Instant::now();
-        let _ = safe_passive_focus_actor_after_sync_lock(tmux, focus);
-        log_sync_latency(
-            focus,
-            "postlock_actor_focus",
-            focus_start.elapsed(),
-            SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
-            auto_start_mode,
-        );
-    }
-
     // Check for new build and clear stale caches
     check_build_stamp();
 
@@ -2691,22 +2737,15 @@ fn run_with_options(
         .unwrap_or_default();
 
     let input_cols = effective_sync_columns(col_args, &saved_layout, &layout_state_path)?;
-    let col_args: Vec<String> = apply_column_memory(&input_cols, &saved_layout)
+    let mut col_args: Vec<String> = apply_column_memory(&input_cols, &saved_layout)
         .into_iter()
         .filter(|col| !col.is_empty())
         .collect();
-    let col_args = col_args.as_slice();
-    sync_log(&format!(
-        "=== sync start: col_args={:?} window={:?} focus={:?} auto_start_mode={}",
-        col_args,
-        window,
-        focus,
-        auto_start_mode.log_label()
-    ));
+
     // Resolve the target session/window without mutating stash/layout state.
     // Phase-7 keeps layout rescue on explicit repair surfaces only.
     let window_resolution_start = Instant::now();
-    let target_session = resolve_sync_target_session(tmux, window, col_args, focus);
+    let target_session = resolve_sync_target_session(tmux, window, &col_args, focus);
     let mut effective_window = match (window, target_session.as_deref()) {
         (Some(w), _) => Some(w.to_string()),
         (None, Some(session_name)) => Some(format!("{session_name}:agent-doc")),
@@ -2747,6 +2786,39 @@ fn run_with_options(
         }
     }
     let window = effective_window.as_deref();
+    let active_column_index = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        active_pane_column_index(tmux, target_session.as_deref(), window, saved_layout.len())
+    } else {
+        None
+    };
+    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        let focus_start = Instant::now();
+        let _ = safe_passive_focus_actor_after_sync_lock(tmux, focus);
+        log_sync_latency(
+            focus,
+            "postlock_actor_focus",
+            focus_start.elapsed(),
+            SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
+            auto_start_mode,
+        );
+    }
+    col_args = expand_focus_only_columns_for_editor_switch(
+        &col_args,
+        &saved_layout,
+        active_column_index,
+        auto_start_mode,
+    )
+    .into_iter()
+    .filter(|col| !col.is_empty())
+    .collect();
+    let col_args = col_args.as_slice();
+    sync_log(&format!(
+        "=== sync start: col_args={:?} window={:?} focus={:?} auto_start_mode={}",
+        col_args,
+        window,
+        focus,
+        auto_start_mode.log_label()
+    ));
     log_sync_latency(
         focus,
         "window_resolution",
@@ -7362,6 +7434,38 @@ mod tests {
     }
 
     #[test]
+    fn safe_passive_focus_only_switch_expands_active_column_from_memory() {
+        let saved_layout = vec!["tasks/left.md".to_string(), "tasks/right.md".to_string()];
+        let focused = vec!["tasks/new-left.md".to_string()];
+
+        let expanded = expand_focus_only_columns_for_editor_switch(
+            &focused,
+            &saved_layout,
+            Some(0),
+            AutoStartMode::SafePassive,
+        );
+        assert_eq!(
+            expanded,
+            vec![
+                "tasks/new-left.md".to_string(),
+                "tasks/right.md".to_string()
+            ],
+            "a focus-only editor switch should replace the active tmux side and keep the sibling side visible"
+        );
+
+        let full_mode = expand_focus_only_columns_for_editor_switch(
+            &focused,
+            &saved_layout,
+            Some(0),
+            AutoStartMode::Full,
+        );
+        assert_eq!(
+            full_mode, focused,
+            "manual/full sync keeps the literal editor projection"
+        );
+    }
+
+    #[test]
     fn empty_window_arg_normalized_to_none() {
         assert_eq!(normalize_scope_arg(None), None);
         assert_eq!(normalize_scope_arg(Some("")), None);
@@ -10068,6 +10172,107 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             iso.active_pane("test").unwrap(),
             dev_pane,
             "blocked passive sync should still reselect the already-visible focused pane"
+        );
+    }
+
+    #[test]
+    fn safe_passive_focus_only_editor_switch_preserves_sibling_pane() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let left_doc = root.join("tasks/left.md");
+        let right_doc = root.join("tasks/right.md");
+        let new_left_doc = root.join("tasks/new-left.md");
+        for (path, session) in [
+            (&left_doc, "left-session"),
+            (&right_doc, "right-session"),
+            (&new_left_doc, "new-left-session"),
+        ] {
+            std::fs::write(
+                path,
+                format!(
+                    "---\nagent_doc_session: {session}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let layout_state = vec![
+            left_doc
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+            right_doc
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
+        ];
+        std::fs::write(
+            root.join(".agent-doc/last_layout.json"),
+            serde_json::to_string(&layout_state).unwrap(),
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-focus-only-editor-switch");
+        let left_pane = iso.new_session("test", root).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        let right_pane = iso.split_window(&left_pane, root, "-dh").unwrap();
+        let target_window = iso.pane_window(&left_pane).unwrap();
+        let new_left_pane = iso.new_window("test", root).unwrap();
+        let new_left_window = iso.pane_window(&new_left_pane).unwrap();
+
+        for (session, pane, window, doc) in [
+            ("left-session", &left_pane, &target_window, &left_doc),
+            ("right-session", &right_pane, &target_window, &right_doc),
+            (
+                "new-left-session",
+                &new_left_pane,
+                &new_left_window,
+                &new_left_doc,
+            ),
+        ] {
+            sessions::register_full_with_cwd(
+                session,
+                pane,
+                &doc.to_string_lossy(),
+                pane_pid_from_tmux(&iso, pane).unwrap(),
+                window,
+                &root.to_string_lossy(),
+            )
+            .unwrap();
+        }
+        iso.select_pane(&left_pane).unwrap();
+
+        run_with_options(
+            &[new_left_doc.to_string_lossy().to_string()],
+            None,
+            Some(new_left_doc.to_string_lossy().as_ref()),
+            AutoStartMode::SafePassive,
+            &iso,
+        )
+        .unwrap();
+
+        let ordered = iso.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(
+            ordered,
+            vec![new_left_pane.clone(), right_pane.clone()],
+            "focus-only editor tab switches should update the active side without collapsing the sibling pane"
+        );
+        assert_eq!(
+            iso.active_pane("test").unwrap(),
+            new_left_pane,
+            "focused replacement pane should be selected after the same-side handoff"
         );
     }
 

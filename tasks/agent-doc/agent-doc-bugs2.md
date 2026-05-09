@@ -114,7 +114,27 @@ Commits pushed:
 I read the referenced `agent-doc-bugs5.md` section. The actionable follow-up is the stale-instructions drift: root `AGENTS.md` can keep telling Codex to reload from an older agent-doc version even when the installed Codex instructions are current.
 
 Added backlog item `#instrdrift` for that fix: make `.codex/AGENTS.md` canonical or thin/update root `AGENTS.md`, and add an audit/CI guard against future `agent-doc-version` drift.
-<!-- agent:boundary:f714b700 -->
+❯ do [#instrdrift]. spec-test-build-install-commit-push
+### Re: instruction drift audit — gpt-5
+
+Implemented `#instrdrift`.
+
+Summary:
+- `agent-doc audit-docs` now checks generated managed instruction surfaces (`AGENTS.md`, `.codex/AGENTS.md`, `.claude/skills/agent-doc/SKILL.md`) against the running binary render and fails on drift.
+- The check preserves custom root `AGENTS.md` files and, when running inside a submodule, audits the superproject install root instead of ignored submodule-local install artifacts.
+- Specs/docs now describe managed root mirror refresh and generated-surface drift audit behavior.
+- Added regressions for stale root/Codex generated surfaces and custom-root preservation.
+
+Verification completed:
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make build-release install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits pushed:
+- `src/agent-doc`: `aa62651` `fix: audit generated instruction drift`
+- outer `agent-loop`: `6007bcc` `chore: update agent-doc submodule`
+<!-- agent:boundary:e95da9b3 -->
 <!-- /agent:exchange -->
 ###
 
@@ -141,7 +161,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#instrdrift] Root AGENTS.md / installed Codex instruction drift causes repeated version-mismatch notices — make .codex/AGENTS.md the canonical generated surface or thin/update root AGENTS.md, then add an audit/CI check so future agent-doc-version bumps cannot leave stale duplicate instructions behind.
+- [ ] [#dodone] Skill does not auto-run --pending-done on do #id completion — when a user prompts 'do [#id]' and the task is completed, the skill's finalize step should include --pending-done <id> automatically. Currently the skill completes the work and finalizes the response but forgets to mark the pending item as done, requiring manual correction.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
@@ -193,6 +213,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
 - 2026-05-09 [#root-empty-preflight] [recommended] Add a focused route/preflight recovery test for repeated empty preflight_started turns with no capture, using src/session-share/tasks/root.md cycle-1778336475478 as evidence: no response exists to replay, so the next invocation should fail with precise retry/restart guidance instead of repeated silent patchback misses.
 - 2026-05-09 [#g4w2] Controller singleton/handoff must allow only one authoritative same-project controller while replacing stale binaries with zero downtime; retire or reap duplicate controller processes only after a promoted replacement preserves active session actors and supervisor leases. Plan: tasks/agent-doc/plan-controller-singleton-zero-downtime-handoff.md
+- 2026-05-09 [#instrdrift] Root AGENTS.md / installed Codex instruction drift causes repeated version-mismatch notices — make .codex/AGENTS.md the canonical generated surface or thin/update root AGENTS.md, then add an audit/CI check so future agent-doc-version bumps cannot leave stale duplicate instructions behind.
 <!-- /agent:pending-done -->
 
 

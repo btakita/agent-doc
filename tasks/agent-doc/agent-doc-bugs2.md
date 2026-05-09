@@ -33,7 +33,30 @@ Added Codex manifest warning cleanup to the backlog.
 
 Active backlog:
 - [ ] [#root-empty-preflight] [recommended] Add a focused route/preflight recovery test for repeated empty preflight_started turns with no capture, using src/session-share/tasks/root.md cycle-1778336475478 as evidence: no response exists to replay, so the next invocation should fail with precise retry/restart guidance instead of repeated silent patchback misses.
-<!-- agent:boundary:cf6970a6 -->
+❯ do [#root-empty-preflight]. spec-test-build-install-commit-push
+### Re: #root-empty-preflight — gpt-5
+Implemented `#root-empty-preflight`.
+
+The preflight repair path now refuses to auto-close an empty `preflight_started` cycle when the live document has an unresolved prompt target and no response capture exists. Instead it fails closed with the cycle id, prompt preview, and restart guidance, so the old no-op commit path cannot silently mark the prompt as handled. It still permits deterministic stale-lock cleanup for matching hashes, frontmatter-only stale empty cycles, historical committed repair, and binary-owned orchestration handoff markers.
+
+Updated the closeout spec/README and added focused repair plus preflight regressions for recent/stale empty prompt drift, the root `do #root-empty-preflight` shape, frontmatter-only drift, and orchestration handoff compatibility.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test stale_empty_preflight -- --nocapture`
+- `cargo test empty_preflight_started_cycle -- --nocapture`
+- `cargo test recover_does_not_treat_orchestration_handoff_marker_as_missing_response -- --nocapture`
+- `cargo test --test run_integration orchestrate_handles_already_open_preflight_cycle_for_first_step -- --nocapture`
+- `cargo test alive_registered_pane_fails_closed_when_legacy_live_owner_conflicts -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits pushed:
+- `src/agent-doc`: `1d06f74` (`fix: fail closed on empty preflight prompt drift`)
+- parent `agent-loop`: `25726bbb0` (`agent-doc: fail closed on empty preflight prompt drift`)
+<!-- agent:boundary:7d6e2c4b -->
 <!-- /agent:exchange -->
 ###
 
@@ -61,7 +84,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#root-empty-preflight] [recommended] Add a focused route/preflight recovery test for repeated empty preflight_started turns with no capture, using src/session-share/tasks/root.md cycle-1778336475478 as evidence: no response exists to replay, so the next invocation should fail with precise retry/restart guidance instead of repeated silent patchback misses.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -101,6 +123,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
 - 2026-05-09 [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
 - 2026-05-09 [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
+- 2026-05-09 [#root-empty-preflight] [recommended] Add a focused route/preflight recovery test for repeated empty preflight_started turns with no capture, using src/session-share/tasks/root.md cycle-1778336475478 as evidence: no response exists to replay, so the next invocation should fail with precise retry/restart guidance instead of repeated silent patchback misses.
 <!-- /agent:pending-done -->
 
 

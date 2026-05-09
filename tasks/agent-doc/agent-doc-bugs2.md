@@ -55,7 +55,21 @@ Verification completed:
 Commits pushed:
 - `src/agent-doc`: `69bc440 fix: preserve split layout on focus-only sync`
 - outer `agent-loop`: `0c3e837ca chore: update agent-doc submodule`
-<!-- agent:boundary:0c8b5361 -->
+❯ The same 1 tmux pane transition is still occurring. Does the agent-doc controller need to restart?
+### Re: controller restart for one-pane transition — gpt-5
+
+The active controller did not look stale: before restart it reported `/home/brian/.cargo/bin/agent-doc`, version `0.33.16`, and a binary timestamp from the local install.
+
+I restarted it anyway through the binary-owned path:
+
+- `agent-doc controller shutdown` returned `{"ok":true}`
+- `agent-doc controller status --ensure` relaunched PID `1992202`
+- the relaunched controller still reports `agent-doc 0.33.16`
+
+One suspicious thing did show up: there was also an older same-project controller process still alive from 01:33 (`PID 4085114`) even after the active controller shutdown. The active socket/status now points at the new controller, so that old process is probably not the reason the current sync path is still collapsing, but it is a real cleanup/singleton bug signal. I added a recommended backlog item for that.
+
+Given the active controller already matched the installed binary, a restart alone was unlikely to be the full fix. If the one-pane transition still happens after this restart, the remaining likely cause is that the editor is still sending a full one-column `sync --no-autostart` event, or the plugin/native library path is not using the newly installed library, rather than the controller holding old sync logic.
+<!-- agent:boundary:eb697c54 -->
 <!-- /agent:exchange -->
 ###
 
@@ -82,6 +96,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#g4w2] [recommended] Controller shutdown leaves stale duplicate same-project controller processes alive; make shutdown/status reap unreachable same-root controller serve processes or fail with a precise singleton diagnostic.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md

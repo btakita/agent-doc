@@ -124,11 +124,22 @@ v0.6.1 published to crates.io
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260507-225642.md`*
-<!-- agent:boundary:80f6414e -->
+❯ Plan #next-steps for tagpath to assist tsift to save tokens.
+### Re: tagpath next steps — gpt-5
+
+I added tagpath backlog items in priority order for helping tsift save tokens. Top backlog item: `#ctxp`.
+
+The order is intentional: first extend the shared token-savings fixture to `context-pack`, then make the compression path a tagpath-owned helper instead of fixture-only logic, then add query/ontology compactness coverage so tsift can keep references as handles rather than repeated prose.
+
+No repo code changes were needed for this cycle; this was planning/backlog capture only.
+<!-- agent:boundary:24532a79 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ctxp] Add `context-pack` to `fixtures/tsift-token-savings.json` with raw refs, tagpath family rows, ontology_ref handles, and minimum savings thresholds; mirror the new case in tagpath + tsift fixture tests.
+- [ ] [#cmpa] Add a tagpath library/CLI compression-report helper that accepts raw symbol rows and emits grouped family previews plus byte/token savings metrics for tsift.
+- [ ] [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
 <!-- /agent:backlog -->

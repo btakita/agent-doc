@@ -128,14 +128,54 @@ v0.6.1 published to crates.io
 Active backlog:
 - [ ] [#cmpa] Add a tagpath library/CLI compression-report helper that accepts raw symbol rows and emits grouped family previews plus byte/token savings metrics for tsift.
 - [ ] [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
-<!-- agent:boundary:27004f2e -->
+❯ do [#cmpa]. spec-test-build-install-commit-push
+### Re: cmpa — gpt-5
+
+Implemented `#cmpa` in tagpath and pushed it.
+
+What changed:
+- Added the `tagpath::compression` library module with raw symbol row input, canonical family grouping, alias previews, raw/compact preview rendering, and deterministic byte/token savings metrics.
+- Added the `tagpath compression-report [<JSON>|-] --format text|json --example-limit <N>` CLI command.
+- Updated the tsift token-savings fixture tests to use the shared compression helper instead of local-only render/calculation code.
+- Updated README and SPEC for the new command and report contract.
+
+Verification:
+- `cargo fmt`
+- `cargo test`
+- `cargo build`
+- `cargo install --path .`
+- CLI smoke test: `tagpath compression-report --format json` from stdin produced one grouped `raw_symbol` family and positive byte/token savings.
+
+Commits:
+- tagpath: `31c3cc7 feat: add compression report helper` (pushed to `btakita/tagpath main`)
+- agent-loop: `a7d730ef7 chore: update tagpath compression helper` (submodule pointer committed locally; push follows this document closeout)
+### Re: cmpa — gpt-5
+
+Implemented `#cmpa` in tagpath and pushed it.
+
+What changed:
+- Added the `tagpath::compression` library module with raw symbol row input, canonical family grouping, alias previews, raw/compact preview rendering, and deterministic byte/token savings metrics.
+- Added the `tagpath compression-report [<JSON>|-] --format text|json --example-limit <N>` CLI command.
+- Updated the tsift token-savings fixture tests to use the shared compression helper instead of local-only render/calculation code.
+- Updated README and SPEC for the new command and report contract.
+
+Verification:
+- `cargo fmt`
+- `cargo test`
+- `cargo build`
+- `cargo install --path .`
+- CLI smoke test: `tagpath compression-report --format json` from stdin produced one grouped `raw_symbol` family and positive byte/token savings.
+
+Commits:
+- tagpath: `31c3cc7 feat: add compression report helper` (pushed to `btakita/tagpath main`)
+- agent-loop: `a7d730ef7 chore: update tagpath compression helper` (submodule pointer committed locally; push follows this document closeout)
+<!-- agent:boundary:010561b5 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cmpa] Add a tagpath library/CLI compression-report helper that accepts raw symbol rows and emits grouped family previews plus byte/token savings metrics for tsift.
 - [ ] [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
 <!-- /agent:backlog -->
 
@@ -143,4 +183,5 @@ Active backlog:
 
 <!-- agent:pending-done -->
 - 2026-05-09 [#ctxp] Add `context-pack` to `fixtures/tsift-token-savings.json` with raw refs, tagpath family rows, ontology_ref handles, and minimum savings thresholds; mirror the new case in tagpath + tsift fixture tests.
+- 2026-05-09 [#cmpa] Add a tagpath library/CLI compression-report helper that accepts raw symbol rows and emits grouped family previews plus byte/token savings metrics for tsift.
 <!-- /agent:pending-done -->

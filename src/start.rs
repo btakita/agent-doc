@@ -2035,7 +2035,7 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         let auto_trigger;
         let args = if !first_run {
             auto_trigger = true;
-            let restart_args = harness.restart_args(&base_args);
+            let restart_args = harness.restart_args(&base_args)?;
             eprintln!("Restarting {} (continue)...", harness.binary);
             log_event(
                 &mut session_log,

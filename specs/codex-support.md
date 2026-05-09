@@ -46,6 +46,8 @@ codex fork --last
 
 When the effective child env still has `CODEX_SANDBOX_NETWORK_DISABLED=1` while the sandbox request is `danger-full-access`, `start` and orchestrated fresh Codex runs fail closed with a launch-policy mismatch instead of silently starting a network-disabled session.
 
+For resumed Codex sessions, agent-doc must not pass legacy sandbox flags through blindly. `codex resume` / `codex exec resume` policy is expressed with `-c sandbox_mode="..."`; supervisor restart and backend resume paths translate `-s <SANDBOX>` / `--sandbox=<SANDBOX>` into that form, strip `--add-dir` entries that resume cannot accept, and fail closed on malformed or conflicting sandbox args before a resumed session can run task work. This prevents a document requesting `danger-full-access` from silently resuming under Codex's default `workspace-write` policy.
+
 Key differences from Claude Code:
 - No `-p` (pipe mode) — `exec` is the non-interactive equivalent
 - No `--permission-mode` — uses `-s` sandbox mode instead
@@ -67,7 +69,7 @@ Key differences from Claude Code:
    - Command: `codex exec`
    - Flags: `--json` for structured output, `-s workspace-write` default
    - Parse JSONL output → extract final response text + session ID
-   - Session resume: shell out to `codex resume <id>` with prompt on stdin
+   - Session resume: shell out to `codex exec resume <id> --json` with prompt on stdin, translating legacy sandbox flags to `-c sandbox_mode="..."`
    - Session fork: `codex fork --last` with prompt on stdin
    - Model override: `-m <model>`
    - System prompt: write to temp `.codex/AGENTS.md` or use `AGENTS.md` in project root
@@ -112,7 +114,7 @@ Key differences from Claude Code:
 
 1. ✅ Defined `HarnessConfig` struct in `harness.rs`:
    - `binary`, `restart_behavior` (Append or Replace), `prompt_patterns`, `trigger_command_template`, `env_remove`, `supports_no_mcp`, `supports_enable_tool_search`
-   - `RestartBehavior::Append` for Claude (`["--continue"]`), `RestartBehavior::Replace` for Codex (`["resume", "--last"]`)
+   - `RestartBehavior::Append` for Claude (`["--continue"]`), `RestartBehavior::Prepend` for Codex (`["resume", "--last"]`)
    - Factory methods: `claude()`, `codex()`, `from_agent_name()`, `from_context()`
    - Helper methods: `restart_args()`, `trigger_command()`, `matches_prompt()`
 
@@ -121,7 +123,7 @@ Key differences from Claude Code:
 
 3. ✅ Refactored `start.rs::run()`:
    - Binary name parameterized (spawn, error messages, log events)
-   - Restart args use `harness.restart_args()` (append vs replace)
+   - Restart args use `harness.restart_args()` (append vs prepend); Codex resume restarts translate sandbox flags to `-c sandbox_mode="..."`, strip resume-incompatible `--add-dir` flags, and reject conflicting sandbox modes before spawning
    - Clean exit handling is harness-aware: Codex auto-restarts in resume mode after a normal `codex exec` turn instead of dropping into the Claude-style `Enter`/`q` prompt, and stdin-forwarded EOF/Ctrl-D or a stdin-forwarded `Ctrl+C` that actually terminates the child both surface that same restart-fresh-or-quit menu so the operator can intentionally leave the supervisor, even immediately after a committed document cycle. Route/plugin-injected interrupts that bypass stdin forwarding stay on the automatic recovery path. Those supervisor prompts must force a canonical local tty mode for the prompt read itself instead of trusting the inherited parent harness stdin flags, so Enter continues to work even when the outer binding session left stdin raw-ish. Only genuinely promptless fresh/fresh-restart clean exits with no forwarded operator quit key still count as failed startup provenance and restart fresh automatically. Failed resume handoffs still stop chaining blind resumes by restarting fresh on the first failure and escalating to the resume-failure prompt on repeated failures, but prompt-time EOF on that path now also restarts fresh rather than quitting
    - Prompt detection now requires a prompt line that appears in pane content produced after the resumed child starts; a stale prompt still visible in tmux history no longer counts as resume proof
    - Trigger command uses `harness.trigger_command()`

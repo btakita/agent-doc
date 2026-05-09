@@ -122,6 +122,17 @@ fn parent_codex_network_disabled() -> bool {
         == Some("1")
 }
 
+fn codex_sandbox_mode_from_config(value: &str) -> Option<String> {
+    let raw = value.trim();
+    let mode = raw.strip_prefix("sandbox_mode=")?;
+    let mode = mode.trim().trim_matches(|c| c == '"' || c == '\'');
+    if mode.is_empty() {
+        None
+    } else {
+        Some(mode.to_string())
+    }
+}
+
 fn codex_sandbox_mode_from_args(args: &[String]) -> Option<String> {
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -131,9 +142,21 @@ fn codex_sandbox_mode_from_args(args: &[String]) -> Option<String> {
                     return Some(mode.clone());
                 }
             }
+            "-c" | "--config" => {
+                if let Some(value) = iter.next()
+                    && let Some(mode) = codex_sandbox_mode_from_config(value)
+                {
+                    return Some(mode);
+                }
+            }
             _ => {
                 if let Some(mode) = arg.strip_prefix("--sandbox=") {
                     return Some(mode.to_string());
+                }
+                if let Some(value) = arg.strip_prefix("--config=")
+                    && let Some(mode) = codex_sandbox_mode_from_config(value)
+                {
+                    return Some(mode);
                 }
             }
         }
@@ -709,6 +732,19 @@ mod tests {
         let status =
             codex_network_status_from_overrides(&args, CodexNetworkAccess::Inherit, &Vec::new());
         assert!(status.effective_disabled);
+        assert!(status.mismatch_error().is_some());
+    }
+
+    #[test]
+    fn codex_network_status_reads_config_sandbox_mode() {
+        let _guard = EnvGuard::set(CODEX_SANDBOX_NETWORK_DISABLED_ENV, "1");
+        let args = vec![
+            "-c".to_string(),
+            "sandbox_mode=\"danger-full-access\"".to_string(),
+        ];
+        let status =
+            codex_network_status_from_overrides(&args, CodexNetworkAccess::Inherit, &Vec::new());
+        assert_eq!(status.sandbox_mode.as_deref(), Some("danger-full-access"));
         assert!(status.mismatch_error().is_some());
     }
 

@@ -6,7 +6,7 @@
 //!   env vars to remove, and feature support flags.
 //! - `RestartBehavior`: how the supervisor restarts after a crash — either append args
 //!   to base_args (Claude: `--continue`) or prefix a resume subcommand while preserving
-//!   the resolved base args (Codex: `resume --last` + existing sandbox/model flags).
+//!   the resolved base args (Codex: `resume --last` + resume-compatible sandbox/model flags).
 //! - `HarnessConfig::claude()` and `HarnessConfig::codex()` provide defaults.
 //! - `HarnessConfig::from_context()` resolves from frontmatter `agent` field,
 //!   config `default_agent`, with Claude as fallback.
@@ -18,6 +18,7 @@
 
 use crate::config::Config;
 use crate::frontmatter::Frontmatter;
+use anyhow::{Result, bail};
 
 /// How the supervisor builds args on restart after a crash.
 #[derive(Debug, Clone, PartialEq)]
@@ -112,17 +113,20 @@ impl HarnessConfig {
     /// Build the full arg list for a restart iteration.
     /// On first run, returns `base_args` unchanged.
     /// On restart, applies the `restart_behavior`.
-    pub fn restart_args(&self, base_args: &[String]) -> Vec<String> {
+    pub fn restart_args(&self, base_args: &[String]) -> Result<Vec<String>> {
         match &self.restart_behavior {
             RestartBehavior::Append(extra) => {
                 let mut args = base_args.to_vec();
                 args.extend(extra.iter().cloned());
-                args
+                Ok(args)
             }
             RestartBehavior::Prepend(prefix) => {
+                if self.binary == "codex" {
+                    return codex_resume_restart_args(prefix, base_args);
+                }
                 let mut args = prefix.clone();
                 args.extend(base_args.iter().cloned());
-                args
+                Ok(args)
             }
         }
     }
@@ -285,6 +289,96 @@ impl HarnessConfig {
     pub fn cmdline_is_agent(&self, cmdline: &str) -> bool {
         self.process_names.iter().any(|name| cmdline.contains(name))
     }
+}
+
+fn parse_sandbox_mode_config(value: &str) -> Option<String> {
+    let raw = value.trim();
+    let mode = raw.strip_prefix("sandbox_mode=")?;
+    let mode = mode.trim().trim_matches(|c| c == '"' || c == '\'');
+    if mode.is_empty() {
+        None
+    } else {
+        Some(mode.to_string())
+    }
+}
+
+fn record_codex_resume_sandbox_mode(seen: &mut Option<String>, mode: &str) -> Result<()> {
+    if let Some(existing) = seen
+        && existing != mode
+    {
+        bail!(
+            "Codex launch policy mismatch: resume args contain conflicting sandbox modes \
+             `{existing}` and `{mode}`. Refusing to resume because this could silently \
+             downgrade the requested sandbox before task work starts."
+        );
+    }
+    *seen = Some(mode.to_string());
+    Ok(())
+}
+
+fn push_codex_resume_sandbox_config(
+    args: &mut Vec<String>,
+    seen_sandbox_mode: &mut Option<String>,
+    mode: &str,
+) -> Result<()> {
+    record_codex_resume_sandbox_mode(seen_sandbox_mode, mode)?;
+    args.push("-c".to_string());
+    args.push(format!("sandbox_mode={mode:?}"));
+    Ok(())
+}
+
+fn codex_resume_restart_args(prefix: &[String], base_args: &[String]) -> Result<Vec<String>> {
+    let mut args = prefix.to_vec();
+    let mut base = base_args.iter().peekable();
+    let mut seen_sandbox_mode: Option<String> = None;
+    while let Some(arg) = base.next() {
+        match arg.as_str() {
+            "exec" | "--json" => {}
+            "-s" | "--sandbox" => {
+                let Some(mode) = base.next() else {
+                    bail!(
+                        "Codex launch policy mismatch: `{arg}` was provided without a sandbox \
+                         mode. Refusing to resume because the session could fall back to the \
+                         Codex default sandbox."
+                    );
+                };
+                push_codex_resume_sandbox_config(&mut args, &mut seen_sandbox_mode, mode)?;
+            }
+            "--add-dir" => {
+                // `codex resume` does not accept --add-dir. A resumed session must inherit
+                // writable roots from the original fresh launch.
+                let _ = base.next();
+            }
+            "-c" | "--config" => {
+                let Some(value) = base.next() else {
+                    bail!("Codex launch policy mismatch: `{arg}` was provided without a value.");
+                };
+                if let Some(mode) = parse_sandbox_mode_config(value) {
+                    record_codex_resume_sandbox_mode(&mut seen_sandbox_mode, &mode)?;
+                }
+                args.push(arg.clone());
+                args.push(value.clone());
+            }
+            _ if arg.starts_with("--sandbox=") => {
+                let mode = &arg["--sandbox=".len()..];
+                push_codex_resume_sandbox_config(&mut args, &mut seen_sandbox_mode, mode)?;
+            }
+            _ if arg.starts_with("--add-dir=") => {
+                // Same as --add-dir <DIR> above.
+            }
+            _ if arg.starts_with("--config=") => {
+                let value = &arg["--config=".len()..];
+                if let Some(mode) = parse_sandbox_mode_config(value) {
+                    record_codex_resume_sandbox_mode(&mut seen_sandbox_mode, &mode)?;
+                }
+                args.push(arg.clone());
+            }
+            _ => {
+                args.push(arg.clone());
+            }
+        }
+    }
+    Ok(args)
 }
 
 fn is_codex_idle_placeholder_prompt(trimmed: &str) -> bool {
@@ -465,7 +559,7 @@ mod tests {
     fn restart_args_append() {
         let h = HarnessConfig::claude();
         let base = vec!["--flag".to_string()];
-        let args = h.restart_args(&base);
+        let args = h.restart_args(&base).unwrap();
         assert_eq!(args, vec!["--flag", "--continue"]);
     }
 
@@ -473,8 +567,80 @@ mod tests {
     fn restart_args_prepend() {
         let h = HarnessConfig::codex();
         let base = vec!["--some-flag".to_string()];
-        let args = h.restart_args(&base);
+        let args = h.restart_args(&base).unwrap();
         assert_eq!(args, vec!["resume", "--last", "--some-flag"]);
+    }
+
+    #[test]
+    fn codex_restart_translates_sandbox_for_resume() {
+        let h = HarnessConfig::codex();
+        let base = vec![
+            "-s".to_string(),
+            "danger-full-access".to_string(),
+            "--model".to_string(),
+            "gpt-5".to_string(),
+        ];
+        let args = h.restart_args(&base).unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "resume",
+                "--last",
+                "-c",
+                "sandbox_mode=\"danger-full-access\"",
+                "--model",
+                "gpt-5",
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_restart_strips_add_dir_for_resume() {
+        let h = HarnessConfig::codex();
+        let base = vec![
+            "-s".to_string(),
+            "danger-full-access".to_string(),
+            "--add-dir".to_string(),
+            "/tmp/project/.git/modules/sub".to_string(),
+            "--add-dir=/tmp/project".to_string(),
+        ];
+        let args = h.restart_args(&base).unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "resume",
+                "--last",
+                "-c",
+                "sandbox_mode=\"danger-full-access\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_restart_rejects_conflicting_sandbox_modes() {
+        let h = HarnessConfig::codex();
+        let base = vec![
+            "-s".to_string(),
+            "danger-full-access".to_string(),
+            "-c".to_string(),
+            "sandbox_mode=\"workspace-write\"".to_string(),
+        ];
+        let err = h.restart_args(&base).unwrap_err().to_string();
+        assert!(
+            err.contains("conflicting sandbox modes"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn codex_restart_rejects_missing_sandbox_value() {
+        let h = HarnessConfig::codex();
+        let base = vec!["-s".to_string()];
+        let err = h.restart_args(&base).unwrap_err().to_string();
+        assert!(
+            err.contains("provided without a sandbox mode"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -858,8 +1024,8 @@ Press Enter to restart, or 'q' to exit.
         let claude = HarnessConfig::claude();
         let codex = HarnessConfig::codex();
         let base = vec!["--flag".to_string()];
-        let claude_args = claude.restart_args(&base);
-        let codex_args = codex.restart_args(&base);
+        let claude_args = claude.restart_args(&base).unwrap();
+        let codex_args = codex.restart_args(&base).unwrap();
         assert!(
             claude_args.contains(&"--flag".to_string()),
             "claude appends to base"

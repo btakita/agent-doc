@@ -25,6 +25,7 @@ import {
     flattenVisibleColumns,
     isPreservedLayoutOutput,
     shouldReplayQueuedTabChange,
+    shouldScheduleDeferredTabSyncRetry,
     type TabSyncState,
 } from './tabSync';
 
@@ -891,10 +892,12 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
                     lastTabSyncState = execution.planned.nextState;
                     resetTabSyncDeferredRetry();
                 } else if (result.shouldRetry) {
-                    const delayMs = registerTabSyncDeferredRetry(execution);
-                    if (delayMs !== null) {
-                        requestTabSync(delayMs);
-                        retryAlreadyScheduled = true;
+                    if (shouldScheduleDeferredTabSyncRetry(startedGeneration, latestTabSyncGeneration)) {
+                        const delayMs = registerTabSyncDeferredRetry(execution);
+                        if (delayMs !== null) {
+                            requestTabSync(delayMs);
+                            retryAlreadyScheduled = true;
+                        }
                     }
                     break;
                 }

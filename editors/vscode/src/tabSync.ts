@@ -33,6 +33,10 @@ export function shouldReplayQueuedTabChange(startedGeneration: number, latestGen
     return latestGeneration > startedGeneration;
 }
 
+export function shouldScheduleDeferredTabSyncRetry(startedGeneration: number, latestGeneration: number): boolean {
+    return latestGeneration <= startedGeneration;
+}
+
 export function isPreservedLayoutOutput(output: string): boolean {
     return output.includes(SAFE_PASSIVE_LAYOUT_PRESERVED_MARKER);
 }

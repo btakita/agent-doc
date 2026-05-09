@@ -126,6 +126,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
         fun shouldReplayAfterRun(startedGeneration: Long, latestGeneration: Long): Boolean =
             latestGeneration > startedGeneration
 
+        fun shouldScheduleDeferredRetry(startedGeneration: Long, latestGeneration: Long): Boolean =
+            latestGeneration <= startedGeneration
+
         fun analyzeCommandResult(
             kind: AutomaticCommandKind,
             exitCode: Int,
@@ -353,15 +356,21 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     lastFocusedFile = execution.activeFile
                     resetDeferredRetryState()
                 } else if (result.shouldRetry) {
-                    val delayMs = registerDeferredRetry(snapshot)
-                    if (delayMs != null) {
-                        log(
-                            "deferred: passive sync preserved layout for ${execution.activeFile}; retry $deferredRetryCount/$MAX_DEFERRED_RETRIES in ${delayMs}ms"
-                        )
-                        requestAutomaticSync(project, snapshot, delayMs)
+                    if (isCurrentGeneration(lib, startedGeneration)) {
+                        val delayMs = registerDeferredRetry(snapshot)
+                        if (delayMs != null) {
+                            log(
+                                "deferred: passive sync preserved layout for ${execution.activeFile}; retry $deferredRetryCount/$MAX_DEFERRED_RETRIES in ${delayMs}ms"
+                            )
+                            requestAutomaticSync(project, snapshot, delayMs)
+                        } else {
+                            log(
+                                "deferred: passive sync preserved layout for ${execution.activeFile}; retry budget exhausted after $MAX_DEFERRED_RETRIES attempts"
+                            )
+                        }
                     } else {
                         log(
-                            "deferred: passive sync preserved layout for ${execution.activeFile}; retry budget exhausted after $MAX_DEFERRED_RETRIES attempts"
+                            "deferred: skipped superseded passive sync retry for ${execution.activeFile}; latest request will replay"
                         )
                     }
                 } else if (exitCode != 0) {

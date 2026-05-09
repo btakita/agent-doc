@@ -5,6 +5,7 @@ import {
     buildSyncCommandArgs,
     buildTabChangeCommand,
     shouldReplayQueuedTabChange,
+    shouldScheduleDeferredTabSyncRetry,
     visibleSignatureFromColumns,
 } from './tabSync';
 
@@ -226,6 +227,11 @@ describe('buildTabChangeCommand', () => {
     it('replays the latest queued tab change after a running sync finishes', () => {
         assert.strictEqual(shouldReplayQueuedTabChange(3, 4), true);
         assert.strictEqual(shouldReplayQueuedTabChange(4, 4), false);
+    });
+
+    it('does not schedule deferred retry work for a superseded tab sync', () => {
+        assert.strictEqual(shouldScheduleDeferredTabSyncRetry(3, 4), false);
+        assert.strictEqual(shouldScheduleDeferredTabSyncRetry(4, 4), true);
     });
 
     it('keeps passive preserve-layout sync pending for retry', () => {

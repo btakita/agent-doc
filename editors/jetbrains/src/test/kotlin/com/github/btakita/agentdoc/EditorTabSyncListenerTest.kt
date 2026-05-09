@@ -164,6 +164,12 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `superseded automatic sync results do not schedule deferred retries`() {
+        assertEquals(false, EditorTabSyncListener.AutomaticCommandPlanner.shouldScheduleDeferredRetry(3, 4))
+        assertEquals(true, EditorTabSyncListener.AutomaticCommandPlanner.shouldScheduleDeferredRetry(4, 4))
+    }
+
+    @Test
     fun `safe passive preserve output keeps sync pending for retry`() {
         val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
             kind = EditorTabSyncListener.AutomaticCommandKind.Sync,

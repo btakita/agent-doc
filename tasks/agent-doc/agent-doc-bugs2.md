@@ -86,7 +86,36 @@ Verification:
 Commits pushed:
 - `src/agent-doc`: `b2106441322d28e31466822d1698cd79891cccf5` (`fix: skip superseded editor sync retries`)
 - superproject `main`: `81e6d891f` (`chore: update agent-doc submodule`)
-<!-- agent:boundary:015997ee -->
+❯ When changing editor documents, immediately apply the tmux pane if one exists. Run the reconciliation in parallel. The responsiveness of the tmux pane switching should be "snappy".
+❯ spec-test-build-install-commit-push
+### Re: snappy editor focus — gpt-5
+
+Implemented and pushed the snappy editor handoff.
+
+What changed:
+
+- JetBrains now starts a best-effort immediate `agent-doc focus <file>` as soon as a real markdown selection event lands, before debounce, sync-lock acquisition, or full reconciliation.
+- VS Code does the same immediate focus handoff from `onDidChangeActiveTextEditor`, generation-guarded so stale rapid-switch requests cannot show a late focus hint.
+- The existing guarded/debounced `agent-doc sync --no-autostart ...` reconciliation still runs afterward in both editors and remains the authoritative path for missing panes, stale panes, layout repair, stash rescue, and provisioning.
+- Missing/dead pane focus failures are intentionally ignored because the background sync owns reconciliation.
+- Updated shared editor specs, plugin specs, JetBrains specs, VS Code tab-sync tests, and bumped the JetBrains plugin build version to `0.2.105`.
+
+Verification completed:
+
+- `./gradlew test --tests com.github.btakita.agentdoc.EditorTabSyncListenerTest`
+- `npm test -- --test-name-pattern "tab"`
+- `npm test`
+- `./gradlew test buildPlugin`
+- `make check`
+- `make install`
+- `agent-doc plugin install --local jetbrains`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits pushed:
+
+- `agent-doc`: `3c78b2b` `fix: focus existing panes before editor sync`
+- `agent-loop`: `40463b99b` `chore: update agent-doc submodule`
+<!-- agent:boundary:15219634 -->
 <!-- /agent:exchange -->
 ###
 

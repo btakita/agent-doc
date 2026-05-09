@@ -51,7 +51,18 @@ I added the top backlog item as `#editorswitch`. It should be first because it t
 ### Re: filed #finalize-do-cascade from session-share/tasks/root.md — opus-4-6
 
 Cross-session bug filed: when `do #id` triggers finalize with `--pending-done`, up to 4 attempts are needed due to conflicting `pending_capture_guard` and `pending_done_guard`. Plan at `tasks/agent-doc/plan-finalize-pending-done-cascade.md`.
-<!-- agent:boundary:911e7440 -->
+### Re: #editorswitch — gpt-5
+
+Implemented `#editorswitch`.
+
+Safe-passive editor sync now performs a narrow pre-lock focus handoff: `agent-doc sync --no-autostart --focus <file>` resolves the focused markdown file through the controller actor binding and selects that live pane before waiting on `.agent-doc/sync.lock`, prune cleanup, ownership proof, or tmux-router reconciliation. If the sync lock is contended afterward, the normal retry marker still returns, but tmux focus has already moved to the selected document's actor pane.
+
+Updated `src/agent-doc/src/sync.rs`, `src/agent-doc/SPEC.md`, `src/agent-doc/specs/07-session-tmux-commands.md`, `src/agent-doc/README.md`, and `src/agent-doc/VERSIONS.md`. Added a tmux regression covering a stale `starting` sibling plus a held sync lock.
+
+Verification passed: focused `cargo test safe_passive_sync_focuses_controller_actor_before_contended_sync_lock`, `cargo fmt`, full `make check`, `make install`, and `agent-doc --version` (`0.33.16`).
+
+Committed and pushed agent-doc subrepo commit `d7c06b72` (`fix: focus editor sync before lock contention`) and parent repo submodule pointer commit `b0600bdb6` (`agent-doc: update editor sync focus fix`).
+<!-- agent:boundary:1b344440 -->
 <!-- /agent:exchange -->
 ###
 
@@ -79,7 +90,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 <!-- agent:backlog -->
 
 - [ ] [#finalize-do-cascade] finalize --pending-done cascade failure: do #id closeout requires up to 4 finalize attempts due to conflicting pending_capture_guard and pending_done_guard. Plan: tasks/agent-doc/plan-finalize-pending-done-cascade.md
-- [ ] [#editorswitch] Implement a bounded editor-document switch fast path: resolve the focused markdown file through the controller actor binding, update tmux focus without waiting on stale safe-passive sync/prune work, and add regressions for stale starting sibling sessions like tasks/software/tsift.md.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -112,6 +122,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#syncproof] [recommended] Reduce safe-passive proof overhead after lock acquisition: cache cheap controller/session facts for unchanged editor selection, avoid repeated ownership proof on no-op syncs, and keep controller_actor_lookup plus ownership_proof inside explicit latency budgets.
 - 2026-05-08 [#syncprune] [recommended] Shorten no-op prune work: skip or incrementally rate-limit stale/stash pane pruning when the active file/session mapping is unchanged, and keep prune_stash_panes under its 250ms subphase budget.
 - 2026-05-09 [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
+- 2026-05-09 [#editorswitch] Implement a bounded editor-document switch fast path: resolve the focused markdown file through the controller actor binding, update tmux focus without waiting on stale safe-passive sync/prune work, and add regressions for stale starting sibling sessions like tasks/software/tsift.md.
 <!-- /agent:pending-done -->
 
 

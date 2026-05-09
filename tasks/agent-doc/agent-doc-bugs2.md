@@ -37,11 +37,42 @@ Active backlog:
 Queue:
 - Next prompt: do [#sidecar-diverge]. #spec-test-build-install-commit-push
 - 1 additional queued prompt(s) remain
-<!-- agent:boundary:14d13e5e -->
+❯ The response patchback did not complete during the last 2 agent-doc turns in /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md.
+❯ spec-test-build-install-commit-push
+### Re: root.md patchback miss — gpt-5
+
+
+I checked `/home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md`. Its current closeout state is an open `preflight_started` cycle, `cycle-1778336475478`, with no capture artifact. That means there is no assistant response body for `agent-doc repair` to replay; the last turn started but never reached response capture/write/commit.
+
+The sidecar-divergence patchback fix is already in `src/agent-doc` at `5eb3764 fix: redeliver sidecar fallback to editor`, and the branch is already synced to origin. The closeout spec now requires sidecar normalization fallback to normalize `content_ours`, repair the working tree, and re-deliver the exact fallback to the editor via full-content IPC.
+
+Verification completed:
+- `cargo test` in `src/agent-doc`: 2,129 passed, 0 failed, 4 ignored.
+- `cargo build` in `src/agent-doc`: passed.
+- `cargo install --path .` in `src/agent-doc`: installed local `agent-doc v0.33.16` to `/home/brian/.cargo/bin/agent-doc`.
+- `git -C src/agent-doc push origin 20260422/codex-agent-backend`: everything up-to-date.
+
+I also left a follow-up backlog item for the separate no-capture failure shape. That should be handled as a route/preflight recovery regression, distinct from the already-fixed sidecar fallback case.
+<!-- agent:boundary:c06ae9e2 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+`Run Agent Doc` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md has an error:
+```
+resync: stash pane %273 is registered in its own project root — skipping kill
+resync: stash pane %269 is registered in its own project root — skipping kill
+[sync] found alive agent-doc child (pid 2167634) in pane %256 for tasks/build-party.md
+[sync] recovered live pane %272 for session 1b08693f via supervisor pid 962597
+[sync] found alive agent-doc child (pid 2751677) in pane %271 for tasks/velvet-thunder/dev.md
+[route] target tmux session: 4
+Error: failed to launch project controller
+
+Caused by:
+    No such file or directory (os error 2)
+
+```
+---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
 `❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?
@@ -59,7 +90,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 -->
 
 <!-- agent:queue auto -->
-- do [#sidecar-diverge]. #spec-test-build-install-commit-push
 - do [#syncbudget-regress]. #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 
@@ -67,6 +97,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#root-empty-preflight] [recommended] Add a focused route/preflight recovery test for repeated empty preflight_started turns with no capture, using src/session-share/tasks/root.md cycle-1778336475478 as evidence: no response exists to replay, so the next invocation should fail with precise retry/restart guidance instead of repeated silent patchback misses.
 - [ ] [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
 <!-- /agent:backlog -->
 

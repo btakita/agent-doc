@@ -66,6 +66,9 @@ impl SupervisorHealth {
 struct SupervisorRuntime {
     health: SupervisorHealth,
     actor_state: Option<ActorState>,
+    actor_session_id: Option<String>,
+    actor_pane_id: Option<String>,
+    actor_generation: Option<u64>,
     supervisor_state: Option<String>,
     restart_count: u32,
     supervisor_pid: Option<u32>,
@@ -404,12 +407,19 @@ fn build_context(file: &Path) -> Result<SessionContext> {
     );
     let operator_status =
         crate::project_controller::session_operator_status(&base_dir, &canonical_file)?;
-    let actor_record = operator_status.record.clone();
     let registry_entry = lookup_registry_entry(&base_dir, &session_id, &canonical_file)?;
     let startup_miss = crate::startup_miss::load(&canonical_file)?;
     let log_status = crate::startup_miss::session_log_status(&canonical_file, &session_id)?;
     let supervisor_socket = crate::supervisor::ipc::socket_path(&base_dir, &session_id);
     let supervisor_runtime = query_supervisor_runtime(&supervisor_socket);
+    let operator_status = reconcile_controller_lease_with_supervisor_runtime(
+        &base_dir,
+        &canonical_file,
+        &supervisor_socket,
+        operator_status,
+        &supervisor_runtime,
+    )?;
+    let actor_record = operator_status.record.clone();
     Ok(SessionContext {
         canonical_file,
         base_dir,
@@ -480,6 +490,9 @@ fn query_supervisor_runtime(socket: &Path) -> SupervisorRuntime {
         return SupervisorRuntime {
             health: SupervisorHealth::NoSocket,
             actor_state: None,
+            actor_session_id: None,
+            actor_pane_id: None,
+            actor_generation: None,
             supervisor_state: None,
             restart_count: 0,
             supervisor_pid: None,
@@ -516,6 +529,17 @@ fn query_supervisor_runtime(socket: &Path) -> SupervisorRuntime {
                     .get("actor_state")
                     .and_then(|value| value.as_str())
                     .and_then(parse_actor_state),
+                actor_session_id: data
+                    .get("actor_session_id")
+                    .and_then(|value| value.as_str())
+                    .map(ToOwned::to_owned),
+                actor_pane_id: data
+                    .get("actor_pane_id")
+                    .and_then(|value| value.as_str())
+                    .map(ToOwned::to_owned),
+                actor_generation: data
+                    .get("actor_generation")
+                    .and_then(|value| value.as_u64()),
                 supervisor_state,
                 restart_count,
                 supervisor_pid: data
@@ -540,6 +564,9 @@ fn query_supervisor_runtime(socket: &Path) -> SupervisorRuntime {
         Ok(_) | Err(_) => SupervisorRuntime {
             health: SupervisorHealth::Unreachable,
             actor_state: None,
+            actor_session_id: None,
+            actor_pane_id: None,
+            actor_generation: None,
             supervisor_state: None,
             restart_count: 0,
             supervisor_pid: None,
@@ -548,6 +575,47 @@ fn query_supervisor_runtime(socket: &Path) -> SupervisorRuntime {
             cwd_source: None,
         },
     }
+}
+
+fn reconcile_controller_lease_with_supervisor_runtime(
+    base_dir: &Path,
+    canonical_file: &Path,
+    supervisor_socket: &Path,
+    operator_status: crate::project_controller::SessionOperatorStatus,
+    runtime: &SupervisorRuntime,
+) -> Result<crate::project_controller::SessionOperatorStatus> {
+    if matches!(
+        runtime.health,
+        SupervisorHealth::NoSocket | SupervisorHealth::Unreachable
+    ) {
+        return Ok(operator_status);
+    }
+    let Some(record) = operator_status.record.as_ref() else {
+        return Ok(operator_status);
+    };
+    let Some(runtime_state) = runtime.actor_state else {
+        return Ok(operator_status);
+    };
+    if runtime.actor_session_id.as_deref() != Some(record.session_id.as_str())
+        || runtime.actor_pane_id.as_deref() != Some(record.pane_id.as_str())
+        || runtime.actor_generation != Some(record.generation)
+    {
+        return Ok(operator_status);
+    }
+
+    crate::project_controller::refresh_supervisor_lease(
+        base_dir,
+        crate::project_controller::SupervisorHeartbeatRequest {
+            file: canonical_file.to_path_buf(),
+            session_id: record.session_id.clone(),
+            pane_id: record.pane_id.clone(),
+            generation: record.generation,
+            supervisor_pid: runtime.supervisor_pid,
+            supervisor_socket: Some(supervisor_socket.to_string_lossy().to_string()),
+            runtime_state: runtime_state.as_str().to_string(),
+        },
+    )?;
+    crate::project_controller::session_operator_status(base_dir, canonical_file)
 }
 
 fn parse_actor_state(raw: &str) -> Option<ActorState> {
@@ -808,10 +876,83 @@ mod tests {
     }
 
     #[test]
+    fn status_context_refreshes_controller_lease_from_matching_live_supervisor() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/status.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-status\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        crate::session_actor::record_session_start_direct(&doc, "session-status", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-status",
+            "%41",
+            Some(1),
+            ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+        crate::project_controller::refresh_supervisor_lease(
+            dir.path(),
+            crate::project_controller::SupervisorHeartbeatRequest {
+                file: doc.clone(),
+                session_id: "session-status".to_string(),
+                pane_id: "%41".to_string(),
+                generation: 1,
+                supervisor_pid: Some(999),
+                supervisor_socket: Some("/tmp/stale.sock".to_string()),
+                runtime_state: "starting".to_string(),
+            },
+        )
+        .unwrap();
+
+        let sock = crate::supervisor::ipc::SupervisorIpc::start(dir.path(), "session-status", {
+            move |method| match method {
+                IpcMethod::State => crate::supervisor::ipc::IpcResponse::ok(serde_json::json!({
+                    "running": true,
+                    "state": "healthy",
+                    "actor_state": "ready",
+                    "actor_session_id": "session-status",
+                    "actor_pane_id": "%41",
+                    "actor_generation": 1,
+                    "restart_count": 0,
+                    "supervisor_pid": 1001,
+                    "supervisor_instance_id": "sup-status",
+                    "child_pid": 1002,
+                    "cwd_source": "config",
+                })),
+                _ => crate::supervisor::ipc::IpcResponse::ok_empty(),
+            }
+        })
+        .unwrap();
+
+        let ctx = build_context(&doc).unwrap();
+        let lease = ctx.operator_status.supervisor_lease.unwrap();
+        let expected_socket = sock.path().to_string_lossy().to_string();
+        assert_eq!(lease.runtime_state.as_deref(), Some("ready"));
+        assert_eq!(lease.supervisor_pid, Some(1001));
+        assert_eq!(
+            lease.supervisor_socket.as_deref(),
+            Some(expected_socket.as_str())
+        );
+        assert_eq!(ctx.operator_status.transitions.len(), 2);
+    }
+
+    #[test]
     fn doctor_flags_missing_actor_and_registry() {
         let runtime = SupervisorRuntime {
             health: SupervisorHealth::NoSocket,
             actor_state: None,
+            actor_session_id: None,
+            actor_pane_id: None,
+            actor_generation: None,
             supervisor_state: None,
             restart_count: 0,
             supervisor_pid: None,
@@ -966,6 +1107,9 @@ mod tests {
             supervisor_runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
                 actor_state: Some(ActorState::Ready),
+                actor_session_id: None,
+                actor_pane_id: None,
+                actor_generation: None,
                 supervisor_state: Some("healthy".to_string()),
                 restart_count: 0,
                 supervisor_pid: Some(1),
@@ -1025,6 +1169,9 @@ mod tests {
             supervisor_runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
                 actor_state: Some(ActorState::Ready),
+                actor_session_id: None,
+                actor_pane_id: None,
+                actor_generation: None,
                 supervisor_state: Some("healthy".to_string()),
                 restart_count: 0,
                 supervisor_pid: Some(1),

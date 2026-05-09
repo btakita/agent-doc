@@ -1290,10 +1290,25 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
                 .lock()
                 .unwrap()
                 .map(|state| state.as_str().to_string());
+            let actor_session_id = shared
+                .actor_runtime
+                .as_ref()
+                .map(|runtime| runtime.session_id.clone());
+            let actor_pane_id = shared
+                .actor_runtime
+                .as_ref()
+                .map(|runtime| runtime.pane_id.clone());
+            let actor_generation = shared
+                .actor_runtime
+                .as_ref()
+                .map(|runtime| runtime.generation);
             IpcResponse::ok(serde_json::json!({
                 "running": shared.running.load(Ordering::Relaxed),
                 "state": state.as_str(),
                 "actor_state": actor_state,
+                "actor_session_id": actor_session_id,
+                "actor_pane_id": actor_pane_id,
+                "actor_generation": actor_generation,
                 "restart_count": shared.restart_count.load(Ordering::Relaxed),
                 "cwd_source": shared.cwd_source,
                 "supervisor_pid": shared.supervisor_pid,

@@ -178,6 +178,17 @@ pub struct LifecycleRequest {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct SupervisorHeartbeatRequest {
+    pub file: PathBuf,
+    pub session_id: String,
+    pub pane_id: String,
+    pub generation: u64,
+    pub supervisor_pid: Option<u32>,
+    pub supervisor_socket: Option<String>,
+    pub runtime_state: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct DispatchRequest {
     pub file: PathBuf,
     pub session_id: String,
@@ -1348,6 +1359,65 @@ pub fn mark_lifecycle(
     )
 }
 
+pub fn refresh_supervisor_lease(
+    project_root: &Path,
+    request: SupervisorHeartbeatRequest,
+) -> Result<SupervisorLeaseStatus> {
+    #[cfg(test)]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        return handle_supervisor_heartbeat(
+            &bootstrap,
+            ControllerRequest {
+                command: "supervisor_heartbeat".to_string(),
+                file: Some(request.file),
+                session_id: Some(request.session_id),
+                pane_id: Some(request.pane_id),
+                window_id: None,
+                generation: Some(request.generation),
+                state: Some(request.runtime_state),
+                caller: None,
+                reason: None,
+                supervisor_pid: request.supervisor_pid,
+                supervisor_socket: request.supervisor_socket,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        );
+    }
+
+    #[cfg(not(test))]
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "supervisor_heartbeat".to_string(),
+            file: Some(request.file),
+            session_id: Some(request.session_id),
+            pane_id: Some(request.pane_id),
+            window_id: None,
+            generation: Some(request.generation),
+            state: Some(request.runtime_state),
+            caller: None,
+            reason: None,
+            supervisor_pid: request.supervisor_pid,
+            supervisor_socket: request.supervisor_socket,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
 pub fn authoritative_actor_binding(
     project_root: &Path,
     file: &Path,
@@ -2095,6 +2165,9 @@ fn handle_request_locked(
         "mark_lifecycle" => {
             controller_envelope(handle_mark_lifecycle(&bootstrap_snapshot, request))
         }
+        "supervisor_heartbeat" => {
+            controller_envelope(handle_supervisor_heartbeat(&bootstrap_snapshot, request))
+        }
         "actor_binding" => controller_envelope(handle_actor_binding(&bootstrap_snapshot, request)),
         "dispatch" => controller_envelope(handle_dispatch(&bootstrap_snapshot, request)),
         "session_status" => {
@@ -2269,6 +2342,61 @@ fn handle_mark_lifecycle(
         ),
     );
     Ok(record)
+}
+
+fn handle_supervisor_heartbeat(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<SupervisorLeaseStatus> {
+    let file = request_file(&request)?;
+    let session_id = request_string(&request.session_id, "session_id")?;
+    let pane_id = request_string(&request.pane_id, "pane_id")?;
+    let generation = request_u64(request.generation, "generation")?;
+    let runtime_state = request
+        .state
+        .as_deref()
+        .unwrap_or(crate::session_actor::ActorState::Starting.as_str());
+    let document_id = crate::session_actor::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    let record = load_actor_record(&bootstrap.project_root, &document_id)?
+        .with_context(|| format!("missing actor record for supervisor {}", file.display()))?;
+    if record.session_id != session_id
+        || record.pane_id != pane_id
+        || record.generation != generation
+    {
+        anyhow::bail!(
+            "stale supervisor heartbeat for {}: requested session={} pane={} generation={}, current session={} pane={} generation={}",
+            file.display(),
+            session_id,
+            pane_id,
+            generation,
+            record.session_id,
+            record.pane_id,
+            record.generation
+        );
+    }
+    upsert_supervisor_lease(
+        &bootstrap.project_root,
+        &record,
+        request.supervisor_pid,
+        request.supervisor_socket.as_deref(),
+        runtime_state,
+    )?;
+    crate::ops_log::log_op(
+        &file,
+        &format!(
+            "controller_supervisor_heartbeat session={} pane={} generation={} state={}",
+            session_id, pane_id, generation, runtime_state
+        ),
+    );
+    load_supervisor_lease_from_db(
+        &open_state_db(&bootstrap.project_root)?,
+        &record.document_id,
+        record.generation,
+    )?
+    .context("missing supervisor lease after heartbeat")
 }
 
 fn handle_actor_binding(
@@ -3113,6 +3241,78 @@ mod tests {
         assert_eq!(pid, 999);
         assert_eq!(socket, "/tmp/agent-doc-test.sock");
         assert_eq!(runtime_state, "ready");
+    }
+
+    #[test]
+    fn controller_supervisor_heartbeat_refreshes_stale_lease_without_actor_transition() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/heartbeat.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-heartbeat\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+
+        crate::session_actor::record_session_start_direct(
+            &doc,
+            "session-heartbeat",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        let record = crate::session_actor::transition_state_direct(
+            &doc,
+            "session-heartbeat",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+        upsert_supervisor_lease(
+            dir.path(),
+            &record,
+            Some(999),
+            Some("/tmp/old.sock"),
+            "starting",
+        )
+        .unwrap();
+
+        let heartbeat = ControllerRequest {
+            command: "supervisor_heartbeat".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-heartbeat".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("ready".to_string()),
+            caller: None,
+            reason: None,
+            supervisor_pid: Some(1001),
+            supervisor_socket: Some("/tmp/new.sock".to_string()),
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let lease = handle_supervisor_heartbeat(&bootstrap, heartbeat).unwrap();
+        assert_eq!(lease.runtime_state.as_deref(), Some("ready"));
+        assert_eq!(lease.supervisor_pid, Some(1001));
+        assert_eq!(lease.supervisor_socket.as_deref(), Some("/tmp/new.sock"));
+
+        let transitions = load_actor_transitions_from_db(
+            &Connection::open(state_db_path(dir.path())).unwrap(),
+            &doc.to_string_lossy(),
+        )
+        .unwrap();
+        assert_eq!(
+            transitions.len(),
+            2,
+            "heartbeat must not create an actor transition"
+        );
     }
 
     #[test]

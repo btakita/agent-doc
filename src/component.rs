@@ -418,6 +418,12 @@ pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
 
 /// Find byte ranges for ordinary HTML comments, skipping code spans/blocks and
 /// preserving `agent:` markers for the component parser.
+///
+/// If an ordinary comment is currently unterminated, treat the rest of the
+/// document as comment body. Users can be editing a scratch comment while an
+/// agent-doc cycle is running; prompt-like text in that transiently broken
+/// comment must not be interpreted as escaped exchange content and moved or
+/// stripped by repair.
 pub fn find_non_agent_html_comment_ranges(doc: &str) -> Vec<(usize, usize)> {
     let code_ranges = find_code_ranges(doc);
     let in_code = |pos: usize| {
@@ -440,6 +446,11 @@ pub fn find_non_agent_html_comment_ranges(doc: &str) -> Vec<(usize, usize)> {
             continue;
         }
         let Some(end) = find_comment_end(bytes, pos + 4) else {
+            let inner = &doc[pos + 4..];
+            if !is_agent_marker(inner) && !inner.trim_start().starts_with("agent:boundary:") {
+                ranges.push((pos, len));
+                break;
+            }
             pos += 4;
             continue;
         };
@@ -1312,6 +1323,25 @@ actual content
                 .all(|&(start, end)| !doc[start..end].contains("agent:exchange")),
             "agent component markers must not be treated as ordinary comments"
         );
+    }
+
+    #[test]
+    fn non_agent_html_comment_ranges_cover_unterminated_tail() {
+        let doc = concat!(
+            "before\n",
+            "<!--\n",
+            "do #hidden. spec-test-build-install-commit-push\n",
+            "still typing\n"
+        );
+
+        let ranges = find_non_agent_html_comment_ranges(doc);
+        assert_eq!(ranges.len(), 1);
+        let (start, end) = ranges[0];
+        assert_eq!(
+            &doc[start..end],
+            "<!--\ndo #hidden. spec-test-build-install-commit-push\nstill typing\n"
+        );
+        assert_eq!(end, doc.len());
     }
 
     #[test]

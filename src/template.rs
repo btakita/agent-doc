@@ -3832,6 +3832,27 @@ Existing answer.
     }
 
     #[test]
+    fn repair_conversation_tail_outside_exchange_ignores_unterminated_html_comment_body() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "do #hidden. spec-test-build-install-commit-push\n",
+            "Still typing this scratch note.\n"
+        );
+
+        let repaired = repair_conversation_tail_outside_exchange(doc).unwrap();
+        assert!(
+            repaired.is_none(),
+            "prompt-like text inside a transiently unclosed ordinary HTML comment must not be moved into exchange"
+        );
+        guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
+
+    #[test]
     fn repair_conversation_tail_outside_exchange_moves_gap_before_backlog_inside_exchange() {
         let doc = concat!(
             "---\nagent_doc_format: template\n---\n\n",

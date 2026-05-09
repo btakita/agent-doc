@@ -36,7 +36,26 @@ Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-<!-- agent:boundary:d1da8b2c -->
+❯ do [#dodone]. spec-test-build-install-commit-push
+### Re: #dodone — gpt-5
+
+Implemented `#dodone` in `src/agent-doc`.
+
+What changed:
+- `do [#id]` now classifies as an imperative repo action, matching the existing `do #id` path.
+- `agent-doc plan` now carries resolved existing tracked-work ids into the normal required finalize command as `--pending-done <id>`.
+- Updated the orchestration and top-level specs to require this behavior.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc extract_imperative_directives_detects_do_and_build_push`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml --bin agent-doc build_plan_includes_pending_done_for_bracketed_do_directive`
+- `make -C src/agent-doc check`
+- `make -C src/agent-doc install`
+- Installed `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md` now emits `repo_actions`, `pending_mutations.resolve_existing id=dodone`, and required finalize command `--pending-done dodone --stream`.
+
+Commit / push:
+- `src/agent-doc` commit `516a2a7` (`fix: plan pending-done for bracketed do directives`) pushed to `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:15dba0c6 -->
 <!-- /agent:exchange -->
 ###
 
@@ -63,7 +82,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#dodone] Skill does not auto-run --pending-done on do #id completion — when a user prompts 'do [#id]' and the task is completed, the skill's finalize step should include --pending-done <id> automatically. Currently the skill completes the work and finalizes the response but forgets to mark the pending item as done, requiring manual correction.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
@@ -116,6 +134,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#root-empty-preflight] [recommended] Add a focused route/preflight recovery test for repeated empty preflight_started turns with no capture, using src/session-share/tasks/root.md cycle-1778336475478 as evidence: no response exists to replay, so the next invocation should fail with precise retry/restart guidance instead of repeated silent patchback misses.
 - 2026-05-09 [#g4w2] Controller singleton/handoff must allow only one authoritative same-project controller while replacing stale binaries with zero downtime; retire or reap duplicate controller processes only after a promoted replacement preserves active session actors and supervisor leases. Plan: tasks/agent-doc/plan-controller-singleton-zero-downtime-handoff.md
 - 2026-05-09 [#instrdrift] Root AGENTS.md / installed Codex instruction drift causes repeated version-mismatch notices — make .codex/AGENTS.md the canonical generated surface or thin/update root AGENTS.md, then add an audit/CI check so future agent-doc-version bumps cannot leave stale duplicate instructions behind.
+- 2026-05-09 [#dodone] Skill does not auto-run --pending-done on do #id completion — when a user prompts 'do [#id]' and the task is completed, the skill's finalize step should include --pending-done <id> automatically. Currently the skill completes the work and finalizes the response but forgets to mark the pending item as done, requiring manual correction.
 <!-- /agent:pending-done -->
 
 

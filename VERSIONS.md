@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **`agent-doc focus` no longer waits on the project controller RPC.** The editor immediate-focus path now selects a live local actor projection from `.agent-doc/session-actors.json`, then falls back to `sessions.json`, without launching or blocking on the controller actor-binding request. Background `sync --no-autostart` still owns slower reconciliation and projection repair. Added focused regressions and updated the focus/editor specs.
+
 - **Editor document switches now attempt immediate focus before background reconciliation.** JetBrains and VS Code automatic tab sync issue a best-effort `agent-doc focus <file>` as soon as a markdown selection changes, then let the existing debounced `sync --no-autostart` reconciliation run in the background. Missing panes still fall through to reconciliation, while existing-pane handoffs feel snappy. Added VS Code command-arg coverage, updated the editor specs, and bumped the JetBrains plugin build version to `0.2.105`.
 
 - **Automatic editor sync now skips superseded deferred retries.** If a rapid document switch leaves an older automatic sync running and that older process later reports a retryable preserved-layout or sync-lock-contention result, JetBrains and VS Code no longer schedule a delayed retry for that intermediate snapshot. The completed process is allowed to finish in the background, and only the latest selected document is replayed. Added plugin regressions, updated the shared editor specs, and bumped the JetBrains plugin build version to `0.2.104`.

@@ -12,9 +12,9 @@
 //!   errors if the override pane is not alive.
 //! - When `pane_override` is `None`, reads the file from disk, parses YAML frontmatter,
 //!   and extracts the `agent_doc_session` UUID; errors if the field is absent.
-//! - When `.agent-doc/session-actors.json` has a live authoritative record for the
+//! - When `.agent-doc/session-actors.json` has a live local actor projection for the
 //!   document session, focus prefers that actor-owned pane over a stale
-//!   `sessions.json` projection.
+//!   `sessions.json` projection without launching or waiting on the project controller.
 //! - Otherwise, looks up the UUID in `sessions.json` via `sessions::lookup`; errors
 //!   if no entry is found or if the registered pane is dead.
 //! - On success, calls `tmux select-pane` and logs the focused pane + file path to stderr.
@@ -31,8 +31,8 @@
 //! ## Evals
 //! - `focus_live_pane` (aspirational): file has a valid session UUID and a live pane →
 //!   `select-pane` is called and `Ok(())` is returned.
-//! - `focus_prefers_authoritative_actor_pane` (aspirational): stale registry pane +
-//!   live actor pane → focus selects the actor-owned pane.
+//! - `focus_prefers_local_actor_projection` (aspirational): stale registry pane +
+//!   live local actor projection → focus selects the actor-owned pane without an RPC.
 //! - `focus_dead_pane` (aspirational): session UUID exists in registry but pane is dead →
 //!   error containing "pane … is dead" is returned.
 //! - `focus_no_session` (aspirational): file frontmatter has no `agent_doc_session` →
@@ -49,6 +49,31 @@ use std::path::Path;
 
 use crate::sessions::Tmux;
 use crate::{frontmatter, sessions};
+
+fn local_actor_projection_pane_for_document(
+    file: &Path,
+    session_id: &str,
+    tmux: &Tmux,
+) -> Option<String> {
+    let canonical = file
+        .canonicalize()
+        .ok()
+        .unwrap_or_else(|| file.to_path_buf());
+    let base_dir = crate::snapshot::find_project_root(&canonical)?;
+    let record = crate::session_actor::load_record_in(&base_dir, &canonical.to_string_lossy())
+        .ok()
+        .flatten()?;
+    if record.session_id != session_id
+        || matches!(
+            record.state,
+            crate::session_actor::ActorState::Closed | crate::session_actor::ActorState::Blocked
+        )
+        || !tmux.pane_alive(&record.pane_id)
+    {
+        return None;
+    }
+    Some(record.pane_id)
+}
 
 pub fn run(file: &Path, pane: Option<&str>) -> Result<()> {
     run_with_tmux(file, pane, &Tmux::default_server())
@@ -81,9 +106,7 @@ pub fn run_with_tmux(file: &Path, pane_override: Option<&str>, tmux: &Tmux) -> R
         ),
     };
 
-    if let Some(actor_pane) =
-        crate::sync::authoritative_actor_pane_for_document(tmux, file, &session_id)
-    {
+    if let Some(actor_pane) = local_actor_projection_pane_for_document(file, &session_id, tmux) {
         tmux.select_pane(&actor_pane)?;
         eprintln!("Focused pane {} ({})", actor_pane, file.display());
         return Ok(());
@@ -142,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_prefers_authoritative_actor_pane_over_stale_registry() {
+    fn focus_prefers_local_actor_projection_over_stale_registry() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -190,7 +213,71 @@ mod tests {
             .to_string();
         assert_eq!(
             selected, actor_pane,
-            "focus should select the authoritative actor pane instead of the stale registry pane"
+            "focus should select the locally projected actor pane instead of the stale registry pane"
+        );
+    }
+
+    #[test]
+    fn focus_ignores_closed_local_actor_projection() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+
+        let doc = root.join("tasks/focus-closed-actor.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: focus-closed\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("focus-closed-local-actor");
+        let registry_pane = iso.new_session("test", root).unwrap();
+        let actor_pane = iso.split_window(&registry_pane, root, "-dh").unwrap();
+        let registry_window = iso.pane_window(&registry_pane).unwrap();
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+
+        sessions::register_full_with_cwd(
+            "focus-closed",
+            &registry_pane,
+            &doc.to_string_lossy(),
+            1,
+            &registry_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        crate::session_actor::project_binding_in(
+            root,
+            &doc.to_string_lossy(),
+            "focus-closed",
+            &actor_pane,
+            &actor_window,
+            "sync",
+            "focus_test_projection",
+        )
+        .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "focus-closed",
+            &actor_pane,
+            None,
+            crate::session_actor::ActorState::Closed,
+            "test",
+            "closed_projection",
+        )
+        .unwrap();
+
+        run_with_tmux(&doc, None, &iso).unwrap();
+
+        let selected = iso
+            .raw_cmd(&["display-message", "-p", "#{pane_id}"])
+            .unwrap()
+            .trim()
+            .to_string();
+        assert_eq!(
+            selected, registry_pane,
+            "focus should fall back to sessions.json when the local actor projection is closed"
         );
     }
 }

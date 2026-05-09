@@ -72,11 +72,13 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 `agent-doc focus <FILE> [--pane P]` focuses the pane that currently owns the document session.
 
-- When `.agent-doc/session-actors.json` has a live authoritative record for the
-  document session, focus must select that actor-owned pane even if
+- When `.agent-doc/session-actors.json` has a live local actor projection for
+  the document session, focus must select that actor-owned pane even if
   `sessions.json` still points at an older projection.
+- Focus must not launch or wait on the project controller actor-binding RPC; it
+  is the editor fast path and must stay independent of slower reconciliation.
 - Focus may use `sessions.json` only as a fallback binding helper when no live
-  authoritative actor pane exists.
+  local actor projection exists.
 - Editor automatic tab-to-pane sync must not use `focus` as a substitute for
   passive `sync --no-autostart`; focus does not own stash rescue, safe passive
   replacement, or preserved-layout reselect proof.

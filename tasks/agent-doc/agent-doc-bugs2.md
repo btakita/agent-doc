@@ -72,7 +72,30 @@ So there are two issues, not one:
 - preset reference normalization is inconsistent between frontmatter keys, queue entries, and prompt-target text.
 
 The active `#controller-timeout` item is the closest existing backlog item for the first issue. The second should be covered by a focused preset normalization regression if it is not already part of that work.
-<!-- agent:boundary:0db90be8 -->
+❯ run the queue
+### Re: run the queue — gpt-5
+
+Ran the first queue item, `#controller-timeout`, using the `#spec-test-build-install-commit-push` preset intent.
+
+The controller stalled-client/start-hang fix was already present in runtime code: controller RPC reads are bounded, idle accepted clients are closed, accepted clients are served concurrently, and `ensure_controller_running` drops the readiness stream before issuing status requests. I added the missing regression for the `controller status --ensure` path with an idle controller client so this specific deadlock shape stays covered.
+
+I also normalized the remaining queue entries from the unsupported queue-wide `preset ...` line into per-item `#spec-test-build-install-commit-push` prompts, so the next `agent-doc` cycle can parse and consume the queue head normally.
+
+Verification passed:
+- `cargo fmt`
+- `cargo test project_controller -- --nocapture`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- live `agent-doc controller status --project-root /home/brian/work/btakita/agent-loop`
+- live `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+
+Commit / push:
+- `src/agent-doc` commit `da539eb` pushed to `origin/20260422/codex-agent-backend`.
+- Superproject commit `cd4cd9619` pushed to `origin/main` with the updated `src/agent-doc` pointer.
+
+I marked `#controller-timeout` done.
+<!-- agent:boundary:d171adf3 -->
 <!-- /agent:exchange -->
 ###
 
@@ -94,17 +117,14 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 -->
 
 <!-- agent:queue auto -->
-preset spec-test-build-install-commit-push
-- do [#controller-timeout]
-- do [#sidecar-diverge]
-- do [#syncbudget-regress]
+- do [#sidecar-diverge]. #spec-test-build-install-commit-push
+- do [#syncbudget-regress]. #spec-test-build-install-commit-push
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
 
-- [ ] [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
 - [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
 - [ ] [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
 <!-- /agent:backlog -->
@@ -143,6 +163,7 @@ preset spec-test-build-install-commit-push
 - 2026-05-09 [#finalize-do-cascade] finalize --pending-done cascade failure: do #id closeout requires up to 4 finalize attempts due to conflicting pending_capture_guard and pending_done_guard. Plan: tasks/agent-doc/plan-finalize-pending-done-cascade.md
 - 2026-05-09 [#codex-manifest-warnings] Fix repeated Codex plugin/skill manifest warnings: overlong interface.defaultPrompt, more than 3 default prompts, invalid skills path ./, and icon paths containing ..; decide whether to patch local plugin metadata, installer validation, or warning suppression.
 - 2026-05-09 [#editorswitchctl] Fix the current editor-document switch split by completing/regressing the Phase D/E controller authority boundary: tasks/software/tsift.md remains actor_state=starting with a healthy supervisor, route refuses injection, and tmux window 4 still has four agent-doc panes. Plan: tasks/agent-doc/plan-project-controller-session-actor-mvp.md
+- 2026-05-09 [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
 <!-- /agent:pending-done -->
 
 

@@ -79,6 +79,40 @@ fn find_component_containing_open_id(
     Ok((content, comp))
 }
 
+fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
+    let id = pending::normalize_pending_id(id);
+    if id.is_empty() {
+        return Ok(false);
+    }
+    if crate::cycle_state::resolved_pending_ids(file)?.contains(&id) {
+        return Ok(true);
+    }
+
+    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let components = component::parse(&content).context("failed to parse components")?;
+    let archive_ref = format!("[#{}]", id);
+    for comp in components {
+        let body = comp.content(&content);
+        if comp.name == "pending-done"
+            && body
+                .lines()
+                .any(|line| line.to_ascii_lowercase().contains(&archive_ref))
+        {
+            return Ok(true);
+        }
+        if is_tracked_work_component(&comp.name) {
+            let (_, items, _) = pending::parse_items(body);
+            if items
+                .into_iter()
+                .any(|item| item.id == id && item.state == pending::PendingState::Done)
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// Compute a stable document id from a file path. Uses `snapshot::doc_hash` so
 /// the id is consistent across pending ops and backfill.
 pub fn doc_id_for(file: &Path) -> String {
@@ -143,7 +177,17 @@ pub fn backfill(file: &Path) -> Result<()> {
 
 /// Mark an item `[x]` by id.
 pub fn done(file: &Path, id: &str) -> Result<()> {
-    let (full_content, comp) = find_component_containing_open_id(file, id)?;
+    let (full_content, comp) = match find_component_containing_open_id(file, id) {
+        Ok(found) => found,
+        Err(_) if tracked_work_id_already_resolved(file, id)? => {
+            eprintln!(
+                "[pending] done: id [#{}] is already resolved; leaving backlog unchanged",
+                pending::normalize_pending_id(id)
+            );
+            return Ok(());
+        }
+        Err(err) => return Err(err),
+    };
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = pending::op_done(existing, id)?;
     let canonical = canonicalize_component_content(file, &new_content);
@@ -458,6 +502,19 @@ mod tests {
         (tmp, doc)
     }
 
+    fn doc_with_pending_and_archive(
+        pending_items: &str,
+        archive_items: &str,
+    ) -> (TempDir, PathBuf) {
+        let content = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n\n<!-- agent:pending-done -->\n{}\n<!-- /agent:pending-done -->\n",
+            pending_items, archive_items
+        );
+        let (tmp, doc) = setup_test_dir();
+        fs::write(&doc, content).unwrap();
+        (tmp, doc)
+    }
+
     #[test]
     fn add_prepends_to_pending_component() {
         let (_tmp, doc) = doc_with_pending("- item one");
@@ -600,6 +657,19 @@ mod tests {
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("<!-- agent:pending -->\n- [ ] [#keep1] Keep backlog item\n"));
         assert!(content.contains("<!-- agent:icebox -->\n- [x] [#ice01] Parked follow-up\n"));
+    }
+
+    #[test]
+    fn done_noops_when_item_was_already_archived() {
+        let (_tmp, doc) = doc_with_pending_and_archive(
+            "- [ ] [#keep1] Keep backlog item\n",
+            "- 2026-05-09 [#done1] Already completed\n",
+        );
+        done(&doc, "done1").unwrap();
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("- [ ] [#keep1] Keep backlog item"));
+        assert!(content.contains("- 2026-05-09 [#done1] Already completed"));
     }
 
     #[test]

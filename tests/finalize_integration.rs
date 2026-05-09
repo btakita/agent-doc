@@ -611,6 +611,42 @@ fn finalize_accepts_hash_prefixed_pending_done_id() {
 }
 
 #[test]
+fn finalize_pending_done_is_noop_when_item_was_already_reaped() {
+    let (tmp, doc) = setup_session_template_doc();
+    let current = fs::read_to_string(&doc).unwrap();
+    let updated = current.replace(
+        "<!-- /agent:pending -->\n",
+        "<!-- /agent:pending -->\n\n<!-- agent:pending-done -->\n- 2026-05-09 [#done1] Close the loop\n<!-- /agent:pending-done -->\n",
+    );
+    fs::write(&doc, updated).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--pending-done",
+            "done1",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: #done1 close the loop — gpt-5"));
+    assert!(content.contains("- 2026-05-09 [#done1] Close the loop"));
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
 fn finalize_stream_rejects_empty_exchange_shell_before_commit() {
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);

@@ -139,7 +139,7 @@ The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch
 | Flag | Behavior |
 |------|----------|
 | `--pending-add "text"` | Add new item at the beginning of the list. Binary assigns hash and `[ ]` unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is accepted as compatibility input. |
-| `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). |
+| `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). If the id is already present in `agent:pending-done` or the current cycle's resolved-id ledger, treat it as an idempotent resolution warning rather than a fatal missing-id error. |
 | `--pending-gate <id>` | Mark `[/]` — code-complete, awaiting gate. Valid from `[ ]`. No-op (logged) if already `[/]`. Error if source is `[x]`. |
 | `--pending-ungate <id>` | Return `[/]` → `[ ]` — gate failed, back to active. Error if source is `[ ]` or `[x]`. |
 | `--pending-edit <id> "new text"` | Rewrite text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. |

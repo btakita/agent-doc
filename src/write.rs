@@ -253,6 +253,7 @@ pub struct CommandOptions {
 pub struct WriteFlags {
     pub allow_replace_pending: bool,
     pub has_pending_add: bool,
+    pub has_pending_done: bool,
     pub pending_done_ids: Vec<String>,
     pub strict_closeout: bool,
     pub rerun_command_base: Option<String>,
@@ -689,6 +690,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
         if !options.pending_done.is_empty() {
             crate::cycle_state::record_pending_done_ids(file, &options.pending_done)?;
+            crate::cycle_state::mark_pending_mutations(file)?;
         }
         if let Some(ref order) = options.pending_reorder {
             let ids: Vec<String> = order
@@ -712,6 +714,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     let write_flags = WriteFlags {
         allow_replace_pending: options.allow_replace_pending,
         has_pending_add: !options.pending_add.is_empty() || !options.pending_add_gated.is_empty(),
+        has_pending_done: !options.pending_done.is_empty(),
         pending_done_ids: options.pending_done.clone(),
         strict_closeout: commit_mode == CommitMode::Required,
         rerun_command_base: build_rerun_command_base(&options, commit_mode),
@@ -1233,6 +1236,7 @@ fn prewrite_pending_capture_check(
         .as_ref()
         .is_some_and(|state| state.had_pending_mutations)
         || flags.has_pending_add
+        || flags.has_pending_done
     {
         return Ok(());
     }
@@ -9844,6 +9848,47 @@ mod precommit_pending_capture_tests {
 
         super::precommit_pending_capture_check(&doc)
             .expect("should pass when pending mutations were recorded");
+    }
+
+    #[test]
+    fn prewrite_pending_capture_accepts_pending_done_resolution() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: strict\n---\n\n",
+            "### Re: #done1 — gpt-5\n\nImplemented and verified.\n",
+            false,
+        );
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+
+        super::prewrite_pending_capture_check(
+            &doc,
+            "### Re: #done1 — gpt-5\n\nImplemented and verified.\n",
+            &super::WriteFlags {
+                has_pending_done: true,
+                pending_done_ids: vec!["done1".to_string()],
+                strict_closeout: true,
+                ..Default::default()
+            },
+        )
+        .expect("pending-done should satisfy do-id backlog capture");
+    }
+
+    #[test]
+    fn precommit_pending_capture_accepts_recorded_pending_done_mutation() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: strict\n---\n\n",
+            "### Re: #done1 — gpt-5\n\nImplemented and verified.\n",
+            false,
+        );
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        crate::cycle_state::record_pending_done_ids(&doc, &["done1".to_string()]).unwrap();
+        crate::cycle_state::mark_pending_mutations(&doc).unwrap();
+
+        super::precommit_pending_capture_check(&doc)
+            .expect("recorded pending-done mutation should satisfy capture guard");
     }
 
     #[test]

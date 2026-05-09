@@ -209,6 +209,21 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `safe passive lock contention keeps automatic sync pending for retry`() {
+        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
+            kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
+            exitCode = 0,
+            output = """
+                [sync] latency budget exceeded: phase sync_lock_wait took 101ms (budget 100ms, mode=safe-passive)
+                [sync] safe_passive_sync_lock_contention_retry phase=sync_lock_wait elapsed_ms=101 budget_ms=100 status=over_budget action=retry
+            """.trimIndent(),
+        )
+
+        assertEquals(false, result.applied)
+        assertEquals(true, result.shouldRetry)
+    }
+
+    @Test
     fun `successful sync output without preserve marker applies immediately`() {
         val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
             kind = EditorTabSyncListener.AutomaticCommandKind.Sync,

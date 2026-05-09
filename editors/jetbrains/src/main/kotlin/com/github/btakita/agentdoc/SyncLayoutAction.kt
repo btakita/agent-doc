@@ -27,6 +27,8 @@ class SyncLayoutAction : AnAction() {
 
         internal const val PRESERVED_LAYOUT_DEFERRED_WARNING =
             "Sync deferred: another visible agent-doc pane is mid-closeout, so the current tmux layout was preserved. Try again after that closeout finishes."
+        internal const val SYNC_ALREADY_RUNNING_WARNING =
+            "Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly."
 
         private val PROTECTED_PANES_PATTERN =
             Regex("""visible protected pane\(s\) (.+?) cannot be detached safely""")
@@ -219,7 +221,18 @@ class SyncLayoutAction : AnAction() {
             }
 
             Thread {
+                var syncGuard: AgentDocLib? = null
                 try {
+                    val lib = AgentDocLib.get()
+                    lib?.agent_doc_sync_bump_generation()
+                    if (lib != null) {
+                        if (!lib.agent_doc_sync_try_lock()) {
+                            LOG.info("[sync] skipped manual sync because another editor sync is already running")
+                            if (notify) TerminalUtil.notifyWarning(project, SYNC_ALREADY_RUNNING_WARNING)
+                            return@Thread
+                        }
+                        syncGuard = lib
+                    }
                     val agentDoc = TerminalUtil.resolveAgentDoc(projectRoot)
                     val editorLayout =
                         absolutizeEditorLayout(
@@ -261,6 +274,8 @@ class SyncLayoutAction : AnAction() {
                     }
                 } catch (ex: Exception) {
                     if (notify) TerminalUtil.notifyError(project, "Failed to sync layout: ${ex.message}")
+                } finally {
+                    syncGuard?.agent_doc_sync_unlock()
                 }
             }.start()
         }

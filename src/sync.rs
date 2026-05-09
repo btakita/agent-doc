@@ -195,6 +195,8 @@ const SYNC_SAFE_PASSIVE_TOTAL_BUDGET: Duration = Duration::from_millis(1_000);
 const SYNC_LOCK_WAIT_BUDGET: Duration = Duration::from_secs(3);
 const SYNC_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const SAFE_PASSIVE_STASH_CLEANUP_THROTTLE: Duration = Duration::from_secs(2);
+const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER: &str =
+    "[sync] safe_passive_sync_lock_contention_retry";
 
 fn latency_budget_status(elapsed: Duration, budget: Duration) -> &'static str {
     if elapsed >= budget {
@@ -220,7 +222,25 @@ fn sync_latency_message(
     )
 }
 
-fn acquire_sync_lock(lock_path: &Path, wait_budget: Duration) -> Option<File> {
+#[derive(Debug)]
+enum SyncLockAcquire {
+    Acquired(File),
+    Contended,
+    Unavailable,
+}
+
+impl SyncLockAcquire {
+    fn is_acquired(&self) -> bool {
+        if let Self::Acquired(file) = self {
+            let _ = file;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn acquire_sync_lock(lock_path: &Path, wait_budget: Duration) -> SyncLockAcquire {
     if let Some(parent) = lock_path.parent()
         && let Err(err) = std::fs::create_dir_all(parent)
     {
@@ -229,7 +249,7 @@ fn acquire_sync_lock(lock_path: &Path, wait_budget: Duration) -> Option<File> {
             parent.display(),
             err
         ));
-        return None;
+        return SyncLockAcquire::Unavailable;
     }
 
     let file = match OpenOptions::new()
@@ -245,7 +265,7 @@ fn acquire_sync_lock(lock_path: &Path, wait_budget: Duration) -> Option<File> {
                 lock_path.display(),
                 err
             ));
-            return None;
+            return SyncLockAcquire::Unavailable;
         }
     };
 
@@ -253,19 +273,28 @@ fn acquire_sync_lock(lock_path: &Path, wait_budget: Duration) -> Option<File> {
     loop {
         use fs2::FileExt;
         match file.try_lock_exclusive() {
-            Ok(()) => return Some(file),
+            Ok(()) => return SyncLockAcquire::Acquired(file),
             Err(err) if started.elapsed() >= wait_budget => {
                 sync_log(&format!(
-                    "sync lock contention exceeded {}ms at {}: {}; proceeding without lock",
+                    "sync lock contention exceeded {}ms at {}: {}",
                     wait_budget.as_millis(),
                     lock_path.display(),
                     err
                 ));
-                return None;
+                return SyncLockAcquire::Contended;
             }
             Err(_) => std::thread::sleep(SYNC_LOCK_POLL_INTERVAL),
         }
     }
+}
+
+fn safe_passive_lock_contention_message(elapsed: Duration, budget: Duration) -> String {
+    format!(
+        "{} phase=sync_lock_wait elapsed_ms={} budget_ms={} status=over_budget action=retry",
+        SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER,
+        elapsed.as_millis(),
+        budget.as_millis()
+    )
 }
 
 fn log_sync_latency(
@@ -2421,15 +2450,29 @@ fn run_with_options(
     // race against each other's stash operations, causing pane bouncing. Contention
     // is bounded so a stuck prior editor sync cannot starve later selections forever.
     let lock_path = std::path::Path::new(".agent-doc/sync.lock");
+    let sync_lock_wait_budget = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        SYNC_LOCK_WAIT_LATENCY_BUDGET
+    } else {
+        SYNC_LOCK_WAIT_BUDGET
+    };
     let sync_lock_start = Instant::now();
-    let _lock_guard = acquire_sync_lock(lock_path, SYNC_LOCK_WAIT_BUDGET);
+    let lock_guard = acquire_sync_lock(lock_path, sync_lock_wait_budget);
+    let sync_lock_elapsed = sync_lock_start.elapsed();
     log_sync_latency(
         focus,
         "sync_lock_wait",
-        sync_lock_start.elapsed(),
+        sync_lock_elapsed,
         SYNC_LOCK_WAIT_LATENCY_BUDGET,
         auto_start_mode,
     );
+    if matches!(auto_start_mode, AutoStartMode::SafePassive) && !lock_guard.is_acquired() {
+        let message =
+            safe_passive_lock_contention_message(sync_lock_elapsed, sync_lock_wait_budget);
+        eprintln!("{}", message);
+        sync_log(&message);
+        return Ok(());
+    }
+    let _lock_guard = lock_guard;
 
     // Check for new build and clear stale caches
     check_build_stamp();
@@ -7371,6 +7414,22 @@ mod tests {
     }
 
     #[test]
+    fn safe_passive_lock_contention_message_is_retryable_and_visible() {
+        let message = safe_passive_lock_contention_message(
+            Duration::from_millis(125),
+            SYNC_LOCK_WAIT_LATENCY_BUDGET,
+        );
+
+        assert!(
+            message.contains(SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER),
+            "{message}"
+        );
+        assert!(message.contains("phase=sync_lock_wait"), "{message}");
+        assert!(message.contains("status=over_budget"), "{message}");
+        assert!(message.contains("action=retry"), "{message}");
+    }
+
+    #[test]
     fn safe_passive_prune_cleanup_throttles_unchanged_layout() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state_path = tmp.path().join(".agent-doc/sync-prune-state.json");
@@ -7463,7 +7522,7 @@ mod tests {
 
         fs2::FileExt::unlock(&holder).unwrap();
         assert!(
-            acquired.is_none(),
+            matches!(acquired, SyncLockAcquire::Contended),
             "contended sync lock should time out instead of blocking"
         );
         assert!(

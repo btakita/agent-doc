@@ -33,6 +33,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         private const val DEBOUNCE_MS = 100L
         private const val DEFERRED_RETRY_BASE_MS = 750L
         private const val DEFERRED_RETRY_MAX_MS = 5_000L
+        private const val SYNC_GUARD_RETRY_MS = 150L
         private const val MAX_DEFERRED_RETRIES = 8
         private val fallbackGeneration = AtomicLong(0)
         private val fallbackRunning = AtomicBoolean(false)
@@ -74,6 +75,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
     internal object AutomaticCommandPlanner {
         private const val SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER =
             "[sync] safe_passive_layout_preserved_reselected_focus"
+        private const val SAFE_PASSIVE_LOCK_CONTENTION_RETRY_MARKER =
+            "[sync] safe_passive_sync_lock_contention_retry"
 
         fun resolveActiveFilePath(
             preferredActiveFile: String?,
@@ -138,6 +141,12 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 if (output.contains(SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER)) {
                     return AutomaticCommandResult(applied = true, shouldRetry = false)
                 }
+                return AutomaticCommandResult(applied = false, shouldRetry = true)
+            }
+            if (
+                kind == AutomaticCommandKind.Sync &&
+                output.contains(SAFE_PASSIVE_LOCK_CONTENTION_RETRY_MARKER)
+            ) {
                 return AutomaticCommandResult(applied = false, shouldRetry = true)
             }
             return AutomaticCommandResult(applied = true, shouldRetry = false)
@@ -311,6 +320,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
             ?: fallbackRunning.compareAndSet(false, true)
         if (!locked) {
             log("guard: layout already running, queued latest request")
+            latestSnapshot.get()?.let {
+                requestAutomaticSync(project, it, SYNC_GUARD_RETRY_MS, requestedGeneration)
+            }
             return
         }
 

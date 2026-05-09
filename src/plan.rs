@@ -126,7 +126,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             prompt_targets: Vec::new(),
             execution_scope: ExecutionScope::Normal,
             repo_actions: Vec::new(),
-            required_commands: finalize_placeholder_commands(file, &fm),
+            required_commands: finalize_placeholder_commands(file, &fm, &[]),
             pending_mutations: Vec::new(),
             handoff: HandoffTarget::None,
             blockers: vec!["No changes detected since the last snapshot.".to_string()],
@@ -210,7 +210,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     }
 
     if !exchange_compaction_requested && matches!(handoff, HandoffTarget::None) {
-        required_commands.extend(finalize_placeholder_commands(file, &fm));
+        required_commands.extend(finalize_placeholder_commands(file, &fm, &pending_mutations));
     }
 
     Ok(DispatchPlan {
@@ -255,11 +255,22 @@ fn execution_scope_for_prompt_targets(
     }
 }
 
-fn finalize_placeholder_commands(file: &Path, fm: &frontmatter::Frontmatter) -> Vec<String> {
+fn finalize_placeholder_commands(
+    file: &Path,
+    fm: &frontmatter::Frontmatter,
+    pending_mutations: &[PendingMutationPlan],
+) -> Vec<String> {
     let mut finalize = format!(
         "agent-doc finalize {} --baseline-file <preflight.baseline_file> --origin skill",
         file.display()
     );
+    for mutation in pending_mutations
+        .iter()
+        .filter(|mutation| mutation.kind == PendingMutationKind::ResolveExisting)
+    {
+        finalize.push_str(" --pending-done ");
+        finalize.push_str(&mutation.id);
+    }
     if fm.resolve_mode().is_crdt() {
         finalize.push_str(" --stream");
     } else if fm.resolve_mode().is_template() {
@@ -534,6 +545,71 @@ What changed?
         );
         assert_eq!(plan.handoff, HandoffTarget::None);
         assert!(plan.blockers.is_empty());
+    }
+
+    #[test]
+    fn build_plan_includes_pending_done_for_bracketed_do_directive() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Pending
+
+<!-- agent:pending -->
+- [ ] [#dodone] Close the matching backlog item
+<!-- /agent:pending -->
+"#;
+
+        let current = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+do [#dodone]. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+
+## Pending
+
+<!-- agent:pending -->
+- [ ] [#dodone] Close the matching backlog item
+<!-- /agent:pending -->
+"#;
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.repo_actions.len(), 1);
+        assert_eq!(plan.pending_mutations.len(), 1);
+        assert_eq!(
+            plan.pending_mutations[0].kind,
+            PendingMutationKind::ResolveExisting
+        );
+        assert_eq!(plan.pending_mutations[0].id, "dodone");
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|cmd| cmd.contains("agent-doc finalize")
+                    && cmd.contains("--pending-done dodone")
+                    && cmd.contains("--stream")),
+            "expected finalize command to carry pending-done, got: {:?}",
+            plan.required_commands
+        );
     }
 
     #[test]

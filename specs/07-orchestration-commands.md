@@ -18,6 +18,7 @@ This file covers binary-owned planning/orchestration and the queue surface that 
   - `blockers`
 - The implementation reuses the same prompt/diff classifiers that power `preflight`.
 - `pending_mutations.resolve_existing` signals that a matching open backlog/icebox item will need `--pending-done <id>` if completed this cycle.
+- For explicit `do #id` / `do [#id]` directives that resolve an existing tracked-work item, the planned finalize command includes the matching `--pending-done <id>` argument so the harness closeout path does not rely on the agent remembering that flag manually.
 - `pending_mutations.expect_add` signals that the response likely needs new backlog capture.
 - `execution_scope=plan_backlog_only` suppresses repo implementation work for report/planning contracts such as `#agent-doc-bug`.
 - Copied `prompt_presets` frontmatter defines reusable prompts but does not invoke them; plan/preflight must ignore preset definition lines when expanding preset references from added diff text.

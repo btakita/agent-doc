@@ -1771,6 +1771,7 @@ fn looks_like_imperative_directive(line: &str) -> bool {
         return true;
     }
     compact.starts_with("do #")
+        || compact.starts_with("do [#")
         || compact.starts_with("fix #")
         || compact.starts_with("fix this")
         || compact.contains(" run tests")
@@ -3845,12 +3846,14 @@ Please fix the bug.\n\
     fn extract_imperative_directives_detects_do_and_build_push() {
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n ctx\n\
             +do #6zyp. update spec + tests. build + install for local testing. commit + push\n\
+            +do [#dodone]. spec-test-build-install-commit-push\n\
             +run benchmarks\n";
         let directives = extract_imperative_directives(diff);
         assert_eq!(
             directives,
             vec![
                 "do #6zyp. update spec + tests. build + install for local testing. commit + push",
+                "do [#dodone]. spec-test-build-install-commit-push",
                 "run benchmarks",
             ]
         );

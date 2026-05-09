@@ -855,9 +855,9 @@ fn active_pane_column_index(
     tmux: &Tmux,
     target_session: Option<&str>,
     window: Option<&str>,
-    saved_layout_len: usize,
+    layout_len: usize,
 ) -> Option<usize> {
-    if saved_layout_len < 2 {
+    if layout_len < 2 {
         return None;
     }
     let session = target_session?;
@@ -868,22 +868,46 @@ fn active_pane_column_index(
         return None;
     }
     let active_index = ordered.iter().position(|pane| pane == &active)?;
-    Some(active_index.min(saved_layout_len.saturating_sub(1)))
+    Some(active_index.min(layout_len.saturating_sub(1)))
+}
+
+fn visible_registered_layout(tmux: &Tmux, window: Option<&str>) -> Vec<String> {
+    let Some(window) = window else {
+        return Vec::new();
+    };
+    let Ok(ordered_panes) = tmux.list_panes_ordered(window) else {
+        return Vec::new();
+    };
+    if ordered_panes.len() < 2 {
+        return Vec::new();
+    }
+    let registry = sessions::load().unwrap_or_default();
+    ordered_panes
+        .iter()
+        .map(|pane| {
+            registry
+                .values()
+                .find(|entry| entry.pane == *pane && !entry.file.trim().is_empty())
+                .map(|entry| entry.file.trim().to_string())
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 fn expand_focus_only_columns_for_editor_switch(
     col_args: &[String],
-    saved_layout: &[String],
+    remembered_layout: &[String],
     active_column_index: Option<usize>,
     auto_start_mode: AutoStartMode,
 ) -> Vec<String> {
     if !matches!(auto_start_mode, AutoStartMode::SafePassive)
         || col_args.len() != 1
-        || saved_layout.len() < 2
+        || remembered_layout.len() < 2
     {
         return col_args.to_vec();
     }
-    let Some(active_column_index) = active_column_index.filter(|index| *index < saved_layout.len())
+    let Some(active_column_index) =
+        active_column_index.filter(|index| *index < remembered_layout.len())
     else {
         return col_args.to_vec();
     };
@@ -892,7 +916,7 @@ fn expand_focus_only_columns_for_editor_switch(
         return col_args.to_vec();
     }
 
-    let mut expanded: Vec<String> = saved_layout
+    let mut expanded: Vec<String> = remembered_layout
         .iter()
         .map(|col| col.trim().to_string())
         .collect();
@@ -2794,8 +2818,18 @@ fn run_with_options(
         }
     }
     let window = effective_window.as_deref();
+    let remembered_layout = if saved_layout.len() >= 2 {
+        saved_layout.clone()
+    } else {
+        visible_registered_layout(tmux, window)
+    };
     let active_column_index = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-        active_pane_column_index(tmux, target_session.as_deref(), window, saved_layout.len())
+        active_pane_column_index(
+            tmux,
+            target_session.as_deref(),
+            window,
+            remembered_layout.len(),
+        )
     } else {
         None
     };
@@ -2812,7 +2846,7 @@ fn run_with_options(
     }
     col_args = expand_focus_only_columns_for_editor_switch(
         &col_args,
-        &saved_layout,
+        &remembered_layout,
         active_column_index,
         auto_start_mode,
     )
@@ -10312,6 +10346,99 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             iso.active_pane("test").unwrap(),
             new_left_pane,
             "focused replacement pane should be selected after the same-side handoff"
+        );
+    }
+
+    #[test]
+    fn safe_passive_focus_only_editor_switch_preserves_sibling_without_saved_layout() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let left_doc = root.join("tasks/left.md");
+        let right_doc = root.join("tasks/right.md");
+        let new_left_doc = root.join("tasks/new-left.md");
+        for (path, session) in [
+            (&left_doc, "left-session-nosaved"),
+            (&right_doc, "right-session-nosaved"),
+            (&new_left_doc, "new-left-session-nosaved"),
+        ] {
+            std::fs::write(
+                path,
+                format!(
+                    "---\nagent_doc_session: {session}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let iso = IsolatedTmux::new("sync-focus-only-no-saved-layout");
+        let left_pane = iso.new_session("test", root).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        let right_pane = iso.split_window(&left_pane, root, "-dh").unwrap();
+        let target_window = iso.pane_window(&left_pane).unwrap();
+        let new_left_pane = iso.new_window("test", root).unwrap();
+        let new_left_window = iso.pane_window(&new_left_pane).unwrap();
+
+        for (session, pane, window, doc) in [
+            (
+                "left-session-nosaved",
+                &left_pane,
+                &target_window,
+                &left_doc,
+            ),
+            (
+                "right-session-nosaved",
+                &right_pane,
+                &target_window,
+                &right_doc,
+            ),
+            (
+                "new-left-session-nosaved",
+                &new_left_pane,
+                &new_left_window,
+                &new_left_doc,
+            ),
+        ] {
+            sessions::register_full_with_cwd(
+                session,
+                pane,
+                &doc.to_string_lossy(),
+                pane_pid_from_tmux(&iso, pane).unwrap(),
+                window,
+                &root.to_string_lossy(),
+            )
+            .unwrap();
+        }
+        iso.select_pane(&left_pane).unwrap();
+
+        run_with_options(
+            &[new_left_doc.to_string_lossy().to_string()],
+            None,
+            Some(new_left_doc.to_string_lossy().as_ref()),
+            AutoStartMode::SafePassive,
+            &iso,
+        )
+        .unwrap();
+
+        let ordered = iso.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(
+            ordered,
+            vec![new_left_pane.clone(), right_pane.clone()],
+            "focus-only sync should derive the current split from visible registered panes when last_layout.json is absent"
+        );
+        assert_eq!(
+            iso.active_pane("test").unwrap(),
+            new_left_pane,
+            "focused replacement pane should be selected without collapsing the sibling pane"
         );
     }
 

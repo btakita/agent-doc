@@ -6,6 +6,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **IPC normalization fallback now respects concurrent non-exchange edits.** When a plugin sidecar strips a prompt prefix and the binary falls back to normalized `content_ours`, the fallback first merges the current disk content against the explicit pre-response baseline. Deleting a scratch HTML comment while the response is running now stays deleted instead of being restored by prefix repair. Added a regression and updated the closeout specs.
+
+- **Safe-passive focus-only sync preserves visible splits without saved layout state.** If an editor event supplies only the focused markdown file and `.agent-doc/last_layout.json` is absent, sync now derives the sibling projection from registered panes already visible in the target `agent-doc` window before reconciling. This prevents post-turn editor sync from collapsing a visible split to one pane. Added a tmux regression and updated the session/tmux specs.
+
 - **`agent-doc focus` no longer waits on the project controller RPC.** The editor immediate-focus path now selects a live local actor projection from `.agent-doc/session-actors.json`, then falls back to `sessions.json`, without launching or blocking on the controller actor-binding request. Background `sync --no-autostart` still owns slower reconciliation and projection repair. Added focused regressions and updated the focus/editor specs.
 
 - **Editor document switches now attempt immediate focus before background reconciliation.** JetBrains and VS Code automatic tab sync issue a best-effort `agent-doc focus <file>` as soon as a markdown selection changes, then let the existing debounced `sync --no-autostart` reconciliation run in the background. Missing panes still fall through to reconciliation, while existing-pane handoffs feel snappy. Added VS Code command-arg coverage, updated the editor specs, and bumped the JetBrains plugin build version to `0.2.105`.

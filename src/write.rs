@@ -4719,12 +4719,41 @@ fn content_ours_with_pending_from_disk(file: &Path, content_ours: &str) -> Strin
     }
 }
 
+fn content_ours_merged_with_disk_edits(
+    file: &Path,
+    baseline: Option<&str>,
+    content_ours: &str,
+) -> String {
+    let Some(base) = baseline else {
+        return content_ours_with_pending_from_disk(file, content_ours);
+    };
+    let Ok(on_disk_content) = std::fs::read_to_string(file) else {
+        return content_ours_with_pending_from_disk(file, content_ours);
+    };
+    if strip_boundary_for_dedup(&on_disk_content) == strip_boundary_for_dedup(content_ours) {
+        return content_ours.to_string();
+    }
+
+    let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+    match merge::merge_contents_crdt(Some(&base_state), content_ours, &on_disk_content) {
+        Ok((merged, _)) => merged,
+        Err(e) => {
+            eprintln!(
+                "[write] WARNING: failed to merge current disk edits into normalization fallback: {}",
+                e
+            );
+            content_ours_with_pending_from_disk(file, content_ours)
+        }
+    }
+}
+
 fn normalized_content_ours_fallback(
     file: &Path,
+    baseline: Option<&str>,
     content_ours: &str,
     normalize_prefix_lines: &[String],
 ) -> String {
-    let fallback = content_ours_with_pending_from_disk(file, content_ours);
+    let fallback = content_ours_merged_with_disk_edits(file, baseline, content_ours);
     normalize_exchange_prefixes_for_targets(&fallback, normalize_prefix_lines)
 }
 
@@ -4953,7 +4982,8 @@ pub fn try_ipc(
                         && !verify_sidecar_normalization(&snap_content, lines)
                     {
                         if let Some(ours) = content_ours {
-                            let fallback = normalized_content_ours_fallback(file, ours, lines);
+                            let fallback =
+                                normalized_content_ours_fallback(file, baseline, ours, lines);
                             eprintln!(
                                 "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
                                 fallback.len()
@@ -5358,8 +5388,13 @@ fn write_ipc_and_poll(
                             && !verify_sidecar_normalization(&content, lines)
                         {
                             if let Some(ours) = content_ours {
-                                let fallback =
-                                    normalized_content_ours_fallback(doc_file, ours, lines);
+                                let baseline = payload
+                                    .get("baseline")
+                                    .and_then(|value| value.as_str())
+                                    .filter(|value| !value.is_empty());
+                                let fallback = normalized_content_ours_fallback(
+                                    doc_file, baseline, ours, lines,
+                                );
                                 eprintln!(
                                     "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
                                     fallback.len()
@@ -8781,6 +8816,117 @@ agent response
             snap.contains("- [ ] [#keepme] Preserve pending add from disk"),
             "snapshot must preserve pending mutations from disk during normalization fallback; got: {}",
             snap
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_preserves_concurrent_comment_deletion() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+do #commentdel
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+
+<!--
+The tmux focus should be snappy.
+-->
+";
+        std::fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let content_ours = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+❯ do #commentdel
+agent response
+<!-- /agent:exchange -->
+
+<!--
+The tmux focus should be snappy.
+-->
+";
+        let normalize_prefix_lines = vec!["do #commentdel".to_string()];
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = std::fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = std::fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            let bad_sidecar = "\
+---
+session: test
+---
+
+<!-- agent:exchange -->
+do #commentdel
+agent response
+<!-- /agent:exchange -->
+";
+                            let _ = std::fs::write(&doc_for_watcher, bad_sidecar);
+                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                        }
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk.contains("❯ do #commentdel"),
+            "normalization fallback must still repair the prompt prefix: {disk}"
+        );
+        assert!(
+            !disk.contains("The tmux focus should be snappy."),
+            "normalization fallback must not restore a concurrently deleted scratch comment: {disk}"
+        );
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snap.contains("The tmux focus should be snappy."),
+            "snapshot must also respect the concurrent comment deletion: {snap}"
         );
     }
 

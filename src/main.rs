@@ -1012,6 +1012,18 @@ enum ControllerAction {
         /// Bootstrap launch mode to persist in controller state
         #[arg(long, default_value = "managed")]
         launch_mode: String,
+        /// Private socket used while promoting a replacement controller
+        #[arg(long, hide = true)]
+        listen_socket: Option<PathBuf>,
+        /// Controller generation to persist for a replacement controller
+        #[arg(long, hide = true)]
+        controller_generation: Option<u64>,
+        /// Previous authoritative controller PID during handoff
+        #[arg(long, hide = true)]
+        previous_controller_pid: Option<u32>,
+        /// Handoff state to persist at startup
+        #[arg(long, hide = true, default_value = "stable")]
+        handoff_state: String,
     },
     /// Stop the project controller if it is running
     Shutdown {
@@ -1892,7 +1904,18 @@ fn main() -> anyhow::Result<()> {
             ControllerAction::Serve {
                 project_root,
                 launch_mode,
-            } => project_controller::run_serve(project_root.as_deref(), &launch_mode),
+                listen_socket,
+                controller_generation,
+                previous_controller_pid,
+                handoff_state,
+            } => project_controller::run_serve(
+                project_root.as_deref(),
+                &launch_mode,
+                listen_socket.as_deref(),
+                controller_generation,
+                previous_controller_pid,
+                &handoff_state,
+            ),
             ControllerAction::Shutdown { project_root } => {
                 project_controller::run_shutdown(project_root.as_deref())
             }

@@ -13,14 +13,14 @@ use interprocess::local_socket::{
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -80,6 +80,14 @@ pub struct ControllerBootstrap {
     pub pid: u32,
     #[serde(default)]
     pub controller_binary: Option<ControllerBinaryIdentity>,
+    #[serde(default = "default_controller_generation")]
+    pub controller_generation: u64,
+    #[serde(default)]
+    pub handoff_state: ControllerHandoffState,
+    #[serde(default)]
+    pub handoff_started_at: Option<u64>,
+    #[serde(default)]
+    pub previous_controller_pid: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +100,42 @@ pub struct ControllerStatus {
     pub pid: Option<u32>,
     #[serde(default)]
     pub controller_binary: Option<ControllerBinaryIdentity>,
+    #[serde(default)]
+    pub controller_generation: Option<u64>,
+    #[serde(default)]
+    pub handoff_state: Option<ControllerHandoffState>,
+    #[serde(default)]
+    pub handoff_started_at: Option<u64>,
+    #[serde(default)]
+    pub previous_controller_pid: Option<u32>,
+    #[serde(default)]
+    pub stale_duplicate_pids: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerHandoffState {
+    #[default]
+    Stable,
+    Preparing,
+    Promoted,
+    Retiring,
+    Failed,
+}
+
+fn default_controller_generation() -> u64 {
+    1
+}
+
+fn parse_handoff_state(raw: &str) -> Result<ControllerHandoffState> {
+    match raw {
+        "stable" => Ok(ControllerHandoffState::Stable),
+        "preparing" => Ok(ControllerHandoffState::Preparing),
+        "promoted" => Ok(ControllerHandoffState::Promoted),
+        "retiring" => Ok(ControllerHandoffState::Retiring),
+        "failed" => Ok(ControllerHandoffState::Failed),
+        other => anyhow::bail!("unknown controller handoff state: {other}"),
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -372,9 +416,28 @@ fn has_path_separator(path: &Path) -> bool {
 }
 
 fn write_bootstrap(project_root: &Path, launch_mode: LaunchMode) -> Result<ControllerBootstrap> {
+    let prior = read_bootstrap(project_root)?.map(|state| state.controller_generation);
+    write_bootstrap_with_options(
+        project_root,
+        socket_path(project_root),
+        launch_mode,
+        prior.unwrap_or(0).saturating_add(1).max(1),
+        ControllerHandoffState::Stable,
+        None,
+    )
+}
+
+fn write_bootstrap_with_options(
+    project_root: &Path,
+    advertised_socket_path: PathBuf,
+    launch_mode: LaunchMode,
+    controller_generation: u64,
+    handoff_state: ControllerHandoffState,
+    previous_controller_pid: Option<u32>,
+) -> Result<ControllerBootstrap> {
     let bootstrap = ControllerBootstrap {
         project_root: project_root.to_path_buf(),
-        socket_path: socket_path(project_root),
+        socket_path: advertised_socket_path,
         launch_mode,
         bootstrap_epoch: SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -382,14 +445,27 @@ fn write_bootstrap(project_root: &Path, launch_mode: LaunchMode) -> Result<Contr
             .as_secs(),
         pid: std::process::id(),
         controller_binary: Some(current_binary_identity()?),
+        controller_generation,
+        handoff_state,
+        handoff_started_at: matches!(
+            handoff_state,
+            ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
+        )
+        .then(timestamp_secs),
+        previous_controller_pid,
     };
-    let path = state_path(project_root);
+    write_bootstrap_state(&bootstrap)?;
+    Ok(bootstrap)
+}
+
+fn write_bootstrap_state(bootstrap: &ControllerBootstrap) -> Result<()> {
+    let path = state_path(&bootstrap.project_root);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, serde_json::to_string_pretty(&bootstrap)?)
         .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(bootstrap)
+    Ok(())
 }
 
 fn open_state_db(project_root: &Path) -> Result<Connection> {
@@ -1123,7 +1199,11 @@ fn record_projection_diagnostic(
 }
 
 fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
-    let name = socket_path(project_root).to_fs_name::<GenericFilePath>()?;
+    connect_path(&socket_path(project_root))
+}
+
+fn connect_path(path: &Path) -> Result<interprocess::local_socket::Stream> {
+    let name = path.to_fs_name::<GenericFilePath>()?;
     interprocess::local_socket::ConnectOptions::new()
         .name(name)
         .connect_sync()
@@ -1131,7 +1211,11 @@ fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
 }
 
 fn request(project_root: &Path, command: &str) -> Result<String> {
-    let stream = connect(project_root)?;
+    request_path(&socket_path(project_root), command)
+}
+
+fn request_path(path: &Path, command: &str) -> Result<String> {
+    let stream = connect_path(path)?;
     stream
         .set_recv_timeout(Some(CONTROLLER_RPC_TIMEOUT))
         .context("failed to set project controller response timeout")?;
@@ -1311,6 +1395,10 @@ pub fn authorize_dispatch(
             bootstrap_epoch: 0,
             pid: std::process::id(),
             controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
         };
         return handle_dispatch(
             &bootstrap,
@@ -1424,6 +1512,10 @@ pub fn authorize_operator_command(
             bootstrap_epoch: 0,
             pid: std::process::id(),
             controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
         };
         return handle_operator_command(
             &bootstrap,
@@ -1472,6 +1564,7 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
             let mut status: ControllerStatus = serde_json::from_str(&response)
                 .context("failed to parse project controller status response")?;
             status.active = true;
+            status.stale_duplicate_pids = discover_stale_duplicate_pids(project_root, status.pid);
             Ok(status)
         }
         Err(_) => {
@@ -1486,20 +1579,133 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
                 controller_binary: bootstrap
                     .as_ref()
                     .and_then(|state| state.controller_binary.clone()),
+                controller_generation: bootstrap.as_ref().map(|state| state.controller_generation),
+                handoff_state: bootstrap.as_ref().map(|state| state.handoff_state),
+                handoff_started_at: bootstrap
+                    .as_ref()
+                    .and_then(|state| state.handoff_started_at),
+                previous_controller_pid: bootstrap
+                    .as_ref()
+                    .and_then(|state| state.previous_controller_pid),
+                stale_duplicate_pids: discover_stale_duplicate_pids(project_root, None),
             })
         }
     }
 }
 
-fn active_controller_matches_current_binary(project_root: &Path) -> Result<bool> {
-    let response = request(project_root, "status")?;
-    let status: ControllerStatus =
-        serde_json::from_str(&response).context("failed to parse project controller status")?;
-    controller_status_matches_current_binary(&status)
-}
-
 fn controller_status_matches_current_binary(status: &ControllerStatus) -> Result<bool> {
     Ok(status.controller_binary.as_ref() == Some(&current_binary_identity()?))
+}
+
+fn discover_stale_duplicate_pids(project_root: &Path, authoritative_pid: Option<u32>) -> Vec<u32> {
+    let mut pids = BTreeSet::new();
+    if let Ok(Some(state)) = read_bootstrap(project_root) {
+        if Some(state.pid) != authoritative_pid {
+            pids.insert(state.pid);
+        }
+        if let Some(pid) = state.previous_controller_pid
+            && Some(pid) != authoritative_pid
+        {
+            pids.insert(pid);
+        }
+    }
+
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            let Ok(pid) = name.parse::<u32>() else {
+                continue;
+            };
+            if Some(pid) == authoritative_pid || pid == std::process::id() {
+                continue;
+            }
+            if is_same_project_controller_pid(project_root, pid) {
+                pids.insert(pid);
+            }
+        }
+    }
+
+    pids.retain(|pid| {
+        Some(*pid) != authoritative_pid && *pid != std::process::id() && process_is_alive(*pid)
+    });
+    pids.into_iter().collect()
+}
+
+fn is_same_project_controller_pid(project_root: &Path, pid: u32) -> bool {
+    let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+        return false;
+    };
+    let args: Vec<String> = cmdline
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .map(|arg| String::from_utf8_lossy(arg).to_string())
+        .collect();
+    args_match_same_project_controller(&args, project_root)
+}
+
+fn args_match_same_project_controller(args: &[String], project_root: &Path) -> bool {
+    if !args.iter().any(|arg| arg.ends_with("agent-doc")) {
+        return false;
+    }
+    if !args
+        .windows(2)
+        .any(|window| window[0] == "controller" && window[1] == "serve")
+    {
+        return false;
+    }
+    let Some(raw_root) = args
+        .windows(2)
+        .find_map(|window| (window[0] == "--project-root").then(|| PathBuf::from(&window[1])))
+    else {
+        return false;
+    };
+    canonical_path_for_compare(&raw_root) == canonical_path_for_compare(project_root)
+}
+
+fn canonical_path_for_compare(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn process_is_alive(pid: u32) -> bool {
+    Path::new("/proc").join(pid.to_string()).exists()
+}
+
+fn reap_verified_controller_pid(project_root: &Path, pid: u32, generation: u64) {
+    if pid == std::process::id() || !is_same_project_controller_pid(project_root, pid) {
+        return;
+    }
+    let _ = Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(750) {
+        if !process_is_alive(pid) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    if is_same_project_controller_pid(project_root, pid) {
+        let _ = Command::new("kill")
+            .arg("-KILL")
+            .arg(pid.to_string())
+            .status();
+        eprintln!(
+            "[controller] reaped stale same-project controller pid={pid} generation={generation}"
+        );
+    }
+}
+
+fn reap_stale_duplicate_controllers(
+    project_root: &Path,
+    authoritative_pid: Option<u32>,
+    generation: u64,
+) {
+    for pid in discover_stale_duplicate_pids(project_root, authoritative_pid) {
+        reap_verified_controller_pid(project_root, pid, generation);
+    }
 }
 
 fn shutdown_stale_controller(project_root: &Path) {
@@ -1513,19 +1719,91 @@ fn shutdown_stale_controller(project_root: &Path) {
     }
 }
 
+fn handoff_stale_controller(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+    old_status: ControllerStatus,
+) -> Result<interprocess::local_socket::Stream> {
+    let public_sock = socket_path(project_root);
+    let old_pid = old_status.pid;
+    let old_generation = old_status.controller_generation.unwrap_or(1);
+    let new_generation = old_generation.saturating_add(1).max(1);
+    let temp_sock = project_root.join(".agent-doc").join(format!(
+        "controller-handoff-{}-{}.sock",
+        std::process::id(),
+        new_generation
+    ));
+    let _ = std::fs::remove_file(&temp_sock);
+    let _ = request(project_root, "prepare_handoff");
+
+    launch_detached_at(
+        project_root,
+        launch_mode,
+        Some(&temp_sock),
+        Some(new_generation),
+        old_pid,
+        ControllerHandoffState::Preparing,
+    )?;
+    let _temp_stream = wait_for_controller_path(&temp_sock)?;
+    let replacement_status: ControllerStatus = serde_json::from_str(
+        &request_path(&temp_sock, "status").context("failed to read replacement status")?,
+    )
+    .context("failed to parse replacement controller status")?;
+    let promoted_response = request_path(&temp_sock, "promote_handoff")?;
+    if !promoted_response.contains("\"ok\":true") {
+        anyhow::bail!("replacement controller refused promotion: {promoted_response}");
+    }
+
+    if public_sock.exists() {
+        let _ = std::fs::remove_file(&public_sock);
+    }
+    std::fs::rename(&temp_sock, &public_sock).with_context(|| {
+        format!(
+            "failed to promote controller socket {} to {}",
+            temp_sock.display(),
+            public_sock.display()
+        )
+    })?;
+
+    reap_stale_duplicate_controllers(project_root, replacement_status.pid, new_generation);
+
+    wait_for_controller(project_root)
+}
+
 pub fn connect_or_launch(
     project_root: &Path,
     launch_mode: LaunchMode,
 ) -> Result<interprocess::local_socket::Stream> {
-    if active_controller_matches_current_binary(project_root).unwrap_or(false) {
+    if let Ok(active_status) = status(project_root)
+        && active_status.active
+        && controller_status_matches_current_binary(&active_status).unwrap_or(false)
+    {
+        reap_stale_duplicate_controllers(
+            project_root,
+            active_status.pid,
+            active_status.controller_generation.unwrap_or(1),
+        );
         return connect(project_root);
     }
 
     let _lock = LaunchLock::acquire(project_root)?;
-    if active_controller_matches_current_binary(project_root).unwrap_or(false) {
+    if let Ok(active_status) = status(project_root)
+        && active_status.active
+        && controller_status_matches_current_binary(&active_status).unwrap_or(false)
+    {
+        reap_stale_duplicate_controllers(
+            project_root,
+            active_status.pid,
+            active_status.controller_generation.unwrap_or(1),
+        );
         return connect(project_root);
     }
     if connect(project_root).is_ok() {
+        if let Ok(old_status) = status(project_root)
+            && old_status.active
+        {
+            return handoff_stale_controller(project_root, launch_mode, old_status);
+        }
         shutdown_stale_controller(project_root);
     }
 
@@ -1540,14 +1818,56 @@ pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -
 }
 
 fn launch_detached(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
+    launch_detached_at(
+        project_root,
+        launch_mode,
+        None,
+        None,
+        None,
+        ControllerHandoffState::Stable,
+    )
+}
+
+fn launch_detached_at(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+    listen_socket: Option<&Path>,
+    controller_generation: Option<u64>,
+    previous_controller_pid: Option<u32>,
+    handoff_state: ControllerHandoffState,
+) -> Result<()> {
     let exe = current_agent_doc_binary()?;
-    Command::new(exe)
+    let mut command = Command::new(exe);
+    command
         .arg("controller")
         .arg("serve")
         .arg("--project-root")
         .arg(project_root)
         .arg("--launch-mode")
-        .arg(launch_mode.as_str())
+        .arg(launch_mode.as_str());
+    if let Some(path) = listen_socket {
+        command.arg("--listen-socket").arg(path);
+    }
+    if let Some(generation) = controller_generation {
+        command
+            .arg("--controller-generation")
+            .arg(generation.to_string());
+    }
+    if let Some(pid) = previous_controller_pid {
+        command
+            .arg("--previous-controller-pid")
+            .arg(pid.to_string());
+    }
+    if handoff_state != ControllerHandoffState::Stable {
+        command.arg("--handoff-state").arg(match handoff_state {
+            ControllerHandoffState::Stable => "stable",
+            ControllerHandoffState::Preparing => "preparing",
+            ControllerHandoffState::Promoted => "promoted",
+            ControllerHandoffState::Retiring => "retiring",
+            ControllerHandoffState::Failed => "failed",
+        });
+    }
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -1557,30 +1877,64 @@ fn launch_detached(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
 }
 
 fn wait_for_controller(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
+    wait_for_controller_path(&socket_path(project_root))
+}
+
+fn wait_for_controller_path(path: &Path) -> Result<interprocess::local_socket::Stream> {
     let start = Instant::now();
     loop {
-        if let Ok(stream) = connect(project_root) {
+        if let Ok(stream) = connect_path(path) {
             return Ok(stream);
         }
         if start.elapsed() >= CONNECT_WAIT {
             anyhow::bail!(
                 "timed out waiting for project controller at {}",
-                socket_path(project_root).display()
+                path.display()
             );
         }
         std::thread::sleep(CONNECT_POLL);
     }
 }
 
+#[allow(dead_code)]
 pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
-    let sock = socket_path(project_root);
+    serve_with_options(
+        project_root,
+        launch_mode,
+        None,
+        None,
+        None,
+        ControllerHandoffState::Stable,
+    )
+}
+
+fn serve_with_options(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+    listen_socket: Option<PathBuf>,
+    controller_generation: Option<u64>,
+    previous_controller_pid: Option<u32>,
+    handoff_state: ControllerHandoffState,
+) -> Result<()> {
+    let sock = listen_socket.unwrap_or_else(|| socket_path(project_root));
     if sock.exists() {
         let _ = std::fs::remove_file(&sock);
     }
     if let Some(parent) = sock.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let bootstrap = write_bootstrap(project_root, launch_mode)?;
+    let bootstrap = if let Some(generation) = controller_generation {
+        write_bootstrap_with_options(
+            project_root,
+            sock.clone(),
+            launch_mode,
+            generation,
+            handoff_state,
+            previous_controller_pid,
+        )?
+    } else {
+        write_bootstrap(project_root, launch_mode)?
+    };
     let name = sock.clone().to_fs_name::<GenericFilePath>()?;
     let listener = ListenerOptions::new()
         .name(name)
@@ -1590,11 +1944,12 @@ pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
         .set_nonblocking(ListenerNonblockingMode::Accept)
         .context("failed to set project controller listener nonblocking")?;
 
+    let bootstrap = Arc::new(Mutex::new(bootstrap));
     let should_stop = Arc::new(AtomicBool::new(false));
     while !should_stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok(stream) => {
-                let bootstrap = bootstrap.clone();
+                let bootstrap = Arc::clone(&bootstrap);
                 let should_stop = Arc::clone(&should_stop);
                 let sock = sock.clone();
                 std::thread::spawn(move || {
@@ -1615,7 +1970,7 @@ pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
 
 fn serve_client(
     stream: interprocess::local_socket::Stream,
-    bootstrap: &ControllerBootstrap,
+    bootstrap: &Arc<Mutex<ControllerBootstrap>>,
     should_stop: &AtomicBool,
     sock: &Path,
 ) -> Result<()> {
@@ -1630,7 +1985,7 @@ fn serve_client(
             Ok(0) => return Ok(()),
             Ok(_) => {
                 let mut request_should_stop = false;
-                let response = handle_request(&line, bootstrap, &mut request_should_stop)?;
+                let response = handle_request_locked(&line, bootstrap, &mut request_should_stop)?;
                 writer_half.write_all(response.as_bytes())?;
                 writer_half.write_all(b"\n")?;
                 writer_half.flush()?;
@@ -1638,6 +1993,11 @@ fn serve_client(
                 if request_should_stop {
                     should_stop.store(true, Ordering::SeqCst);
                     let _ = std::fs::remove_file(sock);
+                    if let Ok(bootstrap) = bootstrap.lock()
+                        && bootstrap.socket_path != sock
+                    {
+                        let _ = std::fs::remove_file(&bootstrap.socket_path);
+                    }
                     return Ok(());
                 }
             }
@@ -1657,36 +2017,93 @@ fn is_timeout_error(err: &std::io::Error) -> bool {
     matches!(err.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock)
 }
 
+#[cfg(test)]
 fn handle_request(
     line: &str,
     bootstrap: &ControllerBootstrap,
     should_stop: &mut bool,
 ) -> Result<String> {
+    handle_request_locked(line, &Arc::new(Mutex::new(bootstrap.clone())), should_stop)
+}
+
+fn handle_request_locked(
+    line: &str,
+    bootstrap: &Arc<Mutex<ControllerBootstrap>>,
+    should_stop: &mut bool,
+) -> Result<String> {
     let request: ControllerRequest = serde_json::from_str(line.trim())?;
+    let bootstrap_snapshot = bootstrap
+        .lock()
+        .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?
+        .clone();
     match request.command.as_str() {
         "status" => Ok(serde_json::to_string(&ControllerStatus {
             active: true,
-            project_root: bootstrap.project_root.clone(),
-            socket_path: bootstrap.socket_path.clone(),
-            launch_mode: Some(bootstrap.launch_mode),
-            bootstrap_epoch: Some(bootstrap.bootstrap_epoch),
-            pid: Some(bootstrap.pid),
-            controller_binary: bootstrap.controller_binary.clone(),
+            project_root: bootstrap_snapshot.project_root.clone(),
+            socket_path: bootstrap_snapshot.socket_path.clone(),
+            launch_mode: Some(bootstrap_snapshot.launch_mode),
+            bootstrap_epoch: Some(bootstrap_snapshot.bootstrap_epoch),
+            pid: Some(bootstrap_snapshot.pid),
+            controller_binary: bootstrap_snapshot.controller_binary.clone(),
+            controller_generation: Some(bootstrap_snapshot.controller_generation),
+            handoff_state: Some(bootstrap_snapshot.handoff_state),
+            handoff_started_at: bootstrap_snapshot.handoff_started_at,
+            previous_controller_pid: bootstrap_snapshot.previous_controller_pid,
+            stale_duplicate_pids: discover_stale_duplicate_pids(
+                &bootstrap_snapshot.project_root,
+                Some(bootstrap_snapshot.pid),
+            ),
         })?),
+        "prepare_handoff" => {
+            let mut state = bootstrap
+                .lock()
+                .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+            state.handoff_state = ControllerHandoffState::Preparing;
+            state.handoff_started_at = Some(timestamp_secs());
+            write_bootstrap_state(&state)?;
+            Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
+        }
+        "promote_handoff" => {
+            let mut state = bootstrap
+                .lock()
+                .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+            state.socket_path = socket_path(&state.project_root);
+            state.handoff_state = ControllerHandoffState::Stable;
+            state.handoff_started_at = None;
+            write_bootstrap_state(&state)?;
+            Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
+        }
+        "retire_after_handoff" => {
+            {
+                let mut state = bootstrap
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+                state.handoff_state = ControllerHandoffState::Retiring;
+                write_bootstrap_state(&state)?;
+            }
+            *should_stop = true;
+            Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
+        }
         "shutdown" => {
             *should_stop = true;
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
-        "start_session" => controller_envelope(handle_start_session(bootstrap, request)),
+        "start_session" => controller_envelope(handle_start_session(&bootstrap_snapshot, request)),
         "register_supervisor" => {
-            controller_envelope(handle_register_supervisor(bootstrap, request))
+            controller_envelope(handle_register_supervisor(&bootstrap_snapshot, request))
         }
-        "mark_lifecycle" => controller_envelope(handle_mark_lifecycle(bootstrap, request)),
-        "actor_binding" => controller_envelope(handle_actor_binding(bootstrap, request)),
-        "dispatch" => controller_envelope(handle_dispatch(bootstrap, request)),
-        "session_status" => controller_envelope(handle_session_status(bootstrap, request)),
-        "attach_pane" => controller_envelope(handle_attach_pane(bootstrap, request)),
-        "operator_command" => controller_envelope(handle_operator_command(bootstrap, request)),
+        "mark_lifecycle" => {
+            controller_envelope(handle_mark_lifecycle(&bootstrap_snapshot, request))
+        }
+        "actor_binding" => controller_envelope(handle_actor_binding(&bootstrap_snapshot, request)),
+        "dispatch" => controller_envelope(handle_dispatch(&bootstrap_snapshot, request)),
+        "session_status" => {
+            controller_envelope(handle_session_status(&bootstrap_snapshot, request))
+        }
+        "attach_pane" => controller_envelope(handle_attach_pane(&bootstrap_snapshot, request)),
+        "operator_command" => {
+            controller_envelope(handle_operator_command(&bootstrap_snapshot, request))
+        }
         other => Ok(serde_json::to_string(&serde_json::json!({
             "ok": false,
             "error": format!("unknown controller command: {other}")
@@ -2131,9 +2548,23 @@ pub fn run_status(root: Option<&Path>, ensure: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn run_serve(root: Option<&Path>, launch_mode: &str) -> Result<()> {
+pub fn run_serve(
+    root: Option<&Path>,
+    launch_mode: &str,
+    listen_socket: Option<&Path>,
+    controller_generation: Option<u64>,
+    previous_controller_pid: Option<u32>,
+    handoff_state: &str,
+) -> Result<()> {
     let project_root = project_root_from_arg(root)?;
-    serve(&project_root, LaunchMode::parse(launch_mode)?)
+    serve_with_options(
+        &project_root,
+        LaunchMode::parse(launch_mode)?,
+        listen_socket.map(Path::to_path_buf),
+        controller_generation,
+        previous_controller_pid,
+        parse_handoff_state(handoff_state)?,
+    )
 }
 
 pub fn run_shutdown(root: Option<&Path>) -> Result<()> {
@@ -2294,10 +2725,98 @@ mod tests {
             read.controller_binary,
             Some(current_binary_identity().unwrap())
         );
+        assert_eq!(read.controller_generation, written.controller_generation);
+        assert_eq!(read.handoff_state, ControllerHandoffState::Stable);
         assert_eq!(
             read.socket_path,
             dir.path().join(".agent-doc/controller.sock")
         );
+    }
+
+    #[test]
+    fn handoff_bootstrap_persists_generation_previous_pid_and_temp_socket() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let temp_sock = dir.path().join(".agent-doc/controller-handoff-test.sock");
+        let written = write_bootstrap_with_options(
+            dir.path(),
+            temp_sock.clone(),
+            LaunchMode::Lazy,
+            7,
+            ControllerHandoffState::Preparing,
+            Some(1234),
+        )
+        .unwrap();
+        let read = read_bootstrap(dir.path()).unwrap().unwrap();
+
+        assert_eq!(written.controller_generation, 7);
+        assert_eq!(read.controller_generation, 7);
+        assert_eq!(read.socket_path, temp_sock);
+        assert_eq!(read.handoff_state, ControllerHandoffState::Preparing);
+        assert_eq!(read.previous_controller_pid, Some(1234));
+        assert!(read.handoff_started_at.is_some());
+    }
+
+    #[test]
+    fn prepare_and_promote_handoff_update_controller_state() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = write_bootstrap_with_options(
+            dir.path(),
+            dir.path().join(".agent-doc/controller-handoff-test.sock"),
+            LaunchMode::Lazy,
+            2,
+            ControllerHandoffState::Preparing,
+            Some(111),
+        )
+        .unwrap();
+        let mut should_stop = false;
+
+        let prepare = handle_request(
+            &(serde_json::json!({ "command": "prepare_handoff" }).to_string() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        assert!(prepare.contains("\"ok\":true"), "{prepare}");
+        let preparing = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(preparing.handoff_state, ControllerHandoffState::Preparing);
+
+        let promote = handle_request(
+            &(serde_json::json!({ "command": "promote_handoff" }).to_string() + "\n"),
+            &preparing,
+            &mut should_stop,
+        )
+        .unwrap();
+        assert!(promote.contains("\"ok\":true"), "{promote}");
+        let promoted = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(promoted.socket_path, socket_path(dir.path()));
+        assert_eq!(promoted.handoff_state, ControllerHandoffState::Stable);
+        assert_eq!(promoted.handoff_started_at, None);
+    }
+
+    #[test]
+    fn duplicate_scan_only_matches_same_project_controller_args() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let args = vec![
+            "/home/user/.cargo/bin/agent-doc".to_string(),
+            "controller".to_string(),
+            "serve".to_string(),
+            "--project-root".to_string(),
+            dir.path().display().to_string(),
+        ];
+        assert!(args_match_same_project_controller(&args, dir.path()));
+
+        let other_dir = tempfile::TempDir::new().unwrap();
+        assert!(!args_match_same_project_controller(&args, other_dir.path()));
+
+        let non_controller = vec![
+            "agent-doc".to_string(),
+            "preflight".to_string(),
+            dir.path().join("task.md").display().to_string(),
+        ];
+        assert!(!args_match_same_project_controller(
+            &non_controller,
+            dir.path()
+        ));
     }
 
     #[test]
@@ -2411,6 +2930,11 @@ mod tests {
             bootstrap_epoch: Some(1),
             pid: Some(2),
             controller_binary: None,
+            controller_generation: Some(1),
+            handoff_state: Some(ControllerHandoffState::Stable),
+            handoff_started_at: None,
+            previous_controller_pid: None,
+            stale_duplicate_pids: Vec::new(),
         };
         assert!(!controller_status_matches_current_binary(&missing).unwrap());
 
@@ -2477,6 +3001,10 @@ mod tests {
             bootstrap_epoch: 123,
             pid: 456,
             controller_binary: Some(current_binary_identity().unwrap()),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
         }
     }
 

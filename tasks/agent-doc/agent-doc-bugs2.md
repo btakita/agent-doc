@@ -33,9 +33,10 @@ Added Codex manifest warning cleanup to the backlog.
 
 Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
+- [ ] [#respmiss] Direct Codex closeout can complete spec/test/commit/push work but leave the exchange prompt without the assistant response in the task document. Add a fail-closed response-persistence invariant and recovery path. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
-- 7 more active item(s)
+- 8 more active item(s)
 <!-- agent:boundary:4a26339a -->
 <!-- /agent:exchange -->
 ###

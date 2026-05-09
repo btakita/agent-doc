@@ -29,112 +29,14 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-161931.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-180537.md`*
 
 Active backlog:
+- [ ] [#dodone] Skill does not auto-run --pending-done on do #id completion — when a user prompts 'do [#id]' and the task is completed, the skill's finalize step should include --pending-done <id> automatically. Currently the skill completes the work and finalizes the response but forgets to mark the pending item as done, requiring manual correction.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
-- [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
-- 7 more active item(s)
-❯ When I switch the editor to a different file on the left or right editor pane, a 1 tmux pane view on the agent-doc tmux window shows...then after a few seconds the correct 2 tmux pane view shows. The 2 tmux pane view should be shown with only the tmux pane on the same side of the editor document switch.
-❯ spec-test-build-install-commit-push
-### Re: focus-only editor sync split layout — gpt-5
-
-Fixed the transient one-pane tmux collapse on editor tab switches.
-
-The safe-passive sync path now treats a focus-only editor update as a same-side tab switch when the last recorded layout had multiple columns. It captures the active tmux column before any actor focus handoff, expands the one-file projection back through the remembered sibling layout, and replaces only that active side before tmux-router reconciliation runs.
-
-Updated specs in `src/agent-doc/SPEC.md` and `src/agent-doc/editors/SPEC.md`, and added regressions in `src/agent-doc/src/sync.rs` for both the pure column expansion and a real tmux-backed two-pane handoff.
-
-Verification completed:
-- `cargo test safe_passive_focus_only`
-- `make check`
-- `make build-release install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits pushed:
-- `src/agent-doc`: `69bc440 fix: preserve split layout on focus-only sync`
-- outer `agent-loop`: `0c3e837ca chore: update agent-doc submodule`
-❯ The same 1 tmux pane transition is still occurring. Does the agent-doc controller need to restart?
-### Re: controller restart for one-pane transition — gpt-5
-
-The active controller did not look stale: before restart it reported `/home/brian/.cargo/bin/agent-doc`, version `0.33.16`, and a binary timestamp from the local install.
-
-I restarted it anyway through the binary-owned path:
-
-- `agent-doc controller shutdown` returned `{"ok":true}`
-- `agent-doc controller status --ensure` relaunched PID `1992202`
-- the relaunched controller still reports `agent-doc 0.33.16`
-
-One suspicious thing did show up: there was also an older same-project controller process still alive from 01:33 (`PID 4085114`) even after the active controller shutdown. The active socket/status now points at the new controller, so that old process is probably not the reason the current sync path is still collapsing, but it is a real cleanup/singleton bug signal. I added a recommended backlog item for that.
-
-Given the active controller already matched the installed binary, a restart alone was unlikely to be the full fix. If the one-pane transition still happens after this restart, the remaining likely cause is that the editor is still sending a full one-column `sync --no-autostart` event, or the plugin/native library path is not using the newly installed library, rather than the controller holding old sync logic.
-❯ The agent-doc binary logic should ensure there is only a single controller processes to manage requests is present. The old process must either gracefully shutdown or be externally killed by the new controller process. The transition from old to new controller process must have 0 downtime...meaning in a live environment, the session actors and supervisors should continue to work seamlessly.
-❯ Please plan #next-steps.
-### Re: controller singleton next steps — gpt-5
-
-Planned this as a focused controller-handoff fix rather than folding it into the broader session-actor MVP.
-
-Created and committed `tasks/agent-doc/plan-controller-singleton-zero-downtime-handoff.md`. The plan tightens the invariant from "restart stale controller" to "one promoted authoritative controller generation per project root," with a zero-downtime handoff path:
-
-- persist controller generation and handoff state separately from the socket path
-- prepare the old controller, launch the replacement on a temporary socket, import durable actor/supervisor state, then promote
-- keep the old controller authoritative if replacement fails before promotion
-- retire the old PID after promotion, and force-reap only verified same-project duplicate controllers after a grace period
-- make supervisors reconnect by controller generation while preserving leases and actor records through SQLite
-
-I updated existing backlog item `#g4w2` to point at that plan instead of adding a duplicate item. `#g4w2` stays open because this cycle only planned the work; it did not implement the controller handoff.
-
-No code tests were run because this cycle only created a plan document and updated the session backlog.
-❯ do [#g4w2]. spec-test-build-install-commit-push
-### Re: controller singleton handoff — gpt-5
-
-Implemented `#g4w2`.
-
-The project controller now records controller generation and handoff metadata in `controller-state.json`, promotes stale-binary replacements through a private socket before switching `.agent-doc/controller.sock`, and reaps only verified same-project duplicate controller PIDs. `controller status --ensure` also cleans up stale duplicate controllers even when the active controller binary is already current.
-
-The active local controller was validated after install: generation `4`, `handoff_state: stable`, and `stale_duplicate_pids: []`.
-
-Verification completed:
-
-- `cargo test project_controller`
-- `make check`
-- `make build-release install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- `agent-doc controller status --ensure --project-root /home/brian/work/btakita/agent-loop`
-
-Commits pushed:
-
-- `src/agent-doc`: `978f0b5 fix: hand off stale project controllers`
-- outer `agent-loop`: `b8d069a17 chore: update agent-doc submodule`
-❯ Please look at agent-doc-bugs5.md `### Re: repeated version-mismatch notice — gpt-5` section.
-❯ Add #next-steps to the backlog.
-### Re: next steps backlog — gpt-5
-
-I read the referenced `agent-doc-bugs5.md` section. The actionable follow-up is the stale-instructions drift: root `AGENTS.md` can keep telling Codex to reload from an older agent-doc version even when the installed Codex instructions are current.
-
-Added backlog item `#instrdrift` for that fix: make `.codex/AGENTS.md` canonical or thin/update root `AGENTS.md`, and add an audit/CI guard against future `agent-doc-version` drift.
-❯ do [#instrdrift]. spec-test-build-install-commit-push
-### Re: instruction drift audit — gpt-5
-
-Implemented `#instrdrift`.
-
-Summary:
-- `agent-doc audit-docs` now checks generated managed instruction surfaces (`AGENTS.md`, `.codex/AGENTS.md`, `.claude/skills/agent-doc/SKILL.md`) against the running binary render and fails on drift.
-- The check preserves custom root `AGENTS.md` files and, when running inside a submodule, audits the superproject install root instead of ignored submodule-local install artifacts.
-- Specs/docs now describe managed root mirror refresh and generated-surface drift audit behavior.
-- Added regressions for stale root/Codex generated surfaces and custom-root preservation.
-
-Verification completed:
-- `make check`
-- `cargo run --quiet -- audit-docs`
-- `make build-release install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits pushed:
-- `src/agent-doc`: `aa62651` `fix: audit generated instruction drift`
-- outer `agent-loop`: `6007bcc` `chore: update agent-doc submodule`
-<!-- agent:boundary:e95da9b3 -->
+- 8 more active item(s)
+<!-- agent:boundary:d1da8b2c -->
 <!-- /agent:exchange -->
 ###
 

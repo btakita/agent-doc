@@ -127,8 +127,8 @@ Acceptance criteria:
 Implementation note:
 
 - Added `sync_sim_tmuxbudget_seed_3001...`, `sync_sim_tmuxbudget_seed_3002...`,
-  and `sync_sim_tmuxbudget_seed_3003...` as deterministic protected-layout
-  traces.
+  `sync_sim_tmuxbudget_seed_3003...`, and `sync_sim_tmuxbudget_seed_3004...`
+  as deterministic protected-layout traces.
 - Kept safe-passive real tmux smokes for pane/window movement and focus, and
   ignored the duplicate manual protected-layout tmux variants behind those
   traces.

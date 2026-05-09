@@ -29,93 +29,14 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-190935.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-195546.md`*
 
 Active backlog:
-- [ ] [#stashprunefast] [recommended] Make safe-passive editor sync skip or amortize expensive registered-live stash pane pruning; current logs spend 2.7-4.7s in prune_stash_panes on routine selection changes.
 - [ ] [#panehang] Post-completion pane not reaped + startup routing miss — agent-doc start spawns Claude Code panes that either (1) complete their cycle but stay alive at idle prompt, or (2) never receive the /agent-doc routing command and sit idle indefinitely. Plan: tasks/agent-doc/plan-hung-pane-reap-and-routing.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
-- 9 more active item(s)
-❯ do [#stashprunefast]. spec-test-build-install-commit-push
-### Re: stashprunefast — gpt-5
-
-Implemented `#stashprunefast`.
-
-Safe-passive sync now uses a separate stash cleanup mode for changed editor selections: it still prunes stale registry entries, idle stash shells, and retained-dead non-stash panes, but it defers live unregistered agent-pane ownership proof to full sync/repair paths. That avoids routine selection changes spending seconds in `prune_stash_panes` proving that live stashed agent panes should be preserved.
-
-Changed in `src/agent-doc`:
-- `src/resync.rs`: added `PreserveLiveAgentStashPanes` cleanup mode and a regression that safe-passive stash cleanup preserves a live `agent-doc`-named stashed pane without owner proof.
-- `src/sync.rs`: safe-passive first-pass cleanup now uses that bounded mode; unchanged layouts still skip expensive stash cleanup via the existing throttle.
-- `specs/07-session-tmux-commands.md` and `VERSIONS.md`: documented the new safe-passive boundary.
-
-Verification:
-- `cargo test safe_passive_stash_cleanup_defers_live_agent_owner_proof`
-- `cargo test safe_passive_prune_cleanup`
-- `make check`
-- `cargo install --path . --force`
-- `agent-doc --version` => `agent-doc 0.33.16`
-
-Commits pushed:
-- `src/agent-doc`: `25614925756237cac6d78e1ae31871821aea1bd2` (`fix: defer passive stash agent proof`)
-- superproject `main`: `7a7f5c50a` (`chore: update agent-doc submodule`)
-❯ In the case of rapid changes between editor documents, please background syncing in incomplete intermediate sync and skip unstarted syncs. Only complete the sync of the agent document we last landed on.
-❯ spec-test-build-install-commit-push
-### Re: editor sync superseded retries — gpt-5
-
-Implemented the rapid editor-document switching behavior.
-
-Automatic editor sync now treats retryable results from superseded intermediate syncs as background noise. If an older sync is already running, it can finish, but when it returns a preserved-layout or sync-lock-contention retry after a newer selection exists, JetBrains and VS Code skip the delayed retry for that old snapshot and replay only the latest selected document.
-
-Changed in `src/agent-doc`:
-- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt`: deferred retries only schedule while the completed generation is still current.
-- `editors/vscode/src/extension.ts` and `editors/vscode/src/tabSync.ts`: same generation-aware deferred retry gate for VS Code tab sync.
-- JetBrains and VS Code tab-sync tests cover the superseded retry decision.
-- `editors/SPEC.md`, `editors/PLUGIN-SPEC.md`, and `editors/jetbrains/SPEC.md` document the last-wins retry contract.
-- `VERSIONS.md` records the change, and JetBrains plugin build version is bumped to `0.2.104`.
-
-Verification:
-- `./gradlew test --tests com.github.btakita.agentdoc.EditorTabSyncListenerTest`
-- `npm test -- --test-name-pattern "tab"`
-- `npm test`
-- `./gradlew test buildPlugin`
-- `make check` passed on rerun. The first full run hit two tmux-backed route timing failures (`fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs`, `full_auto_start_flow`); both passed individually, and the full rerun passed.
-- `make install`
-- `agent-doc --version` => `agent-doc 0.33.16`
-- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.104.zip` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
-
-Commits pushed:
-- `src/agent-doc`: `b2106441322d28e31466822d1698cd79891cccf5` (`fix: skip superseded editor sync retries`)
-- superproject `main`: `81e6d891f` (`chore: update agent-doc submodule`)
-❯ When changing editor documents, immediately apply the tmux pane if one exists. Run the reconciliation in parallel. The responsiveness of the tmux pane switching should be "snappy".
-❯ spec-test-build-install-commit-push
-### Re: snappy editor focus — gpt-5
-
-Implemented and pushed the snappy editor handoff.
-
-What changed:
-
-- JetBrains now starts a best-effort immediate `agent-doc focus <file>` as soon as a real markdown selection event lands, before debounce, sync-lock acquisition, or full reconciliation.
-- VS Code does the same immediate focus handoff from `onDidChangeActiveTextEditor`, generation-guarded so stale rapid-switch requests cannot show a late focus hint.
-- The existing guarded/debounced `agent-doc sync --no-autostart ...` reconciliation still runs afterward in both editors and remains the authoritative path for missing panes, stale panes, layout repair, stash rescue, and provisioning.
-- Missing/dead pane focus failures are intentionally ignored because the background sync owns reconciliation.
-- Updated shared editor specs, plugin specs, JetBrains specs, VS Code tab-sync tests, and bumped the JetBrains plugin build version to `0.2.105`.
-
-Verification completed:
-
-- `./gradlew test --tests com.github.btakita.agentdoc.EditorTabSyncListenerTest`
-- `npm test -- --test-name-pattern "tab"`
-- `npm test`
-- `./gradlew test buildPlugin`
-- `make check`
-- `make install`
-- `agent-doc plugin install --local jetbrains`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits pushed:
-
-- `agent-doc`: `3c78b2b` `fix: focus existing panes before editor sync`
-- `agent-loop`: `40463b99b` `chore: update agent-doc submodule`
-<!-- agent:boundary:15219634 -->
+- [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
+- 8 more active item(s)
+<!-- agent:boundary:a83dc735 -->
 <!-- /agent:exchange -->
 ###
 

@@ -56,7 +56,30 @@ Verification:
 Commits pushed:
 - `src/agent-doc`: `1d06f74` (`fix: fail closed on empty preflight prompt drift`)
 - parent `agent-loop`: `25726bbb0` (`agent-doc: fail closed on empty preflight prompt drift`)
-<!-- agent:boundary:7d6e2c4b -->
+❯ Please review agent-doc, Claude, Code session logs to evaluate pane sync issues. For example when I switch the editor to tsift.md, only 1 tmux pane is shown with 2 agent docs open in the editor.
+
+❯ spec-test-build-install-commit-push
+### Re: pane sync review — gpt-5
+
+I reviewed the active tmux state and the IntelliJ 2026.1 agent-doc logs for the `tsift.md` switch. The visible symptom was a real sync ordering bug: `sessions.json` still knew about both `tasks/software/tsift.md` and `tasks/agent-doc/agent-doc-bugs2.md`, but tmux had them split across different window indexes while `.agent-doc/last_layout.json` was stale. The editor then invoked `agent-doc sync --no-autostart --focus ...`, which selected the hidden controller actor pane before it acquired `.agent-doc/sync.lock`; when lock contention hit, sync returned the retry marker without reconciling the rest of the layout. That left tmux partially focused/revealed in the wrong shape, matching the one-pane / two-open-docs behavior you described.
+
+I fixed that by moving safe-passive controller actor focus until after the bounded sync lock is acquired. On contention, safe-passive sync now emits the existing retry marker and returns without auto-start, tmux-router reconciliation, or hidden-pane focus changes, so the editor retry owns the latest selection cleanly. I updated the matching README/SPEC/session-tmux contract text and added the regression coverage in `src/sync.rs`.
+
+Verification passed:
+
+- `cargo test safe_passive_sync_does_not_focus_controller_actor_when_sync_lock_is_contended`
+- `make check` in `src/agent-doc`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
+
+Install completed for the local CLI and the IntelliJIdea2026.1 plugin profile. IntelliJ needs a restart to load the reinstalled local plugin.
+
+Commits created locally:
+
+- `aaa3bb8` in `src/agent-doc`: `fix: avoid hidden pane focus on sync contention`
+- `1e7e6d338` in the parent repo: `agent-doc: avoid hidden pane focus on sync contention`
+
+No new follow-up backlog item is needed for this cycle; the fix, tests, docs, build, install, and commits are complete. Per the agent-doc closeout rule, the remote push happens immediately after this session-document finalize/session-check boundary so the session response commit is included correctly.
+<!-- agent:boundary:42d6ae73 -->
 <!-- /agent:exchange -->
 ###
 
@@ -83,7 +106,16 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-
+- [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
+- [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
+- [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
+- [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
+- [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
+- [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
+- [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death doesn't lose work entirely.
+- [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
+- [ ] [#pfxleak2] content_ours prefix leak + commit churn — plan: tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
+- [ ] [#bppfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

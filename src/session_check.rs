@@ -1341,9 +1341,10 @@ pub(crate) fn first_unstarted_prompt_bearing_change(
     };
 
     let prompt_bearing_body = |content: &str| {
-        crate::frontmatter::parse(content)
+        let body = crate::frontmatter::parse(content)
             .map(|(_, body)| body.to_string())
-            .unwrap_or_else(|_| content.to_string())
+            .unwrap_or_else(|_| content.to_string());
+        crate::diff::strip_comments(&body)
     };
     let norm = |s: &str| crate::git::normalize_committed_exchange_artifacts(s);
     let snap_norm = norm(&prompt_bearing_body(&snapshot));
@@ -1673,6 +1674,42 @@ Body\n\
         assert_eq!(
             change.text,
             "When I run `Run Agent Doc` on this document...nothing happens. Please diagnose the root cause failure and fix the root cause. spec-test-build-install-commit-push"
+        );
+    }
+
+    #[test]
+    fn first_unstarted_prompt_bearing_change_ignores_html_comment_prompt_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "do #hidden. spec-test-build-install-commit-push\n",
+            "Can this stay hidden?\n",
+            "-->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+
+        let change = first_unstarted_prompt_bearing_change(&doc).unwrap();
+        assert!(
+            change.is_none(),
+            "prompt-like text inside ordinary HTML comments must not reopen the cycle"
         );
     }
 

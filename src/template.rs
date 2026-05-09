@@ -367,9 +367,11 @@ fn conversation_tail_start_in_range(
     search_end: usize,
 ) -> Option<usize> {
     let code_ranges = component::find_code_ranges(doc);
-    let in_code = |pos: usize| {
+    let comment_ranges = component::find_non_agent_html_comment_ranges(doc);
+    let in_ignored_range = |pos: usize| {
         code_ranges
             .iter()
+            .chain(comment_ranges.iter())
             .any(|&(start, end)| pos >= start && pos < end)
     };
 
@@ -379,7 +381,7 @@ fn conversation_tail_start_in_range(
     for line in doc.split_inclusive('\n') {
         let line_start = offset;
         offset += line.len();
-        if line_start < search_start || in_code(line_start) {
+        if line_start < search_start || in_ignored_range(line_start) {
             continue;
         }
         if line_start >= search_end {
@@ -413,9 +415,11 @@ fn prompt_tail_range_in_region(
     search_end: usize,
 ) -> Option<(usize, usize)> {
     let code_ranges = component::find_code_ranges(doc);
-    let in_code = |pos: usize| {
+    let comment_ranges = component::find_non_agent_html_comment_ranges(doc);
+    let in_ignored_range = |pos: usize| {
         code_ranges
             .iter()
+            .chain(comment_ranges.iter())
             .any(|&(start, end)| pos >= start && pos < end)
     };
 
@@ -426,7 +430,7 @@ fn prompt_tail_range_in_region(
     for line in doc.split_inclusive('\n') {
         let line_start = offset;
         offset += line.len();
-        if line_start < search_start || in_code(line_start) {
+        if line_start < search_start || in_ignored_range(line_start) {
             continue;
         }
         if line_start >= search_end {
@@ -3804,6 +3808,30 @@ Existing answer.
     }
 
     #[test]
+    fn repair_conversation_tail_outside_exchange_ignores_html_comment_body() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "do #hidden. spec-test-build-install-commit-push\n",
+            "Can this stay hidden?\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = repair_conversation_tail_outside_exchange(doc).unwrap();
+        assert!(
+            repaired.is_none(),
+            "prompt-like text inside ordinary HTML comments must not be moved into exchange"
+        );
+    }
+
+    #[test]
     fn repair_conversation_tail_outside_exchange_moves_gap_before_backlog_inside_exchange() {
         let doc = concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -4195,6 +4223,22 @@ Existing answer.
             "<!-- agent:boundary:abc123 -->\n",
             "<!-- /agent:exchange -->\n\n",
             "[//]: # (leave this note outside exchange)\n"
+        );
+        guard_no_conversation_tail_outside_exchange(doc).unwrap();
+    }
+
+    #[test]
+    fn guard_no_conversation_tail_outside_exchange_passes_for_html_comment_body() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!--\n",
+            "do #hidden. spec-test-build-install-commit-push\n",
+            "Can this stay hidden?\n",
+            "-->\n"
         );
         guard_no_conversation_tail_outside_exchange(doc).unwrap();
     }

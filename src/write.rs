@@ -293,7 +293,11 @@ fn snapshot_persist_mode(
         return SnapshotPersistMode::FinalContent;
     }
 
-    let Some(diff_text) = crate::diff::unified_diff_from_contents(&ours_norm, &final_norm) else {
+    let ours_prompt_norm = crate::diff::strip_comments(&ours_norm);
+    let final_prompt_norm = crate::diff::strip_comments(&final_norm);
+    let Some(diff_text) =
+        crate::diff::unified_diff_from_contents(&ours_prompt_norm, &final_prompt_norm)
+    else {
         return SnapshotPersistMode::FinalContent;
     };
     let has_prompt_bearing_user_drift = crate::diff::classify_prompt_bearing_changes(&diff_text)
@@ -365,7 +369,11 @@ fn outside_component_content_changed(left: &str, right: &str, component_name: &s
 fn has_prompt_bearing_user_drift(base: &str, current: &str) -> bool {
     let base_norm = strip_boundary_for_dedup(base);
     let current_norm = strip_boundary_for_dedup(current);
-    let Some(diff_text) = crate::diff::unified_diff_from_contents(&base_norm, &current_norm) else {
+    let base_prompt_norm = crate::diff::strip_comments(&base_norm);
+    let current_prompt_norm = crate::diff::strip_comments(&current_norm);
+    let Some(diff_text) =
+        crate::diff::unified_diff_from_contents(&base_prompt_norm, &current_prompt_norm)
+    else {
         return false;
     };
     if diff_text.lines().any(|line| {

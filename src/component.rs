@@ -416,6 +416,42 @@ pub fn find_code_ranges(doc: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
+/// Find byte ranges for ordinary HTML comments, skipping code spans/blocks and
+/// preserving `agent:` markers for the component parser.
+pub fn find_non_agent_html_comment_ranges(doc: &str) -> Vec<(usize, usize)> {
+    let code_ranges = find_code_ranges(doc);
+    let in_code = |pos: usize| {
+        code_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end)
+    };
+
+    let bytes = doc.as_bytes();
+    let len = bytes.len();
+    let mut ranges = Vec::new();
+    let mut pos = 0usize;
+    while pos + 4 <= len {
+        if &bytes[pos..pos + 4] != b"<!--" {
+            pos += 1;
+            continue;
+        }
+        if in_code(pos) {
+            pos += 4;
+            continue;
+        }
+        let Some(end) = find_comment_end(bytes, pos + 4) else {
+            pos += 4;
+            continue;
+        };
+        let inner = &doc[pos + 4..end - 3];
+        if !is_agent_marker(inner) && !inner.trim().starts_with("agent:boundary:") {
+            ranges.push((pos, end));
+        }
+        pos = end;
+    }
+    ranges
+}
+
 /// Parse all components from a document.
 ///
 /// Uses a stack for nesting. Returns components sorted by `open_start`.
@@ -1248,6 +1284,34 @@ actual content
     fn strip_comments_removes_html_comment() {
         let result = strip_comments("before\n<!-- a comment -->\nafter\n");
         assert_eq!(result, "before\nafter\n");
+    }
+
+    #[test]
+    fn non_agent_html_comment_ranges_cover_multiline_body() {
+        let doc = concat!(
+            "before\n",
+            "<!--\n",
+            "do #hidden. spec-test-build-install-commit-push\n",
+            "-->\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let ranges = find_non_agent_html_comment_ranges(doc);
+        assert_eq!(ranges.len(), 1);
+        let hidden = doc.find("do #hidden").unwrap();
+        assert!(
+            ranges
+                .iter()
+                .any(|&(start, end)| hidden >= start && hidden < end),
+            "ordinary comment body should be inside a non-agent comment range"
+        );
+        assert!(
+            ranges
+                .iter()
+                .all(|&(start, end)| !doc[start..end].contains("agent:exchange")),
+            "agent component markers must not be treated as ordinary comments"
+        );
     }
 
     #[test]

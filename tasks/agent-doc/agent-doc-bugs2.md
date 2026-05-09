@@ -28,77 +28,11 @@ Planned editor autosync, sync latency, and tmux test-budget follow-ups.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-045327.md`*
-❯ Please review the recent Claude Score, Codex, and agent-doc logs. Identify any issues that have arisen.
-❯ When I switch editor documents, the tmux pane should always quickly change.
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-054841.md`*
 
-❯ Are there any deferred steps in /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md that would fix the issues?
-❯ #next-steps
-### Re: editor switching and recent logs — gpt-5.5
-
-I reviewed the recent Claude Score artifacts, Codex log, agent-doc ops/session logs, current session status, and `tasks/agent-doc/plan-project-controller-session-actor-mvp.md`.
-
-The strongest issue is still editor sync/focus latency, not dispatch to the active `agent-doc-bugs2.md` pane. Recent `ops.log` entries show repeated `sync_latency` overruns: earlier safe-passive syncs spent about 3s in `sync_lock_wait`, 1.3-2.1s in `prune_stash_panes`, and about 5.2-6.0s in `safe_passive_total` against a 1s budget. Later churn improved the lock wait to 100ms, but it is still logged as over budget and repeats during selection changes. Route dispatch itself looks healthy for this document: `%268`, generation 113, ready state, direct submit about 356ms, and `dispatch_start_proof` consumed in 1ms.
-
-There is also a stale sibling-session problem: `tasks/software/tsift.md` is still recorded as actor generation 69, pane `%273`, state `starting`, while the supervisor is healthy and the last transition was `2026-05-08T18:53:45Z`. That mismatch can make editor-document switching feel wrong because one document has an authoritative ready actor and another visible document is still treated as starting. This is the exact class of bug where tmux layout heuristics and actor lifecycle facts disagree.
-
-The Codex log is noisy with repeated plugin/skill manifest warnings, mostly invalid plugin default prompts and icon paths. I do not see those as the cause of the tmux switching delay. The Claude Score bootstrap artifacts do show calibration issues to keep tracking: the latest report passes `calibration_none <= 5%`, but reliability is poor in the 0.2-0.3 and 0.7-0.8 confidence bins, sentiment is under-scoring overall, and `claude-code/version-management` is the max divergence. The pytest `lastfailed` cache also still lists old scoring-api failures, so it is not clean evidence by itself.
-
-Yes, deferred work in `tasks/agent-doc/plan-project-controller-session-actor-mvp.md` would fix the switching issue. The most relevant pieces are Phase C, which makes supervisors report lifecycle facts like ready/busy/blocked instead of leaving a healthy session stuck in `starting`; Phase D, which moves start/route/sync onto controller authority and makes tmux-router only reconcile layout; and the performance guardrails that budget `sync_latency` phases and make over-budget editor paths visible. Phase E then adds better editor diagnostics when a pane is stale, blocked, or accepted-but-unproven.
-
-I added the top backlog item as `#editorswitch`. It should be first because it turns the deferred controller work into the user-visible invariant: switching editor documents should quickly focus the correct tmux pane even when another session is stale or sync/prune work is slow.
-❯ do [#editorswitch]. spec-test-build-install-commit-push
-### Re: filed #finalize-do-cascade from session-share/tasks/root.md — opus-4-6
-
-Cross-session bug filed: when `do #id` triggers finalize with `--pending-done`, up to 4 attempts are needed due to conflicting `pending_capture_guard` and `pending_done_guard`. Plan at `tasks/agent-doc/plan-finalize-pending-done-cascade.md`.
-### Re: #editorswitch — gpt-5
-
-Implemented `#editorswitch`.
-
-Safe-passive editor sync now performs a narrow pre-lock focus handoff: `agent-doc sync --no-autostart --focus <file>` resolves the focused markdown file through the controller actor binding and selects that live pane before waiting on `.agent-doc/sync.lock`, prune cleanup, ownership proof, or tmux-router reconciliation. If the sync lock is contended afterward, the normal retry marker still returns, but tmux focus has already moved to the selected document's actor pane.
-
-Updated `src/agent-doc/src/sync.rs`, `src/agent-doc/SPEC.md`, `src/agent-doc/specs/07-session-tmux-commands.md`, `src/agent-doc/README.md`, and `src/agent-doc/VERSIONS.md`. Added a tmux regression covering a stale `starting` sibling plus a held sync lock.
-
-Verification passed: focused `cargo test safe_passive_sync_focuses_controller_actor_before_contended_sync_lock`, `cargo fmt`, full `make check`, `make install`, and `agent-doc --version` (`0.33.16`).
-
-Committed and pushed agent-doc subrepo commit `d7c06b72` (`fix: focus editor sync before lock contention`) and parent repo submodule pointer commit `b0600bdb6` (`agent-doc: update editor sync focus fix`).
-❯ do [#finalize-do-cascade]. spec-test-build-install-commit-push
-### Re: #finalize-do-cascade — gpt-5
-Implemented `#finalize-do-cascade` so `finalize --pending-done <id>` now satisfies the `do #id` pending-capture requirement in the same closeout pass.
-
-Changes made:
-- `write` records `--pending-done` as a pending mutation before closeout guards run, so pending-capture accepts item resolution without a second repair/finalize cycle.
-- `pending done` is idempotent when the item was already resolved in cycle state or reaped into `agent:pending-done`, emitting a warning instead of failing with `id not found`.
-- Added write, pending-command, and finalize integration regressions, plus updated `SPEC.md`, closeout/pending specs, and `VERSIONS.md`.
-
-Verification:
-- `cargo fmt`
-- focused regressions for pending-capture, idempotent pending-done, and finalize already-reaped behavior
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits:
-- `98b3edc` in `src/agent-doc`: `fix: make pending-done satisfy do-id closeout` (pushed to `origin/20260422/codex-agent-backend`)
-- `be124f7fd` in the parent repo: `agent-doc: update pending-done closeout fix`
-❯ If I type in text into a html-style comment, agent-doc thinks the prompt is being extended. Please ensure the document is parsed so html-style comments are properly recognized.
-❯ spec-test-build-install-commit-push
-### Re: HTML comment prompt tails — gpt-5
-
-Fixed the HTML comment parsing bug in `src/agent-doc`. The escaped prompt/tail scanners now build ordinary non-agent `<!-- ... -->` comment ranges and ignore those bodies the same way they ignore code ranges, so prompt-like scratch notes typed outside `agent:exchange` are not pulled into the live exchange. I also made session-check and write-path prompt-drift decisions classify comment-stripped bodies.
-
-Verification:
-- `cargo fmt`
-- focused HTML-comment regressions for component ranges, template escaped-tail guard/repair, and session-check
-- `make check`
-- `cargo build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits:
-- `4f5d874` in `src/agent-doc`: `fix: ignore html comments in prompt tail scans` (pushed to `origin/20260422/codex-agent-backend`)
-- `07c592b39` in the parent repo: `agent-doc: ignore html comment prompt tails` (pushed to `origin/main`)
-<!-- agent:boundary:58b701c4 -->
+Active backlog:
+- [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
+<!-- agent:boundary:1657a7ec -->
 <!-- /agent:exchange -->
 ###
 

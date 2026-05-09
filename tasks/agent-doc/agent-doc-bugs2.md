@@ -28,36 +28,14 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-060655.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-061924.md`*
 
 Active backlog:
 - [ ] [#editorswitchctl] Fix the current editor-document switch split by completing/regressing the Phase D/E controller authority boundary: tasks/software/tsift.md remains actor_state=starting with a healthy supervisor, route refuses injection, and tmux window 4 still has four agent-doc panes. Plan: tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 - [ ] [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
 - [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
 - 1 more active item(s)
-❯ Can we reduce the tmux test count in favor of SimWorld tests?
-❯ spec-test-build-install-commit-push
-### Re: tmux test count vs SimWorld — gpt-5
-
-Yes. I reduced the default real-tmux coverage by moving another pure sync ownership/cardinality variant into SimWorld while keeping the live pane/window smoke path.
-
-Implemented:
-
-- Added `SyncProtectedGrowthFocusVisible` and the named regression `sync_sim_tmuxbudget_seed_3004_attaches_hidden_requested_pane_and_focuses_visible_sibling` in `src/agent-doc/src/sim_world.rs`.
-- Marked the duplicate real tmux test `safe_passive_protected_open_cycle_sync_still_selects_visible_focus_pane` ignored, with the ignore message pointing at the new SimWorld trace.
-- Updated `src/agent-doc/specs/12-deterministic-simulation.md` and `tasks/agent-doc/plan-editor-autosync-latency-test-budget.md` so the spec/plan describe the new 3004 trace.
-
-Verification/build/install:
-
-- `cargo test sync_sim_tmuxbudget_seed_3004_attaches_hidden_requested_pane_and_focuses_visible_sibling` passed.
-- `make check` passed, including clippy, full Rust tests, and the medium deterministic simulator corpus.
-- `make build install` passed and replaced `/home/brian/.cargo/bin/agent-doc`; `libagent_doc-0.33.16.so` was installed.
-
-Committed and pushed:
-
-- `src/agent-doc`: `059d6db test: shift sync focus coverage to SimWorld`, pushed to `origin/20260422/codex-agent-backend`.
-- parent repo: `e2473c14f test: move sync focus variant into SimWorld`, pushed to `origin/main`.
-<!-- agent:boundary:15374257 -->
+<!-- agent:boundary:0c192638 -->
 <!-- /agent:exchange -->
 ###
 

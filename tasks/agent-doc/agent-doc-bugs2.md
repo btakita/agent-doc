@@ -81,17 +81,40 @@ Verification:
 Commits:
 - `98b3edc` in `src/agent-doc`: `fix: make pending-done satisfy do-id closeout` (pushed to `origin/20260422/codex-agent-backend`)
 - `be124f7fd` in the parent repo: `agent-doc: update pending-done closeout fix`
-<!-- agent:boundary:1b0b9174 -->
+❯ If I type in text into a html-style comment, agent-doc thinks the prompt is being extended. Please ensure the document is parsed so html-style comments are properly recognized.
+❯ spec-test-build-install-commit-push
+### Re: HTML comment prompt tails — gpt-5
+
+Fixed the HTML comment parsing bug in `src/agent-doc`. The escaped prompt/tail scanners now build ordinary non-agent `<!-- ... -->` comment ranges and ignore those bodies the same way they ignore code ranges, so prompt-like scratch notes typed outside `agent:exchange` are not pulled into the live exchange. I also made session-check and write-path prompt-drift decisions classify comment-stripped bodies.
+
+Verification:
+- `cargo fmt`
+- focused HTML-comment regressions for component ranges, template escaped-tail guard/repair, and session-check
+- `make check`
+- `cargo build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits:
+- `4f5d874` in `src/agent-doc`: `fix: ignore html comments in prompt tail scans` (pushed to `origin/20260422/codex-agent-backend`)
+- `07c592b39` in the parent repo: `agent-doc: ignore html comment prompt tails` (pushed to `origin/main`)
+<!-- agent:boundary:58b701c4 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+Please review the recent Claude Score, Codex, and agent-doc logs. Identify any issues that have arisen.
+When I switch editor documents, there is sometimes 1 tmux pane with 2 editor docs and 3 tmux panes with 2 editor docs.
+
+Are there any deferred items in /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md that should be implemented?
+#next-steps
+---
+Can we reduce the tmux test count in favor of SimWorld tests?
+---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
 `❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?
 spec-test-build-install-commit-push
----
-If I type in text into a html-style comment, agent-doc thinks the prompt is being extended. Please ensure the document is parsed so html-style comments are properly recognized. 
 ---
 Comments after a run starts are deleted by agent-doc.
 ---
@@ -108,6 +131,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

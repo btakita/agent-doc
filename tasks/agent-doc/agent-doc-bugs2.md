@@ -29,53 +29,14 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-195546.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-202806.md`*
 
 Active backlog:
 - [ ] [#panehang] Post-completion pane not reaped + startup routing miss — agent-doc start spawns Claude Code panes that either (1) complete their cycle but stay alive at idle prompt, or (2) never receive the /agent-doc routing command and sit idle indefinitely. Plan: tasks/agent-doc/plan-hung-pane-reap-and-routing.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-❯ Selecting monsterrodholders.md regresses into the 3 tmux pane layout. #next-steps
-❯ Please review logs for #next-steps re: sync issues.
-❯ spec-test-build-install-commit-push
-### Re: safe-passive sync layout — gpt-5
-
-Reviewed the sync logs for the `monsterrodholders.md` selection. The regression was visible at `1778356552`: window `@128` had panes `%268`, `%269`, and `%272`; safe-passive sync then spent about 4 seconds in `prune_stash_panes` before tmux-router detached `%272` and restored the requested two-pane projection. That made the 3-pane layout visible during normal editor switching even though the router eventually corrected it.
-
-Implemented the fix in `src/agent-doc`: safe-passive editor sync now skips expensive stash-window/stash-pane cleanup before router reconciliation. It still prunes stale registry rows and retained dead non-stash panes, but it lets tmux-router detach extra visible panes immediately instead of waiting on orphaned stash scans. Updated the spec/README and safe-passive tests to lock this in.
-
-Verification completed:
-- `cargo test safe_passive -- --nocapture`
-- `make check` (clippy, full tests, medium simulator corpus, version sync)
-- `make install`
-
-Commits:
-- `src/agent-doc`: `5078cb9 fix: skip safe-passive stash scans before sync` (pushed to `origin/20260422/codex-agent-backend`)
-- parent repo: `66bf0916d chore: update agent-doc submodule` (created; push follows after this managed session closeout)
-❯ The 3 panes are still occurring. Please review the logs to understand why. Fix.
-❯ spec-test-build-install-commit-push
-### Re: three-pane sync regression — gpt-5
-
-Reviewed the live tmux state and sync logs. The remaining three-pane layout was not from slow stash pruning anymore. The current evidence was `/tmp/agent-doc-sync.log`: window `@128` requested only `%268` (`agent-doc-bugs2.md`) and `%269` (`boost-client/tasks/monsterrodholders.md`), but `%272` stayed visible because sync classified `src/session-share/tasks/root.md` as an open `preflight_started` closeout and told tmux-router to protect it from DETACH.
-
-That policy was too conservative. DETACH moves a pane into stash; it does not kill the agent process. Keeping open-cycle extras visible was preserving closeout safety by forcing visible pane growth.
-
-Fixed in `src/agent-doc`:
-- open-cycle panes are now logged as detachable during reconcile instead of protected from DETACH
-- unwanted open-cycle panes can be stashed while staying alive, so a two-document editor projection stays two visible panes
-- sync specs, README notes, and tmux smoke tests now describe and enforce that behavior
-
-Verification completed:
-- `cargo test open_cycle -- --nocapture`
-- `cargo test safe_passive_sync_replaces_detachable_visible_pane_and_stashes_open_cycle_extra -- --nocapture`
-- `make check` (clippy, full tests, integration tests, medium deterministic simulator corpus)
-- `make install`
-
-Commits:
-- `src/agent-doc`: `49113a7 fix: stash open-cycle panes during sync` (pushed to `origin/20260422/codex-agent-backend`)
-- parent repo: `20a65854f chore: update agent-doc submodule` (pushed to `origin/main`)
-<!-- agent:boundary:3e743adc -->
+<!-- agent:boundary:b4ee64e8 -->
 <!-- /agent:exchange -->
 ###
 

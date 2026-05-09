@@ -32,7 +32,9 @@ Added Codex manifest warning cleanup to the backlog.
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-213909.md`*
 
 Active backlog:
+❯ - [ ] [#codexcapstale] Managed Codex pane capability drift — ready actor/process args can show `-s danger-full-access` and expected `--add-dir` roots while the long-lived pane still lacks DNS/SSH/write access that a fresh runtime has. Plan: tasks/agent-doc/plan-codex-managed-session-capability-proof.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
+❯ - [ ] [#codexcapstale] Managed Codex pane capability drift — ready actor/process args can show `-s danger-full-access` and expected `--add-dir` roots while the long-lived pane still lacks DNS/SSH/write access that a fresh runtime has. Plan: tasks/agent-doc/plan-codex-managed-session-capability-proof.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
 - 7 more active item(s)
@@ -91,7 +93,72 @@ Verification completed:
 Pushed commits:
 - `src/agent-doc` `20260422/codex-agent-backend`: `cb30f7a4e` (`fix: preserve edits during sync closeout`)
 - root `main`: `3752d3165` (`chore: update agent-doc submodule`)
-<!-- agent:boundary:577d84c2 -->
+❯ Why do we still need `.agent-doc/last_layout.json`? Why not just have the controller hold the state in memory and persist state into the sqlitedb? Same with any other session state json file.
+
+❯ docs.md tmux pane is being closed and restarted after ending a turn and focusing on the file with the editor.
+
+❯ spec-test-build-install-commit-push
+### Re: layout state and docs.md pane focus — gpt-5
+
+Implemented, verified, installed, committed, and pushed.
+
+`last_layout.json` is still useful today, but not as authoritative session state. It is a cross-process editor layout projection cache: editor plugins, CLI sync invocations, tmux panes, and restarted agent processes do not share controller memory. Holding this only in memory would lose column memory across those boundaries. The controller/SQLite direction is right for durable authority; JSON files should either become projections from SQLite or short-lived caches. I added a recommended backlog item to audit the remaining `.agent-doc` JSON state files under that rule.
+
+The `docs.md` pane churn came from safe-passive focus-only sync using the currently active tmux pane to choose which column to replace. After a turn ends, tmux can still be active on the old pane while the editor focus is already on a visible sibling. Sync now first matches `--focus` against the remembered or currently visible layout and only falls back to active-pane inference for true replacements. That keeps the existing `docs.md`-style sibling pane selected instead of replacing/collapsing the old active pane.
+
+While rerunning the full suite, the route tests exposed one more red path: supervisor-PID recovery could still downgrade to a focus-only no-op when argv lost the document path and the direct prompt probe could not classify the child prompt. Fixed that too: a healthy supervisor PID mapped to the registered pane now keeps managed reroutes on supervisor IPC.
+
+Updated:
+- `src/agent-doc/src/sync.rs`
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/specs/08-session-routing.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification completed:
+- `cargo test focus_only_switch_prefers_existing_focused_column_over_active_tmux_pane`
+- `cargo test safe_passive_focus_only_existing_sibling_focus_does_not_replace_active_pane`
+- `cargo test alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Pushed commits:
+- `src/agent-doc` `20260422/codex-agent-backend`: `8f42dd1` (`fix: preserve visible focus-only sync siblings`)
+- root `main`: `6294bad60` (`chore: update agent-doc submodule`)
+### Re: layout state and docs.md pane focus — gpt-5
+
+Implemented, verified, installed, committed, and pushed.
+
+`last_layout.json` is still useful today, but not as authoritative session state. It is a cross-process editor layout projection cache: editor plugins, CLI sync invocations, tmux panes, and restarted agent processes do not share controller memory. Holding this only in memory would lose column memory across those boundaries. The controller/SQLite direction is right for durable authority; JSON files should either become projections from SQLite or short-lived caches. I added a recommended backlog item to audit the remaining `.agent-doc` JSON state files under that rule.
+
+The `docs.md` pane churn came from safe-passive focus-only sync using the currently active tmux pane to choose which column to replace. After a turn ends, tmux can still be active on the old pane while the editor focus is already on a visible sibling. Sync now first matches `--focus` against the remembered or currently visible layout and only falls back to active-pane inference for true replacements. That keeps the existing `docs.md`-style sibling pane selected instead of replacing/collapsing the old active pane.
+
+While rerunning the full suite, the route tests exposed one more red path: supervisor-PID recovery could still downgrade to a focus-only no-op when argv lost the document path and the direct prompt probe could not classify the child prompt. Fixed that too: a healthy supervisor PID mapped to the registered pane now keeps managed reroutes on supervisor IPC.
+
+Updated:
+- `src/agent-doc/src/sync.rs`
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/specs/08-session-routing.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification completed:
+- `cargo test focus_only_switch_prefers_existing_focused_column_over_active_tmux_pane`
+- `cargo test safe_passive_focus_only_existing_sibling_focus_does_not_replace_active_pane`
+- `cargo test alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Pushed commits:
+- `src/agent-doc` `20260422/codex-agent-backend`: `8f42dd1` (`fix: preserve visible focus-only sync siblings`)
+- root `main`: `6294bad60` (`chore: update agent-doc submodule`)
+<!-- agent:boundary:cb4c916b -->
 <!-- /agent:exchange -->
 ###
 
@@ -118,6 +185,8 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#codexcapstale] Managed Codex pane capability drift — ready actor/process args can show  and expected  roots while the long-lived pane still lacks DNS/SSH/write access that a fresh runtime has. Plan: tasks/agent-doc/plan-codex-managed-session-capability-proof.md
+- [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md

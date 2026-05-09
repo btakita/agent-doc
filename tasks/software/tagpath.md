@@ -132,14 +132,46 @@ I added tagpath backlog items in priority order for helping tsift save tokens. T
 The order is intentional: first extend the shared token-savings fixture to `context-pack`, then make the compression path a tagpath-owned helper instead of fixture-only logic, then add query/ontology compactness coverage so tsift can keep references as handles rather than repeated prose.
 
 No repo code changes were needed for this cycle; this was planning/backlog capture only.
-<!-- agent:boundary:24532a79 -->
+❯ do [#ctxp]. spec-test-build-install-commit-push
+### Re: #ctxp context-pack token savings — gpt-5
+
+Completed `#ctxp`.
+
+- Added `context-pack` to tagpath's shared `fixtures/tsift-token-savings.json` with raw symbol refs, compact tagpath family rows, `context_pack_inputs`, ontology refs, summary refs, artifact handles, and a 55% minimum savings threshold.
+- Updated tagpath's fixture tests and spec so the shared contract now covers `search`, `explain`, `session-review`, and `context-pack`.
+- Updated tsift's token-savings fixture consumer to account for `context_pack_inputs` by comparing raw handoff refs against compact section handles, and updated the tsift spec/test assertions for the four-surface fixture.
+
+Verification passed:
+
+- tagpath: `cargo test`
+- tagpath: `cargo clippy --all-targets -- -D warnings`
+- tagpath: `cargo build --release`
+- tagpath: `cargo install --path .`
+- tsift: `cargo fmt --check`
+- tsift: `cargo test token_savings_accepts_tagpath_preview_fixture`
+- tsift: `cargo test`
+- tsift: `cargo clippy --all-targets -- -D warnings`
+- tsift: `cargo build --release`
+- tsift: `cargo install --path .`
+- installed `tsift token-savings --fixture /home/brian/work/btakita/agent-loop/src/tagpath/fixtures/tsift-token-savings.json --fail-under --json`
+
+Committed and pushed:
+
+- tagpath `main`: `1bcb017 test: add context-pack token savings fixture`
+- tsift `main`: `e53fa00 test: include context-pack in token savings`
+<!-- agent:boundary:a9fa79ed -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ctxp] Add `context-pack` to `fixtures/tsift-token-savings.json` with raw refs, tagpath family rows, ontology_ref handles, and minimum savings thresholds; mirror the new case in tagpath + tsift fixture tests.
 - [ ] [#cmpa] Add a tagpath library/CLI compression-report helper that accepts raw symbol rows and emits grouped family previews plus byte/token savings metrics for tsift.
 - [ ] [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
 <!-- /agent:backlog -->
+
+## Completed / Reaped
+
+<!-- agent:pending-done -->
+- 2026-05-09 [#ctxp] Add `context-pack` to `fixtures/tsift-token-savings.json` with raw refs, tagpath family rows, ontology_ref handles, and minimum savings thresholds; mirror the new case in tagpath + tsift fixture tests.
+<!-- /agent:pending-done -->

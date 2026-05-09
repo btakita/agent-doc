@@ -29,70 +29,11 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-143444.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-150127.md`*
 
 Active backlog:
-- [ ] [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
-
-Queue:
-- Next prompt: do [#sidecar-diverge]. #spec-test-build-install-commit-push
-- 1 additional queued prompt(s) remain
-❯ The response patchback did not complete during the last 2 agent-doc turns in /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md.
-❯ spec-test-build-install-commit-push
-### Re: root.md patchback miss — gpt-5
-
-
-I checked `/home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md`. Its current closeout state is an open `preflight_started` cycle, `cycle-1778336475478`, with no capture artifact. That means there is no assistant response body for `agent-doc repair` to replay; the last turn started but never reached response capture/write/commit.
-
-The sidecar-divergence patchback fix is already in `src/agent-doc` at `5eb3764 fix: redeliver sidecar fallback to editor`, and the branch is already synced to origin. The closeout spec now requires sidecar normalization fallback to normalize `content_ours`, repair the working tree, and re-deliver the exact fallback to the editor via full-content IPC.
-
-Verification completed:
-- `cargo test` in `src/agent-doc`: 2,129 passed, 0 failed, 4 ignored.
-- `cargo build` in `src/agent-doc`: passed.
-- `cargo install --path .` in `src/agent-doc`: installed local `agent-doc v0.33.16` to `/home/brian/.cargo/bin/agent-doc`.
-- `git -C src/agent-doc push origin 20260422/codex-agent-backend`: everything up-to-date.
-
-I also left a follow-up backlog item for the separate no-capture failure shape. That should be handled as a route/preflight recovery regression, distinct from the already-fixed sidecar fallback case.
-❯ `Run Agent Doc` on /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md had an error:
-```
-resync: stash pane %273 is registered in its own project root — skipping kill
-resync: stash pane %269 is registered in its own project root — skipping kill
-[sync] found alive agent-doc child (pid 2167634) in pane %256 for tasks/build-party.md
-[sync] recovered live pane %272 for session 1b08693f via supervisor pid 962597
-[sync] found alive agent-doc child (pid 2751677) in pane %271 for tasks/velvet-thunder/dev.md
-[route] target tmux session: 4
-Error: failed to launch project controller
-
-Caused by:
-    No such file or directory (os error 2)
-
-```
-❯ spec-test-build-install-commit-push
-### Re: project controller launch ENOENT — gpt-5
-
-I fixed the `failed to launch project controller` / `No such file or directory (os error 2)` path in `src/agent-doc`.
-
-Root cause: lazy controller startup used `std::env::current_exe()` directly for the detached controller process. After a local install or rebuild replaces the binary, a still-running agent-doc process can report a stale executable path; `Command::new(stale_path).spawn()` then fails with bare `ENOENT` before the controller can start.
-
-Implemented change:
-- Controller launch and bootstrap identity now resolve a launchable agent-doc binary by preferring the live `current_exe()` path, then falling back to the invoked command or `agent-doc` on `PATH`.
-- If all candidates are missing, the failure now says it skipped the stale `current_exe()` path instead of surfacing an unexplained controller launch `ENOENT`.
-- Added focused resolver regressions for the existing-current-exe and missing-current-exe fallback cases.
-- Updated `SPEC.md`, `VERSIONS.md`, and the controller/session actor specs with the launch fallback contract.
-
-Verification completed in `src/agent-doc`:
-- `cargo test project_controller::tests::controller_binary_resolution`: passed, 2 tests.
-- `cargo test`: passed, 2,131 tests, 0 failed, 4 ignored.
-- `cargo build`: passed.
-- `cargo install --path .`: installed local `agent-doc v0.33.16` to `/home/brian/.cargo/bin/agent-doc`.
-- `agent-doc --version`: `agent-doc 0.33.16`.
-
-Committed and pushed:
-- `5e20abc fix: recover controller launch after binary replacement`
-- `git -C src/agent-doc push origin 20260422/codex-agent-backend`: pushed `5eb3764..5e20abc`.
-
-No follow-up backlog item is needed for this specific failure shape; the stale binary path now has direct code coverage and a spec contract.
-<!-- agent:boundary:d228926b -->
+- [ ] [#root-empty-preflight] [recommended] Add a focused route/preflight recovery test for repeated empty preflight_started turns with no capture, using src/session-share/tasks/root.md cycle-1778336475478 as evidence: no response exists to replay, so the next invocation should fail with precise retry/restart guidance instead of repeated silent patchback misses.
+<!-- agent:boundary:cf6970a6 -->
 <!-- /agent:exchange -->
 ###
 

@@ -36,7 +36,31 @@ Active backlog:
 - [ ] [#stashprunefast] [recommended] Make safe-passive editor sync skip or amortize expensive registered-live stash pane pruning; current logs spend 2.7-4.7s in prune_stash_panes on routine selection changes.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - 9 more active item(s)
-<!-- agent:boundary:4fcd967f -->
+❯ do [#ctrlstatedrift]. spec-test-build-install-commit-push
+### Re: ctrlstatedrift — gpt-5
+
+Implemented `#ctrlstatedrift`.
+
+- Added a controller `supervisor_heartbeat` path that refreshes the persisted supervisor lease `runtime_state`, heartbeat, pid, and socket after verifying the session id, pane id, and generation still match the authoritative actor.
+- Extended supervisor IPC `state` responses with actor session, pane, and generation proof.
+- Updated `session status` / `doctor` context loading so a live matching supervisor refreshes stale controller lease data before diagnostics are printed, without adding a duplicate actor transition.
+- Updated `SPEC.md` and `README.md` for the lease-refresh invariant.
+
+Verification:
+- `cargo fmt`
+- `cargo test controller_supervisor_heartbeat_refreshes_stale_lease_without_actor_transition -- --test-threads=1`
+- `cargo test status_context_refreshes_controller_lease_from_matching_live_supervisor -- --test-threads=1`
+- `cargo check`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits pushed:
+- `src/agent-doc`: `3592b0e fix: refresh supervisor lease from live status`
+- outer repo: `66d93879d chore: update agent-doc submodule`
+
+No follow-up backlog items were created by this fix. The user-added `#panehang` backlog item remains open.
+<!-- agent:boundary:214c3a11 -->
 <!-- /agent:exchange -->
 ###
 
@@ -63,8 +87,8 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ctrlstatedrift] [recommended] Reconcile controller/supervisor runtime_state with session-actor projection; current tsift status shows actor ready while supervisor/controller lease still reports starting with a stale heartbeat.
 - [ ] [#stashprunefast] [recommended] Make safe-passive editor sync skip or amortize expensive registered-live stash pane pruning; current logs spend 2.7-4.7s in prune_stash_panes on routine selection changes.
+- [ ] [#panehang] Post-completion pane not reaped + startup routing miss — agent-doc start spawns Claude Code panes that either (1) complete their cycle but stay alive at idle prompt, or (2) never receive the /agent-doc routing command and sit idle indefinitely. Plan: tasks/agent-doc/plan-hung-pane-reap-and-routing.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
@@ -119,6 +143,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#instrdrift] Root AGENTS.md / installed Codex instruction drift causes repeated version-mismatch notices — make .codex/AGENTS.md the canonical generated surface or thin/update root AGENTS.md, then add an audit/CI check so future agent-doc-version bumps cannot leave stale duplicate instructions behind.
 - 2026-05-09 [#dodone] Skill does not auto-run --pending-done on do #id completion — when a user prompts 'do [#id]' and the task is completed, the skill's finalize step should include --pending-done <id> automatically. Currently the skill completes the work and finalizes the response but forgets to mark the pending item as done, requiring manual correction.
 - 2026-05-09 [#routeerrstale] [recommended] Clear stale editor-route-errors after a later successful route/session status so the editor does not keep surfacing obsolete proof-timeout or starting-actor diagnostics.
+- 2026-05-09 [#ctrlstatedrift] [recommended] Reconcile controller/supervisor runtime_state with session-actor projection; current tsift status shows actor ready while supervisor/controller lease still reports starting with a stale heartbeat.
 <!-- /agent:pending-done -->
 
 

@@ -73,7 +73,34 @@ The editor route-error files are stale in at least one case. `tasks/software/tsi
 There is still real controller state drift behind the stale errors. `tsift.md` currently has `session-actors.json` state `ready`, but `agent-doc session status` reports the supervisor/controller lease runtime as `starting` with an old heartbeat. That is exactly the kind of split that can make route refuse a live pane as still starting, or fall back to slower direct-pane paths.
 
 I added three follow-up backlog items for the actionable parts: stale route-error clearing, controller/supervisor state drift, and the expensive safe-passive stash-prune path. No source files were changed in this investigation cycle.
-<!-- agent:boundary:68e0412f -->
+❯ do [#routeerrstale]. spec-test-build-install-commit-push
+### Re: #routeerrstale — gpt-5
+
+Implemented `#routeerrstale` in the JetBrains editor plugin.
+
+What changed:
+- persisted JetBrains route failures still save exact `agent-doc route` output under `.agent-doc/state/editor-route-errors/`
+- a later successful `Run Agent Doc` for the same document now deletes that saved route-error file
+- a successful `Show Session Status` for the same document also deletes the saved route-error file
+- common editor specs and JetBrains specs now require stale route-error cleanup after successful route/status recovery
+- bumped the JetBrains plugin version to `0.2.103`
+
+Verification passed:
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `make check`
+- `./gradlew test buildPlugin`
+- `npm test`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.103.zip` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+
+Commit / push:
+- `src/agent-doc` commit `d018c17` (`fix: clear stale editor route errors`) pushed to `origin/20260422/codex-agent-backend`
+- parent `agent-loop` commit `32e91f479` (`chore: update agent-doc submodule`) pushed to `origin/main`
+
+I marked `#routeerrstale` done.
+<!-- agent:boundary:81cc451c -->
 <!-- /agent:exchange -->
 ###
 
@@ -100,7 +127,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#routeerrstale] [recommended] Clear stale editor-route-errors after a later successful route/session status so the editor does not keep surfacing obsolete proof-timeout or starting-actor diagnostics.
 - [ ] [#ctrlstatedrift] [recommended] Reconcile controller/supervisor runtime_state with session-actor projection; current tsift status shows actor ready while supervisor/controller lease still reports starting with a stale heartbeat.
 - [ ] [#stashprunefast] [recommended] Make safe-passive editor sync skip or amortize expensive registered-live stash pane pruning; current logs spend 2.7-4.7s in prune_stash_panes on routine selection changes.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
@@ -156,6 +182,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#g4w2] Controller singleton/handoff must allow only one authoritative same-project controller while replacing stale binaries with zero downtime; retire or reap duplicate controller processes only after a promoted replacement preserves active session actors and supervisor leases. Plan: tasks/agent-doc/plan-controller-singleton-zero-downtime-handoff.md
 - 2026-05-09 [#instrdrift] Root AGENTS.md / installed Codex instruction drift causes repeated version-mismatch notices — make .codex/AGENTS.md the canonical generated surface or thin/update root AGENTS.md, then add an audit/CI check so future agent-doc-version bumps cannot leave stale duplicate instructions behind.
 - 2026-05-09 [#dodone] Skill does not auto-run --pending-done on do #id completion — when a user prompts 'do [#id]' and the task is completed, the skill's finalize step should include --pending-done <id> automatically. Currently the skill completes the work and finalizes the response but forgets to mark the pending item as done, requiring manual correction.
+- 2026-05-09 [#routeerrstale] [recommended] Clear stale editor-route-errors after a later successful route/session status so the editor does not keep surfacing obsolete proof-timeout or starting-actor diagnostics.
 <!-- /agent:pending-done -->
 
 

@@ -53,7 +53,29 @@ Verification completed:
 Commits:
 - `src/agent-doc`: `5078cb9 fix: skip safe-passive stash scans before sync` (pushed to `origin/20260422/codex-agent-backend`)
 - parent repo: `66bf0916d chore: update agent-doc submodule` (created; push follows after this managed session closeout)
-<!-- agent:boundary:64dd2160 -->
+❯ The 3 panes are still occurring. Please review the logs to understand why. Fix.
+❯ spec-test-build-install-commit-push
+### Re: three-pane sync regression — gpt-5
+
+Reviewed the live tmux state and sync logs. The remaining three-pane layout was not from slow stash pruning anymore. The current evidence was `/tmp/agent-doc-sync.log`: window `@128` requested only `%268` (`agent-doc-bugs2.md`) and `%269` (`boost-client/tasks/monsterrodholders.md`), but `%272` stayed visible because sync classified `src/session-share/tasks/root.md` as an open `preflight_started` closeout and told tmux-router to protect it from DETACH.
+
+That policy was too conservative. DETACH moves a pane into stash; it does not kill the agent process. Keeping open-cycle extras visible was preserving closeout safety by forcing visible pane growth.
+
+Fixed in `src/agent-doc`:
+- open-cycle panes are now logged as detachable during reconcile instead of protected from DETACH
+- unwanted open-cycle panes can be stashed while staying alive, so a two-document editor projection stays two visible panes
+- sync specs, README notes, and tmux smoke tests now describe and enforce that behavior
+
+Verification completed:
+- `cargo test open_cycle -- --nocapture`
+- `cargo test safe_passive_sync_replaces_detachable_visible_pane_and_stashes_open_cycle_extra -- --nocapture`
+- `make check` (clippy, full tests, integration tests, medium deterministic simulator corpus)
+- `make install`
+
+Commits:
+- `src/agent-doc`: `49113a7 fix: stash open-cycle panes during sync` (pushed to `origin/20260422/codex-agent-backend`)
+- parent repo: `20a65854f chore: update agent-doc submodule` (pushed to `origin/main`)
+<!-- agent:boundary:3e743adc -->
 <!-- /agent:exchange -->
 ###
 

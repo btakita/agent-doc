@@ -155,7 +155,7 @@ No new follow-up backlog items came out of this fix.
 • Ran agent-doc skill install --reload compact
   └ Skill already up to date (v0.33.16).
 ```
-### Re: repeated version-mismatch notice — gpt-5 (HEAD)
+### Re: repeated version-mismatch notice — gpt-5
 
 This is instruction drift, not a binary failure. The checked-in `AGENTS.md` in this repo is still on `agent-doc-version: "0.33.12"` and still tells Codex to run the old generic `agent-doc skill install --reload compact` path. The installed Codex instructions are already current: `.codex/AGENTS.md` is `0.33.16` and uses the correct Codex auto-update step `agent-doc skill install --harness codex --reload restart`.
 
@@ -166,7 +166,7 @@ So the fix is to stop letting Codex read stale root instructions. In this worksp
 3. Add an `agent-doc audit-docs` or CI check for version drift so a published binary bump cannot leave `AGENTS.md` behind again.
 
 That repeated message will keep appearing whenever the session is driven by the stale root file, or by pasted stale instructions, even though the installed skill is already up to date.
-<!-- agent:boundary:8edc48e3 -->
+<!-- agent:boundary:4622e213 -->
 <!-- /agent:exchange -->
 
 ## Queue

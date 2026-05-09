@@ -36,14 +36,66 @@ Active backlog:
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
 - 7 more active item(s)
-<!-- agent:boundary:f4ed49bf -->
+❯ I deleted "The tmux focus should be "snappy"..." in the html comment below the agent:exchange element in this document. while the last turn was running. agent-doc readded the content. agent-doc should respect and not reset the document user edits when the turn is finalized.
+
+❯ After the last turn ended, the agent-doc tmux window went into a 1 pane state.
+
+❯ spec-test-build-install-commit-push
+### Re: concurrent comment deletion and one-pane tmux collapse — gpt-5
+
+Implemented, verified, installed, committed, and pushed.
+
+The closeout write path now handles the sidecar-normalization fallback by merging current disk content against the explicit pre-response baseline before repairing prompt prefixes. That means a user edit outside `agent:exchange`, including deleting the scratch HTML comment below the exchange, is preserved instead of being restored from `content_ours`.
+
+Safe-passive focus-only editor sync now preserves a visible split even when `.agent-doc/last_layout.json` is absent. If the editor only sends the focused markdown file, sync derives the sibling projection from registered panes already visible in the target `agent-doc` window and replaces only the active side, preventing the post-turn route from collapsing to one pane.
+
+Updated specs and release notes:
+- `SPEC.md`
+- `specs/07-closeout-commands.md`
+- `specs/07-session-tmux-commands.md`
+- `VERSIONS.md`
+
+Verification completed:
+- `cargo test normalization_fallback_preserves_concurrent_comment_deletion`
+- `cargo test safe_passive_focus_only_editor_switch_preserves_sibling_without_saved_layout`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Pushed commits:
+- `src/agent-doc` `20260422/codex-agent-backend`: `cb30f7a4e` (`fix: preserve edits during sync closeout`)
+- root `main`: `3752d3165` (`chore: update agent-doc submodule`)
+### Re: concurrent comment deletion and one-pane tmux collapse — gpt-5
+
+Implemented, verified, installed, committed, and pushed.
+
+The closeout write path now handles the sidecar-normalization fallback by merging current disk content against the explicit pre-response baseline before repairing prompt prefixes. That means a user edit outside `agent:exchange`, including deleting the scratch HTML comment below the exchange, is preserved instead of being restored from `content_ours`.
+
+Safe-passive focus-only editor sync now preserves a visible split even when `.agent-doc/last_layout.json` is absent. If the editor only sends the focused markdown file, sync derives the sibling projection from registered panes already visible in the target `agent-doc` window and replaces only the active side, preventing the post-turn route from collapsing to one pane.
+
+Updated specs and release notes:
+- `SPEC.md`
+- `specs/07-closeout-commands.md`
+- `specs/07-session-tmux-commands.md`
+- `VERSIONS.md`
+
+Verification completed:
+- `cargo test normalization_fallback_preserves_concurrent_comment_deletion`
+- `cargo test safe_passive_focus_only_editor_switch_preserves_sibling_without_saved_layout`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Pushed commits:
+- `src/agent-doc` `20260422/codex-agent-backend`: `cb30f7a4e` (`fix: preserve edits during sync closeout`)
+- root `main`: `3752d3165` (`chore: update agent-doc submodule`)
+<!-- agent:boundary:577d84c2 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-The tmux focus should be "snappy". The slower reconciliation should happen in the background and should not block additional tmux focus events. When I focus on the editor document on the oppposite side twice quiclky, there is a noticable delay with focusing the correct tmux pane.
-spec-test-build-install-commit-push
----
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
 `❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?

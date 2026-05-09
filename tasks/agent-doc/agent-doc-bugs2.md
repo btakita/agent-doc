@@ -20,7 +20,7 @@ prompt_presets:
 
 <!-- agent:status patch=replace -->
 
-Planned editor autosync, sync latency, and tmux test-budget follow-ups.
+Added Codex manifest warning cleanup to the backlog.
 <!-- /agent:status -->
 
 ## Exchange
@@ -49,6 +49,8 @@ The finalize/patchback side is still independently suspicious. Recent `ops.log` 
 
 Codex logs did not show a blocking model/API failure in the current turn. They are noisy with repeated plugin/skill manifest warnings: overlong `interface.defaultPrompt`, too many default prompts, `skills: path must not be ./`, and icon paths containing `..`. Those are config hygiene issues unless a missing plugin prompt is part of the workflow being tested.
 
+❯ Please add fixing Codex repeated plugin/skill manifest warnings to the backlog
+
 Claude logs mostly show normal session-stop churn plus a session-share preflight where parent submodule pointer commits failed with an empty error message. That failure is worth watching because it can make a submodule task look committed while the parent pointer is stale. The Claude/Claude Score context also records the recent agent-doc patchback investigation and the `plan-finalize-sidecar-divergence.md` decision, which matches the agent-doc logs.
 
 For Claude Score itself, the latest bootstrap calibration output is not an operational crash, but it has quality issues to keep tracking: ECE is about `0.100`, sentiment MAE is `1.1015`, composite MAE is `4.4`, the high-confidence bin is badly overconfident, and the largest rubric divergence is `claude-code/version-management` with scorer `2.0` vs expert `9.0`. The `.pytest_cache` still lists several historical failures, but I did not rerun that suite, so I am treating that as stale evidence rather than a current red build.
@@ -56,7 +58,10 @@ For Claude Score itself, the latest bootstrap calibration output is not an opera
 Deferred items from `tasks/agent-doc/plan-project-controller-session-actor-mvp.md` that should be implemented or re-opened: Phase D and Phase E. Specifically, `start`/`route`/`sync` need to fully read/dispatch through controller authority, and operator diagnostics need to expose stale `starting`, controller timeout, and stale pane generation states without relying on tmux-router election. The plan's exit criterion about the `tsift.md` stale-starting/three-pane failure is not satisfied by the current workspace.
 
 I added the follow-ups in priority order. The top backlog item is `#editorswitchctl`.
-<!-- agent:boundary:43fe7069 -->
+### Re: Codex manifest warnings backlog — gpt-5.5
+
+Added the Codex plugin/skill manifest warning cleanup to the backlog as `#codex-manifest-warnings`.
+<!-- agent:boundary:842b4953 -->
 <!-- /agent:exchange -->
 ###
 
@@ -83,6 +88,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#codex-manifest-warnings] Fix repeated Codex plugin/skill manifest warnings: overlong interface.defaultPrompt, more than 3 default prompts, invalid skills path ./, and icon paths containing ..; decide whether to patch local plugin metadata, installer validation, or warning suppression.
 - [ ] [#editorswitchctl] Fix the current editor-document switch split by completing/regressing the Phase D/E controller authority boundary: tasks/software/tsift.md remains actor_state=starting with a healthy supervisor, route refuses injection, and tmux window 4 still has four agent-doc panes. Plan: tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 - [ ] [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
 - [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md

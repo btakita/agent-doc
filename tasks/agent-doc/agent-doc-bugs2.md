@@ -55,7 +55,25 @@ Verification:
 
 Commit / push:
 - `src/agent-doc` commit `516a2a7` (`fix: plan pending-done for bracketed do directives`) pushed to `origin/20260422/codex-agent-backend`.
-<!-- agent:boundary:15dba0c6 -->
+❯ Please investigate agent-doc logs for sync issues.
+
+❯ I have seen:
+❯ - Switching editor documents still has ~5s 1 tmux pane transition before the 2 tmux pane layout
+❯ - 3 tmux panes with 2 editor panes
+### Re: sync log investigation — gpt-5
+
+I found three separate issues in the current logs/state, not one single sync bug.
+
+The 5s editor-switch delay is real and is mostly `prune_stash_panes`. Recent safe-passive syncs repeatedly spend 2.8-4.7s in that phase while the rest of the path is small: actor lookup is usually ~60-100ms, ownership proof ~150-180ms, and tmux-router ~20-40ms. When full syncs overlap the selection churn, there is also a ~3s `sync_lock_wait`, but the steady cost is registered-live stash scanning.
+
+The 3-pane symptom is also visible. At 2026-05-09 16:08:10, sync was asked for two markdown files, `tasks/software/tsift.md` and `tasks/agent-doc/agent-doc-bugs2.md`, but logged `post-sync pane count window="@128" pane_count=3 file_panes=2`. A later sync at 16:17:38 corrected the same pair back to `pane_count=2 file_panes=2`. That points to a transient extra registered pane being left in the target window during reconciliation, not a permanent duplicate registration.
+
+The editor route-error files are stale in at least one case. `tasks/software/tsift.md` still has a May 4 route-error saying generation 61 / pane `%188` was stuck `starting`, but current state is generation 69 / pane `%273`. `tasks/agent-doc/agent-doc-bugs2.md` has a stale proof-timeout file modified at 2026-05-09 11:44, while current `agent-doc session status` shows generation 113 / pane `%268` ready with no startup miss, and the ops log later records dispatch proof consumed successfully. The editor can therefore keep showing obsolete route failures after recovery.
+
+There is still real controller state drift behind the stale errors. `tsift.md` currently has `session-actors.json` state `ready`, but `agent-doc session status` reports the supervisor/controller lease runtime as `starting` with an old heartbeat. That is exactly the kind of split that can make route refuse a live pane as still starting, or fall back to slower direct-pane paths.
+
+I added three follow-up backlog items for the actionable parts: stale route-error clearing, controller/supervisor state drift, and the expensive safe-passive stash-prune path. No source files were changed in this investigation cycle.
+<!-- agent:boundary:68e0412f -->
 <!-- /agent:exchange -->
 ###
 
@@ -82,6 +100,9 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#routeerrstale] [recommended] Clear stale editor-route-errors after a later successful route/session status so the editor does not keep surfacing obsolete proof-timeout or starting-actor diagnostics.
+- [ ] [#ctrlstatedrift] [recommended] Reconcile controller/supervisor runtime_state with session-actor projection; current tsift status shows actor ready while supervisor/controller lease still reports starting with a stale heartbeat.
+- [ ] [#stashprunefast] [recommended] Make safe-passive editor sync skip or amortize expensive registered-live stash pane pruning; current logs spend 2.7-4.7s in prune_stash_panes on routine selection changes.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md

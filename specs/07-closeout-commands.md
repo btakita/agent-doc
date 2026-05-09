@@ -78,7 +78,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 `agent-doc repair <FILE>`
 
 - Repairs open `response_captured` / `write_applied` cycles, deduplicates already-applied responses, and can adopt a visible response already present in the live document when the snapshot still lags behind.
-- The same repair path also handles stale `preflight_started` cycles when the hashes or safe historical `HEAD` proof make that deterministic, and it may also auto-close an otherwise-empty `preflight_started` cycle after the bounded stale timeout when no capture exists for that cycle.
+- The same repair path also handles stale `preflight_started` cycles when the hashes or safe historical `HEAD` proof make that deterministic, and it may auto-close an otherwise-empty `preflight_started` cycle after the bounded stale timeout only when the live document has no unresolved prompt-bearing drift. If a `preflight_started` cycle has no response capture and the live document contains a prompt target such as `do #id`, repair/preflight must fail closed with retry/restart guidance instead of marking the empty cycle committed.
 - Historical capture replay is narrow: it requires either an active capture artifact or a matching orphan prompt target in the live exchange.
 - Transcript-shaped or full-document-dump captured payloads must fail closed and be parked under `.agent-doc/repair-blocked/`.
 - No-pending repair still runs transcript canonicalization, completed-backlog reap, safe escaped-conversation repair (including the exchange-to-backlog gap case), safe duplicate-close repair, and deterministic stale-boundary repair when applicable.

@@ -21,6 +21,9 @@
 //! - `repair(file)` — runs the same recovery logic as `run(file)` and, when recovery work happened
 //!   inside a git repo, immediately attempts `git::commit(file)` so the repaired response crosses
 //!   the normal commit boundary instead of waiting for a later `preflight`.
+//! - When there is no pending response/capture to replay and an open `preflight_started` cycle
+//!   contains unresolved prompt-bearing drift, `run(file)` fails closed with retry/restart
+//!   guidance instead of committing an empty cycle with no response body.
 //! - When there is no pending response/capture to replay, `run(file)` also reaps stale completed
 //!   backlog items (`- [x] ...`) that should already have been removed, synchronizing the reap
 //!   into the snapshot and `agent:pending-done` archive when present.
@@ -306,6 +309,8 @@ fn visible_response_patch_from_document(file: &Path, doc_content: &str) -> Resul
 
 pub(crate) const AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR: &str =
     "ambiguous preflight_started patchback";
+pub(crate) const EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR: &str =
+    "empty preflight_started cycle has no response capture";
 pub(crate) const STALE_EMPTY_PREFLIGHT_TTL_SECS: u64 = 60;
 
 fn normalized_content_hash(content: &str) -> String {
@@ -314,6 +319,34 @@ fn normalized_content_hash(content: &str) -> String {
 
 fn preflight_cycle_age_secs(state: &crate::cycle_state::CycleState) -> u64 {
     now_secs().saturating_sub(state.updated_at.max(state.started_at))
+}
+
+fn prompt_change_is_orchestration_handoff_marker(text: &str) -> bool {
+    let mut meaningful = text
+        .lines()
+        .map(|line| line.trim().trim_start_matches('❯').trim())
+        .filter(|line| !line.is_empty() && !line.starts_with("<!--"));
+    let Some(line) = meaningful.next() else {
+        return false;
+    };
+    if meaningful.next().is_some() {
+        return false;
+    }
+    let normalized = line
+        .trim_end_matches(':')
+        .trim_end_matches('.')
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "synchronous orchestra"
+            | "synchronous orcestra"
+            | "orchestra"
+            | "orchestrate"
+            | "sequential"
+            | "sequentially"
+            | "run these sequentially"
+    )
 }
 
 pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<RepairOutcome> {
@@ -402,10 +435,29 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
         );
     }
 
-    let age_secs = preflight_cycle_age_secs(&state);
-    if age_secs >= STALE_EMPTY_PREFLIGHT_TTL_SECS
-        && crate::capture::load_by_id(file, &state.cycle_id)?.is_none()
+    let cycle_capture_exists = crate::capture::load_by_id(file, &state.cycle_id)?.is_some();
+    if !cycle_capture_exists
+        && let Some(change) = crate::session_check::first_unstarted_prompt_bearing_change(file)?
+        && !prompt_change_is_orchestration_handoff_marker(&change.text)
     {
+        let preview = change
+            .text
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or(change.text.as_str())
+            .trim();
+        anyhow::bail!(
+            "{} for {}: previous cycle `{}` is still `preflight_started`, the live document has unresolved prompt_target: {preview}, and no response exists to replay. Restart the harness pane and rerun `agent-doc {}` (or use `agent-doc start {}` from a fresh pane) so the prompt is handled by a new response cycle.",
+            EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR,
+            file.display(),
+            state.cycle_id,
+            file.display(),
+            file.display(),
+        );
+    }
+
+    let age_secs = preflight_cycle_age_secs(&state);
+    if age_secs >= STALE_EMPTY_PREFLIGHT_TTL_SECS && !cycle_capture_exists {
         crate::cycle_state::mark_committed(
             file,
             "repair_preflight_stale_empty_cycle",
@@ -2031,7 +2083,7 @@ mod tests {
     }
 
     #[test]
-    fn recover_repairs_stale_empty_preflight_started_cycle_without_hash_proof() {
+    fn recover_repairs_stale_empty_preflight_started_cycle_with_frontmatter_only_drift() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("test.md");
@@ -2049,8 +2101,8 @@ mod tests {
         crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
 
         let live = base.replace(
-            "<!-- agent:boundary:abc123 -->\n",
-            "do [#staleflt]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
+            "agent_doc_session: test",
+            "agent_doc_session: test\nagent: codex",
         );
         std::fs::write(&doc, &live).unwrap();
         age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
@@ -2066,7 +2118,50 @@ mod tests {
     }
 
     #[test]
-    fn recover_does_not_close_recent_empty_preflight_started_cycle_without_hash_proof() {
+    fn recover_fails_closed_on_stale_empty_preflight_started_cycle_with_prompt_drift() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "done\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        init_git_repo(root, &doc);
+        let state = crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+
+        let live = base.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            "do [#root-empty-preflight]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
+        );
+        std::fs::write(&doc, &live).unwrap();
+        age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+
+        let err = run(&doc).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains(EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR));
+        assert!(message.contains(&state.cycle_id));
+        assert!(message.contains("prompt_target: do [#root-empty-preflight]"));
+        assert!(message.contains("no response exists to replay"));
+        assert!(message.contains("agent-doc start"));
+
+        let after = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            after.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+        assert_eq!(after.last_event, "preflight_started");
+        assert_eq!(snapshot::load(&doc).unwrap().as_deref(), Some(base));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), live);
+    }
+
+    #[test]
+    fn recover_fails_closed_on_recent_empty_preflight_started_cycle_with_prompt_drift() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
         let base = concat!(
@@ -2084,6 +2179,41 @@ mod tests {
         let live = base.replace(
             "<!-- agent:boundary:abc123 -->\n",
             "do [#staleflt]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
+        );
+        std::fs::write(&doc, &live).unwrap();
+
+        let err = run(&doc).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains(EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR));
+        assert!(message.contains("prompt_target: do [#staleflt]"));
+        assert!(message.contains("no response exists to replay"));
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+        assert_eq!(state.last_event, "preflight_started");
+    }
+
+    #[test]
+    fn recover_does_not_treat_orchestration_handoff_marker_as_missing_response() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+
+        let live = base.replace(
+            "❯ Please reply\n",
+            "❯ Please reply\n\nSynchronous orchestra:\n",
         );
         std::fs::write(&doc, &live).unwrap();
 

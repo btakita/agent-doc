@@ -10,10 +10,12 @@
 //! - Step 0-pre — interrupted-cycle guard: inspects persisted cycle state.
 //!   For any open prior cycle, preflight auto-attempts `repair::run(file)` +
 //!   `git::commit(file)` before diffing again. For an open `preflight_started`
-//!   cycle with no recoverable response, the `git::commit(file)` path is the
-//!   narrow no-op closeout that stages the snapshot only and leaves later live
-//!   working-tree edits uncommitted; if that closeout still cannot prove the
-//!   prior cycle is durable, preflight fails closed instead of diffing again.
+//!   cycle with no recoverable response and unresolved prompt-bearing drift,
+//!   preflight fails closed before the no-op commit path can mark an empty
+//!   cycle committed. Non-prompt drift may still use the narrow no-op closeout
+//!   that stages the snapshot only and leaves later live working-tree edits
+//!   uncommitted; if that closeout still cannot prove the prior cycle is durable,
+//!   preflight fails closed instead of diffing again.
 //! - Step 1 — repair: calls `repair::run(file)` to detect and apply any
 //!   orphaned pending agent responses from a previous interrupted cycle.
 //! - Step 2 — commit: calls `git::commit(file)` to record the previous
@@ -668,8 +670,9 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
         let recovered = match repair::run(file) {
             Ok(outcome) => outcome.repaired(),
             Err(e) => {
-                if e.to_string()
-                    .contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                let message = e.to_string();
+                if message.contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                    || message.contains(repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
                 {
                     anyhow::bail!("{}", e);
                 }
@@ -751,8 +754,9 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
     let recovered = match repair::run(file) {
         Ok(outcome) => outcome.repaired(),
         Err(e) => {
-            if e.to_string()
-                .contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+            let message = e.to_string();
+            if message.contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                || message.contains(repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
             {
                 anyhow::bail!("{}", e);
             }
@@ -883,8 +887,9 @@ pub fn run(file: &Path) -> Result<()> {
         || match repair::run(file) {
             Ok(outcome) => outcome.repaired(),
             Err(e) => {
-                if e.to_string()
-                    .contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                let message = e.to_string();
+                if message.contains(repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR)
+                    || message.contains(repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
                 {
                     return Err(e);
                 }
@@ -3186,7 +3191,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_closes_stale_empty_preflight_started_cycle_without_hash_proof() {
+    fn preflight_fails_closed_on_stale_empty_preflight_started_prompt_drift_without_capture() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("session.md");
@@ -3210,28 +3215,55 @@ mod tests {
             .args(["commit", "-m", "add doc", "--no-verify"])
             .output()
             .unwrap();
-        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        let prior =
+            crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
 
         let live = snapshot.replace(
             "<!-- agent:boundary:abc123 -->\n",
-            "do [#staleflt]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
+            "do [#root-empty-preflight]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
         );
         std::fs::write(&doc, &live).unwrap();
         age_cycle_state(&doc, crate::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
 
-        run(&doc).unwrap();
+        let err = run(&doc).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains(crate::repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR),
+            "expected empty-preflight fail-closed message, got: {message}"
+        );
+        assert!(
+            message.contains(&prior.cycle_id),
+            "message should name the stranded cycle: {message}"
+        );
+        assert!(
+            message.contains("prompt_target: do [#root-empty-preflight]"),
+            "message should name the unresolved prompt: {message}"
+        );
+        assert!(
+            message.contains("no response exists to replay"),
+            "message should explain that recovery has no response body: {message}"
+        );
+        assert!(
+            message.contains("agent-doc start"),
+            "message should include retry/restart guidance: {message}"
+        );
 
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(
             state.phase,
             crate::cycle_state::CyclePhase::PreflightStarted
         );
-        assert_ne!(state.last_event, "repair_preflight_stale_empty_cycle");
+        assert_eq!(state.cycle_id, prior.cycle_id);
+        assert_eq!(state.last_event, "preflight_started");
 
         let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("repair_preflight_stale_empty_cycle file="),
-            "preflight should auto-close the stale empty cycle before reopening:\n{log}"
+            !log.contains("repair_preflight_stale_empty_cycle file="),
+            "preflight must not silently auto-close a prompt-bearing empty cycle:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_already_current file="),
+            "preflight must not mark the empty cycle committed through the no-op commit path:\n{log}"
         );
     }
 

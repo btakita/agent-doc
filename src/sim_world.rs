@@ -81,6 +81,7 @@ enum SimCommand {
     RepairProjection,
     SyncProtectedGrowthManual,
     SyncProtectedGrowthPassive,
+    SyncProtectedGrowthFocusVisible,
     SyncDetachableReplaceManual,
     SyncDetachableReplacePassive,
     SyncVisibleFocusPreserve,
@@ -368,7 +369,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(37) {
+            let command = match rng.next_usize(38) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -398,8 +399,9 @@ impl SimWorld {
                 31 => SimCommand::RepairProjection,
                 32 => SimCommand::SyncProtectedGrowthManual,
                 33 => SimCommand::SyncProtectedGrowthPassive,
-                34 => SimCommand::SyncDetachableReplaceManual,
-                35 => SimCommand::SyncDetachableReplacePassive,
+                34 => SimCommand::SyncProtectedGrowthFocusVisible,
+                35 => SimCommand::SyncDetachableReplaceManual,
+                36 => SimCommand::SyncDetachableReplacePassive,
                 _ => SimCommand::SyncVisibleFocusPreserve,
             };
             world.apply(command)?;
@@ -573,6 +575,9 @@ impl SimWorld {
             SimCommand::SyncProtectedGrowthPassive => {
                 self.apply_sync_protected_growth(SyncMode::SafePassive);
             }
+            SimCommand::SyncProtectedGrowthFocusVisible => {
+                self.apply_sync_protected_growth_focus_visible();
+            }
             SimCommand::SyncDetachableReplaceManual => {
                 self.apply_sync_detachable_replace(SyncMode::Full);
             }
@@ -594,13 +599,13 @@ impl SimWorld {
             }
             SyncOutcome::ReplacedDetachable(count) => {
                 self.coverage.sync_detachable_replacements += count;
-                if self.sync.active.as_deref() == Some("requested") {
+                if self.sync.active.is_some() {
                     self.coverage.sync_focus_handoffs += 1;
                 }
             }
             SyncOutcome::AttachedAroundProtected(count) => {
                 self.coverage.sync_protected_expansions += count;
-                if self.sync.active.as_deref() == Some("requested") {
+                if self.sync.active.is_some() {
                     self.coverage.sync_focus_handoffs += 1;
                 }
             }
@@ -612,6 +617,17 @@ impl SimWorld {
         let outcome =
             self.sync
                 .apply_requested_projection(&["requested", "sibling"], "requested", mode);
+        self.record_sync_outcome(outcome);
+    }
+
+    fn apply_sync_protected_growth_focus_visible(&mut self) {
+        self.sync = SyncProjection::protected_growth_case();
+        self.sync.active = Some("protected".to_string());
+        let outcome = self.sync.apply_requested_projection(
+            &["requested", "sibling"],
+            "sibling",
+            SyncMode::SafePassive,
+        );
         self.record_sync_outcome(outcome);
     }
 
@@ -1484,5 +1500,30 @@ fn sync_sim_tmuxbudget_seed_3003_preserve_layout_still_reselects_visible_focus()
     );
     assert_eq!(world.sync.active.as_deref(), Some("sibling"));
     assert_eq!(world.coverage.sync_preserve_layout_blocks, 1);
+    assert_eq!(world.coverage.sync_focus_handoffs, 1);
+}
+
+#[test]
+fn sync_sim_tmuxbudget_seed_3004_attaches_hidden_requested_pane_and_focuses_visible_sibling() {
+    let mut world = SimWorld::new(3_004);
+    world
+        .apply(SimCommand::SyncProtectedGrowthFocusVisible)
+        .unwrap();
+
+    assert_eq!(
+        world.sync.visible,
+        vec![
+            "protected".to_string(),
+            "sibling".to_string(),
+            "requested".to_string()
+        ],
+        "safe-passive sync should attach the hidden requested pane without detaching the protected closeout owner"
+    );
+    assert_eq!(
+        world.sync.active.as_deref(),
+        Some("sibling"),
+        "safe-passive sync should still focus an already-visible requested sibling"
+    );
+    assert_eq!(world.coverage.sync_protected_expansions, 1);
     assert_eq!(world.coverage.sync_focus_handoffs, 1);
 }

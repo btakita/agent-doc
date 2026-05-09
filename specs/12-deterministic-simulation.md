@@ -48,6 +48,7 @@ DriftProjection
 RepairProjection
 SyncProtectedGrowthManual
 SyncProtectedGrowthPassive
+SyncProtectedGrowthFocusVisible
 SyncDetachableReplaceManual
 SyncDetachableReplacePassive
 SyncVisibleFocusPreserve
@@ -139,6 +140,9 @@ live tmux server:
   different protected open-cycle pane remains visible.
 - `sync_sim_tmuxbudget_seed_3003...` covers the focus proof: a preserve-layout
   return still reselects an already-visible requested focus pane.
+- `sync_sim_tmuxbudget_seed_3004...` covers the remaining pure attach/focus
+  variant: a hidden requested pane is attached around a protected open-cycle
+  owner while sync still focuses an already-visible requested sibling.
 
 Real tmux tests are still required for pane/window movement, `tmux-router`
 reconcile behavior, shell/process ownership proof, and end-to-end editor

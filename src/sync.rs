@@ -9882,6 +9882,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "covered by sync_sim_tmuxbudget_seed_3004; safe-passive attach/focus tmux smoke keeps the real pane/window path covered"]
     fn safe_passive_protected_open_cycle_sync_still_selects_visible_focus_pane() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();

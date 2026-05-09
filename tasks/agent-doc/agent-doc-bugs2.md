@@ -28,97 +28,15 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-061924.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-143444.md`*
 
 Active backlog:
-- [ ] [#editorswitchctl] Fix the current editor-document switch split by completing/regressing the Phase D/E controller authority boundary: tasks/software/tsift.md remains actor_state=starting with a healthy supervisor, route refuses injection, and tmux window 4 still has four agent-doc panes. Plan: tasks/agent-doc/plan-project-controller-session-actor-mvp.md
-- [ ] [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
-- [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
-- 1 more active item(s)
-❯ do [#editorswitchctl]. spec-test-build-install-commit-push
-### Re: #editorswitchctl — gpt-5
+- [ ] [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
 
-Implemented `#editorswitchctl`.
-
-Route now keeps dispatch-only reruns on the authoritative controller actor when the supervisor is healthy but the actor still reports `starting`, using the same direct-pane submit boundary as `session clear`. If the pane is visibly dispatch-ready, route promotes the stale `starting` lifecycle state to `ready`; otherwise it still submits directly instead of focusing and refusing injection.
-
-Updated the tmux command spec and added a regression covering a healthy `starting` authoritative actor with four existing agent-doc panes. The regression verifies dispatch lands in the existing authoritative pane and does not create, kill, or re-elect panes.
-
-Verification passed:
-- `cargo fmt`
-- `cargo test resolve_or_create_pane_dispatch_only_submits_to_healthy_starting_actor_without_split_churn`
-- `cargo test resolve_or_create_pane_dispatch_only_keeps_starting_authoritative_actor_on_direct_pane_submit`
-- `cargo test`
-- `cargo build`
-- `cargo install --path .`
-- live `agent-doc route /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --dispatch-only`, accepted on pane `%273` via `direct_pane_submit` with consumed proof.
-
-Commit / push:
-- `src/agent-doc` commit `efb25d6` pushed to `origin/20260422/codex-agent-backend`.
-- Superproject commit `8b99a803e` pushed to `origin/main` with the updated `src/agent-doc` pointer.
-
-I marked `#editorswitchctl` done.
-### Re: startup-miss routed trigger — gpt-5
-
-That text is in the bound Codex session prompt because the router accepted a pending prompt target, then the startup watchdog noticed that no document response cycle actually began. The `echo '[agent-doc] startup-miss: ...'` line is a diagnostic injected into the bound session so the operator can see the lost target and retry with `agent-doc start ...`.
-
-It was not Entered because this path is not the normal prompt-delivery path. Normal delivery should submit the prompt target to the harness and produce a managed `preflight -> plan -> finalize` cycle. In this failure path, route had already considered the trigger accepted, but the downstream cycle did not start, so the recovery code printed a shell-visible diagnostic instead of pressing Enter on the original prompt.
-
-The `spec-test-build-install-commit-push` text is there because it was part of the pending target: `do #ppct. spec-test-build-install-commit-push`. At that diagnostic layer it is still raw user shorthand, not expanded preset text. There is also a normalization bug here: this document defines the preset as `#spec-test-build-install-commit-push`, while the queue and prompt text use `spec-test-build-install-commit-push` without the leading `#`. This cycle's preflight failed before returning JSON with `document references missing prompt preset(s): spec-test-build-install-commit-push`, which confirms that at least one validator path treats those as different names.
-
-So there are two issues, not one:
-
-- startup-miss reports an accepted-but-not-entered route as a diagnostic instead of guaranteeing prompt delivery or failing before acceptance;
-- preset reference normalization is inconsistent between frontmatter keys, queue entries, and prompt-target text.
-
-The active `#controller-timeout` item is the closest existing backlog item for the first issue. The second should be covered by a focused preset normalization regression if it is not already part of that work.
-❯ run the queue
-### Re: run the queue — gpt-5
-
-Ran the first queue item, `#controller-timeout`, using the `#spec-test-build-install-commit-push` preset intent.
-
-The controller stalled-client/start-hang fix was already present in runtime code: controller RPC reads are bounded, idle accepted clients are closed, accepted clients are served concurrently, and `ensure_controller_running` drops the readiness stream before issuing status requests. I added the missing regression for the `controller status --ensure` path with an idle controller client so this specific deadlock shape stays covered.
-
-I also normalized the remaining queue entries from the unsupported queue-wide `preset ...` line into per-item `#spec-test-build-install-commit-push` prompts, so the next `agent-doc` cycle can parse and consume the queue head normally.
-
-Verification passed:
-- `cargo fmt`
-- `cargo test project_controller -- --nocapture`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- live `agent-doc controller status --project-root /home/brian/work/btakita/agent-loop`
-- live `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
-
-Commit / push:
-- `src/agent-doc` commit `da539eb` pushed to `origin/20260422/codex-agent-backend`.
-- Superproject commit `cd4cd9619` pushed to `origin/main` with the updated `src/agent-doc` pointer.
-
-I marked `#controller-timeout` done.
-❯ do [#sidecar-diverge]. spec-test-build-install-commit-push
-### Re: #sidecar-diverge — gpt-5
-
-Implemented `#sidecar-diverge`.
-
-When IPC ack-content sidecar verification rejects editor-normalized content, the write path now repairs disk to the normalized `content_ours` fallback and immediately re-delivers that exact full document back to the editor via full-content IPC. If that repair cannot be consumed, the warning now says the editor may need a reload instead of silently leaving the buffer stale.
-
-Updated the closeout and editor plugin specs to make this convergence contract explicit, and added a socket-backed regression that simulates a bad sidecar followed by the full-content repair payload.
-
-Verification passed:
-- `cargo fmt`
-- `cargo test normalization_fallback_redelivers_full_content_to_editor -- --nocapture`
-- `cargo test`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commit / push:
-- `src/agent-doc` commit `5eb3764` pushed to `origin/20260422/codex-agent-backend`.
-- Superproject commit `76ef25f65` pushed to `origin/main` with the updated `src/agent-doc` pointer.
-
-I marked `#sidecar-diverge` done.
-<!-- agent:boundary:d00c3109 -->
+Queue:
+- Next prompt: do [#sidecar-diverge]. #spec-test-build-install-commit-push
+- 1 additional queued prompt(s) remain
+<!-- agent:boundary:ad98c256 -->
 <!-- /agent:exchange -->
 ###
 

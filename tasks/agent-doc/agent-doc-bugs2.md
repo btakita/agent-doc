@@ -50,11 +50,35 @@ Verification completed: focused route/start tests, `cargo check`, `make check`, 
 Pushed commits:
 - `src/agent-doc`: `2ad446d` (`fix: reap route-owned startup panes`)
 - `agent-loop`: `826e87a8e` (`agent-doc: reap route-owned startup panes`)
-<!-- agent:boundary:439e3da8 -->
+❯ When I write into the html-style comment while an agent-doc task is running, agent-doc deletes what was written in the html-style comment. The contents any user edit should persist. If the document is in a broken state, the repair should only drop the offending content.
+❯ spec-test-build-install-commit-push
+### Re: scratch comment preservation — gpt-5
+
+Implemented the scratch-comment preservation fix.
+
+- Ordinary HTML scratch comments that are temporarily unterminated while the user is typing now count as ignored comment ranges through EOF for escaped-tail and prompt-drift scanners.
+- Prompt-looking text inside those in-progress comments is no longer moved into `agent:exchange` or stripped by repair.
+- Updated the template/comment specs and added focused regressions for unterminated scratch-comment tails.
+
+Verification completed:
+- `cargo test unterminated --lib`
+- `cargo test`
+- `cargo check`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+
+Pushed commits:
+- `src/agent-doc`: `2b63ff1` (`fix: preserve in-progress scratch comments`)
+- `agent-loop`: `12a55584b` (`agent-doc: preserve in-progress scratch comments`)
+<!-- agent:boundary:376b1e2c -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+The tmux focus should be "snappy". The slower reconciliation should happen in the background and should not block additional tmux focus events. When I focus on the editor document on the oppposite side twice quiclky, there is a noticable delay with focusing the correct tmux pane.
+spec-test-build-install-commit-push
+---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
 `❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?

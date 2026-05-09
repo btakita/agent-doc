@@ -35,7 +35,30 @@ Active backlog:
 - [ ] [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
 - [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
 - 1 more active item(s)
-<!-- agent:boundary:0c192638 -->
+❯ do [#editorswitchctl]. spec-test-build-install-commit-push
+### Re: #editorswitchctl — gpt-5
+
+Implemented `#editorswitchctl`.
+
+Route now keeps dispatch-only reruns on the authoritative controller actor when the supervisor is healthy but the actor still reports `starting`, using the same direct-pane submit boundary as `session clear`. If the pane is visibly dispatch-ready, route promotes the stale `starting` lifecycle state to `ready`; otherwise it still submits directly instead of focusing and refusing injection.
+
+Updated the tmux command spec and added a regression covering a healthy `starting` authoritative actor with four existing agent-doc panes. The regression verifies dispatch lands in the existing authoritative pane and does not create, kill, or re-elect panes.
+
+Verification passed:
+- `cargo fmt`
+- `cargo test resolve_or_create_pane_dispatch_only_submits_to_healthy_starting_actor_without_split_churn`
+- `cargo test resolve_or_create_pane_dispatch_only_keeps_starting_authoritative_actor_on_direct_pane_submit`
+- `cargo test`
+- `cargo build`
+- `cargo install --path .`
+- live `agent-doc route /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --dispatch-only`, accepted on pane `%273` via `direct_pane_submit` with consumed proof.
+
+Commit / push:
+- `src/agent-doc` commit `efb25d6` pushed to `origin/20260422/codex-agent-backend`.
+- Superproject commit `8b99a803e` pushed to `origin/main` with the updated `src/agent-doc` pointer.
+
+I marked `#editorswitchctl` done.
+<!-- agent:boundary:bc34eda2 -->
 <!-- /agent:exchange -->
 ###
 
@@ -60,7 +83,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#editorswitchctl] Fix the current editor-document switch split by completing/regressing the Phase D/E controller authority boundary: tasks/software/tsift.md remains actor_state=starting with a healthy supervisor, route refuses injection, and tmux window 4 still has four agent-doc panes. Plan: tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 - [ ] [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
 - [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
 - [ ] [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
@@ -99,6 +121,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#editorswitch] Implement a bounded editor-document switch fast path: resolve the focused markdown file through the controller actor binding, update tmux focus without waiting on stale safe-passive sync/prune work, and add regressions for stale starting sibling sessions like tasks/software/tsift.md.
 - 2026-05-09 [#finalize-do-cascade] finalize --pending-done cascade failure: do #id closeout requires up to 4 finalize attempts due to conflicting pending_capture_guard and pending_done_guard. Plan: tasks/agent-doc/plan-finalize-pending-done-cascade.md
 - 2026-05-09 [#codex-manifest-warnings] Fix repeated Codex plugin/skill manifest warnings: overlong interface.defaultPrompt, more than 3 default prompts, invalid skills path ./, and icon paths containing ..; decide whether to patch local plugin metadata, installer validation, or warning suppression.
+- 2026-05-09 [#editorswitchctl] Fix the current editor-document switch split by completing/regressing the Phase D/E controller authority boundary: tasks/software/tsift.md remains actor_state=starting with a healthy supervisor, route refuses injection, and tmux window 4 still has four agent-doc panes. Plan: tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 <!-- /agent:pending-done -->
 
 

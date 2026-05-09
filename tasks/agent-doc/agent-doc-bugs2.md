@@ -36,23 +36,41 @@ Active backlog:
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - 9 more active item(s)
-<!-- agent:boundary:361ed5b0 -->
+❯ do [#codexcapstale]. spec-test-build-install-commit-push
+### Re: managed Codex capability proof — gpt-5
+
+Implemented `#codexcapstale` in `src/agent-doc`.
+
+Summary:
+- Managed Codex startup now proves requested capabilities before the session is considered reusable: enabled network gets a DNS probe, required SSH targets use the isolated SSH proof, and explicit `--add-dir` roots get a write probe.
+- Codex routing now refuses to trust an old ready pane when the current capability proof is missing after the latest `session_start`; it restarts fresh once, then reapplies the launch contract before dispatch.
+- `agent-doc session status` now reports `codex_capability_proof` as `not_required`, `proven`, `missing`, or `unknown(...)`.
+- Updated README/spec coverage and `VERSIONS.md`, with focused regression tests around capability requirements, writable roots, and session-log proof freshness.
+
+Verification:
+- `cargo test`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- Installed CLI reports `agent-doc 0.33.16`.
+
+Commit/push:
+- `src/agent-doc`: `6076f95` (`fix: prove managed codex capabilities before reuse`) pushed to `origin/20260422/codex-agent-backend`.
+- root repo: `3188488d6` (`agent-doc: update codex capability proof`) pushed to `origin/main`.
+<!-- agent:boundary:8c103243 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+If a file is externally edited, the editor prompts to whether or not to load the external changes. If there is a significant delay and the external changes are accepted, a turn response can be duplicated. Please address root cause(s) including reducing the occurences of external edits.
+spec-test-build-install-commit-push
+---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
 `❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?
 spec-test-build-install-commit-push
 ---
-Comments after a run starts are deleted by agent-doc.
----
-"❯ Commit / push:" should not have the `❯ ` prefix since this was the agent response. #agent-doc-bug
----
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
----
-Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/brian/work/btakita/agent-loop/tasks/software/tsift did not respond to `Run Agent Doc` in a previous turn. It seems to run ok now but I'm concerned that `Run Agent Doc` was non-responsive.
 ---
 "Press Enter to restart, or 'q' to exit."
 -->

@@ -2291,6 +2291,28 @@ mod tests {
         handle.join().unwrap();
     }
 
+    #[test]
+    fn run_status_ensure_does_not_hold_idle_controller_stream() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let server_root = project_root.clone();
+        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        wait_for_test_controller(&project_root);
+
+        let idle_stream = connect(&project_root).unwrap();
+        let started = Instant::now();
+        run_status(Some(&project_root), true).unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "controller status --ensure should complete without holding an idle stream"
+        );
+
+        drop(idle_stream);
+        let shutdown = request(&project_root, "shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        handle.join().unwrap();
+    }
+
     fn wait_for_test_controller(project_root: &Path) {
         let started = Instant::now();
         loop {

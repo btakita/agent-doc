@@ -29,7 +29,25 @@ Planned editor autosync, sync latency, and tmux test-budget follow-ups.
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-045327.md`*
-<!-- agent:boundary:426bf77f -->
+❯ Please review the recent Claude Score, Codex, and agent-doc logs. Identify any issues that have arisen.
+❯ When I switch editor documents, the tmux pane should always quickly change.
+
+❯ Are there any deferred steps in /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md that would fix the issues?
+❯ #next-steps
+### Re: editor switching and recent logs — gpt-5.5
+
+I reviewed the recent Claude Score artifacts, Codex log, agent-doc ops/session logs, current session status, and `tasks/agent-doc/plan-project-controller-session-actor-mvp.md`.
+
+The strongest issue is still editor sync/focus latency, not dispatch to the active `agent-doc-bugs2.md` pane. Recent `ops.log` entries show repeated `sync_latency` overruns: earlier safe-passive syncs spent about 3s in `sync_lock_wait`, 1.3-2.1s in `prune_stash_panes`, and about 5.2-6.0s in `safe_passive_total` against a 1s budget. Later churn improved the lock wait to 100ms, but it is still logged as over budget and repeats during selection changes. Route dispatch itself looks healthy for this document: `%268`, generation 113, ready state, direct submit about 356ms, and `dispatch_start_proof` consumed in 1ms.
+
+There is also a stale sibling-session problem: `tasks/software/tsift.md` is still recorded as actor generation 69, pane `%273`, state `starting`, while the supervisor is healthy and the last transition was `2026-05-08T18:53:45Z`. That mismatch can make editor-document switching feel wrong because one document has an authoritative ready actor and another visible document is still treated as starting. This is the exact class of bug where tmux layout heuristics and actor lifecycle facts disagree.
+
+The Codex log is noisy with repeated plugin/skill manifest warnings, mostly invalid plugin default prompts and icon paths. I do not see those as the cause of the tmux switching delay. The Claude Score bootstrap artifacts do show calibration issues to keep tracking: the latest report passes `calibration_none <= 5%`, but reliability is poor in the 0.2-0.3 and 0.7-0.8 confidence bins, sentiment is under-scoring overall, and `claude-code/version-management` is the max divergence. The pytest `lastfailed` cache also still lists old scoring-api failures, so it is not clean evidence by itself.
+
+Yes, deferred work in `tasks/agent-doc/plan-project-controller-session-actor-mvp.md` would fix the switching issue. The most relevant pieces are Phase C, which makes supervisors report lifecycle facts like ready/busy/blocked instead of leaving a healthy session stuck in `starting`; Phase D, which moves start/route/sync onto controller authority and makes tmux-router only reconcile layout; and the performance guardrails that budget `sync_latency` phases and make over-budget editor paths visible. Phase E then adds better editor diagnostics when a pane is stale, blocked, or accepted-but-unproven.
+
+I added the top backlog item as `#editorswitch`. It should be first because it turns the deferred controller work into the user-visible invariant: switching editor documents should quickly focus the correct tmux pane even when another session is stale or sync/prune work is slow.
+<!-- agent:boundary:bff89737 -->
 <!-- /agent:exchange -->
 ###
 
@@ -56,6 +74,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
+- [ ] [#editorswitch] Implement a bounded editor-document switch fast path: resolve the focused markdown file through the controller actor binding, update tmux focus without waiting on stale safe-passive sync/prune work, and add regressions for stale starting sibling sessions like tasks/software/tsift.md.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

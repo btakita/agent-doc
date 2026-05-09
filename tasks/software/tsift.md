@@ -68,14 +68,37 @@ Top backlog item: `#ctxp`.
 3. `#budg` Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
 
 No repo code changed in this cycle. I checked the current fixture-backed savings gate with `cargo run -- token-savings --fixture ../tagpath/fixtures/tsift-token-savings.json --fail-under --json`; it still passes for `search`, `explain`, and `session-review` with an estimated 697-token delta. The main next gap is `context-pack`, which already exists but is still outside the savings fixture contract.
-<!-- agent:boundary:ba4ea489 -->
+❯ do [#ctxp]. spec-test-build-install-commit-push
+### Re: #ctxp context-pack token savings — gpt-5
+
+Completed `#ctxp`.
+
+- Extended `tsift token-savings` so fixture cases can include `context_pack_inputs` for raw `next_context`, `diff`, `test`, and `log` handoff rows, then compare those raw rows against compact context-pack section handles plus tagpath family rows.
+- Updated `src/tsift/SPEC.md` and the compiled `tests/exit_code.rs` regression to lock the shared fixture contract to `search`, `explain`, `session-review`, and `context-pack`.
+- The shared `tagpath` fixture now includes one `context-pack` case with next-context, diff, test, log, summary-ref, ontology-ref, and artifact-handle inputs plus a `55%` fail-under threshold.
+
+Verification passed:
+
+- `cargo run -- token-savings --fixture ../tagpath/fixtures/tsift-token-savings.json --fail-under --json`
+- `cargo test --test exit_code token_savings_accepts_tagpath_preview_fixture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- installed `tsift token-savings --fixture ../tagpath/fixtures/tsift-token-savings.json --fail-under --json`
+
+The updated installed gate passes with `4` cases, `1286` estimated tokens saved overall, and the `context-pack` case at `70.4%` savings against its `55%` threshold.
+
+Committed and pushed:
+
+- `src/tagpath` `main`: `1bcb017 test: add context-pack token savings fixture`
+- `src/tsift` `main`: `e53fa00 test: include context-pack in token savings`
+<!-- agent:boundary:215ed214 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ctxp] Add context-pack to the token-savings fixture/regression, including diff/test/log/next-context inputs and a fail-under threshold for its envelope preview.
 - [ ] [#real] Add a real-session token-savings benchmark from recent tsift/agent-doc transcripts, covering session-review and context-pack paths that dominate actual prompt volume.
 - [ ] [#budg] Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
 <!-- /agent:backlog -->
@@ -85,6 +108,12 @@ No repo code changed in this cycle. I checked the current fixture-backed savings
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:pending-done -->
+- 2026-05-09 [#ctxp] Add context-pack to the token-savings fixture/regression, including diff/test/log/next-context inputs and a fail-under threshold for its envelope preview.
+<!-- /agent:pending-done -->
 
 <!--
 -->

@@ -1,19 +1,20 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+agent: codex
+claude_model: claude-opus-4-6
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
-claude_model: claude-opus-4-6
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. #follow-up-backlog
+  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix.
   '#commit-push': commit + push all uncommitted files
   '#follow-up-backlog': Any follow-up items to place in the backlog?
-  '#next-steps': #follow-up-backlog Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
-  "#spec-test-build-install-commit-push": update spec + tests. build + install for local testing. commit + push
-  "#spec-test-commit-push": update spec + tests. commit + push
+  '#next-steps': ''
+  '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
+  '#spec-test-commit-push': update spec + tests. commit + push
+queue_active: true
 ---
 
 ## Status
@@ -36,7 +37,7 @@ Active backlog:
 Queue:
 - Next prompt: do [#sidecar-diverge]. #spec-test-build-install-commit-push
 - 1 additional queued prompt(s) remain
-<!-- agent:boundary:ad98c256 -->
+<!-- agent:boundary:14d13e5e -->
 <!-- /agent:exchange -->
 ###
 

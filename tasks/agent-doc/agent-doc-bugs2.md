@@ -28,48 +28,14 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-054841.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-060655.md`*
 
 Active backlog:
+- [ ] [#editorswitchctl] Fix the current editor-document switch split by completing/regressing the Phase D/E controller authority boundary: tasks/software/tsift.md remains actor_state=starting with a healthy supervisor, route refuses injection, and tmux window 4 still has four agent-doc panes. Plan: tasks/agent-doc/plan-project-controller-session-actor-mvp.md
+- [ ] [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
 - [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
-❯ Please review the recent Claude Score, Codex, and agent-doc logs. Identify any issues that have arisen.
-❯ When I switch editor documents, there is sometimes 1 tmux pane with 2 editor docs and 3 tmux panes with 2 editor docs.
-
-❯ Are there any deferred items in /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md that should be implemented?
-❯ #next-steps
-### Re: log review and next steps — gpt-5.5
-
-I reviewed the recent Codex, Claude/Claude Score, and agent-doc evidence. The user-visible editor-switch problem is still real, not just cosmetic tmux noise.
-
-The strongest agent-doc evidence is current: `tasks/software/tsift.md` is still recorded as `actor_state=starting` while its supervisor is healthy, and `.agent-doc/state/editor-route-errors/tasks__software__tsift.md.txt` says route will not inject because the authoritative actor is still starting. `tmux list-panes` also shows window `4` with four agent-doc panes (`%268`, `%272`, `%256`, `%271`, `%269`, `%273` across the window), which matches the reported split after switching editor documents. There is also a live controller readiness issue: `.agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt` ends with `timed out waiting for project controller at .agent-doc/controller.sock`.
-
-The sync logs point to latency/backpressure rather than pure layout failure. `.agent-doc/logs/ops.log` repeatedly reports `sync_lock_wait` over budget, including 3s waits on full sync, and `prune_stash_panes` taking roughly 1.4-2.1s where the sub-budget is 250ms. That explains why editor selection changes can feel delayed or produce stale visible pane sets. It also means the already-planned `#synclock`, `#syncprune`, and `#editorswitch` work either did not cover this current shape or has regressed.
-
-The finalize/patchback side is still independently suspicious. Recent `ops.log` entries show repeated `sidecar_normalization_fallback ... reason=prefix_divergence` for `agent-doc-bugs2.md`. That lines up with the existing active `#sidecar-diverge` backlog item and should stay high priority, but it is probably separate from the editor-switch pane split.
-
-Codex logs did not show a blocking model/API failure in the current turn. They are noisy with repeated plugin/skill manifest warnings: overlong `interface.defaultPrompt`, too many default prompts, `skills: path must not be ./`, and icon paths containing `..`. Those are config hygiene issues unless a missing plugin prompt is part of the workflow being tested.
-
-❯ Please add fixing Codex repeated plugin/skill manifest warnings to the backlog
-
-Claude logs mostly show normal session-stop churn plus a session-share preflight where parent submodule pointer commits failed with an empty error message. That failure is worth watching because it can make a submodule task look committed while the parent pointer is stale. The Claude/Claude Score context also records the recent agent-doc patchback investigation and the `plan-finalize-sidecar-divergence.md` decision, which matches the agent-doc logs.
-
-For Claude Score itself, the latest bootstrap calibration output is not an operational crash, but it has quality issues to keep tracking: ECE is about `0.100`, sentiment MAE is `1.1015`, composite MAE is `4.4`, the high-confidence bin is badly overconfident, and the largest rubric divergence is `claude-code/version-management` with scorer `2.0` vs expert `9.0`. The `.pytest_cache` still lists several historical failures, but I did not rerun that suite, so I am treating that as stale evidence rather than a current red build.
-
-Deferred items from `tasks/agent-doc/plan-project-controller-session-actor-mvp.md` that should be implemented or re-opened: Phase D and Phase E. Specifically, `start`/`route`/`sync` need to fully read/dispatch through controller authority, and operator diagnostics need to expose stale `starting`, controller timeout, and stale pane generation states without relying on tmux-router election. The plan's exit criterion about the `tsift.md` stale-starting/three-pane failure is not satisfied by the current workspace.
-
-I added the follow-ups in priority order. The top backlog item is `#editorswitchctl`.
-### Re: Codex manifest warnings backlog — gpt-5.5
-
-Added the Codex plugin/skill manifest warning cleanup to the backlog as `#codex-manifest-warnings`.
-❯ do [#codex-manifest-warnings]. Fix local plugin metadata.
-### Re: Codex manifest warnings metadata — gpt-5
-
-Fixed the workspace-owned local metadata by changing `src/agent-doc/.codex-plugin/plugin.json` from `skills: "./"` to `skills: "./.claude/skills/"`. That removes the local Codex `skills path must not be ./` warning without making the plugin root itself a skill directory.
-
-I also checked the other local plugin manifest values. `agent-doc` has 2 default prompts, `corky-gmail` has 3, and their longest prompts are 52 and 55 characters, so the workspace-owned manifests are already inside Codex's `<=3 prompts` and `<=128 chars` limits. The overlong prompt, too-many-prompts, and `..` icon examples visible in the current logs resolve to Codex's generated marketplace cache under `~/.codex/.tmp/plugins/plugins`, not source metadata in this workspace, so I left that cache alone.
-
-Verification passed: `jq empty` on the local plugin/marketplace JSON files, and `make -C src/agent-doc check`.
-<!-- agent:boundary:d43dbb0b -->
+- 1 more active item(s)
+<!-- agent:boundary:2a75e92a -->
 <!-- /agent:exchange -->
 ###
 

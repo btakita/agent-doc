@@ -36,7 +36,24 @@ Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-<!-- agent:boundary:a83dc735 -->
+❯ Selecting monsterrodholders.md regresses into the 3 tmux pane layout. #next-steps
+❯ Please review logs for #next-steps re: sync issues.
+❯ spec-test-build-install-commit-push
+### Re: safe-passive sync layout — gpt-5
+
+Reviewed the sync logs for the `monsterrodholders.md` selection. The regression was visible at `1778356552`: window `@128` had panes `%268`, `%269`, and `%272`; safe-passive sync then spent about 4 seconds in `prune_stash_panes` before tmux-router detached `%272` and restored the requested two-pane projection. That made the 3-pane layout visible during normal editor switching even though the router eventually corrected it.
+
+Implemented the fix in `src/agent-doc`: safe-passive editor sync now skips expensive stash-window/stash-pane cleanup before router reconciliation. It still prunes stale registry rows and retained dead non-stash panes, but it lets tmux-router detach extra visible panes immediately instead of waiting on orphaned stash scans. Updated the spec/README and safe-passive tests to lock this in.
+
+Verification completed:
+- `cargo test safe_passive -- --nocapture`
+- `make check` (clippy, full tests, medium simulator corpus, version sync)
+- `make install`
+
+Commits:
+- `src/agent-doc`: `5078cb9 fix: skip safe-passive stash scans before sync` (pushed to `origin/20260422/codex-agent-backend`)
+- parent repo: `66bf0916d chore: update agent-doc submodule` (created; push follows after this managed session closeout)
+<!-- agent:boundary:64dd2160 -->
 <!-- /agent:exchange -->
 ###
 

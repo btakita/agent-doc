@@ -18,7 +18,7 @@
     "crdt",
     "workflow"
   ],
-  "skills": "./",
+  "skills": "./.claude/skills/",
   "interface": {
     "displayName": "agent-doc",
     "shortDescription": "Run interactive AI sessions from markdown documents",

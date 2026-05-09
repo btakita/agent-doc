@@ -166,7 +166,14 @@ So the fix is to stop letting Codex read stale root instructions. In this worksp
 3. Add an `agent-doc audit-docs` or CI check for version drift so a published binary bump cannot leave `AGENTS.md` behind again.
 
 That repeated message will keep appearing whenever the session is driven by the stale root file, or by pasted stale instructions, even though the installed skill is already up to date.
-<!-- agent:boundary:4622e213 -->
+❯ Add #next-steps to address the issues you just surfaced.
+❯ Note that agent-doc restarted the tmux session for this document. Codex prompted for an upgrade which I initiated. Plan #next-steps for this "hiccup" as well.
+### Re: next steps — gpt-5
+
+Added `#next-steps` at the top of the backlog. It covers the stale root instruction surface, the tmux restart plus Codex upgrade handoff hiccup, and an audit/check so version drift is caught before another session repeats the upgrade loop.
+
+Top of backlog: `#next-steps`.
+<!-- agent:boundary:56756bd5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -183,6 +190,7 @@ That repeated message will keep appearing whenever the session is driven by the 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#next-steps] Fix instruction-surface drift and restart/upgrade handoff hiccup — make the repo-root AGENTS.md stop drifting from generated Codex instructions, document that MCP/auth/restart prompts are sub-steps rather than closeout boundaries, and add an audit/check that flags stale harness instruction versions before sessions repeat the upgrade loop.
 - [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
 - [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
 - [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.

@@ -95,7 +95,30 @@ Commit / push:
 - Superproject commit `cd4cd9619` pushed to `origin/main` with the updated `src/agent-doc` pointer.
 
 I marked `#controller-timeout` done.
-<!-- agent:boundary:d171adf3 -->
+❯ do [#sidecar-diverge]. spec-test-build-install-commit-push
+### Re: #sidecar-diverge — gpt-5
+
+Implemented `#sidecar-diverge`.
+
+When IPC ack-content sidecar verification rejects editor-normalized content, the write path now repairs disk to the normalized `content_ours` fallback and immediately re-delivers that exact full document back to the editor via full-content IPC. If that repair cannot be consumed, the warning now says the editor may need a reload instead of silently leaving the buffer stale.
+
+Updated the closeout and editor plugin specs to make this convergence contract explicit, and added a socket-backed regression that simulates a bad sidecar followed by the full-content repair payload.
+
+Verification passed:
+- `cargo fmt`
+- `cargo test normalization_fallback_redelivers_full_content_to_editor -- --nocapture`
+- `cargo test`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commit / push:
+- `src/agent-doc` commit `5eb3764` pushed to `origin/20260422/codex-agent-backend`.
+- Superproject commit `76ef25f65` pushed to `origin/main` with the updated `src/agent-doc` pointer.
+
+I marked `#sidecar-diverge` done.
+<!-- agent:boundary:d00c3109 -->
 <!-- /agent:exchange -->
 ###
 
@@ -125,7 +148,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
 - [ ] [#syncbudget-regress] [recommended] Turn the current sync latency evidence into a regression budget: repeated sync_lock_wait=100/3004ms over-budget and prune_stash_panes=1395-2073ms over-budget should become a focused fast-path test before more tmux test expansion. Plan: tasks/agent-doc/plan-editor-autosync-latency-test-budget.md
 <!-- /agent:backlog -->
 
@@ -164,6 +186,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#codex-manifest-warnings] Fix repeated Codex plugin/skill manifest warnings: overlong interface.defaultPrompt, more than 3 default prompts, invalid skills path ./, and icon paths containing ..; decide whether to patch local plugin metadata, installer validation, or warning suppression.
 - 2026-05-09 [#editorswitchctl] Fix the current editor-document switch split by completing/regressing the Phase D/E controller authority boundary: tasks/software/tsift.md remains actor_state=starting with a healthy supervisor, route refuses injection, and tmux window 4 still has four agent-doc panes. Plan: tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 - 2026-05-09 [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
+- 2026-05-09 [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
 <!-- /agent:pending-done -->
 
 

@@ -28,31 +28,8 @@ Planned editor autosync, sync latency, and tmux test-budget follow-ups.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-043640.md`*
-
-Active backlog:
-- [ ] [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
-❯ do [#synclock]. spec-test-build-install-commit-push
-### Re: #synclock — gpt-5
-
-Implemented `#synclock` in `src/agent-doc` and pushed commit `3fb22d0 fix: bound safe passive sync contention` to `origin/20260422/codex-agent-backend`.
-
-What changed:
-- Safe-passive `agent-doc sync --no-autostart` now waits only the `sync_lock_wait` latency budget for `.agent-doc/sync.lock`; on contention it emits `[sync] safe_passive_sync_lock_contention_retry ... phase=sync_lock_wait ... status=over_budget` and returns before ownership proof, auto-start, or tmux reconciliation.
-- JetBrains automatic sync treats that marker as retryable, keeps dedup state unchanged, and reschedules only the latest pending selection/layout snapshot.
-- Manual `Sync Tmux Layout` now shares the editor-side sync guard with automatic sync and shows a visible deferred warning instead of launching another CLI sync while one is already running.
-- Specs and tests were updated, including the JetBrains plugin patch version bump to `0.2.102`.
-
-Verification completed:
-- `cargo test sync_lock`
-- `cargo test safe_passive_lock_contention`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.EditorTabSyncListenerTest --tests com.github.btakita.agentdoc.SyncLayoutActionTest`
-- `make check`
-- `make install`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
-- `cargo clippy -- -D warnings`
-- `make plugin-version-check`
-<!-- agent:boundary:1ea1d74d -->
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-045327.md`*
+<!-- agent:boundary:426bf77f -->
 <!-- /agent:exchange -->
 ###
 

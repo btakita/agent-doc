@@ -559,8 +559,7 @@ pub(crate) fn prune_with_tmux_timed_in_mode(
         tracing::debug!(removed, "resync: pruned stale sessions");
         eprintln!("resync: pruned {} stale session(s)", removed);
     }
-    let skip_expensive_stash_cleanup =
-        cleanup_mode == PruneCleanupMode::SkipExpensiveStashCleanup && removed == 0;
+    let skip_expensive_stash_cleanup = cleanup_mode == PruneCleanupMode::SkipExpensiveStashCleanup;
     let preserve_live_agent_stash_panes =
         cleanup_mode == PruneCleanupMode::PreserveLiveAgentStashPanes && removed == 0;
 

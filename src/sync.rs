@@ -2419,21 +2419,19 @@ fn safe_passive_prune_cleanup_mode_at(
                 && now_ms.saturating_sub(state.last_full_cleanup_ms) < throttle_ms
         });
 
-    if fresh_unchanged {
-        return resync::PruneCleanupMode::SkipExpensiveStashCleanup;
+    if !fresh_unchanged {
+        if let Some(parent) = state_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let state = SyncPruneState {
+            fingerprint,
+            last_full_cleanup_ms: now_ms,
+        };
+        if let Ok(raw) = serde_json::to_string(&state) {
+            let _ = std::fs::write(state_path, raw);
+        }
     }
-
-    if let Some(parent) = state_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let state = SyncPruneState {
-        fingerprint,
-        last_full_cleanup_ms: now_ms,
-    };
-    if let Ok(raw) = serde_json::to_string(&state) {
-        let _ = std::fs::write(state_path, raw);
-    }
-    resync::PruneCleanupMode::PreserveLiveAgentStashPanes
+    resync::PruneCleanupMode::SkipExpensiveStashCleanup
 }
 
 fn safe_passive_prune_cleanup_mode(
@@ -2445,8 +2443,13 @@ fn safe_passive_prune_cleanup_mode(
     if !matches!(auto_start_mode, AutoStartMode::SafePassive) {
         return resync::PruneCleanupMode::Full;
     }
+    // Editor-driven safe-passive sync is the fast handoff path. It still prunes
+    // stale registry rows and retained dead non-stash panes, but it must not
+    // spend the selection budget scanning stash panes before tmux-router can
+    // detach any extra visible pane from the active editor projection.
     let state_path = sync_prune_state_path_for_sync(col_args, focus);
-    safe_passive_prune_cleanup_mode_at(&state_path, col_args, window, epoch_millis_now())
+    let _ = safe_passive_prune_cleanup_mode_at(&state_path, col_args, window, epoch_millis_now());
+    resync::PruneCleanupMode::SkipExpensiveStashCleanup
 }
 
 fn effective_sync_columns(
@@ -7738,20 +7741,20 @@ mod tests {
     }
 
     #[test]
-    fn safe_passive_prune_cleanup_throttles_unchanged_layout() {
+    fn safe_passive_prune_state_skips_stash_cleanup_from_first_pass() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state_path = tmp.path().join(".agent-doc/sync-prune-state.json");
         let cols = vec!["tasks/a.md,tasks/b.md".to_string()];
 
         let first = safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_000);
-        assert_eq!(first, resync::PruneCleanupMode::PreserveLiveAgentStashPanes);
+        assert_eq!(first, resync::PruneCleanupMode::SkipExpensiveStashCleanup);
 
         let second = safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_500);
         assert_eq!(second, resync::PruneCleanupMode::SkipExpensiveStashCleanup);
     }
 
     #[test]
-    fn safe_passive_prune_cleanup_ignores_focus_only_changes() {
+    fn safe_passive_prune_cleanup_skips_stash_scan_for_editor_handoff() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
@@ -7767,23 +7770,34 @@ mod tests {
                 Some("agent:1"),
                 Some("tasks/a.md")
             ),
-            resync::PruneCleanupMode::PreserveLiveAgentStashPanes
+            resync::PruneCleanupMode::SkipExpensiveStashCleanup
         );
 
-        let same_layout_with_other_focus = safe_passive_prune_cleanup_mode(
+        let changed_focus = safe_passive_prune_cleanup_mode(
             AutoStartMode::SafePassive,
             &cols,
             Some("agent:1"),
             Some("tasks/b.md"),
         );
         assert_eq!(
-            same_layout_with_other_focus,
+            changed_focus,
+            resync::PruneCleanupMode::SkipExpensiveStashCleanup
+        );
+
+        let changed_cols = vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()];
+        assert_eq!(
+            safe_passive_prune_cleanup_mode(
+                AutoStartMode::SafePassive,
+                &changed_cols,
+                Some("agent:1"),
+                Some("tasks/b.md"),
+            ),
             resync::PruneCleanupMode::SkipExpensiveStashCleanup
         );
     }
 
     #[test]
-    fn safe_passive_prune_cleanup_resets_on_layout_change_or_expiry() {
+    fn safe_passive_prune_state_keeps_skipping_on_layout_change_or_expiry() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state_path = tmp.path().join(".agent-doc/sync-prune-state.json");
         let cols = vec!["tasks/a.md,tasks/b.md".to_string()];
@@ -7791,11 +7805,11 @@ mod tests {
 
         assert_eq!(
             safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_000),
-            resync::PruneCleanupMode::PreserveLiveAgentStashPanes
+            resync::PruneCleanupMode::SkipExpensiveStashCleanup
         );
         assert_eq!(
             safe_passive_prune_cleanup_mode_at(&state_path, &changed_cols, Some("agent:1"), 1_100),
-            resync::PruneCleanupMode::PreserveLiveAgentStashPanes
+            resync::PruneCleanupMode::SkipExpensiveStashCleanup
         );
 
         let expired_ms = 1_100 + SAFE_PASSIVE_STASH_CLEANUP_THROTTLE.as_millis() as u64;
@@ -7806,7 +7820,7 @@ mod tests {
                 Some("agent:1"),
                 expired_ms
             ),
-            resync::PruneCleanupMode::PreserveLiveAgentStashPanes
+            resync::PruneCleanupMode::SkipExpensiveStashCleanup
         );
     }
 

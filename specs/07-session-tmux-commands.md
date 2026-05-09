@@ -173,16 +173,14 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   and post-router `sessions.json` projection must share a per-cycle proof cache
   instead of re-querying controller actor bindings or supervisor/live-owner
   heuristics for unchanged selection state.
-- Repeated passive editor syncs with the same visible column/window mapping
-  should rate-limit expensive stash cleanup. Registry pruning and retained-dead
-  non-stash cleanup still run, but `prune_stash_windows` and
-  `prune_stash_panes` may be treated as skipped subphases inside the throttle
-  window so focus-only selection churn does not spend the safe-passive budget on
-  orphaned stash-pane scans.
-- Safe-passive editor sync should not spend the first pass of a changed
-  selection proving whether live unregistered agent panes in stash are still
-  owned. It may prune idle-shell stash panes, stale registry entries, and
-  retained-dead non-stash panes, but live agent-pane ownership proof and
+- Safe-passive editor sync must skip expensive stash-window and stash-pane
+  cleanup before tmux-router reconciliation, including the first pass of a
+  changed selection. Registry pruning and retained-dead non-stash cleanup still
+  run, but `prune_stash_windows` and `prune_stash_panes` are skipped subphases
+  so the router can detach extra visible panes before orphaned stash scans spend
+  the safe-passive budget.
+- Safe-passive editor sync should not prove whether live unregistered agent
+  panes in stash are still owned. Live agent-pane ownership proof and
   kill-or-preserve decisions belong to full sync/repair paths.
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.

@@ -391,6 +391,7 @@ pub(crate) struct PrunePhaseTiming {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PruneCleanupMode {
     Full,
+    PreserveLiveAgentStashPanes,
     SkipExpensiveStashCleanup,
 }
 
@@ -560,6 +561,8 @@ pub(crate) fn prune_with_tmux_timed_in_mode(
     }
     let skip_expensive_stash_cleanup =
         cleanup_mode == PruneCleanupMode::SkipExpensiveStashCleanup && removed == 0;
+    let preserve_live_agent_stash_panes =
+        cleanup_mode == PruneCleanupMode::PreserveLiveAgentStashPanes && removed == 0;
 
     // Fetch metadata once. Repeated safe-passive no-op syncs can skip window
     // metadata and stash cleanup while still pruning the registry and retained
@@ -588,7 +591,11 @@ pub(crate) fn prune_with_tmux_timed_in_mode(
             purge_stash_windows_bulk(tmux, &windows, &panes)
         });
         record_prune_phase(&mut timings, "prune_stash_panes", || {
-            purge_unregistered_stash_panes_bulk(tmux, &windows, &panes)
+            if preserve_live_agent_stash_panes {
+                purge_unregistered_stash_panes_bulk_in_mode(tmux, &windows, &panes, true)
+            } else {
+                purge_unregistered_stash_panes_bulk(tmux, &windows, &panes)
+            }
         });
     }
     record_prune_phase(&mut timings, "prune_dead_non_stash", || {
@@ -1213,11 +1220,44 @@ fn purge_unregistered_stash_panes_bulk(tmux: &Tmux, windows: &WindowMeta, panes:
     purge_unregistered_stash_panes_bulk_with_supervisors(tmux, windows, panes, &live_supervisors);
 }
 
+fn purge_unregistered_stash_panes_bulk_in_mode(
+    tmux: &Tmux,
+    windows: &WindowMeta,
+    panes: &PaneMeta,
+    preserve_live_agent_stash_panes: bool,
+) {
+    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&project_root);
+    purge_unregistered_stash_panes_bulk_with_supervisors_in_mode(
+        tmux,
+        windows,
+        panes,
+        &live_supervisors,
+        preserve_live_agent_stash_panes,
+    );
+}
+
 fn purge_unregistered_stash_panes_bulk_with_supervisors(
     tmux: &Tmux,
     windows: &WindowMeta,
     panes: &PaneMeta,
     live_supervisors: &[(String, u32)],
+) {
+    purge_unregistered_stash_panes_bulk_with_supervisors_in_mode(
+        tmux,
+        windows,
+        panes,
+        live_supervisors,
+        false,
+    );
+}
+
+fn purge_unregistered_stash_panes_bulk_with_supervisors_in_mode(
+    tmux: &Tmux,
+    windows: &WindowMeta,
+    panes: &PaneMeta,
+    live_supervisors: &[(String, u32)],
+    preserve_live_agent_stash_panes: bool,
 ) {
     let current_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut pane_context_cache = PaneProjectContextCache::default();
@@ -1243,6 +1283,11 @@ fn purge_unregistered_stash_panes_bulk_with_supervisors(
             continue;
         }
         if registered_panes.contains(pane_id.as_str()) {
+            continue;
+        }
+        let process_kind = pane_process_kind_from_current_command(cmd);
+        if preserve_live_agent_stash_panes && matches!(process_kind, PaneProcessKind::Agent(_)) {
+            sync_log_safe_passive_stash_skip(pane_id);
             continue;
         }
         let pane_root = pane_project_root(tmux, pane_id);
@@ -1305,7 +1350,7 @@ fn purge_unregistered_stash_panes_bulk_with_supervisors(
             );
             continue;
         }
-        match pane_process_kind_from_current_command(cmd) {
+        match process_kind {
             PaneProcessKind::IdleShell(_) | PaneProcessKind::Agent(_) => {
                 if let Err(e) = tmux.kill_pane(pane_id) {
                     eprintln!("resync: failed to kill stash pane {}: {}", pane_id, e);
@@ -1320,6 +1365,13 @@ fn purge_unregistered_stash_panes_bulk_with_supervisors(
     if killed_count > 0 {
         eprintln!("resync: purged {} orphaned stash pane(s)", killed_count);
     }
+}
+
+fn sync_log_safe_passive_stash_skip(pane_id: &str) {
+    eprintln!(
+        "resync: safe-passive stash cleanup deferred live agent pane {} ownership proof",
+        pane_id
+    );
 }
 
 fn purge_unregistered_dead_non_stash_panes(tmux: &Tmux) {
@@ -2510,6 +2562,22 @@ mod tests {
         }
     }
 
+    fn wait_for_pane_current_command(
+        tmux: &IsolatedTmux,
+        pane: &str,
+        expected: &str,
+        timeout: std::time::Duration,
+    ) -> bool {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if pane_current_command(tmux, pane).as_deref() == Some(expected) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        false
+    }
+
     fn wait_for_window_relation(
         tmux: &IsolatedTmux,
         pane_a: &str,
@@ -3333,6 +3401,45 @@ mod tests {
         assert!(
             !iso.pane_alive(&pane2),
             "bulk stash purge should kill unregistered agent panes with no live owner"
+        );
+    }
+
+    #[test]
+    fn safe_passive_stash_cleanup_defers_live_agent_owner_proof() {
+        let iso = IsolatedTmux::new("resync-safe-passive-defer-agent-proof");
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let agent_bin = bin_dir.join("agent-doc");
+        std::os::unix::fs::symlink("/bin/sleep", &agent_bin).unwrap();
+
+        let pane1 = iso.auto_start("test", &cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
+        iso.send_keys(&pane2, &format!("exec {} 60", agent_bin.display()))
+            .unwrap();
+        assert!(
+            wait_for_pane_current_command(
+                &iso,
+                &pane2,
+                "agent-doc",
+                std::time::Duration::from_secs(3)
+            ),
+            "pane should run an agent-doc-named process before stash cleanup"
+        );
+        iso.stash_pane(&pane2, "test").unwrap();
+        assert!(
+            wait_for_pane_in_stash_window(&iso, "test", &pane2, std::time::Duration::from_secs(3)),
+            "pane should move into stash before safe-passive prune"
+        );
+
+        let windows = fetch_all_window_metadata(&iso);
+        let panes = fetch_all_pane_metadata(&iso);
+        purge_unregistered_stash_panes_bulk_in_mode(&iso, &windows, &panes, true);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(
+            iso.pane_alive(&pane2),
+            "safe-passive stash cleanup should defer live agent panes to full cleanup instead of proving ownership"
         );
     }
 

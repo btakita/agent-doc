@@ -179,6 +179,11 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   `prune_stash_panes` may be treated as skipped subphases inside the throttle
   window so focus-only selection churn does not spend the safe-passive budget on
   orphaned stash-pane scans.
+- Safe-passive editor sync should not spend the first pass of a changed
+  selection proving whether live unregistered agent panes in stash are still
+  owned. It may prune idle-shell stash panes, stale registry entries, and
+  retained-dead non-stash panes, but live agent-pane ownership proof and
+  kill-or-preserve decisions belong to full sync/repair paths.
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.
 - If any visible file stays blocked under passive `--no-autostart`, sync must preserve the current visible tmux layout and warn instead of reconciling the remaining foreign pane set into a new authoritative layout. This includes the live mixed-root replay shape where `tasks/agent-doc/agent-doc-bugs2.md` shares the visible `agent-doc` window with `src/session-share/tasks/claudescore-3.md`; a blocked sibling file must not let the remaining visible pane set collapse into a new authoritative layout.

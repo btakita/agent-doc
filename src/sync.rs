@@ -2433,7 +2433,7 @@ fn safe_passive_prune_cleanup_mode_at(
     if let Ok(raw) = serde_json::to_string(&state) {
         let _ = std::fs::write(state_path, raw);
     }
-    resync::PruneCleanupMode::Full
+    resync::PruneCleanupMode::PreserveLiveAgentStashPanes
 }
 
 fn safe_passive_prune_cleanup_mode(
@@ -7744,7 +7744,7 @@ mod tests {
         let cols = vec!["tasks/a.md,tasks/b.md".to_string()];
 
         let first = safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_000);
-        assert_eq!(first, resync::PruneCleanupMode::Full);
+        assert_eq!(first, resync::PruneCleanupMode::PreserveLiveAgentStashPanes);
 
         let second = safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_500);
         assert_eq!(second, resync::PruneCleanupMode::SkipExpensiveStashCleanup);
@@ -7767,7 +7767,7 @@ mod tests {
                 Some("agent:1"),
                 Some("tasks/a.md")
             ),
-            resync::PruneCleanupMode::Full
+            resync::PruneCleanupMode::PreserveLiveAgentStashPanes
         );
 
         let same_layout_with_other_focus = safe_passive_prune_cleanup_mode(
@@ -7791,11 +7791,11 @@ mod tests {
 
         assert_eq!(
             safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_000),
-            resync::PruneCleanupMode::Full
+            resync::PruneCleanupMode::PreserveLiveAgentStashPanes
         );
         assert_eq!(
             safe_passive_prune_cleanup_mode_at(&state_path, &changed_cols, Some("agent:1"), 1_100),
-            resync::PruneCleanupMode::Full
+            resync::PruneCleanupMode::PreserveLiveAgentStashPanes
         );
 
         let expired_ms = 1_100 + SAFE_PASSIVE_STASH_CLEANUP_THROTTLE.as_millis() as u64;
@@ -7806,7 +7806,7 @@ mod tests {
                 Some("agent:1"),
                 expired_ms
             ),
-            resync::PruneCleanupMode::Full
+            resync::PruneCleanupMode::PreserveLiveAgentStashPanes
         );
     }
 

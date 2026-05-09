@@ -77,7 +77,7 @@ Audit instruction files (CLAUDE.md, AGENTS.md, README.md, SKILL.md) against the 
 agent-doc route <FILE>
 ```
 
-Route a `/agent-doc` command to the correct tmux pane. Looks up the session UUID from frontmatter, finds the pane in `sessions.json`, and sends the command via `tmux send-keys`. If the pane is dead, auto-starts a new Claude session.
+Route a `/agent-doc` command to the correct tmux pane. Looks up the session UUID from frontmatter, finds the pane in `sessions.json`, and sends the command via the managed supervisor or tmux submit path. If no live owner exists, route auto-starts a route-owned pane and reaps it after the new document cycle commits; a startup miss records diagnostics and kills the just-created idle pane.
 
 ## start
 
@@ -85,7 +85,7 @@ Route a `/agent-doc` command to the correct tmux pane. Looks up the session UUID
 agent-doc start <FILE>
 ```
 
-Start Claude in the current tmux pane and register the session. Ensures a session UUID exists in frontmatter, registers the pane in `sessions.json`, then execs `claude`.
+Start the configured harness in the current tmux pane and register the session. Ensures a session UUID exists in frontmatter, registers the pane in `sessions.json`, then runs the harness under the supervisor restart loop. Route-created panes use an internal one-shot mode so successful fresh cycles close the pane automatically; manually started panes remain persistent.
 
 If the YAML frontmatter is malformed, `start` now fails with a file-targeted error that includes a compiler-style frontmatter excerpt with a caret at the reported line/column, then tells you to fix the `--- ... ---` block before retrying. The sync/auto-start path also mirrors the same warning into the document's `agent:status` component when present, so editor-driven auto-start failures are visible even when no tmux pane appears.
 

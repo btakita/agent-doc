@@ -24,7 +24,10 @@
 //! - Registers the session UUID → current tmux pane ID in `sessions.json` so
 //!   other subcommands (`route`, `focus`, etc.) can locate the pane.
 //! - Runs the configured harness binary as a blocking child process inside a persistent restart loop
-//!   so the tmux pane never dies on its own.
+//!   so a normal tmux pane never dies on its own.
+//! - When `--route-owned` is set by `route` auto-start, watches for the first
+//!   new binary-owned document cycle to reach `committed`, stops the child, and
+//!   reaps the tmux pane. Failed or interrupted cycles stay visible for debugging.
 //! - On non-zero exit (context exhaustion, crash, etc.): auto-restarts after a
 //!   2-second delay using `--continue` to resume the previous conversation.
 //! - On clean exit (code 0): honors the active harness policy.
@@ -178,6 +181,7 @@ const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const AUTO_TRIGGER_TIMEOUT: Duration = Duration::from_secs(30);
 const AUTO_TRIGGER_OUTPUT_BYTES_MAX: usize = 64 * 1024;
+const ROUTE_OWNED_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SHARED_WRITER_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SHARED_WRITER_WRITE_POLL_INTERVAL_MS: i32 = 50;
 const SHARED_WRITER_CHUNK_MAX: usize = 1024;
@@ -468,6 +472,65 @@ fn resume_handoff_failed(
 
 fn clean_exit_before_prompt_seen(auto_trigger_enabled: bool, prompt_visible_once: bool) -> bool {
     !auto_trigger_enabled && !prompt_visible_once
+}
+
+fn route_owned_cycle_changed_after_start(
+    current: &crate::cycle_state::CycleState,
+    baseline: Option<&crate::cycle_state::CycleState>,
+) -> bool {
+    match baseline {
+        None => true,
+        Some(previous) if previous.is_open() => {
+            current.cycle_id != previous.cycle_id
+                || current.updated_at != previous.updated_at
+                || current.phase != previous.phase
+                || current.last_event != previous.last_event
+        }
+        Some(previous) => current.cycle_id != previous.cycle_id,
+    }
+}
+
+fn route_owned_cycle_completed_after_start(
+    current: &crate::cycle_state::CycleState,
+    baseline: Option<&crate::cycle_state::CycleState>,
+) -> bool {
+    route_owned_cycle_changed_after_start(current, baseline)
+        && current.phase == crate::cycle_state::CyclePhase::Committed
+}
+
+fn spawn_route_owned_completion_thread(
+    shared: Arc<SupervisorShared>,
+    file: PathBuf,
+    baseline: Option<crate::cycle_state::CycleState>,
+    completed: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    mut session_log: Option<std::fs::File>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("route-owned-completion".into())
+        .spawn(move || {
+            while !stop.load(Ordering::Relaxed) && !completed.load(Ordering::Relaxed) {
+                if let Ok(Some(state)) = crate::cycle_state::load(&file)
+                    && route_owned_cycle_completed_after_start(&state, baseline.as_ref())
+                {
+                    completed.store(true, Ordering::Relaxed);
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "route_owned_cycle_committed cycle={} event={}",
+                            state.cycle_id, state.last_event
+                        ),
+                    );
+                    shared.stop_requested.store(true, Ordering::Relaxed);
+                    shared.kill_child();
+                    return;
+                }
+                if !sleep_with_stop(&stop, ROUTE_OWNED_COMPLETION_POLL_INTERVAL) {
+                    return;
+                }
+            }
+        })
+        .expect("spawn route-owned completion thread")
 }
 
 fn strip_stale_ctrl_d_before_prompt(
@@ -1627,7 +1690,7 @@ fn spawn_writer_thread(
         .expect("spawn stdin->pty thread")
 }
 
-pub fn run(file: &Path, force: bool) -> Result<()> {
+pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -2003,6 +2066,26 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
 
     // Crash policy state machine
     let mut policy = CrashPolicy::new();
+    let route_owned_cycle_baseline = if route_owned {
+        crate::cycle_state::load(file).unwrap_or(None)
+    } else {
+        None
+    };
+    let route_owned_completion = Arc::new(AtomicBool::new(false));
+    let route_owned_completion_stop = Arc::new(AtomicBool::new(false));
+    let route_owned_completion_thread = if route_owned {
+        log_event(&mut session_log, "route_owned_start enabled=true");
+        Some(spawn_route_owned_completion_thread(
+            shared.clone(),
+            canonical.clone(),
+            route_owned_cycle_baseline,
+            route_owned_completion.clone(),
+            route_owned_completion_stop.clone(),
+            session_log.as_ref().and_then(|f| f.try_clone().ok()),
+        ))
+    } else {
+        None
+    };
 
     // Put stdin into raw mode so the outer pty's line discipline doesn't
     // mangle input bytes (e.g. ICRNL converting \r→\n). Claude Code sets
@@ -2211,6 +2294,11 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
         }
 
         // Check IPC-requested stop
+        if route_owned_completion.load(Ordering::Relaxed) {
+            log_event(&mut session_log, "route_owned_cycle_complete_stop");
+            break "route_owned_cycle_complete";
+        }
+
         if shared.stop_requested.load(Ordering::Relaxed) {
             log_event(&mut session_log, "ipc_stop");
             break "ipc_stop";
@@ -2528,6 +2616,10 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
 
     // Restore terminal to original mode before cleanup
     drop(raw_mode);
+    route_owned_completion_stop.store(true, Ordering::Relaxed);
+    if let Some(handle) = route_owned_completion_thread {
+        let _ = handle.join();
+    }
 
     // Cleanup
     if let Some(mut rw) = resize_watcher.take() {
@@ -2548,6 +2640,18 @@ pub fn run(file: &Path, force: bool) -> Result<()> {
     );
     log_event(&mut session_log, "session_end");
     eprintln!("Session ended for {}", file.display());
+    if route_owned && route_owned_completion.load(Ordering::Relaxed) {
+        log_event(
+            &mut session_log,
+            &format!("route_owned_reap_pane pane={}", pane_id),
+        );
+        eprintln!(
+            "[start] route-owned cycle committed for {}; reaping pane {}",
+            file.display(),
+            pane_id
+        );
+        let _ = tmux.raw_cmd(&["kill-pane", "-t", &pane_id]);
+    }
     Ok(())
 }
 
@@ -3251,7 +3355,7 @@ mod tests {
         let file = tmp.path().join("bad.md");
         std::fs::write(&file, "---\nprompt_presets:\n  key: [oops\n---\n").unwrap();
 
-        let err = run(&file, false).unwrap_err();
+        let err = run(&file, false, false).unwrap_err();
         let message = err.to_string();
 
         assert!(message.contains("invalid YAML frontmatter in"));
@@ -3260,6 +3364,67 @@ mod tests {
         assert!(message.contains("> 2 |   key: [oops"));
         assert!(
             message.contains("Fix the frontmatter between the opening and closing --- markers")
+        );
+    }
+
+    fn test_cycle(
+        id: &str,
+        phase: crate::cycle_state::CyclePhase,
+        updated_at: u64,
+    ) -> crate::cycle_state::CycleState {
+        crate::cycle_state::CycleState {
+            cycle_id: id.to_string(),
+            file: "doc.md".to_string(),
+            phase,
+            last_event: format!("{:?}", phase),
+            started_at: 1,
+            updated_at,
+            snapshot_hash: None,
+            file_hash: None,
+            normalized_snapshot_hash: None,
+            normalized_file_hash: None,
+            capture_id: None,
+            response_sha256: None,
+            had_pending_mutations: false,
+            requires_backlog_capture: false,
+            required_backlog_targets: Vec::new(),
+            required_explicit_backlog_item_count: 0,
+            required_plan_reference_count: 0,
+            pending_done_ids: Vec::new(),
+            reaped_pending_ids: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn route_owned_cycle_completion_ignores_unchanged_committed_baseline() {
+        let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
+        let current = baseline.clone();
+
+        assert!(
+            !route_owned_cycle_completed_after_start(&current, Some(&baseline)),
+            "a stale committed cycle from before route-owned start must not reap the pane"
+        );
+    }
+
+    #[test]
+    fn route_owned_cycle_completion_detects_new_committed_cycle() {
+        let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
+        let current = test_cycle("cycle-2", crate::cycle_state::CyclePhase::Committed, 20);
+
+        assert!(
+            route_owned_cycle_completed_after_start(&current, Some(&baseline)),
+            "a newer committed cycle should stop and reap a route-owned pane"
+        );
+    }
+
+    #[test]
+    fn route_owned_cycle_completion_waits_while_new_cycle_open() {
+        let baseline = test_cycle("cycle-1", crate::cycle_state::CyclePhase::Committed, 10);
+        let current = test_cycle("cycle-2", crate::cycle_state::CyclePhase::WriteApplied, 20);
+
+        assert!(
+            !route_owned_cycle_completed_after_start(&current, Some(&baseline)),
+            "route-owned panes should stay alive for debugging until the new cycle commits"
         );
     }
 

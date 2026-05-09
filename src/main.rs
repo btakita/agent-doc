@@ -397,6 +397,10 @@ enum Commands {
         /// owner already exists in another pane
         #[arg(long)]
         force: bool,
+        /// Internal route-owned pane mode: exit and reap after the first
+        /// binary-owned document cycle commits.
+        #[arg(long = "route-owned", hide = true)]
+        route_owned: bool,
     },
     /// Route /agent-doc command to the correct tmux pane
     Route {
@@ -1416,7 +1420,11 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Start { file, force } => start::run(&file, force),
+        Commands::Start {
+            file,
+            force,
+            route_owned,
+        } => start::run(&file, force, route_owned),
         Commands::Route {
             file,
             dispatch_only,

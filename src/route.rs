@@ -34,9 +34,10 @@
 //!   8. If no registered pane or no claimable pane: auto-starts a new agent session.
 //!      Blocked by `AGENT_DOC_NO_AUTOSTART` env var (used in tests).
 //! - **`auto_start(tmux, file, session_id, file_path, context_session)`**: Public; spawns a
-//!   new agent pane and sends `agent-doc start`. Waits for the agent's idle prompt before
-//!   sending the initial command, then requires a real document-cycle acknowledgment before
-//!   treating the fresh start as successful. Called by `sync.rs` for unresolved files.
+//!   new route-owned agent pane and sends `agent-doc start --route-owned`. Waits for the
+//!   agent's idle prompt before sending the initial command, then requires a real
+//!   document-cycle acknowledgment before treating the fresh start as successful. Called
+//!   by `sync.rs` for unresolved files.
 //! - **`provision_pane(tmux, file, session_id, file_path, context_session, col_args)`**: Like
 //!   `auto_start` but skips waiting for the agent to be ready. Used by sync when only pane
 //!   existence is needed (agent will start asynchronously). Computes `split_before` via
@@ -1159,6 +1160,16 @@ fn cleanup_failed_route_panes(
         if !tmux.pane_alive(p) {
             continue;
         }
+        if failed_route_pane_has_startup_miss(file, p) {
+            eprintln!(
+                "[route] reaping startup-miss pane {} after failed fresh route for {}",
+                p,
+                file.display()
+            );
+            tracing::warn!(pane = %p, "route: killing startup-miss pane from failed fresh route");
+            let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
+            continue;
+        }
         if should_preserve_failed_route_pane(tmux, file, p, session_id) {
             eprintln!(
                 "[route] preserving newly-created pane {} after failed route because it is still the live registered owner for {}",
@@ -1174,6 +1185,19 @@ fn cleanup_failed_route_panes(
         tracing::warn!(pane = %p, "route: killing orphaned pane from failed route");
         let _ = tmux.raw_cmd(&["kill-pane", "-t", p]);
     }
+}
+
+fn failed_route_pane_has_startup_miss(file: &Path, pane_id: &str) -> bool {
+    crate::startup_miss::load(file)
+        .ok()
+        .flatten()
+        .is_some_and(|miss| {
+            miss.pane_id == pane_id
+                && matches!(
+                    miss.origin,
+                    crate::startup_miss::StartupMissOrigin::FreshStart
+                )
+        })
 }
 
 fn failed_route_registry_root(file: &Path) -> Option<std::path::PathBuf> {
@@ -5819,7 +5843,7 @@ fn auto_start_in_session(
     let start_path = rewrite_start_path(file, &cwd, file_path);
 
     // Start agent-doc start in the new pane
-    let start_cmd = format!("{} start {}", agent_doc_bin, start_path);
+    let start_cmd = format!("{} start --route-owned {}", agent_doc_bin, start_path);
     crate::sessions::send_submitted_text(tmux, &new_pane, &start_cmd)?;
 
     eprintln!(
@@ -13818,6 +13842,45 @@ Body\n\
         assert!(
             !should_preserve_failed_route_pane(&iso, &file, &pane, "session-1"),
             "failed-route cleanup should still remove panes that never became the live owner"
+        );
+    }
+
+    #[test]
+    fn failed_route_cleanup_reaps_startup_miss_owner_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+        let iso = IsolatedTmux::new("route-test-cleanup-startup-miss");
+        let pane = iso.new_session("test", dir.path()).unwrap();
+        let file = dir.path().join("tasks/software/corky.md");
+        if let Some(parent) = file.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&file, "# Corky\n").unwrap();
+        sessions::register_full_in(
+            dir.path(),
+            "session-1",
+            &pane,
+            "tasks/software/corky.md",
+            123,
+            "@1",
+        )
+        .unwrap();
+        crate::startup_miss::record(
+            &file,
+            &pane,
+            "session-1",
+            "claude",
+            crate::startup_miss::StartupMissOrigin::FreshStart,
+            None,
+        )
+        .unwrap();
+
+        cleanup_failed_route_panes(&iso, &file, "session-1", std::slice::from_ref(&pane));
+
+        assert!(
+            !iso.pane_alive(&pane),
+            "fresh-route startup-miss panes should be reaped instead of preserved idle"
         );
     }
 

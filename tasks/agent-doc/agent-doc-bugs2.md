@@ -32,7 +32,27 @@ Planned editor autosync, sync latency, and tmux test-budget follow-ups.
 
 Active backlog:
 - [ ] [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
-<!-- agent:boundary:bd028cbd -->
+❯ do [#synclock]. spec-test-build-install-commit-push
+### Re: #synclock — gpt-5
+
+Implemented `#synclock` in `src/agent-doc` and pushed commit `3fb22d0 fix: bound safe passive sync contention` to `origin/20260422/codex-agent-backend`.
+
+What changed:
+- Safe-passive `agent-doc sync --no-autostart` now waits only the `sync_lock_wait` latency budget for `.agent-doc/sync.lock`; on contention it emits `[sync] safe_passive_sync_lock_contention_retry ... phase=sync_lock_wait ... status=over_budget` and returns before ownership proof, auto-start, or tmux reconciliation.
+- JetBrains automatic sync treats that marker as retryable, keeps dedup state unchanged, and reschedules only the latest pending selection/layout snapshot.
+- Manual `Sync Tmux Layout` now shares the editor-side sync guard with automatic sync and shows a visible deferred warning instead of launching another CLI sync while one is already running.
+- Specs and tests were updated, including the JetBrains plugin patch version bump to `0.2.102`.
+
+Verification completed:
+- `cargo test sync_lock`
+- `cargo test safe_passive_lock_contention`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.EditorTabSyncListenerTest --tests com.github.btakita.agentdoc.SyncLayoutActionTest`
+- `make check`
+- `make install`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+- `cargo clippy -- -D warnings`
+- `make plugin-version-check`
+<!-- agent:boundary:1ea1d74d -->
 <!-- /agent:exchange -->
 ###
 
@@ -59,7 +79,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -91,6 +110,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#tmuxbudget] Implement Phase 3 from tasks/agent-doc/plan-editor-autosync-latency-test-budget.md: inventory slow tmux-backed edge tests, keep only real tmux smoke coverage, and migrate pure ownership/controller schedules into deterministic SimWorld traces with runtime-budget tracking.
 - 2026-05-08 [#syncproof] [recommended] Reduce safe-passive proof overhead after lock acquisition: cache cheap controller/session facts for unchanged editor selection, avoid repeated ownership proof on no-op syncs, and keep controller_actor_lookup plus ownership_proof inside explicit latency budgets.
 - 2026-05-08 [#syncprune] [recommended] Shorten no-op prune work: skip or incrementally rate-limit stale/stash pane pruning when the active file/session mapping is unchanged, and keep prune_stash_panes under its 250ms subphase budget.
+- 2026-05-09 [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
 <!-- /agent:pending-done -->
 
 

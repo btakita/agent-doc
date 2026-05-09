@@ -58,7 +58,35 @@ Verification:
 Commits pushed:
 - `src/agent-doc`: `25614925756237cac6d78e1ae31871821aea1bd2` (`fix: defer passive stash agent proof`)
 - superproject `main`: `7a7f5c50a` (`chore: update agent-doc submodule`)
-<!-- agent:boundary:9b28c724 -->
+❯ In the case of rapid changes between editor documents, please background syncing in incomplete intermediate sync and skip unstarted syncs. Only complete the sync of the agent document we last landed on.
+❯ spec-test-build-install-commit-push
+### Re: editor sync superseded retries — gpt-5
+
+Implemented the rapid editor-document switching behavior.
+
+Automatic editor sync now treats retryable results from superseded intermediate syncs as background noise. If an older sync is already running, it can finish, but when it returns a preserved-layout or sync-lock-contention retry after a newer selection exists, JetBrains and VS Code skip the delayed retry for that old snapshot and replay only the latest selected document.
+
+Changed in `src/agent-doc`:
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt`: deferred retries only schedule while the completed generation is still current.
+- `editors/vscode/src/extension.ts` and `editors/vscode/src/tabSync.ts`: same generation-aware deferred retry gate for VS Code tab sync.
+- JetBrains and VS Code tab-sync tests cover the superseded retry decision.
+- `editors/SPEC.md`, `editors/PLUGIN-SPEC.md`, and `editors/jetbrains/SPEC.md` document the last-wins retry contract.
+- `VERSIONS.md` records the change, and JetBrains plugin build version is bumped to `0.2.104`.
+
+Verification:
+- `./gradlew test --tests com.github.btakita.agentdoc.EditorTabSyncListenerTest`
+- `npm test -- --test-name-pattern "tab"`
+- `npm test`
+- `./gradlew test buildPlugin`
+- `make check` passed on rerun. The first full run hit two tmux-backed route timing failures (`fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs`, `full_auto_start_flow`); both passed individually, and the full rerun passed.
+- `make install`
+- `agent-doc --version` => `agent-doc 0.33.16`
+- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.104.zip` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
+
+Commits pushed:
+- `src/agent-doc`: `b2106441322d28e31466822d1698cd79891cccf5` (`fix: skip superseded editor sync retries`)
+- superproject `main`: `81e6d891f` (`chore: update agent-doc submodule`)
+<!-- agent:boundary:015997ee -->
 <!-- /agent:exchange -->
 ###
 

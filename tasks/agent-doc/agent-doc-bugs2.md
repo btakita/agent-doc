@@ -33,11 +33,35 @@ Added Codex manifest warning cleanup to the backlog.
 
 Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
-- [ ] [#respmiss] Direct Codex closeout can complete spec/test/commit/push work but leave the exchange prompt without the assistant response in the task document. Add a fail-closed response-persistence invariant and recovery path. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
-- 8 more active item(s)
-<!-- agent:boundary:4a26339a -->
+- 7 more active item(s)
+❯ The tmux focus should be "snappy". The slower reconciliation should happen in the background and should not block additional tmux focus events. When I focus on the editor document on the oppposite side twice quiclky, there is a noticable delay with focusing the correct tmux pane.
+❯ spec-test-build-install-commit-push
+### Re: tmux focus should stay snappy — gpt-5
+
+Implemented the fast-path fix. `agent-doc focus <file>` no longer launches or waits on the project-controller actor-binding RPC; it now selects a live local actor projection from `.agent-doc/session-actors.json` and falls back to `sessions.json`. That keeps the editor's immediate focus handoff independent of slower `sync --no-autostart` reconciliation, stash cleanup, controller lookup, and sync-lock contention.
+
+Updated specs/docs to make this contract explicit:
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/editors/SPEC.md`
+- `src/agent-doc/editors/PLUGIN-SPEC.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/VERSIONS.md`
+
+Added focused Rust regressions for local actor projection focus and closed-projection fallback in `src/agent-doc/src/focus.rs`.
+
+Verification completed:
+- `cargo check`
+- `cargo test focus_`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+- `src/agent-doc`: `1adc854` (`fix: keep editor focus handoff off controller RPC`) pushed to `origin/20260422/codex-agent-backend`
+- superproject: `f73f6cc26` (`agent-doc: keep focus handoff off controller RPC`) pushed to `origin/main`
+<!-- agent:boundary:1d1a0a33 -->
 <!-- /agent:exchange -->
 ###
 

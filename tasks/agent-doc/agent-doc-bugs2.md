@@ -61,7 +61,15 @@ I added the follow-ups in priority order. The top backlog item is `#editorswitch
 ### Re: Codex manifest warnings backlog — gpt-5.5
 
 Added the Codex plugin/skill manifest warning cleanup to the backlog as `#codex-manifest-warnings`.
-<!-- agent:boundary:842b4953 -->
+❯ do [#codex-manifest-warnings]. Fix local plugin metadata.
+### Re: Codex manifest warnings metadata — gpt-5
+
+Fixed the workspace-owned local metadata by changing `src/agent-doc/.codex-plugin/plugin.json` from `skills: "./"` to `skills: "./.claude/skills/"`. That removes the local Codex `skills path must not be ./` warning without making the plugin root itself a skill directory.
+
+I also checked the other local plugin manifest values. `agent-doc` has 2 default prompts, `corky-gmail` has 3, and their longest prompts are 52 and 55 characters, so the workspace-owned manifests are already inside Codex's `<=3 prompts` and `<=128 chars` limits. The overlong prompt, too-many-prompts, and `..` icon examples visible in the current logs resolve to Codex's generated marketplace cache under `~/.codex/.tmp/plugins/plugins`, not source metadata in this workspace, so I left that cache alone.
+
+Verification passed: `jq empty` on the local plugin/marketplace JSON files, and `make -C src/agent-doc check`.
+<!-- agent:boundary:d43dbb0b -->
 <!-- /agent:exchange -->
 ###
 
@@ -88,7 +96,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#codex-manifest-warnings] Fix repeated Codex plugin/skill manifest warnings: overlong interface.defaultPrompt, more than 3 default prompts, invalid skills path ./, and icon paths containing ..; decide whether to patch local plugin metadata, installer validation, or warning suppression.
 - [ ] [#editorswitchctl] Fix the current editor-document switch split by completing/regressing the Phase D/E controller authority boundary: tasks/software/tsift.md remains actor_state=starting with a healthy supervisor, route refuses injection, and tmux window 4 still has four agent-doc panes. Plan: tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 - [ ] [#controller-timeout] Re-open the controller stalled-client/start hang work for the current route timeout: .agent-doc/state/editor-route-errors/tasks__agent-doc__agent-doc-bugs2.md.txt still reports timed out waiting for .agent-doc/controller.sock. Plan: tasks/agent-doc/plan-controller-stalled-client-start-hang.md
 - [ ] [#sidecar-diverge] [immediate] Finalize sidecar normalization divergence loses patchback — editor does not show response despite git commit. Plan: tasks/agent-doc/plan-finalize-sidecar-divergence.md
@@ -127,6 +134,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
 - 2026-05-09 [#editorswitch] Implement a bounded editor-document switch fast path: resolve the focused markdown file through the controller actor binding, update tmux focus without waiting on stale safe-passive sync/prune work, and add regressions for stale starting sibling sessions like tasks/software/tsift.md.
 - 2026-05-09 [#finalize-do-cascade] finalize --pending-done cascade failure: do #id closeout requires up to 4 finalize attempts due to conflicting pending_capture_guard and pending_done_guard. Plan: tasks/agent-doc/plan-finalize-pending-done-cascade.md
+- 2026-05-09 [#codex-manifest-warnings] Fix repeated Codex plugin/skill manifest warnings: overlong interface.defaultPrompt, more than 3 default prompts, invalid skills path ./, and icon paths containing ..; decide whether to patch local plugin metadata, installer validation, or warning suppression.
 <!-- /agent:pending-done -->
 
 

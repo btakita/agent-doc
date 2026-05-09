@@ -36,7 +36,29 @@ Active backlog:
 - [ ] [#panehang] Post-completion pane not reaped + startup routing miss — agent-doc start spawns Claude Code panes that either (1) complete their cycle but stay alive at idle prompt, or (2) never receive the /agent-doc routing command and sit idle indefinitely. Plan: tasks/agent-doc/plan-hung-pane-reap-and-routing.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - 9 more active item(s)
-<!-- agent:boundary:935b8512 -->
+❯ do [#stashprunefast]. spec-test-build-install-commit-push
+### Re: stashprunefast — gpt-5
+
+Implemented `#stashprunefast`.
+
+Safe-passive sync now uses a separate stash cleanup mode for changed editor selections: it still prunes stale registry entries, idle stash shells, and retained-dead non-stash panes, but it defers live unregistered agent-pane ownership proof to full sync/repair paths. That avoids routine selection changes spending seconds in `prune_stash_panes` proving that live stashed agent panes should be preserved.
+
+Changed in `src/agent-doc`:
+- `src/resync.rs`: added `PreserveLiveAgentStashPanes` cleanup mode and a regression that safe-passive stash cleanup preserves a live `agent-doc`-named stashed pane without owner proof.
+- `src/sync.rs`: safe-passive first-pass cleanup now uses that bounded mode; unchanged layouts still skip expensive stash cleanup via the existing throttle.
+- `specs/07-session-tmux-commands.md` and `VERSIONS.md`: documented the new safe-passive boundary.
+
+Verification:
+- `cargo test safe_passive_stash_cleanup_defers_live_agent_owner_proof`
+- `cargo test safe_passive_prune_cleanup`
+- `make check`
+- `cargo install --path . --force`
+- `agent-doc --version` => `agent-doc 0.33.16`
+
+Commits pushed:
+- `src/agent-doc`: `25614925756237cac6d78e1ae31871821aea1bd2` (`fix: defer passive stash agent proof`)
+- superproject `main`: `7a7f5c50a` (`chore: update agent-doc submodule`)
+<!-- agent:boundary:9b28c724 -->
 <!-- /agent:exchange -->
 ###
 
@@ -63,7 +85,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#stashprunefast] [recommended] Make safe-passive editor sync skip or amortize expensive registered-live stash pane pruning; current logs spend 2.7-4.7s in prune_stash_panes on routine selection changes.
 - [ ] [#panehang] Post-completion pane not reaped + startup routing miss — agent-doc start spawns Claude Code panes that either (1) complete their cycle but stay alive at idle prompt, or (2) never receive the /agent-doc routing command and sit idle indefinitely. Plan: tasks/agent-doc/plan-hung-pane-reap-and-routing.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
@@ -120,6 +141,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-09 [#dodone] Skill does not auto-run --pending-done on do #id completion — when a user prompts 'do [#id]' and the task is completed, the skill's finalize step should include --pending-done <id> automatically. Currently the skill completes the work and finalizes the response but forgets to mark the pending item as done, requiring manual correction.
 - 2026-05-09 [#routeerrstale] [recommended] Clear stale editor-route-errors after a later successful route/session status so the editor does not keep surfacing obsolete proof-timeout or starting-actor diagnostics.
 - 2026-05-09 [#ctrlstatedrift] [recommended] Reconcile controller/supervisor runtime_state with session-actor projection; current tsift status shows actor ready while supervisor/controller lease still reports starting with a stale heartbeat.
+- 2026-05-09 [#stashprunefast] [recommended] Make safe-passive editor sync skip or amortize expensive registered-live stash pane pruning; current logs spend 2.7-4.7s in prune_stash_panes on routine selection changes.
 <!-- /agent:pending-done -->
 
 

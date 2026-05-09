@@ -91,6 +91,10 @@ Later phases may refine caller values without changing the field names.
   and client-side response reads are bounded, each accepted client is handled
   independently, and readiness checks must release any idle controller stream
   before issuing a real RPC.
+- Controller lazy launch must not trust a stale `current_exe()` path after a
+  local binary replacement. If that path no longer exists, launch and bootstrap
+  identity resolution fall back to the invoked command or `agent-doc` on `PATH`;
+  only then may the client fail closed with the missing path in the diagnostic.
 - The phase-3 supervisor path reports these actor transitions through the
   project controller IPC, not by independently rewriting actor files:
   `start_session`, `register_supervisor`, `prompt_ready`, `ipc_inject` /

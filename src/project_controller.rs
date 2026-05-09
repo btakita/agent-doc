@@ -14,6 +14,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -281,7 +282,7 @@ pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>
 }
 
 fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
-    let path = std::env::current_exe().context("failed to locate current agent-doc binary")?;
+    let path = current_agent_doc_binary()?;
     let metadata = std::fs::metadata(&path)
         .with_context(|| format!("failed to stat current agent-doc binary {}", path.display()))?;
     let modified = metadata
@@ -296,6 +297,78 @@ fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
         modified_secs: modified.as_secs(),
         modified_nanos: modified.subsec_nanos(),
     })
+}
+
+fn current_agent_doc_binary() -> Result<PathBuf> {
+    let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
+    resolve_agent_doc_binary_from_env(
+        std::env::current_exe().ok(),
+        std::env::args_os().next(),
+        std::env::var_os("PATH"),
+        &cwd,
+    )
+}
+
+fn resolve_agent_doc_binary_from_env(
+    current_exe: Option<PathBuf>,
+    argv0: Option<OsString>,
+    path_env: Option<OsString>,
+    cwd: &Path,
+) -> Result<PathBuf> {
+    let stale_current_exe = match current_exe {
+        Some(path) if launchable_file(&path) => return Ok(path),
+        other => other,
+    };
+
+    let mut path_search_names = Vec::new();
+    if let Some(raw_argv0) = argv0.as_deref() {
+        let argv0_path = Path::new(raw_argv0);
+        if has_path_separator(argv0_path) {
+            let candidate = if argv0_path.is_absolute() {
+                argv0_path.to_path_buf()
+            } else {
+                cwd.join(argv0_path)
+            };
+            if launchable_file(&candidate) {
+                return Ok(candidate);
+            }
+        } else if !raw_argv0.is_empty() {
+            path_search_names.push(raw_argv0.to_os_string());
+        }
+    }
+    if !path_search_names
+        .iter()
+        .any(|name| name == OsStr::new("agent-doc"))
+    {
+        path_search_names.push(OsString::from("agent-doc"));
+    }
+
+    if let Some(path_env) = path_env {
+        for dir in std::env::split_paths(&path_env) {
+            for name in &path_search_names {
+                let candidate = dir.join(name);
+                if launchable_file(&candidate) {
+                    return Ok(candidate);
+                }
+            }
+        }
+    }
+
+    let stale = stale_current_exe
+        .as_ref()
+        .map(|path| format!("; skipped missing current_exe {}", path.display()))
+        .unwrap_or_default();
+    anyhow::bail!("failed to locate launchable agent-doc binary{stale}");
+}
+
+fn launchable_file(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
+}
+
+fn has_path_separator(path: &Path) -> bool {
+    path.is_absolute() || path.components().count() > 1
 }
 
 fn write_bootstrap(project_root: &Path, launch_mode: LaunchMode) -> Result<ControllerBootstrap> {
@@ -1467,7 +1540,7 @@ pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -
 }
 
 fn launch_detached(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
-    let exe = std::env::current_exe().context("failed to locate current agent-doc binary")?;
+    let exe = current_agent_doc_binary()?;
     Command::new(exe)
         .arg("controller")
         .arg("serve")
@@ -2354,6 +2427,46 @@ mod tests {
             ..stale
         };
         assert!(controller_status_matches_current_binary(&fresh).unwrap());
+    }
+
+    #[test]
+    fn controller_binary_resolution_prefers_existing_current_exe() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let current = dir.path().join("current-agent-doc");
+        let path_bin_dir = dir.path().join("bin");
+        let path_bin = path_bin_dir.join("agent-doc");
+        std::fs::create_dir_all(&path_bin_dir).unwrap();
+        std::fs::write(&current, "current").unwrap();
+        std::fs::write(&path_bin, "path").unwrap();
+
+        let resolved = resolve_agent_doc_binary_from_env(
+            Some(current.clone()),
+            Some(OsString::from("agent-doc")),
+            Some(path_bin_dir.into_os_string()),
+            dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, current);
+    }
+
+    #[test]
+    fn controller_binary_resolution_falls_back_to_path_when_current_exe_is_missing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path_bin_dir = dir.path().join("bin");
+        let path_bin = path_bin_dir.join("agent-doc");
+        std::fs::create_dir_all(&path_bin_dir).unwrap();
+        std::fs::write(&path_bin, "path").unwrap();
+
+        let resolved = resolve_agent_doc_binary_from_env(
+            Some(dir.path().join("deleted-agent-doc")),
+            Some(OsString::from("agent-doc")),
+            Some(path_bin_dir.into_os_string()),
+            dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, path_bin);
     }
 
     fn test_bootstrap(dir: &tempfile::TempDir) -> ControllerBootstrap {

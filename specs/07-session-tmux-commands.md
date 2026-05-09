@@ -290,8 +290,12 @@ missing that binary identity or reports a different path/version/size/mtime
 stamp, the client must shut it down and relaunch before returning a client
 connection. This keeps local installs or rebuilds from leaving a stale
 controller process that rejects newly-added controller RPCs as unknown
-commands. The persisted bootstrap records `project_root`, `socket_path`,
-`launch_mode`, `bootstrap_epoch`, `pid`, and the startup binary identity.
+commands. Detached launch must also tolerate the caller's `current_exe()` path
+being removed by a local install or rebuild: the client should skip that stale
+path and fall back to the invoked command or `agent-doc` on `PATH` before
+reporting a launch failure. The persisted bootstrap records `project_root`,
+`socket_path`, `launch_mode`, `bootstrap_epoch`, `pid`, and the startup binary
+identity.
 Controller request and response reads are bounded: a stalled client connection
 must close with a timeout diagnostic instead of monopolizing the server, and a
 client waiting for a response must fail closed rather than blocking

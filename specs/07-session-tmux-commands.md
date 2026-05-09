@@ -129,16 +129,16 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   --repair` own that recovery boundary.
 - When tmux-router DETACH would evict an unwanted pane whose owning document
   still has an open `preflight_started`, `response_captured`, or
-  `write_applied` cycle, sync must warn and preserve that pane instead of
-  stashing it mid-closeout.
+  `write_applied` cycle, sync must log the open-cycle state and allow
+  non-destructive stashing. The pane and closeout process must stay alive, but
+  the visible editor projection should not grow solely because another document
+  is mid-closeout.
 - If a requested projection is missing from the visible `agent-doc` window and
-  a visible pane is protected by an open closeout cycle, both manual sync and
-  passive `--no-autostart` sync must satisfy the requested projection without
-  waiting for the protected closeout owner. Sync may displace unprotected
-  unwanted visible panes, and when that is insufficient it must attach/focus the
-  requested pane around the protected closeout owner rather than preserving the
-  old layout as a deferred no-op. Temporary visible pane growth is preferable to
-  blocking a different document's sync.
+  a visible pane owns an open closeout cycle, both manual sync and passive
+  `--no-autostart` sync must satisfy the requested projection without waiting
+  for that closeout owner. Sync may displace unrelated unwanted visible panes
+  and may stash the open-cycle pane; blocking a different document's sync is
+  not acceptable.
 - Test coverage for those pure ownership/cardinality decisions should live in
   deterministic `SimWorld` traces. Keep real tmux coverage only for the
   minimal smoke surface that proves pane/window movement, tmux-router detach,

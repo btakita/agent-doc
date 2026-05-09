@@ -125,6 +125,11 @@
 //! - Post-auto_start stash is no longer needed: `tmux_router::sync` always runs the
 //!   full reconcile path (no early exits), so excess panes are stashed during the
 //!   DETACH phase.
+//! - Open closeout panes stay alive during sync reconcile: if an unwanted pane owns
+//!   a document with an open `preflight_started`, `response_captured`, or
+//!   `write_applied` cycle, sync logs that fact but still lets tmux-router stash the
+//!   pane. Stashing is non-destructive, so the closeout keeps running without
+//!   forcing a third visible pane into a two-document editor projection.
 //!
 //! ## Evals
 //! - repair_layout_skips_correct_state: session with agent-doc at index 0 and one
@@ -3800,23 +3805,23 @@ fn run_with_options(
         .unwrap_or(registry_path.as_path());
     let allow_unresolved_pane_assignment =
         |path: &Path| !blocked_unresolved_files.borrow().contains(path);
-    let logged_protected_panes: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
-    let protect_open_cycle_pane = |pane_id: &str| {
+    let logged_open_cycle_panes: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    let log_open_cycle_detach = |pane_id: &str| {
         let Some(protected) = open_cycle_protected_pane_state(tmux, pane_id) else {
             return false;
         };
-        if logged_protected_panes
+        if logged_open_cycle_panes
             .borrow_mut()
             .insert(pane_id.to_string())
         {
             eprintln!(
-                "[sync] preserving pane {} for {} during reconcile because its {} cycle is still open",
+                "[sync] allowing pane {} for {} to be stashed during reconcile while its {} cycle remains open",
                 pane_id,
                 protected.file.display(),
                 protected.phase
             );
             sync_log(&format!(
-                "reconcile_protected_open_cycle pane={} file={} phase={}",
+                "reconcile_open_cycle_detachable pane={} file={} phase={}",
                 pane_id,
                 protected.file.display(),
                 protected.phase
@@ -3824,13 +3829,17 @@ fn run_with_options(
         }
         true
     };
+    let allow_open_cycle_detach = |pane_id: &str| {
+        let _ = log_open_cycle_detach(pane_id);
+        false
+    };
     let tmux_router_options = tmux_router::SyncOptions {
-        protect_pane: Some(&protect_open_cycle_pane),
+        protect_pane: Some(&allow_open_cycle_detach),
         allow_unresolved_pane_assignment: Some(&allow_unresolved_pane_assignment),
     };
 
-    // Only open-cycle panes are protected during DETACH. Other requested
-    // documents may still attach/focus immediately around that protected pane.
+    // Open-cycle panes are logged during DETACH, but they are not kept visible.
+    // Stashing preserves the process and avoids recurring 3-pane projections.
     let router_start = Instant::now();
     let result = tmux_router::sync_with_options(
         col_args,
@@ -3873,12 +3882,12 @@ fn run_with_options(
                 .collect();
             let unprotected_extras: Vec<String> = extra_panes
                 .iter()
-                .filter(|pane| !protect_open_cycle_pane(pane))
+                .filter(|pane| !log_open_cycle_detach(pane))
                 .cloned()
                 .collect();
             if unprotected_extras.is_empty() {
                 sync_log(&format!(
-                    "layout_projection_exceeded_by_protected_open_cycles window={} desired_panes={} actual_visible_panes={} extras={:?}",
+                    "layout_projection_exceeded_by_open_cycles window={} desired_panes={} actual_visible_panes={} extras={:?}",
                     w, projected, pane_count, extra_panes
                 ));
             } else {
@@ -9482,7 +9491,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
-    fn sync_preserves_open_cycle_pane_during_reconcile_detach() {
+    fn sync_stashes_open_cycle_pane_during_reconcile_detach() {
         let iso = IsolatedTmux::new("sync-open-cycle-protect");
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -9559,12 +9568,18 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 
         let visible = iso.list_window_panes("test:agent-doc").unwrap();
         assert!(
-            visible.contains(&pane_a),
-            "open-cycle pane must stay visible instead of being stashed: {visible:?}"
+            !visible.contains(&pane_a),
+            "open-cycle extra pane should be stashed instead of forcing a 3-pane projection: {visible:?}"
         );
         assert!(
             visible.contains(&pane_b),
             "requested pane must remain visible after reconcile: {visible:?}"
+        );
+        assert!(iso.pane_alive(&pane_a), "open-cycle pane must stay alive");
+        assert_ne!(
+            iso.pane_window(&pane_a).unwrap(),
+            window,
+            "open-cycle pane should move out of the visible agent-doc window"
         );
         assert_eq!(
             crate::cycle_state::load(&doc_a).unwrap().unwrap().phase,
@@ -9751,7 +9766,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
-    fn safe_passive_sync_attaches_requested_pane_around_protected_open_cycle_pane() {
+    fn safe_passive_sync_attaches_requested_pane_and_stashes_open_cycle_extra() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         let _cwd = ScopedCurrentDir::set(root);
@@ -9834,8 +9849,8 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 
         let ordered = iso.list_panes_ordered(&target_window).unwrap();
         assert!(
-            ordered.contains(&pane_a),
-            "open-cycle pane must remain visible while other documents sync"
+            !ordered.contains(&pane_a),
+            "open-cycle extra pane should be stashed while other documents sync"
         );
         assert!(
             ordered.contains(&pane_b),
@@ -9849,6 +9864,12 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             iso.pane_window(&pane_c).unwrap(),
             target_window,
             "safe passive sync should move the requested pane into the visible agent-doc window"
+        );
+        assert!(iso.pane_alive(&pane_a), "open-cycle pane must stay alive");
+        assert_ne!(
+            iso.pane_window(&pane_a).unwrap(),
+            target_window,
+            "open-cycle pane should no longer be visible in the requested projection"
         );
     }
 
@@ -9937,8 +9958,8 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 
         let ordered = iso.list_panes_ordered(&target_window).unwrap();
         assert!(
-            ordered.contains(&pane_a),
-            "open-cycle pane must remain visible while other documents sync"
+            !ordered.contains(&pane_a),
+            "open-cycle extra pane should be stashed while other documents sync"
         );
         assert!(
             ordered.contains(&pane_c),
@@ -9951,7 +9972,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         );
     }
 
-    fn sync_replaces_detachable_visible_pane_while_protected_pane_remains(
+    fn sync_replaces_detachable_visible_pane_and_stashes_open_cycle_extra(
         mode: AutoStartMode,
         test_name: &str,
     ) {
@@ -10037,8 +10058,8 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 
         let ordered = iso.list_panes_ordered(&target_window).unwrap();
         assert!(
-            ordered.contains(&protected_pane),
-            "protected open-cycle pane must remain visible"
+            !ordered.contains(&protected_pane),
+            "open-cycle extra pane should be stashed instead of remaining visible"
         );
         assert!(
             ordered.contains(&requested_pane),
@@ -10053,11 +10074,15 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             requested_pane,
             "sync should focus the requested pane after replacing a detachable visible pane"
         );
+        assert!(
+            iso.pane_alive(&protected_pane),
+            "open-cycle pane should stay alive after being stashed"
+        );
     }
 
     #[test]
-    fn safe_passive_sync_replaces_detachable_visible_pane_while_protected_pane_remains() {
-        sync_replaces_detachable_visible_pane_while_protected_pane_remains(
+    fn safe_passive_sync_replaces_detachable_visible_pane_and_stashes_open_cycle_extra() {
+        sync_replaces_detachable_visible_pane_and_stashes_open_cycle_extra(
             AutoStartMode::SafePassive,
             "sync-safe-passive-replace-detachable",
         );
@@ -10065,8 +10090,8 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 
     #[test]
     #[ignore = "covered by sync_sim_tmuxbudget_seed_3002; safe-passive tmux smoke keeps the real pane/window path covered"]
-    fn manual_sync_replaces_detachable_visible_pane_while_protected_pane_remains() {
-        sync_replaces_detachable_visible_pane_while_protected_pane_remains(
+    fn manual_sync_replaces_detachable_visible_pane_and_stashes_open_cycle_extra() {
+        sync_replaces_detachable_visible_pane_and_stashes_open_cycle_extra(
             AutoStartMode::Full,
             "sync-manual-replace-detachable",
         );
@@ -10376,8 +10401,8 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 
         let ordered = iso.list_panes_ordered(&target_window).unwrap();
         assert!(
-            ordered.contains(&pane_a),
-            "open-cycle pane must remain visible while other documents sync"
+            !ordered.contains(&pane_a),
+            "open-cycle extra pane should be stashed while other documents sync"
         );
         assert!(
             ordered.contains(&pane_c),

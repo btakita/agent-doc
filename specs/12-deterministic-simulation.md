@@ -130,19 +130,20 @@ actor model:
 The simulator also owns pure sync-layout ownership schedules that do not need a
 live tmux server:
 
-- `sync_sim_tmuxbudget_seed_3001...` covers the protected-closeout attach case:
+- `sync_sim_tmuxbudget_seed_3001...` covers the open-closeout attach case:
   a hidden requested pane is brought into the visible projection even when the
-  only unwanted visible pane owns an open closeout cycle. The protected owner is
-  not detached, and the requested document syncs immediately with temporary pane
-  growth.
+  only unwanted visible pane owns an open closeout cycle. The open-cycle owner
+  remains alive but can be stashed so sync does not create temporary visible
+  pane growth.
 - `sync_sim_tmuxbudget_seed_3002...` covers the replacement case: a hidden
   requested pane must replace an unprotected unwanted visible pane while a
-  different protected open-cycle pane remains visible.
+  different open-cycle pane remains alive but detached from the visible
+  projection.
 - `sync_sim_tmuxbudget_seed_3003...` covers the focus proof: a preserve-layout
   return still reselects an already-visible requested focus pane.
 - `sync_sim_tmuxbudget_seed_3004...` covers the remaining pure attach/focus
-  variant: a hidden requested pane is attached around a protected open-cycle
-  owner while sync still focuses an already-visible requested sibling.
+  variant: a hidden requested pane is attached while an open-cycle owner can be
+  stashed and sync still focuses an already-visible requested sibling.
 
 Real tmux tests are still required for pane/window movement, `tmux-router`
 reconcile behavior, shell/process ownership proof, and end-to-end editor

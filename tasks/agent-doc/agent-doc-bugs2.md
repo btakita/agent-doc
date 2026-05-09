@@ -29,83 +29,14 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-150127.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-161931.md`*
 
 Active backlog:
-- [ ] [#root-empty-preflight] [recommended] Add a focused route/preflight recovery test for repeated empty preflight_started turns with no capture, using src/session-share/tasks/root.md cycle-1778336475478 as evidence: no response exists to replay, so the next invocation should fail with precise retry/restart guidance instead of repeated silent patchback misses.
-❯ do [#root-empty-preflight]. spec-test-build-install-commit-push
-### Re: #root-empty-preflight — gpt-5
-Implemented `#root-empty-preflight`.
-
-The preflight repair path now refuses to auto-close an empty `preflight_started` cycle when the live document has an unresolved prompt target and no response capture exists. Instead it fails closed with the cycle id, prompt preview, and restart guidance, so the old no-op commit path cannot silently mark the prompt as handled. It still permits deterministic stale-lock cleanup for matching hashes, frontmatter-only stale empty cycles, historical committed repair, and binary-owned orchestration handoff markers.
-
-Updated the closeout spec/README and added focused repair plus preflight regressions for recent/stale empty prompt drift, the root `do #root-empty-preflight` shape, frontmatter-only drift, and orchestration handoff compatibility.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test stale_empty_preflight -- --nocapture`
-- `cargo test empty_preflight_started_cycle -- --nocapture`
-- `cargo test recover_does_not_treat_orchestration_handoff_marker_as_missing_response -- --nocapture`
-- `cargo test --test run_integration orchestrate_handles_already_open_preflight_cycle_for_first_step -- --nocapture`
-- `cargo test alive_registered_pane_fails_closed_when_legacy_live_owner_conflicts -- --nocapture`
-- `make check`
-- `cargo build --release`
-- `cargo install --path .`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits pushed:
-- `src/agent-doc`: `1d06f74` (`fix: fail closed on empty preflight prompt drift`)
-- parent `agent-loop`: `25726bbb0` (`agent-doc: fail closed on empty preflight prompt drift`)
-❯ Please review agent-doc, Claude, Code session logs to evaluate pane sync issues. For example when I switch the editor to tsift.md, only 1 tmux pane is shown with 2 agent docs open in the editor.
-
-❯ spec-test-build-install-commit-push
-### Re: pane sync review — gpt-5
-
-I reviewed the active tmux state and the IntelliJ 2026.1 agent-doc logs for the `tsift.md` switch. The visible symptom was a real sync ordering bug: `sessions.json` still knew about both `tasks/software/tsift.md` and `tasks/agent-doc/agent-doc-bugs2.md`, but tmux had them split across different window indexes while `.agent-doc/last_layout.json` was stale. The editor then invoked `agent-doc sync --no-autostart --focus ...`, which selected the hidden controller actor pane before it acquired `.agent-doc/sync.lock`; when lock contention hit, sync returned the retry marker without reconciling the rest of the layout. That left tmux partially focused/revealed in the wrong shape, matching the one-pane / two-open-docs behavior you described.
-
-I fixed that by moving safe-passive controller actor focus until after the bounded sync lock is acquired. On contention, safe-passive sync now emits the existing retry marker and returns without auto-start, tmux-router reconciliation, or hidden-pane focus changes, so the editor retry owns the latest selection cleanly. I updated the matching README/SPEC/session-tmux contract text and added the regression coverage in `src/sync.rs`.
-
-Verification passed:
-
-- `cargo test safe_passive_sync_does_not_focus_controller_actor_when_sync_lock_is_contended`
-- `make check` in `src/agent-doc`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
-
-Install completed for the local CLI and the IntelliJIdea2026.1 plugin profile. IntelliJ needs a restart to load the reinstalled local plugin.
-
-Commits created locally:
-
-- `aaa3bb8` in `src/agent-doc`: `fix: avoid hidden pane focus on sync contention`
-- `1e7e6d338` in the parent repo: `agent-doc: avoid hidden pane focus on sync contention`
-
-No new follow-up backlog item is needed for this cycle; the fix, tests, docs, build, install, and commits are complete. Per the agent-doc closeout rule, the remote push happens immediately after this session-document finalize/session-check boundary so the session response commit is included correctly.
-❯ Neither autosync nor `Sync Tmux Layout` works after switching the editor to tsift.md. Please investigate root cause(s) and fix.
-❯ spec-test-build-install-commit-push
-### Re: stale sync lock owners — gpt-5
-
-I found the root cause for autosync and `Sync Tmux Layout` failing after switching to `tsift.md`: the parent workspace `.agent-doc/sync.lock` was held by stale orphaned `agent-doc sync` processes from May 8. They were all reparented to PID 1 and most were blocked in `locks_lock_inode_wait`; the active lock owner was sleeping in a socket read. New autosync calls hit the 100ms safe-passive lock budget and returned the retry marker, while manual sync waited about 3 seconds before continuing, so neither path could reliably repair the layout.
-
-I fixed `src/agent-doc/src/sync.rs` so sync lock acquisition now detects stale orphaned `agent-doc sync` processes that still have the same lock file open, sends them `SIGTERM`, and retries lock acquisition before reporting contention. The guard is narrow: it requires `PPid == 1`, command `agent-doc sync`, age at least 5 minutes, and an open fd to the exact lock file. I also updated `README.md`, `SPEC.md`, `CLAUDE.md`, and `specs/07-session-tmux-commands.md` to capture that contract.
-
-I exercised the fix against the live parent workspace: the rebuilt debug binary reaped 17 stale sync lock owners, and the installed release binary then completed a safe-passive sync for `tasks/software/tsift.md`, swapping `%273` into the visible `agent-doc` window with no lock retry.
-
-Verification passed:
-
-- `cargo fmt --check`
-- `cargo test sync_lock`
-- `make check`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
-- installed binary smoke: `agent-doc sync --col .../tasks/software/tsift.md --col .../tasks/agent-doc/agent-doc-bugs2.md --focus .../tasks/software/tsift.md --no-autostart`
-
-Install completed for the local CLI and the IntelliJIdea2026.1 plugin profile. IntelliJ still needs a restart to load the reinstalled local plugin.
-
-Commits created locally:
-
-- `d8f3352` in `src/agent-doc`: `fix: reap stale sync lock owners`
-- `3e56b0b45` in the parent repo: `agent-doc: reap stale sync lock owners`
-
-No new follow-up backlog item is needed for this cycle; the root cause, fix, tests, build, install, and commits are complete. Per the agent-doc closeout rule, the remote push happens immediately after this session-document finalize/session-check boundary so the session response commit is included correctly.
-<!-- agent:boundary:602785c1 -->
+- [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
+- [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
+- [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
+- 7 more active item(s)
+<!-- agent:boundary:71e84184 -->
 <!-- /agent:exchange -->
 ###
 

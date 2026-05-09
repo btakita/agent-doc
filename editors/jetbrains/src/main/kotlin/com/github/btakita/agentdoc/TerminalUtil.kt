@@ -183,6 +183,7 @@ object TerminalUtil {
                         )
                     } else {
                         LOG.warn("[route] SUCCESS: $output")
+                        clearPersistedRouteFailureOutput(cwd, relativePath)
                     }
                 } finally {
                     inFlightRouteRegistry.clearIfCurrent(routeKey, handle)
@@ -299,12 +300,14 @@ object TerminalUtil {
     }
 
     fun showSessionStatus(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        val (cwd, _) = resolveProject(project, file)
         runSessionCommand(
             project = project,
             file = file,
             args = listOf("status"),
             startedMessage = "Loading session status for ${file.name}",
             onSuccess = { relativePath, output ->
+                clearPersistedRouteFailureOutput(cwd, relativePath)
                 notifyInfo(project, sessionStatusSuccessMessage(relativePath, output))
             },
             onComplete = onComplete,
@@ -512,6 +515,15 @@ object TerminalUtil {
             diagnostics
         } catch (_: Exception) {
             null
+        }
+    }
+
+    internal fun clearPersistedRouteFailureOutput(cwd: String, relativePath: String): Boolean {
+        return try {
+            val diagnostics = routeFailureDiagnosticsFile(cwd, relativePath)
+            diagnostics.exists() && diagnostics.delete()
+        } catch (_: Exception) {
+            false
         }
     }
 

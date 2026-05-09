@@ -6,7 +6,7 @@ Common behavior required of all `agent-doc` editor plugins.
 
 - **Trigger:** `Ctrl+Shift+Alt+A` (configurable)
 - **Behavior:** Save the active `.md` file, call `agent-doc route --dispatch-only <relative-path>` from the project root. This action must send the bare harness trigger into the owning live session; it must not restart Codex just because the latest tracked prompt was `/clear`.
-- **Feedback:** Show an immediate in-flight info notification while `agent-doc route` is running, then finish with an inline hint near the cursor. Error notifications persist.
+- **Feedback:** Show an immediate in-flight info notification while `agent-doc route` is running, then finish with an inline hint near the cursor. Error notifications persist. If an editor persists exact route failures to disk, a later successful route for the same document must clear that saved diagnostic so obsolete startup/proof failures are not surfaced after recovery.
 - **Availability:** Only enabled when a `.md` file is active.
 
 ## 2. Claim for Tmux Pane
@@ -44,7 +44,7 @@ Common behavior required of all `agent-doc` editor plugins.
 
 ## 6a. Session Operator Actions
 
-- **Show Session Status:** Run `agent-doc session status <relative-path>` and surface the full output in an IDE-owned diagnostics surface.
+- **Show Session Status:** Run `agent-doc session status <relative-path>` and surface the full output in an IDE-owned diagnostics surface. A successful status command must clear any persisted route-error diagnostic for the same document.
 - **Restart Supervisor Process:** Run `agent-doc session restart-supervisor <relative-path>` (the legacy `session restart` alias remains valid) and show an inline success hint once the restart request is accepted.
 - **Clear Session Context:** Run `agent-doc session clear <relative-path>` so the authoritative session receives the harness-native clear command instead of the plugin pasting `/clear` directly into tmux. The next Run action must still dispatch the bare reopen into that same session.
 - **Copy Session Diagnostics:** Run `agent-doc session doctor <relative-path>`, show the output in an IDE-owned diagnostics surface, and offer a one-click copy path for the exact text.

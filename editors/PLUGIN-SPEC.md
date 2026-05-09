@@ -87,7 +87,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Behavior:**
   1. Save the active document to disk.
   2. Run `agent-doc route --dispatch-only <relative-path>` via subprocess from project root. This must stay a bare reopen send into the owning session, not a post-`/clear` restart shortcut.
-  3. Show an immediate in-flight info notification while route is running, then an inline hint on success and a persistent error notification on failure. Failure UI must preserve the exact route error text in a copyable surface (for example, copy action plus saved diagnostics file) instead of only a transient toast.
+  3. Show an immediate in-flight info notification while route is running, then an inline hint on success and a persistent error notification on failure. Failure UI must preserve the exact route error text in a copyable surface (for example, copy action plus saved diagnostics file) instead of only a transient toast. A later successful route for the same document must clear that saved route-error diagnostic so obsolete startup/proof failures are not surfaced after recovery.
   4. Register the file for prompt polling (Section 2.6).
 - **Run action statelessness:** Do not block manual Run behind a plugin-local "already in progress" gate. Repeated Run presses should still dispatch the bare reopen and let the CLI own pane targeting.
 - **Truncation detection (`diff --wait`):** The CLI's diff path runs `agent-doc diff --wait <file>` before reading, which polls for up to 5 seconds until the last line of the file is not a partial (truncated) write. Plugins do not need to implement this — it is handled inside the binary. However, plugins should save the document to disk *before* invoking route so that `diff --wait` sees the latest content.
@@ -134,7 +134,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 
 ### 2.8 Session Operator Actions
 
-- **Show Session Status:** Run `agent-doc session status <relative-path>`. Plugins must display the exact CLI output instead of paraphrasing actor/registry/supervisor state themselves.
+- **Show Session Status:** Run `agent-doc session status <relative-path>`. Plugins must display the exact CLI output instead of paraphrasing actor/registry/supervisor state themselves. A successful status command for the same document must clear any persisted editor route-error diagnostic for that document because the old failure is no longer the latest observed state.
 - **Restart Supervisor Process:** Run `agent-doc session restart-supervisor <relative-path>` (the legacy `session restart` alias remains valid). Plugins must not send raw tmux control keys as a substitute for the actor-owned restart path.
 - **Clear Session Context:** Run `agent-doc session clear <relative-path>` so Codex/Claude clear behavior stays aligned with the binary-owned clear-command path. The next Run action must still dispatch the bare reopen into the same live session.
 - **Copy Session Diagnostics:** Run `agent-doc session doctor <relative-path>`, preserve the exact text in an IDE diagnostics surface, and provide a one-click copy path.

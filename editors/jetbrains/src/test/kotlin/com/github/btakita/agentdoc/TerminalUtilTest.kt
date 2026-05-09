@@ -120,6 +120,24 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `successful route or status clears persisted route failure for document`() {
+        val cwd = Files.createTempDirectory("agent-doc-jb-route-error-clear").toFile()
+        val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
+        val output = "[agent-doc] proof-timeout: accepted but unproven\n"
+        val saved = TerminalUtil.persistRouteFailureOutput(
+            cwd = cwd.path,
+            relativePath = relativePath,
+            routeOutput = output,
+        )
+
+        assertNotNull(saved)
+        assertTrue(saved!!.isFile)
+        assertTrue(TerminalUtil.clearPersistedRouteFailureOutput(cwd.path, relativePath))
+        assertFalse(saved.exists())
+        assertFalse(TerminalUtil.clearPersistedRouteFailureOutput(cwd.path, relativePath))
+    }
+
+    @Test
     fun `session status success keeps exact cli output`() {
         val output = "generation=4\nstate=waiting_input\npane=%12"
 

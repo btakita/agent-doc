@@ -29,49 +29,14 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-204409.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-212016.md`*
 
 Active backlog:
-- [ ] [#panehang] Post-completion pane not reaped + startup routing miss — agent-doc start spawns Claude Code panes that either (1) complete their cycle but stay alive at idle prompt, or (2) never receive the /agent-doc routing command and sit idle indefinitely. Plan: tasks/agent-doc/plan-hung-pane-reap-and-routing.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
-- 8 more active item(s)
-❯ do [#panehang]. spec-test-build-install-commit-push
-### Re: #panehang — gpt-5
-
-Implemented `#panehang`.
-
-- Route-created panes now launch `agent-doc start --route-owned`. That internal mode watches for the first new binary-owned document cycle to reach `committed`, stops the child harness, and reaps the tmux pane. Manual `agent-doc start` remains persistent.
-- Failed fresh-route startup misses now record the startup-miss marker and reap the just-created pane instead of preserving an idle registered owner indefinitely.
-- Updated the route/start specs and command docs, plus focused regressions for route-owned cycle completion and startup-miss cleanup.
-
-Verification completed: focused route/start tests, `cargo check`, `make check`, `cargo build`, and `cargo install --path .`.
-
-Pushed commits:
-- `src/agent-doc`: `2ad446d` (`fix: reap route-owned startup panes`)
-- `agent-loop`: `826e87a8e` (`agent-doc: reap route-owned startup panes`)
-❯ When I write into the html-style comment while an agent-doc task is running, agent-doc deletes what was written in the html-style comment. The contents any user edit should persist. If the document is in a broken state, the repair should only drop the offending content.
-❯ spec-test-build-install-commit-push
-### Re: scratch comment preservation — gpt-5
-
-Implemented the scratch-comment preservation fix.
-
-- Ordinary HTML scratch comments that are temporarily unterminated while the user is typing now count as ignored comment ranges through EOF for escaped-tail and prompt-drift scanners.
-- Prompt-looking text inside those in-progress comments is no longer moved into `agent:exchange` or stripped by repair.
-- Updated the template/comment specs and added focused regressions for unterminated scratch-comment tails.
-
-Verification completed:
-- `cargo test unterminated --lib`
-- `cargo test`
-- `cargo check`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-
-Pushed commits:
-- `src/agent-doc`: `2b63ff1` (`fix: preserve in-progress scratch comments`)
-- `agent-loop`: `12a55584b` (`agent-doc: preserve in-progress scratch comments`)
-<!-- agent:boundary:376b1e2c -->
+- [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
+- 7 more active item(s)
+<!-- agent:boundary:4a26339a -->
 <!-- /agent:exchange -->
 ###
 

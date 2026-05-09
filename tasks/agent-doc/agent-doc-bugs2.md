@@ -62,7 +62,26 @@ Updated `src/agent-doc/src/sync.rs`, `src/agent-doc/SPEC.md`, `src/agent-doc/spe
 Verification passed: focused `cargo test safe_passive_sync_focuses_controller_actor_before_contended_sync_lock`, `cargo fmt`, full `make check`, `make install`, and `agent-doc --version` (`0.33.16`).
 
 Committed and pushed agent-doc subrepo commit `d7c06b72` (`fix: focus editor sync before lock contention`) and parent repo submodule pointer commit `b0600bdb6` (`agent-doc: update editor sync focus fix`).
-<!-- agent:boundary:1b344440 -->
+❯ do [#finalize-do-cascade]. spec-test-build-install-commit-push
+### Re: #finalize-do-cascade — gpt-5
+Implemented `#finalize-do-cascade` so `finalize --pending-done <id>` now satisfies the `do #id` pending-capture requirement in the same closeout pass.
+
+Changes made:
+- `write` records `--pending-done` as a pending mutation before closeout guards run, so pending-capture accepts item resolution without a second repair/finalize cycle.
+- `pending done` is idempotent when the item was already resolved in cycle state or reaped into `agent:pending-done`, emitting a warning instead of failing with `id not found`.
+- Added write, pending-command, and finalize integration regressions, plus updated `SPEC.md`, closeout/pending specs, and `VERSIONS.md`.
+
+Verification:
+- `cargo fmt`
+- focused regressions for pending-capture, idempotent pending-done, and finalize already-reaped behavior
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits:
+- `98b3edc` in `src/agent-doc`: `fix: make pending-done satisfy do-id closeout` (pushed to `origin/20260422/codex-agent-backend`)
+- `be124f7fd` in the parent repo: `agent-doc: update pending-done closeout fix`
+<!-- agent:boundary:1b0b9174 -->
 <!-- /agent:exchange -->
 ###
 
@@ -89,7 +108,6 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 
 <!-- agent:backlog -->
 
-- [ ] [#finalize-do-cascade] finalize --pending-done cascade failure: do #id closeout requires up to 4 finalize attempts due to conflicting pending_capture_guard and pending_done_guard. Plan: tasks/agent-doc/plan-finalize-pending-done-cascade.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -123,6 +141,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 - 2026-05-08 [#syncprune] [recommended] Shorten no-op prune work: skip or incrementally rate-limit stale/stash pane pruning when the active file/session mapping is unchanged, and keep prune_stash_panes under its 250ms subphase budget.
 - 2026-05-09 [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
 - 2026-05-09 [#editorswitch] Implement a bounded editor-document switch fast path: resolve the focused markdown file through the controller actor binding, update tmux focus without waiting on stale safe-passive sync/prune work, and add regressions for stale starting sibling sessions like tasks/software/tsift.md.
+- 2026-05-09 [#finalize-do-cascade] finalize --pending-done cascade failure: do #id closeout requires up to 4 finalize attempts due to conflicting pending_capture_guard and pending_done_guard. Plan: tasks/agent-doc/plan-finalize-pending-done-cascade.md
 <!-- /agent:pending-done -->
 
 

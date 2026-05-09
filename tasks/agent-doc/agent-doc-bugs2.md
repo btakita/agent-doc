@@ -36,14 +36,69 @@ Active backlog:
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - 9 more active item(s)
-<!-- agent:boundary:074b9d2b -->
+❯ External edits cause duplicate turn responses. Please address root cause(s) including reducing the occurences of external edits.
+❯ spec-test-build-install-commit-push
+### Re: external edits causing duplicate turn responses — gpt-5
+
+Fixed the IPC timeout replay root cause. The CLI now treats `.agent-doc/claimed-patches/<patch_id>` as a durable per-patch skip sentinel instead of a one-shot token, so repeated editor watcher passes or multiple consumers cannot race the same stale timeout patch back into the editor after the CLI has already written and committed the response locally.
+
+I also tightened the JetBrains watcher inner EDT dedup path so a claimed/stale patch file is deleted when the late re-check skips it. That reduces the external-edit churn source directly: stale IPC files left behind after disk fallback should be cleaned instead of being eligible for a later duplicate response apply.
+
+Changed files are in `src/agent-doc`:
+- `src/ffi.rs`
+- `editors/vscode/src/patchGuard.ts`
+- `editors/vscode/src/patchGuard.test.ts`
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt`
+- `editors/jetbrains/gradle.properties`
+- `specs/06-config.md`
+- `VERSIONS.md`
+
+Verification and install completed:
+- `cargo test -p agent-doc test_is_claimed_by_force_disk_present`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `make check` in `src/agent-doc`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
+- `make install` in `src/agent-doc`
+- `agent-doc --version` reports `agent-doc 0.33.16`
+- Installed the locally built JetBrains plugin `0.2.106` into the active IntelliJ IDEA 2026.1 config root; restart the IDE to activate it.
+
+Commits created:
+- `src/agent-doc`: `4f09f36 fix: make claimed ipc patches durable`
+- parent repo: `51d9fbfc5 agent-doc: durable ipc patch claims`
+### Re: external edits causing duplicate turn responses — gpt-5
+
+Fixed the IPC timeout replay root cause. The CLI now treats `.agent-doc/claimed-patches/<patch_id>` as a durable per-patch skip sentinel instead of a one-shot token, so repeated editor watcher passes or multiple consumers cannot race the same stale timeout patch back into the editor after the CLI has already written and committed the response locally.
+
+I also tightened the JetBrains watcher inner EDT dedup path so a claimed/stale patch file is deleted when the late re-check skips it. That reduces the external-edit churn source directly: stale IPC files left behind after disk fallback should be cleaned instead of being eligible for a later duplicate response apply.
+
+Changed files are in `src/agent-doc`:
+- `src/ffi.rs`
+- `editors/vscode/src/patchGuard.ts`
+- `editors/vscode/src/patchGuard.test.ts`
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt`
+- `editors/jetbrains/gradle.properties`
+- `specs/06-config.md`
+- `VERSIONS.md`
+
+Verification and install completed:
+- `cargo test -p agent-doc test_is_claimed_by_force_disk_present`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `make check` in `src/agent-doc`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
+- `make install` in `src/agent-doc`
+- `agent-doc --version` reports `agent-doc 0.33.16`
+- Installed the locally built JetBrains plugin `0.2.106` into the active IntelliJ IDEA 2026.1 config root; restart the IDE to activate it.
+
+Commits created:
+- `src/agent-doc`: `4f09f36 fix: make claimed ipc patches durable`
+- parent repo: `51d9fbfc5 agent-doc: durable ipc patch claims`
+<!-- agent:boundary:cac3cd9c -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-External edits cause duplicate turn responses. Please address root cause(s) including reducing the occurences of external edits.
-spec-test-build-install-commit-push
----
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
 `❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?

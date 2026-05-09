@@ -28,110 +28,11 @@ Planned editor autosync, sync latency, and tmux test-budget follow-ups.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260508-214856.md`*
-❯ When I switch to the opposite editor pane, autosync + `Sync Tmux Layout` takes over 5s for the tmux pane to change.
-❯ Why does the sync take so long?
-### Re: sync latency — gpt-5
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-043640.md`*
 
-It is not tmux pane switching itself taking 5s. The recent `ops.log` entries show the slow path is mostly serialized sync overhead before tmux-router gets to reconcile the layout.
-
-The latest safe-passive run I found was:
-
-- `sync_lock_wait`: about 3004ms, over the 100ms budget
-- `prune_stash_panes`: about 1055ms, over the 250ms subphase budget
-- total `prune`: about 1075ms, over the 1000ms budget
-- `controller_actor_lookup`: about 59ms and 84ms
-- `ownership_proof`: about 347ms
-- `tmux_router`: about 19ms
-- `safe_passive_total`: about 5295ms, over the 1000ms budget
-
-So the visible delay is mainly two things: autosync/manual sync contention on `.agent-doc/sync.lock`, which can burn the full 3s wait budget when another sync is already running, plus conservative stale/stash pane cleanup during prune. The actual tmux layout reconcile phase is fast in this trace.
-
-That also explains why it shows up when switching panes in the editor: editor autosync can already be running, then a manual `Sync Tmux Layout` or another selection event queues behind it. The queued command still does its own prune/proof/reconcile after the lock wait, so the end-to-end time lands around 5s even though the final pane selection is quick.
-
-❯ The current tree has already started making this accountable: sync now emits phase-level timings (`sync_lock_wait`, prune subphases, `controller_actor_lookup`, `projection_refresh`, `ownership_proof`, `tmux_router`, and total safe-passive time). The remaining optimization target is to avoid holding/contending the sync lock for routine selection churn and to shorten or skip expensive stash-pane prune work on the no-op safe-passive path.
-### Re: closeout guard — gpt-5
-
-❯ No additional prompt-bearing change was present after the sync-latency response. The later working-tree delta was comment-only after template comment stripping, so there was nothing else to answer in this cycle.
-### Re: comment-only drift — gpt-5
-
-A follow-up preflight still found no prompt-bearing document change after stripping comments. I am closing this as comment-only drift; the substantive sync-latency answer above remains the response for the user question.
-### Re: prefix repair opt-in — gpt-5
-
-Yes. The recurring prefix loss was brittle opt-out behavior: after an agent response heading, post-commit repair treated an existing `❯ ` as enough evidence to reopen a prompt run inside agent prose. That meant one stale or misplaced prefix could keep making assistant text look like a user prompt.
-
-I changed the repair path to opt-in criteria. A line inside an agent response block is now eligible only when it is an explicit current normalization target, or when the line independently looks like a prompt, question, imperative, or soft request. A bare existing `❯ ` is not enough anymore.
-
-Implemented in `src/agent-doc/src/diff.rs`, `src/agent-doc/src/git.rs`, and `src/agent-doc/src/write.rs`; the invariant is documented in `src/agent-doc/specs/07-closeout-commands.md`.
-
-Verification passed:
-- `cargo test -p agent-doc prefix`
-- `cargo test -p agent-doc duplicate_missing_lines`
-- `cargo test`
-- `cargo build`
-- `cargo install --path . --force`
-- `make check` from `src/agent-doc`
-
-Root `make check` exits immediately because the root Makefile references a missing `instruction-files` directory; the crate-local suite completed successfully.
-
-Commit / push:
-- `src/agent-doc` commit `fdc9177` pushed to `origin/20260422/codex-agent-backend`
-❯ What are the #next-steps to reduce the sync command latency?
-### Re: sync latency next steps — gpt-5
-
-The next steps should attack the measured latency in priority order:
-
-1. `#synclock` — remove the 3s lock-wait path for routine editor selection churn. Autosync and manual `Sync Tmux Layout` should coalesce, supersede, or join equivalent safe-passive syncs instead of serializing a redundant run behind `.agent-doc/sync.lock`.
-2. `#syncprune` — make no-op sync prune work cheap. The trace showed `prune_stash_panes` around 1055ms, so stale/stash pane cleanup should be skipped, cached, or rate-limited when the selected markdown/session mapping has not changed.
-3. `#syncproof` — reduce repeated proof overhead after the lock is acquired. Cache unchanged controller/session facts and avoid ownership proof on no-op safe-passive syncs while keeping phase-level budgets visible.
-
-I added those backlog items in that order. Top backlog item: `#synclock`.
-❯ do [#syncproof]. spec-test-build-install-commit-push
-### Re: syncproof — gpt-5
-
-Implemented `#syncproof` in `src/agent-doc`.
-
-What changed:
-- Added a per-sync ownership proof cache so repeated checks for the same document/session/pane reuse already-proven controller actor bindings and live-owner results within the cycle.
-- Routed pre-reconcile ownership checks, synthetic tmux-router registry construction, and post-router registry projection through the shared cache.
-- Added a regression covering per-cycle actor lookup reuse.
-- Updated the sync/tmux spec and `VERSIONS.md` entry for the `#syncproof` closeout.
-
-Verification passed:
-- `cargo test -p agent-doc sync_proof_cache_reuses_actor_lookup_within_one_sync_cycle`
-- `cargo test`
-- `cargo build`
-- `cargo install --path . --force`
-- `make check`
-
-Commit / push:
-- `src/agent-doc` commit `326552f` pushed to `origin/20260422/codex-agent-backend`
-
-Marked `#syncproof` done.
-❯ do [#syncprune]. spec-test-build-install-commit-push
-### Re: syncprune — gpt-5
-
-Implemented `#syncprune` in `src/agent-doc`.
-
-What changed:
-- Safe-passive sync now records a short-lived visible column/window fingerprint and rate-limits expensive stash cleanup when that mapping is unchanged.
-- Repeated `sync --no-autostart` focus churn still prunes stale registry entries and retained-dead non-stash panes, but skips `prune_stash_windows` and `prune_stash_panes` inside the throttle window.
-- Normal prune callers still use full cleanup, and safe-passive cleanup falls back to full cleanup after the throttle expires or the visible layout changes.
-- Added focused regressions for unchanged layouts, focus-only changes, layout changes, and throttle expiry.
-- Updated the sync/tmux spec and `VERSIONS.md` entry for the `#syncprune` closeout.
-
-Verification passed:
-- `cargo test -p agent-doc safe_passive_prune_cleanup`
-- `cargo test`
-- `cargo build`
-- `cargo install --path . --force`
-- `make check`
-
-Commit / push:
-- `src/agent-doc` commit `1ac3fe1` pushed to `origin/20260422/codex-agent-backend`
-
-Marked `#syncprune` done.
-<!-- agent:boundary:a03762e7 -->
+Active backlog:
+- [ ] [#synclock] Coalesce editor autosync and manual Sync Tmux Layout requests so routine selection churn does not wait the full 3s sync_lock_wait budget; make redundant safe-passive syncs join, supersede, or fail fast with a visible over-budget phase.
+<!-- agent:boundary:bd028cbd -->
 <!-- /agent:exchange -->
 ###
 

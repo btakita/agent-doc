@@ -29,38 +29,14 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-185115.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-190935.md`*
 
 Active backlog:
-- [ ] [#ctrlstatedrift] [recommended] Reconcile controller/supervisor runtime_state with session-actor projection; current tsift status shows actor ready while supervisor/controller lease still reports starting with a stale heartbeat.
 - [ ] [#stashprunefast] [recommended] Make safe-passive editor sync skip or amortize expensive registered-live stash pane pruning; current logs spend 2.7-4.7s in prune_stash_panes on routine selection changes.
+- [ ] [#panehang] Post-completion pane not reaped + startup routing miss — agent-doc start spawns Claude Code panes that either (1) complete their cycle but stay alive at idle prompt, or (2) never receive the /agent-doc routing command and sit idle indefinitely. Plan: tasks/agent-doc/plan-hung-pane-reap-and-routing.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - 9 more active item(s)
-❯ do [#ctrlstatedrift]. spec-test-build-install-commit-push
-### Re: ctrlstatedrift — gpt-5
-
-Implemented `#ctrlstatedrift`.
-
-- Added a controller `supervisor_heartbeat` path that refreshes the persisted supervisor lease `runtime_state`, heartbeat, pid, and socket after verifying the session id, pane id, and generation still match the authoritative actor.
-- Extended supervisor IPC `state` responses with actor session, pane, and generation proof.
-- Updated `session status` / `doctor` context loading so a live matching supervisor refreshes stale controller lease data before diagnostics are printed, without adding a duplicate actor transition.
-- Updated `SPEC.md` and `README.md` for the lease-refresh invariant.
-
-Verification:
-- `cargo fmt`
-- `cargo test controller_supervisor_heartbeat_refreshes_stale_lease_without_actor_transition -- --test-threads=1`
-- `cargo test status_context_refreshes_controller_lease_from_matching_live_supervisor -- --test-threads=1`
-- `cargo check`
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits pushed:
-- `src/agent-doc`: `3592b0e fix: refresh supervisor lease from live status`
-- outer repo: `66d93879d chore: update agent-doc submodule`
-
-No follow-up backlog items were created by this fix. The user-added `#panehang` backlog item remains open.
-<!-- agent:boundary:214c3a11 -->
+<!-- agent:boundary:935b8512 -->
 <!-- /agent:exchange -->
 ###
 

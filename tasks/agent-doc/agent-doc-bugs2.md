@@ -36,7 +36,26 @@ Active backlog:
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
 - 7 more active item(s)
-<!-- agent:boundary:71e84184 -->
+❯ When I switch the editor to a different file on the left or right editor pane, a 1 tmux pane view on the agent-doc tmux window shows...then after a few seconds the correct 2 tmux pane view shows. The 2 tmux pane view should be shown with only the tmux pane on the same side of the editor document switch.
+❯ spec-test-build-install-commit-push
+### Re: focus-only editor sync split layout — gpt-5
+
+Fixed the transient one-pane tmux collapse on editor tab switches.
+
+The safe-passive sync path now treats a focus-only editor update as a same-side tab switch when the last recorded layout had multiple columns. It captures the active tmux column before any actor focus handoff, expands the one-file projection back through the remembered sibling layout, and replaces only that active side before tmux-router reconciliation runs.
+
+Updated specs in `src/agent-doc/SPEC.md` and `src/agent-doc/editors/SPEC.md`, and added regressions in `src/agent-doc/src/sync.rs` for both the pure column expansion and a real tmux-backed two-pane handoff.
+
+Verification completed:
+- `cargo test safe_passive_focus_only`
+- `make check`
+- `make build-release install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits pushed:
+- `src/agent-doc`: `69bc440 fix: preserve split layout on focus-only sync`
+- outer `agent-loop`: `0c3e837ca chore: update agent-doc submodule`
+<!-- agent:boundary:0c8b5361 -->
 <!-- /agent:exchange -->
 ###
 

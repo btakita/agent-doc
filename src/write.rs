@@ -4746,6 +4746,51 @@ fn repair_disk_from_normalization_fallback(file: &Path, fallback: &str) -> Resul
     Ok(())
 }
 
+fn redeliver_normalization_fallback_to_editor(file: &Path, fallback: &str) {
+    match try_ipc_full_content(file, fallback) {
+        Ok(true) => {
+            eprintln!(
+                "[write] sidecar normalization fallback re-delivered to editor via full-content IPC"
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "sidecar_normalization_fallback_redelivered_editor file={} bytes={}",
+                    file.display(),
+                    fallback.len()
+                ),
+            );
+        }
+        Ok(false) => {
+            eprintln!(
+                "[write] WARNING: sidecar normalization fallback repaired disk, but editor IPC repair was not consumed; reload the document if the editor view is stale"
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "sidecar_normalization_fallback_editor_repair_not_consumed file={} bytes={}",
+                    file.display(),
+                    fallback.len()
+                ),
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "[write] WARNING: sidecar normalization fallback repaired disk, but editor IPC repair failed: {}; reload the document if the editor view is stale",
+                e
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "sidecar_normalization_fallback_editor_repair_failed file={} error={}",
+                    file.display(),
+                    e
+                ),
+            );
+        }
+    }
+}
+
 /// Result of an IPC write attempt, including the patch_id used.
 ///
 /// The `patch_id` is returned so callers (e.g., `run_stream()` timeout fallback)
@@ -4941,6 +4986,7 @@ pub fn try_ipc(
                     }
                     if repair_disk {
                         repair_disk_from_normalization_fallback(file, &effective_snap)?;
+                        redeliver_normalization_fallback_to_editor(file, &effective_snap);
                     }
                     crate::ops_log::log_op(
                         file,
@@ -5326,6 +5372,7 @@ fn write_ipc_and_poll(
                                     ),
                                 );
                                 repair_disk_from_normalization_fallback(doc_file, &fallback)?;
+                                redeliver_normalization_fallback_to_editor(doc_file, &fallback);
                                 fallback
                             } else {
                                 eprintln!(
@@ -8483,6 +8530,136 @@ agent response
             disk.contains("❯ do #bppfxstrip. spec-test-build-install-commit-push"),
             "content_ours fallback must repair the working tree before commit; got: {}",
             disk
+        );
+    }
+
+    #[test]
+    fn normalization_fallback_redelivers_full_content_to_editor() {
+        // A disk-only fallback can leave an editor buffer stale. When the ack
+        // sidecar proves the plugin normalized differently from the binary, the
+        // fallback must be sent back through IPC as a full-content repair.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #sidecar-diverge. spec-test-build-install-commit-push
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "agent response");
+        let content_ours = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+❯ do #sidecar-diverge. spec-test-build-install-commit-push
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        let normalize_prefix_lines =
+            vec!["do #sidecar-diverge. spec-test-build-install-commit-push".to_string()];
+
+        let call_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen_full_content = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let listener_root = dir.path().to_path_buf();
+        let listener_doc = doc.clone();
+        let listener_count = call_count.clone();
+        let listener_full_content = seen_full_content.clone();
+        std::fs::create_dir_all(listener_root.join(".agent-doc")).unwrap();
+        let _listener = std::thread::spawn(move || {
+            let root_for_handler = listener_root.clone();
+            let _ = crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                listener_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if let Some(full_content) = v.get("fullContent").and_then(|value| value.as_str()) {
+                    let _ = std::fs::write(&listener_doc, full_content);
+                    listener_full_content
+                        .lock()
+                        .unwrap()
+                        .push(full_content.to_string());
+                    return Some(serde_json::json!({"type": "ack"}).to_string());
+                }
+
+                let patch_id = v.get("patch_id").and_then(|value| value.as_str())?;
+                let bad_sidecar = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #sidecar-diverge. spec-test-build-install-commit-push
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+                let _ = std::fs::write(&listener_doc, bad_sidecar);
+                let ack_dir = root_for_handler.join(".agent-doc/ack-content");
+                let _ = std::fs::create_dir_all(&ack_dir);
+                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), bad_sidecar);
+                Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
+            });
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(dir.path()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(dir.path()),
+            "fake socket listener did not start"
+        );
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        assert!(
+            call_count.load(std::sync::atomic::Ordering::SeqCst) >= 2,
+            "fallback should send a second full-content IPC repair"
+        );
+        let full_content_payloads = seen_full_content.lock().unwrap();
+        assert_eq!(
+            full_content_payloads.len(),
+            1,
+            "expected exactly one full-content repair payload"
+        );
+        assert!(
+            full_content_payloads[0]
+                .contains("❯ do #sidecar-diverge. spec-test-build-install-commit-push"),
+            "full-content repair must carry the authoritative normalized prompt: {}",
+            full_content_payloads[0]
+        );
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk.contains("❯ do #sidecar-diverge. spec-test-build-install-commit-push"),
+            "editor full-content repair should leave disk/editor content normalized: {disk}"
         );
     }
 

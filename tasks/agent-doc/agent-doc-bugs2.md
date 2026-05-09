@@ -69,7 +69,24 @@ I restarted it anyway through the binary-owned path:
 One suspicious thing did show up: there was also an older same-project controller process still alive from 01:33 (`PID 4085114`) even after the active controller shutdown. The active socket/status now points at the new controller, so that old process is probably not the reason the current sync path is still collapsing, but it is a real cleanup/singleton bug signal. I added a recommended backlog item for that.
 
 Given the active controller already matched the installed binary, a restart alone was unlikely to be the full fix. If the one-pane transition still happens after this restart, the remaining likely cause is that the editor is still sending a full one-column `sync --no-autostart` event, or the plugin/native library path is not using the newly installed library, rather than the controller holding old sync logic.
-<!-- agent:boundary:eb697c54 -->
+❯ The agent-doc binary logic should ensure there is only a single controller processes to manage requests is present. The old process must either gracefully shutdown or be externally killed by the new controller process. The transition from old to new controller process must have 0 downtime...meaning in a live environment, the session actors and supervisors should continue to work seamlessly.
+❯ Please plan #next-steps.
+### Re: controller singleton next steps — gpt-5
+
+Planned this as a focused controller-handoff fix rather than folding it into the broader session-actor MVP.
+
+Created and committed `tasks/agent-doc/plan-controller-singleton-zero-downtime-handoff.md`. The plan tightens the invariant from "restart stale controller" to "one promoted authoritative controller generation per project root," with a zero-downtime handoff path:
+
+- persist controller generation and handoff state separately from the socket path
+- prepare the old controller, launch the replacement on a temporary socket, import durable actor/supervisor state, then promote
+- keep the old controller authoritative if replacement fails before promotion
+- retire the old PID after promotion, and force-reap only verified same-project duplicate controllers after a grace period
+- make supervisors reconnect by controller generation while preserving leases and actor records through SQLite
+
+I updated existing backlog item `#g4w2` to point at that plan instead of adding a duplicate item. `#g4w2` stays open because this cycle only planned the work; it did not implement the controller handoff.
+
+No code tests were run because this cycle only created a plan document and updated the session backlog.
+<!-- agent:boundary:ce001260 -->
 <!-- /agent:exchange -->
 ###
 
@@ -96,7 +113,7 @@ Does the supervisor actor ever block on `Run Agent Doc`? I noticed that /home/br
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#g4w2] [recommended] Controller shutdown leaves stale duplicate same-project controller processes alive; make shutdown/status reap unreachable same-root controller serve processes or fail with a precise singleton diagnostic.
+- [ ] [#g4w2] Controller singleton/handoff must allow only one authoritative same-project controller while replacing stale binaries with zero downtime; retire or reap duplicate controller processes only after a promoted replacement preserves active session actors and supervisor leases. Plan: tasks/agent-doc/plan-controller-singleton-zero-downtime-handoff.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md

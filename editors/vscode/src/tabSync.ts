@@ -94,6 +94,10 @@ export function buildSyncCommandArgs(
     return args;
 }
 
+export function buildImmediateFocusCommandArgs(activeFile: string): ['focus', string] {
+    return ['focus', activeFile];
+}
+
 export function buildTabChangeCommand(input: TabChangeInput): PlannedTabChange | null {
     const visibleColumns = normalizeVisibleColumns(input.visibleColumns ?? [input.visibleMd]);
     const visibleMd = normalizeVisibleMd(

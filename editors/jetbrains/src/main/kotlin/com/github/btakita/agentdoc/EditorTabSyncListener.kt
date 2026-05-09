@@ -177,10 +177,14 @@ class EditorTabSyncListener : FileEditorManagerListener {
         snapshot: AutomaticStateSnapshot,
         delayMs: Long = DEBOUNCE_MS,
         requestedGeneration: Long? = null,
+        immediateFocus: Boolean = false,
     ) {
         latestSnapshot.set(snapshot)
         val lib = AgentDocLib.get()
         val generation = requestedGeneration ?: nextGeneration(lib)
+        if (immediateFocus) {
+            focusExistingPaneImmediately(project, snapshot, generation, lib)
+        }
         Thread {
             try {
                 if (delayMs > 0) {
@@ -193,6 +197,44 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 drainAutomaticSync(project, generation)
             } catch (e: Exception) {
                 log("error: ${e.message}")
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun focusExistingPaneImmediately(
+        project: com.intellij.openapi.project.Project,
+        snapshot: AutomaticStateSnapshot,
+        generation: Long,
+        lib: AgentDocLib?,
+    ) {
+        Thread {
+            try {
+                if (!isCurrentGeneration(lib, generation)) {
+                    log("focus-fast: superseded gen=$generation")
+                    return@Thread
+                }
+                val agentDoc = TerminalUtil.resolveAgentDoc(snapshot.focusedProjectRoot)
+                val cmd = SyncLayoutAction.buildFocusCommand(
+                    agentDoc = agentDoc,
+                    focusedFile = snapshot.focusedRelativePath,
+                )
+                val process = ProcessBuilder(cmd)
+                    .directory(java.io.File(snapshot.focusedProjectRoot))
+                    .redirectErrorStream(true)
+                    .start()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                val exitCode = process.waitFor()
+                if (exitCode == 0) {
+                    log("focus-fast: applied ${snapshot.focusedRelativePath}")
+                    TerminalUtil.showHint(project, TerminalUtil.formatLayoutSummary(cmd))
+                } else {
+                    log("focus-fast: skipped ${snapshot.focusedRelativePath} exit=$exitCode output=${output.take(200)}")
+                }
+            } catch (e: Exception) {
+                log("focus-fast: skipped ${snapshot.focusedRelativePath}: ${e.message}")
             }
         }.apply {
             isDaemon = true
@@ -396,6 +438,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
         if (visibleMdFiles.isEmpty()) return
 
         val snapshot = captureSnapshot(event.manager.project, file) ?: return
-        requestAutomaticSync(event.manager.project, snapshot)
+        requestAutomaticSync(event.manager.project, snapshot, immediateFocus = true)
     }
 }

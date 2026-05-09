@@ -20,6 +20,7 @@ import {
 } from './popupMenu';
 import {
     analyzeTabSyncCommandResult,
+    buildImmediateFocusCommandArgs,
     buildSyncCommandArgs,
     buildTabChangeCommand,
     flattenVisibleColumns,
@@ -826,12 +827,13 @@ function planCurrentTabChange(): PlannedTabSyncExecution | null {
     return { root, activeFsPath, planned };
 }
 
-function requestTabSync(delayMs = TAB_SYNC_DEBOUNCE_MS): void {
+function requestTabSync(delayMs = TAB_SYNC_DEBOUNCE_MS): number {
     const requestedGeneration = ++latestTabSyncGeneration;
     if (tabSyncDebounceTimer) clearTimeout(tabSyncDebounceTimer);
     tabSyncDebounceTimer = setTimeout(() => {
         void drainTabSync(requestedGeneration);
     }, delayMs);
+    return requestedGeneration;
 }
 
 function resetTabSyncDeferredRetry(): void {
@@ -916,9 +918,26 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
     }
 }
 
+function focusExistingPaneForTabChange(execution: PlannedTabSyncExecution, generation: number): void {
+    void (async () => {
+        if (generation !== latestTabSyncGeneration) return;
+        try {
+            const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
+            await runCli(buildImmediateFocusCommandArgs(rel), cwd);
+            if (generation === latestTabSyncGeneration) {
+                showHint(`Focus: ${rel}`);
+            }
+        } catch {
+            // Missing or stale panes are expected during tab churn; background sync owns reconciliation.
+        }
+    })();
+}
+
 function onTabChanged(): void {
-    if (planCurrentTabChange() === null) return;
-    requestTabSync();
+    const execution = planCurrentTabChange();
+    if (execution === null) return;
+    const generation = requestTabSync();
+    focusExistingPaneForTabChange(execution, generation);
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
     analyzeTabSyncCommandResult,
+    buildImmediateFocusCommandArgs,
     buildSyncCommandArgs,
     buildTabChangeCommand,
     shouldReplayQueuedTabChange,
@@ -221,6 +222,13 @@ describe('buildTabChangeCommand', () => {
                 'src/session-share/tasks/claudescore-3.md',
                 '--no-autostart',
             ],
+        );
+    });
+
+    it('builds immediate focus command args for the fast tab handoff path', () => {
+        assert.deepStrictEqual(
+            buildImmediateFocusCommandArgs('tasks/agent-doc/agent-doc-bugs2.md'),
+            ['focus', 'tasks/agent-doc/agent-doc-bugs2.md'],
         );
     });
 

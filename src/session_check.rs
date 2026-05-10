@@ -22,6 +22,10 @@
 //!   no new `agent-doc` cycle ever started for them. Plain exchange-only
 //!   content edits without a fresh prompt target do not reopen a committed
 //!   cycle.
+//! - Also fails closed when a closed cycle leaves the live `agent:exchange` tail
+//!   ending in a prompt-looking block with no later assistant response. This
+//!   catches direct-harness turns where the prompt was already committed into
+//!   the snapshot/baseline but the final response patchback never happened.
 //! - When that bypassed patchback also leaves prompt-target lines in the same
 //!   diff without the binary-owned `❯ ` transcript prefix, `session-check`
 //!   reports the bare prompt target in the failure marker so the write path can
@@ -159,6 +163,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
             }
         }
         match check_parent_submodule_pointer_guard(file)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
+        match check_prompt_only_exchange_tail_guard(file)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -342,6 +354,19 @@ fn check_parent_submodule_pointer_guard(file: &Path) -> Result<GuardResult> {
         ),
     );
     Ok(GuardResult::Error(msg))
+}
+
+fn check_prompt_only_exchange_tail_guard(file: &Path) -> Result<GuardResult> {
+    let content = std::fs::read_to_string(file)?;
+    let Some(prompt) = prompt_only_exchange_tail(&content) else {
+        return Ok(GuardResult::None);
+    };
+    Ok(GuardResult::Error(format!(
+        "[session-check] INTERRUPTED: live exchange ends with unresolved prompt-only closeout tail and no assistant response: {}. Finish the turn through `agent-doc finalize {}` or recover the missing response with `agent-doc write --commit {}` before reporting closeout success.",
+        prompt,
+        file.display(),
+        file.display()
+    )))
 }
 
 fn tracked_side_effect_paths(file: &Path) -> Result<Vec<String>> {
@@ -1518,6 +1543,63 @@ fn prompt_target_is_immediately_before_existing_response(
     false
 }
 
+fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
+    let body = crate::frontmatter::parse(doc)
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_else(|_| doc.to_string());
+    let components = crate::component::parse(&body).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+
+    let mut in_fence: Option<&'static str> = None;
+    let mut prompt_preview: Option<String> = None;
+    for line in exchange.content(&body).lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            in_fence = match in_fence {
+                Some("```") => None,
+                None => Some("```"),
+                other => other,
+            };
+            continue;
+        }
+        if trimmed.starts_with("~~~") {
+            in_fence = match in_fence {
+                Some("~~~") => None,
+                None => Some("~~~"),
+                other => other,
+            };
+            continue;
+        }
+        if in_fence.is_some() {
+            continue;
+        }
+        if is_exchange_response_heading(trimmed) {
+            prompt_preview = None;
+            continue;
+        }
+        if trimmed.is_empty()
+            || trimmed.starts_with("<!--")
+            || trimmed == "(HEAD)"
+            || crate::diff::line_looks_like_plain_response_after_prompt(trimmed)
+        {
+            continue;
+        }
+        if crate::diff::text_line_looks_like_prompt_target(trimmed) {
+            prompt_preview.get_or_insert_with(|| {
+                trimmed
+                    .trim_start_matches('❯')
+                    .trim()
+                    .chars()
+                    .take(160)
+                    .collect::<String>()
+            });
+        }
+    }
+    prompt_preview
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1799,6 +1881,53 @@ Body\n\
             change.is_none(),
             "prompt-like text inside ordinary HTML comments must not reopen the cycle"
         );
+    }
+
+    #[test]
+    fn prompt_only_exchange_tail_detects_closed_cycle_with_no_response_patchback() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n\n",
+            "do [#vt-agent-deploy]. spec-test-news-commit-push\n",
+            "<!-- agent:boundary:tail -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
+            .unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("prompt-only closeout tail"));
+                assert!(message.contains("#vt-agent-deploy"));
+            }
+            other => panic!("expected prompt-only closeout interruption, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prompt_only_exchange_tail_ignores_answered_tail_prompt() {
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Completed.\n\n",
+            "do [#vt-agent-deploy]. spec-test-news-commit-push\n",
+            "### Re: vt agent deploy — gpt-5\n\n",
+            "Deployed and verified.\n",
+            "<!-- agent:boundary:tail -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(prompt_only_exchange_tail(current), None);
     }
 
     impl Drop for EnvGuard {

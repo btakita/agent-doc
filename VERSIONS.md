@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Prompt-only exchange tails now fail closed after closeout.** `session-check` now scans the live `agent:exchange` tail after otherwise-clean closed cycles and interrupts when it ends in a prompt-looking block with no later assistant response, even if that prompt already matches the committed snapshot. This catches direct Codex/manual turns like the May 10 `#vt-agent-deploy` patchback miss where implementation commits succeeded but the final response never landed in the session document. This closes `#rootpatchmiss` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **BREAKING CHANGE: completed backlog archives now use `agent:done`.** The completed/reaped archive component was renamed from `agent:backlog-done` to `agent:done`, and `agent:backlog-done` / `agent:pending-done` are no longer accepted as archive aliases by closeout, history replay, or pending resolution. `agent-doc migrate` rewrites both legacy tags to `agent:done`, and newly reaped items create or append to `agent:done`. This closes the follow-up archive rename request in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Cross-document backlog capture now has a binary-owned target path.** `write` and `finalize` accept `--pending-add-to <file> <text>` for explicit backlog targets, fail closed when the target file is missing or lacks a backlog component, and `plan` now surfaces those target files in `pending_mutations` / finalize hints. Closeout guards no longer let a current-document `--pending-add` bypass explicit target validation, preventing `#agent-doc-bug` items from landing in the wrong session document. This closes `#crossdocpend` in `tasks/agent-doc/agent-doc-bugs2.md`.

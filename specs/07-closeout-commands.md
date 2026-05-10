@@ -109,6 +109,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Fails on open cycle states, uncommitted visible `### Re:` / `## Assistant` patchbacks, or hidden `snapshot != HEAD` closeout drift.
 - Fails when a committed submodule document snapshot still leaves the parent repository submodule pointer uncommitted, naming the submodule path and prescribing `agent-doc commit <FILE>` recovery.
 - Fails after a committed closeout when the working tree still contains prompt-bearing user edits that were added concurrently with the write and therefore are absent from the committed snapshot.
+- Fails after a closed cycle when the live `agent:exchange` tail ends with a prompt-looking block and no later assistant response, even if the prompt already matches the committed snapshot. This prevents direct/manual implementation commits from counting as closeout when the response patchback was skipped.
 - Plain `content_edit` drift without a new prompt target or response patchback is not an unstarted closeout by itself; session-check must leave that to the next normal preflight diff instead of forcing another finalize cycle after a committed turn.
 - The active Codex post-commit drift guard is scoped the same way: exchange-only content edits with no unresolved prompt target are allowed to wait for the next preflight diff, while typed-component drift, fresh prompt targets, or response patchback markers still fail closed.
 - May self-heal only narrow exchange-only already-committed historical drift proven by `HEAD`.

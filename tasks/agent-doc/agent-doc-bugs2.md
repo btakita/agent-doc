@@ -55,7 +55,7 @@ Commits:
 
 No follow-up backlog items from this cycle.
 Rename agent:backlog-done to agent:done. Remove support for agent:backlog-done and agent:pending-done tags.
-spec-test-build-install-commit-push
+❯ spec-test-build-install-commit-push
 ### Re: completed archive component rename — gpt-5
 
 Implemented the completed/reaped archive component rename.
@@ -77,7 +77,29 @@ Commits:
 - Parent repo: `8dd7e11af chore: update agent-doc archive component` committed; I will push `main` after this document closeout.
 
 There were no actionable follow-up items to capture.
-<!-- agent:boundary:9f121e19 -->
+❯ do [#rootpatchmiss]. spec-test-build-install-commit-push
+### Re: rootpatchmiss — gpt-5
+
+Implemented the prompt-only closeout guard.
+
+- Added a `session-check` guard that scans the live `agent:exchange` tail after an otherwise closed cycle and fails closed when the tail ends in a prompt-looking block with no later assistant response, even if that prompt already matches the committed snapshot.
+- Added regressions for the May 10 `#vt-agent-deploy` snapshot-equal prompt-only shape and for the answered-tail non-regression.
+- Updated the plan evidence note, closeout specs, README/CLAUDE/SKILL guidance, and unreleased notes.
+
+Verification completed:
+- `cargo test prompt_only_exchange_tail`
+- `make check`
+- `cargo build`
+- `make install`
+- `agent-doc skill install --all`
+- `cargo run --quiet -- audit-docs`
+
+Commits:
+- `src/agent-doc`: `8252c60 fix: fail closed on prompt-only closeout tails` pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo: `599a3b578 agent-doc response: prompt-only closeout guard` committed; I will push `main` after this document closeout.
+
+No follow-up backlog items from this cycle.
+<!-- agent:boundary:84d3dad2 -->
 <!-- /agent:exchange -->
 ###
 
@@ -167,4 +189,5 @@ spec-test-build-install-commit-push
 - 2026-05-10 [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
 - 2026-05-10 [#pfxleak2] content_ours prefix leak + commit churn — plan: tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - 2026-05-10 [#bppfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
+- 2026-05-10 [#rootpatchmiss] Direct Codex agent-doc turn completed commits/pushes but did not write the final response into `src/session-share/tasks/root.md`; extend `tasks/agent-doc/plan-response-missing-after-manual-closeout.md` with the May 10 `#vt-agent-deploy` reproduction and fail closed on prompt-only exchange closeout.
 <!-- /agent:done -->

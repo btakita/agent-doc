@@ -58,6 +58,7 @@ mod convert;
 mod cycle_state;
 mod dedupe;
 mod diff;
+mod editor_route_errors;
 mod env;
 mod extract;
 mod focus;

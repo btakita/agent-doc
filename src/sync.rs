@@ -4062,6 +4062,9 @@ fn run_with_options(
             auto_start_mode,
         );
     }
+    if let Some(focus) = focus.map(str::trim).filter(|path| !path.is_empty()) {
+        crate::editor_route_errors::clear_for_success(Path::new(focus), "sync_success");
+    }
 
     Ok(())
 }

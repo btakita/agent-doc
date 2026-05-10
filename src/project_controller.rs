@@ -1396,15 +1396,50 @@ fn request_controller<T: DeserializeOwned>(
     let mut reader = BufReader::new(reader_half);
     let mut response = String::new();
     read_controller_response_line(&mut reader, &mut response)?;
-    let envelope: ControllerEnvelope<T> = serde_json::from_str(response.trim())
-        .context("failed to parse project controller response envelope")?;
+    decode_controller_response(project_root, &request, response.trim())
+}
+
+fn decode_controller_response<T: DeserializeOwned>(
+    project_root: &Path,
+    request: &ControllerRequest,
+    raw_response: &str,
+) -> Result<T> {
+    let envelope: ControllerEnvelope<T> =
+        serde_json::from_str(raw_response).with_context(|| {
+            format!(
+                "failed to parse project controller response envelope for command `{}`: raw={}",
+                request.command, raw_response
+            )
+        })?;
     if envelope.ok {
-        envelope
-            .data
-            .context("project controller returned ok response without data")
+        match envelope.data {
+            Some(data) => Ok(data),
+            None => {
+                if let Some(file) = request.file.as_ref() {
+                    let log_file = if file.is_absolute() {
+                        file.clone()
+                    } else {
+                        project_root.join(file)
+                    };
+                    crate::ops_log::log_op(
+                        &log_file,
+                        &format!(
+                            "controller_response_missing_data command={} raw={}",
+                            request.command, raw_response
+                        ),
+                    );
+                }
+                anyhow::bail!(
+                    "project controller command `{}` returned ok response without data: raw={}",
+                    request.command,
+                    raw_response
+                )
+            }
+        }
     } else {
         anyhow::bail!(
-            "{}",
+            "project controller command `{}` failed: {}",
+            request.command,
             envelope
                 .error
                 .unwrap_or_else(|| "project controller request failed".to_string())
@@ -3786,5 +3821,42 @@ mod tests {
         assert_eq!(record.generation, 2);
         assert_eq!(record.last_transition.caller, "session");
         assert_eq!(record.last_transition.reason, "manual_attach");
+    }
+
+    #[test]
+    fn typed_controller_decode_reports_missing_data_with_command_and_raw_envelope() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/missing-data.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let request = ControllerRequest {
+            command: "session_status".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+
+        let err = decode_controller_response::<SessionOperatorStatus>(
+            dir.path(),
+            &request,
+            r#"{"ok":true}"#,
+        )
+        .expect_err("typed controller response without data must fail");
+
+        let message = err.to_string();
+        assert!(message.contains("command `session_status`"));
+        assert!(message.contains(r#"{"ok":true}"#));
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("controller_response_missing_data command=session_status"));
     }
 }

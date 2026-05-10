@@ -1357,6 +1357,7 @@ pub fn run_with_tmux(
             // races with the first sync's stash operations, causing panes to
             // bounce between stash and agent-doc window visibly.
             // The JB plugin's sync call is authoritative — no defensive re-sync needed.
+            crate::editor_route_errors::clear_for_success(file, "route_success");
             Ok(())
         }
         Err(e) => {
@@ -2381,8 +2382,54 @@ fn route_via_authoritative_actor(
     dispatch_only: bool,
     actor: AuthoritativeActorDispatchTarget,
 ) -> Result<String> {
-    let dispatch_pane = actor.record.pane_id.clone();
-    let actor_state = actor.actor_state();
+    let mut actor = actor;
+    let mut dispatch_pane = actor.record.pane_id.clone();
+    let mut actor_state = actor.actor_state();
+    if dispatch_only && actor_state == crate::session_actor::ActorState::Starting {
+        match load_authoritative_actor_binding(
+            tmux, file, session_id, file_path, harness, false, false,
+        ) {
+            Ok(Some(refreshed)) => {
+                let refreshed_state = refreshed.actor_state();
+                if refreshed.record.generation != actor.record.generation
+                    || refreshed.record.pane_id != actor.record.pane_id
+                    || refreshed_state != actor_state
+                {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_dispatch_only_starting_actor_refreshed file={} old_pane={} new_pane={} harness={} old_generation={} new_generation={} old_state={} new_state={}",
+                            file.display(),
+                            actor.record.pane_id,
+                            refreshed.record.pane_id,
+                            harness.binary,
+                            actor.record.generation,
+                            refreshed.record.generation,
+                            actor_state.as_str(),
+                            refreshed_state.as_str()
+                        ),
+                    );
+                    actor = refreshed;
+                    dispatch_pane = actor.record.pane_id.clone();
+                    actor_state = actor.actor_state();
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_starting_actor_refresh_failed file={} pane={} harness={} generation={} err={}",
+                        file.display(),
+                        actor.record.pane_id,
+                        harness.binary,
+                        actor.record.generation,
+                        err
+                    ),
+                );
+            }
+        }
+    }
 
     if lookup_dispatch_registration(file_path, session_id)?.as_deref()
         != Some(dispatch_pane.as_str())

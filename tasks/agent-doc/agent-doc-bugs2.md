@@ -36,11 +36,54 @@ Active backlog:
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - 10 more active item(s)
-<!-- agent:boundary:01b08b33 -->
+❯ do [#rspcmt2]. spec-test-build-install-commit-push
+### Re: #rspcmt2 stale parent pointer closeout — gpt-5
+
+Implemented `#rspcmt2`.
+
+Changed `src/agent-doc` so strict closeout and `session-check` now verify submodule-hosted response patchbacks across both layers: the submodule document snapshot must be committed in the submodule, and the parent repository gitlink must point at that submodule `HEAD`. If the inner commit succeeds but the parent pointer commit fails, closeout now interrupts with the submodule path, short parent/submodule SHAs, and `agent-doc commit <FILE>` recovery guidance.
+
+Updated specs and release notes for the new invariant, and added a regression that forces the parent pointer commit to fail after the submodule response commit succeeds.
+
+Verification:
+- `cargo test required_closeout_fails_when_parent_submodule_pointer_commit_fails`
+- `cargo test submodule`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits created:
+- `src/agent-doc` `771089c` (`fix: fail closed on stale submodule pointers`) and pushed to `origin/20260422/codex-agent-backend`
+- parent repo `65685eb02` (`agent-doc: update submodule closeout guard`)
+
+The parent repo push is intentionally after this finalize boundary so the pushed `main` includes the session-document closeout commit as well.
+### Re: #rspcmt2 stale parent pointer closeout — gpt-5
+
+Implemented `#rspcmt2`.
+
+Changed `src/agent-doc` so strict closeout and `session-check` now verify submodule-hosted response patchbacks across both layers: the submodule document snapshot must be committed in the submodule, and the parent repository gitlink must point at that submodule `HEAD`. If the inner commit succeeds but the parent pointer commit fails, closeout now interrupts with the submodule path, short parent/submodule SHAs, and `agent-doc commit <FILE>` recovery guidance.
+
+Updated specs and release notes for the new invariant, and added a regression that forces the parent pointer commit to fail after the submodule response commit succeeds.
+
+Verification:
+- `cargo test required_closeout_fails_when_parent_submodule_pointer_commit_fails`
+- `cargo test submodule`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits created:
+- `src/agent-doc` `771089c` (`fix: fail closed on stale submodule pointers`) and pushed to `origin/20260422/codex-agent-backend`
+- parent repo `65685eb02` (`agent-doc: update submodule closeout guard`)
+
+The parent repo push is intentionally after this finalize boundary so the pushed `main` includes the session-document closeout commit as well.
+<!-- agent:boundary:7c223166 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+do [#stateproj]. spec-test-build-install-commit-push
+---
 `Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
 spec-test-build-install-commit-push
 ---
@@ -60,7 +103,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
@@ -126,6 +168,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-09 [#commitfs] Codex commit filesystem sandbox denial — managed session can edit nested submodule files but cannot create the backing `.git/modules/.../index.lock`, so `git add`/commit fails late with `Read-only file system`. Plan: tasks/agent-doc/plan-codex-commit-filesystem-sandbox.md
 - 2026-05-09 [#caplat] [recommended] Reduce Codex managed capability proof latency and surface phase timings for network/SSH/write-root probes so slow agent-doc start checks identify the expensive step.
 - 2026-05-09 [#tmuxdevci] Split agent-doc test budgets: keep default development tests pure/fast by gating real tmux-backed tests behind an explicit CI target, add GitHub Actions coverage for that target, and require matching SimWorld edge-case traces before demoting any tmux regression.
+- 2026-05-10 [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 <!-- /agent:pending-done -->
 
 

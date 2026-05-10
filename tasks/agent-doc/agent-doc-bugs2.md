@@ -29,54 +29,14 @@ Implemented Codex capability proof timing diagnostics.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-044013.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-045329.md`*
 
 Active backlog:
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-❯ /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md agent-doc runs that take a long time give no output to Codex. So Codex keeps checking to see if the agent-doc process is still alive. Why is agent-doc taking so long to give feedback to Codex in this file? Is there a performance issue? Should we have a heartbeat that Codex sees to validate that agent-doc is still progressing? How can we guard against true deadlocks?
-### Re: root.md long-running feedback — gpt-5
-
-The current `root.md` state does not look like an active deadlock now. `agent-doc session-check /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md` reports `cycle-1778387344780` as `committed` with `commit_success`.
-
-The reason it can look dead from Codex is the direct-run shape: after `agent-doc <file>` opens `preflight_started`, it launches/waits on the child harness process. For Codex, that wait is mostly opaque until the child exits or produces final output, so the outer Codex tool call has little meaningful stdout to show. That is not necessarily document-size performance; it is a progress-reporting gap around a long child-agent wait.
-
-There was a real `root.md` failure shape already captured in `tasks/agent-doc/plan-direct-invocation-preflight-hang.md`: a recursive direct invocation from inside the same Codex-owned pane opened `preflight_started` and then sat after `Submitting to codex...` with no capture. That has been implemented as a bounded failure path: recursive same-pane dispatch is detected, and child waits are bounded by `AGENT_DOC_RUN_AGENT_TIMEOUT_SECS` (default 1800s) with recoverable cycle diagnostics.
-
-What I would still add is a parent-visible heartbeat. The useful heartbeat is not just "process is alive"; it should say which phase is still alive: preflight, child-agent wait, response capture, write, commit, or session-check, with cycle id and elapsed time. Then the deadlock guard can distinguish:
-
-- healthy long run: heartbeat timestamp advances, child process is alive, and no timeout budget has been exceeded
-- stuck child: process is alive but no phase/progress heartbeat changes before the child-wait budget
-- stranded closeout: response is captured or written, but `write_applied` / commit / `session-check` does not advance
-- recursive self-dispatch: current pane already owns the target document, so fail before waiting on itself
-
-I added a recommended backlog item for that remaining heartbeat/watchdog work. It should complement the existing timeout fix rather than replace it.
-❯ do [#runhb]. spec-test-build-install-commit-push
-### Re: #runhb heartbeat/watchdog — gpt-5
-
-Implemented `#runhb`.
-
-What changed:
-- `agent-doc run` now emits parent-visible `[run] heartbeat ...` stderr while waiting on a non-streaming child agent.
-- Heartbeats default to 30 seconds and can be tuned with `AGENT_DOC_RUN_HEARTBEAT_SECS` for tests/diagnostics.
-- Each heartbeat persists open-cycle progress by updating the cycle state's `updated_at` and `last_event` without advancing the phase.
-- `run` also records visible progress before response capture/write and starts the same heartbeat wrapper around strict commit closeout.
-- Specs and version notes now document the direct-run heartbeat contract.
-
-Verification:
-- `cargo test --test run_integration run_`
-- `cargo test --test run_integration run_heartbeats_are_visible_and_persisted_while_child_is_waiting`
-- `make check`
-- `make install`
-
-Commit / push:
-- `src/agent-doc`: `6e8b241` pushed to `origin/20260422/codex-agent-backend`
-- `agent-loop`: `cdbf4f273` pushed to `origin/main`
-
-No follow-up backlog items are needed for this change.
-<!-- agent:boundary:30a418c9 -->
+<!-- agent:boundary:7fade083 -->
 <!-- /agent:exchange -->
 ###
 

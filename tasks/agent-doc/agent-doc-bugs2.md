@@ -90,21 +90,6 @@ I checked the current launcher environment during this turn: `CODEX_SANDBOX_NETW
 SSH is a separate question. `CODEX_SANDBOX_NETWORK_DISABLED` only gates network. SSH also depends on the sandbox being able to read the needed SSH config/keys and open the target socket. This document does not declare `required_ssh_targets`, and the shown line is only the network policy summary, not an SSH proof. So from this output I would say: network would likely have worked in the current parent env; SSH was not proven by this start line.
 
 I added `#caplat` as a recommended follow-up to make the slow managed capability check expose phase timings and target the expensive probe instead of leaving it as one long opaque startup wait.
-### Re: Codex network policy — gpt-5
-
-Short answer: in this exact shell, probably yes for general network, but not because `-s danger-full-access` alone proves it.
-
-What the line means:
-
-- This document resolves Codex as `-s danger-full-access`.
-- Your global `~/.config/agent-doc/config.toml` sets `codex_network_access = "enabled"`.
-- That policy makes `agent-doc` remove `CODEX_SANDBOX_NETWORK_DISABLED` from the Codex child environment. The status text says `forced ... off` even when the parent env was already unset.
-
-I checked the current launcher environment during this turn: `CODEX_SANDBOX_NETWORK_DISABLED` is not set. So if `agent-doc` had merely inherited this same parent environment, the child should still have had network access. The forced-off setting is still useful because it makes the launch deterministic: if some future parent shell or supervisor has `CODEX_SANDBOX_NETWORK_DISABLED=1`, `inherit` plus `danger-full-access` would still be network-disabled, while `codex_network_access: enabled` clears it and fails closed if that does not take.
-
-SSH is a separate question. `CODEX_SANDBOX_NETWORK_DISABLED` only gates network. SSH also depends on the sandbox being able to read the needed SSH config/keys and open the target socket. This document does not declare `required_ssh_targets`, and the shown line is only the network policy summary, not an SSH proof. So from this output I would say: network would likely have worked in the current parent env; SSH was not proven by this start line.
-
-I added `#caplat` as a recommended follow-up to make the slow managed capability check expose phase timings and target the expensive probe instead of leaving it as one long opaque startup wait.
 <!-- agent:boundary:ff8dad94 -->
 <!-- /agent:exchange -->
 ###

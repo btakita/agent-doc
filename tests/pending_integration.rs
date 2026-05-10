@@ -294,6 +294,43 @@ fn write_pending_add_creates_item_with_hash() {
 }
 
 #[test]
+fn write_pending_add_multiple_flags_keep_cli_order_at_top() {
+    let (_tmp, doc) = setup_doc("- [ ] [#old1] existing task");
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-add",
+            "id=first first task",
+            "--pending-add",
+            "id=second second task",
+            "--pending-add",
+            "id=third third task",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let pending = content
+        .split("<!-- agent:pending -->\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
+        .unwrap();
+    let first = pending.find("[#first] first task").unwrap();
+    let second = pending.find("[#second] second task").unwrap();
+    let third = pending.find("[#third] third task").unwrap();
+    let existing = pending.find("[#old1] existing task").unwrap();
+
+    assert!(
+        first < second && second < third && third < existing,
+        "expected pending-add flags to keep CLI order above existing backlog, got:\n{}",
+        pending
+    );
+}
+
+#[test]
 fn write_pending_add_accepts_custom_id_prefix() {
     let (_tmp, doc) = setup_doc("");
     agent_doc()

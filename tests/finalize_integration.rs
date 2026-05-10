@@ -435,6 +435,54 @@ fn finalize_fails_closed_when_internal_session_check_rejects_closeout() {
 }
 
 #[test]
+fn finalize_pending_add_multiple_flags_keep_cli_order_at_top() {
+    let (tmp, doc) = setup_template_doc();
+    insert_pending_item(&doc, "- [ ] [#old1] existing task\n");
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--pending-add",
+            "id=first first task",
+            "--pending-add",
+            "id=second second task",
+            "--pending-add",
+            "id=third third task",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: ordered pending adds — gpt-5\nDone.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let pending = content
+        .split("<!-- agent:pending -->\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n<!-- /agent:pending -->").next())
+        .unwrap();
+    let first = pending.find("[#first] first task").unwrap();
+    let second = pending.find("[#second] second task").unwrap();
+    let third = pending.find("[#third] third task").unwrap();
+    let existing = pending.find("[#old1] existing task").unwrap();
+    assert!(
+        first < second && second < third && third < existing,
+        "expected pending-add flags to keep CLI order above existing backlog, got:\n{}",
+        pending
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("[#first] first task")
+            && head.contains("[#second] second task")
+            && head.contains("[#third] third task")
+    );
+}
+
+#[test]
 fn finalize_blocks_session_closeout_when_completed_pending_lacks_pending_done() {
     let (tmp, doc) = setup_session_template_doc();
     insert_pending_item(&doc, "- [ ] [#4qja] Stream orchestrate patchback\n");

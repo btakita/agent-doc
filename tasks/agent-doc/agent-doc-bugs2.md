@@ -36,13 +36,28 @@ Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-<!-- agent:boundary:e5573537 -->
+❯ /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md agent-doc runs that take a long time give no output to Codex. So Codex keeps checking to see if the agent-doc process is still alive. Why is agent-doc taking so long to give feedback to Codex in this file? Is there a performance issue? Should we have a heartbeat that Codex sees to validate that agent-doc is still progressing? How can we guard against true deadlocks?
+### Re: root.md long-running feedback — gpt-5
+
+The current `root.md` state does not look like an active deadlock now. `agent-doc session-check /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md` reports `cycle-1778387344780` as `committed` with `commit_success`.
+
+The reason it can look dead from Codex is the direct-run shape: after `agent-doc <file>` opens `preflight_started`, it launches/waits on the child harness process. For Codex, that wait is mostly opaque until the child exits or produces final output, so the outer Codex tool call has little meaningful stdout to show. That is not necessarily document-size performance; it is a progress-reporting gap around a long child-agent wait.
+
+There was a real `root.md` failure shape already captured in `tasks/agent-doc/plan-direct-invocation-preflight-hang.md`: a recursive direct invocation from inside the same Codex-owned pane opened `preflight_started` and then sat after `Submitting to codex...` with no capture. That has been implemented as a bounded failure path: recursive same-pane dispatch is detected, and child waits are bounded by `AGENT_DOC_RUN_AGENT_TIMEOUT_SECS` (default 1800s) with recoverable cycle diagnostics.
+
+What I would still add is a parent-visible heartbeat. The useful heartbeat is not just "process is alive"; it should say which phase is still alive: preflight, child-agent wait, response capture, write, commit, or session-check, with cycle id and elapsed time. Then the deadlock guard can distinguish:
+
+- healthy long run: heartbeat timestamp advances, child process is alive, and no timeout budget has been exceeded
+- stuck child: process is alive but no phase/progress heartbeat changes before the child-wait budget
+- stranded closeout: response is captured or written, but `write_applied` / commit / `session-check` does not advance
+- recursive self-dispatch: current pane already owns the target document, so fail before waiting on itself
+
+I added a recommended backlog item for that remaining heartbeat/watchdog work. It should complement the existing timeout fix rather than replace it.
+<!-- agent:boundary:336ba27a -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-/home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md agent-doc runs that take a long time give no output to Codex. So Codex keeps checking to see if the agent-doc process is still alive. Why is agent-doc taking so long to give feedback to Codex in this file? Is there a performance issue? Should we have a heartbeat that Codex sees to validate that agent-doc is still progressing? How can we guard against true deadlocks?
----
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
 `❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?
@@ -59,6 +74,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#runhb] [recommended] Add a parent-visible heartbeat/watchdog for long direct `agent-doc <file>` and child-agent waits: emit elapsed phase/cycle output every 30s, persist last-progress timestamps, and fail closed when capture/write/commit progress stalls past budget.
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.

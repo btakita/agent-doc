@@ -36,7 +36,42 @@ Active backlog:
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - 10 more active item(s)
-<!-- agent:boundary:45e3538a -->
+❯ The tmux tests are too slow. Can we disable all the tmux tests for development, run the tmux tests on gh actions ci, and ensure that the SimWorld tests have full edge case coverage?
+### Re: tmux test split — gpt-5
+
+Yes. I would make the local development path fast and move the full live-tmux sweep into an explicit CI gate.
+
+The repo already has the beginning of that split in `src/agent-doc/Makefile`: `test` runs ordinary Rust tests, `sim-medium` runs the ignored wider deterministic simulator corpus, and `check` combines clippy, tests, simulator budget, and version sync. The missing boundary is that real tmux-backed tests are still mixed into ordinary test runs.
+
+The change I would make:
+
+- mark real tmux integration tests as ignored or gate them behind an explicit environment/feature flag
+- add a named target like `tmux-ci` that runs the ignored/gated tmux suite intentionally
+- keep local `make test` focused on pure/unit/SimWorld coverage so normal development does not pay tmux startup and synchronization cost
+- wire GitHub Actions on Linux with `tmux` installed to run the `tmux-ci` target
+- require a matching named SimWorld trace before any tmux-backed edge regression is demoted out of the local default suite
+
+I would not disable all tmux tests from normal development blindly until the SimWorld model covers the edge families those tests protect: actor lifecycle transitions, stale/dead pane observations, registry/projection drift, protected closeout panes, focus-only editor switches, fresh-start/startup-miss handoff, dispatch accepted-but-unproven cases, cross-root split preservation, and finalize/session-check guard interactions.
+
+I added a backlog item for that test-budget split so it can be implemented as one coherent change instead of scattering the policy across individual regressions.
+### Re: tmux test split — gpt-5
+
+Yes. I would make the local development path fast and move the full live-tmux sweep into an explicit CI gate.
+
+The repo already has the beginning of that split in `src/agent-doc/Makefile`: `test` runs ordinary Rust tests, `sim-medium` runs the ignored wider deterministic simulator corpus, and `check` combines clippy, tests, simulator budget, and version sync. The missing boundary is that real tmux-backed tests are still mixed into ordinary test runs.
+
+The change I would make:
+
+- mark real tmux integration tests as ignored or gate them behind an explicit environment/feature flag
+- add a named target like `tmux-ci` that runs the ignored/gated tmux suite intentionally
+- keep local `make test` focused on pure/unit/SimWorld coverage so normal development does not pay tmux startup and synchronization cost
+- wire GitHub Actions on Linux with `tmux` installed to run the `tmux-ci` target
+- require a matching named SimWorld trace before any tmux-backed edge regression is demoted out of the local default suite
+
+I would not disable all tmux tests from normal development blindly until the SimWorld model covers the edge families those tests protect: actor lifecycle transitions, stale/dead pane observations, registry/projection drift, protected closeout panes, focus-only editor switches, fresh-start/startup-miss handoff, dispatch accepted-but-unproven cases, cross-root split preservation, and finalize/session-check guard interactions.
+
+I added a backlog item for that test-budget split so it can be implemented as one coherent change instead of scattering the policy across individual regressions.
+<!-- agent:boundary:0244cc00 -->
 <!-- /agent:exchange -->
 ###
 
@@ -60,6 +95,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tmuxdevci] Split agent-doc test budgets: keep default development tests pure/fast by gating real tmux-backed tests behind an explicit CI target, add GitHub Actions coverage for that target, and require matching SimWorld edge-case traces before demoting any tmux regression.
 - [ ] [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.

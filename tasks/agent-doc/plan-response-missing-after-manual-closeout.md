@@ -44,6 +44,8 @@ do [#vt-agent-deploy]. spec-test-news-commit-push
 
 The work completed and was pushed (`BuildParty af7b9b7`, `SessionShare ebc806c2`, parent `agent-loop` 8d972190b), but the final response block was not written into the exchange. The user had to request manual repair with: "The response patchback is not written into the document." This is another prompt-only exchange closeout after a nested submodule commit, session-share commit, and parent pointer commit all succeeded.
 
+Implementation note: preserve this as a snapshot-equal regression, not only a diff regression. Once preflight has already committed the prompt into the snapshot/baseline, the post-work guard still has to scan the live `agent:exchange` tail and fail closed if the tail ends with `do [#vt-agent-deploy]...` and no later `### Re:` / `## Assistant` response.
+
 ## Fix Plan
 
 1. Add a regression fixture for a direct Codex/agent-doc turn that:

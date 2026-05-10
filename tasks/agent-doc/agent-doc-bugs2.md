@@ -104,7 +104,7 @@ Verification:
 ❯ Commit / push:
 - `src/agent-doc`: `7cef057` pushed to `origin/20260422/codex-agent-backend`
 - root repo: `7062ca01c` pushed to `origin/main`
-### Re: direct invocation preflight hang — gpt-5
+### Re: direct invocation preflight hang — gpt-5 (HEAD)
 
 ❯ Implemented `#preflighthang`.
 
@@ -131,7 +131,7 @@ Verification:
 ###
 
 <!--
-`❯ Commit / push:` in the last response should not have
+A large part of the previous response has the `❯ `  
 ---
 `Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
 spec-test-build-install-commit-push

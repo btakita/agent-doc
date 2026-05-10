@@ -77,7 +77,12 @@ Commits created:
 - parent repo `65685eb02` (`agent-doc: update submodule closeout guard`)
 
 The parent repo push is intentionally after this finalize boundary so the pushed `main` includes the session-document closeout commit as well.
-<!-- agent:boundary:7c223166 -->
+### Re: duplicated #rspcmt2 patchback — gpt-5
+
+Confirmed the duplicate: the `#rspcmt2` response block appears twice back-to-back in `tasks/agent-doc/agent-doc-bugs2.md` after the sidecar-normalization fallback path re-delivered full content to the editor.
+
+Created the plan at `tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md` and added backlog item `#duppb` for the root cause and regression work.
+<!-- agent:boundary:d183855f -->
 <!-- /agent:exchange -->
 ###
 
@@ -103,6 +108,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#duppb] Duplicate response patchback after sidecar normalization fallback / full-content IPC re-delivery — the same response block can appear twice back-to-back after finalize reports success. Plan: tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md

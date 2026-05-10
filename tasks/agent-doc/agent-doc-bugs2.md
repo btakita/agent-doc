@@ -29,31 +29,8 @@ Implemented Codex capability proof timing diagnostics.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-063530.md`*
-
-Active backlog:
-- [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
-- [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
-- [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
-- 5 more active item(s)
-❯ Review the backlog items. These items are potentially stale due to being authored a few days ago.
-### Re: backlog staleness review — gpt-5
-
-I reviewed the eight active backlog items against the current repo state. They are stale and should be reaped from the active backlog.
-
-Evidence by item:
-
-- `#iceboxpatch` is closed by the `replace:icebox` template-patch support recorded in `src/agent-doc/VERSIONS.md`.
-- `#staleflt` is closed by stale empty `preflight_started` auto-close support in `repair.rs`, also recorded in `VERSIONS.md`.
-- `#busychk` is closed by sync reconcile preserving panes with open closeout cycles, recorded in `VERSIONS.md`.
-- `#chkptcap` is closed by durable partial checkpoint capture during streaming, recorded in `VERSIONS.md`.
-- `#257p` is closed by the Codex Stop/auth-interrupted closeout diagnostics plus the updated MCP-auth closeout contract, recorded in `VERSIONS.md`.
-- `#oobpmt` is covered by the OOB/status prompt absorption fix: `git.rs` now rejects safe status absorbs when the inserted status text contains prompt work, and `preflight.rs` has `preflight_status_prompt_preset_addition_does_not_swallow_diff`.
-- `#pfxleak2` is covered by the later `content_ours` prefix fallback repair work: `write.rs` now diff-normalizes from snapshot to baseline instead of prefixing inserted assistant response lines, preserves HEAD prefix state, and `session_check.rs` no longer reopens committed cycles for plain exchange-only `content_edit` drift.
-- `#bppfxstrip2` is covered by the same prefix-state repair path plus the multi-line prompt regressions in `write.rs`; the version log records this as `#pfxstrip2` rather than this backlog id.
-
-I marked all eight active items done. I did not add replacement backlog items because the remaining work here is bookkeeping, not a new defect.
-<!-- agent:boundary:797ecd37 -->
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-063826.md`*
+<!-- agent:boundary:23468067 -->
 <!-- /agent:exchange -->
 ###
 

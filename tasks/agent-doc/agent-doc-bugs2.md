@@ -142,7 +142,29 @@ Issues still visible in the logs:
 - Codex managed-session capability proof still put about 10.1s on startup at 1778388204, almost entirely in the child network probe. The proof succeeded, but the user-visible latency problem is real.
 
 I added `#next-steps` to the backlog with those four concrete follow-ups. I did not change code in this cycle; this was log review and backlog capture only.
-<!-- agent:boundary:33a6e10f -->
+❯ do [#next-steps]. spec-test-build-install-commit-push
+### Re: next-steps diagnostics cleanup — gpt-5
+
+Implemented the actionable cleanup from `#next-steps`.
+
+- `agent-doc gc` now removes stale Codex blocked-stop diagnostics after seven days, matching the existing repair-blocked retention.
+- `agent-doc gc` now closes stale `starting` controller actor records after one hour only when no fresh supervisor heartbeat or live supervisor PID proves that actor generation is still booting; the controller SQLite store remains authoritative and `session-actors.json` is re-emitted as a projection.
+- Updated the core command spec, session actor contract, README, SPEC, and CLAUDE invariants.
+
+Verification completed:
+- `cargo test stale_starting_actor`
+- `cargo test blocked_stop_diagnostics`
+- `make check`
+- `cargo build`
+- `make install`
+- `cargo run --quiet -- audit-docs`
+
+Commits:
+- `src/agent-doc`: `6147f99 fix: reap stale agent-doc diagnostics` pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo: `9cc070fcc chore: update agent-doc diagnostics cleanup` committed with only the submodule pointer; I will push `main` after this document closeout.
+
+No follow-up backlog items from this cycle.
+<!-- agent:boundary:1dfb7e6b -->
 <!-- /agent:exchange -->
 ###
 
@@ -160,7 +182,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#next-steps] Triage the current activity/session-log findings: sidecar prefix-divergence fallback still fires, stale starting actors remain in session-actors, blocked-stop repair payloads exist for transcript-wrapped patch responses, and Codex child network proof still adds about 10s on restart.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -233,4 +254,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#pfxleak2] content_ours prefix leak + commit churn — plan: tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - 2026-05-10 [#bppfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
 - 2026-05-10 [#rootpatchmiss] Direct Codex agent-doc turn completed commits/pushes but did not write the final response into `src/session-share/tasks/root.md`; extend `tasks/agent-doc/plan-response-missing-after-manual-closeout.md` with the May 10 `#vt-agent-deploy` reproduction and fail closed on prompt-only exchange closeout.
+- 2026-05-10 [#next-steps] Triage the current activity/session-log findings: sidecar prefix-divergence fallback still fires, stale starting actors remain in session-actors, blocked-stop repair payloads exist for transcript-wrapped patch responses, and Codex child network proof still adds about 10s on restart.
 <!-- /agent:done -->

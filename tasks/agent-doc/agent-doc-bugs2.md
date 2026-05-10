@@ -56,7 +56,28 @@ Commits:
 No follow-up backlog items from this cycle.
 Rename agent:backlog-done to agent:done. Remove support for agent:backlog-done and agent:pending-done tags.
 spec-test-build-install-commit-push
-<!-- agent:boundary:c6a0b821 -->
+### Re: completed archive component rename — gpt-5
+
+Implemented the completed/reaped archive component rename.
+
+- `agent:done` is now the canonical completed/reaped archive component.
+- `agent:backlog-done` and `agent:pending-done` no longer count as archive aliases at runtime; `agent-doc migrate` rewrites both legacy tags to `agent:done`.
+- Reaping now creates/appends `agent:done`, and the active session document has been migrated to that marker.
+- Updated specs, runbooks, harness instruction source, README/CLAUDE docs, focused regressions, finalize integration coverage, and the unreleased notes.
+
+Verification completed:
+- `cargo test done`
+- `make check`
+- `cargo build`
+- `make install`
+- `cargo run --quiet -- audit-docs`
+
+Commits:
+- `src/agent-doc`: `d6ca93e fix: rename completed archive component` pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo: `8dd7e11af chore: update agent-doc archive component` committed; I will push `main` after this document closeout.
+
+There were no actionable follow-up items to capture.
+<!-- agent:boundary:50c187c1 -->
 <!-- /agent:exchange -->
 ###
 

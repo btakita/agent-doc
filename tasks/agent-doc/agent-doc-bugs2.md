@@ -29,72 +29,14 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260509-225908.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-003516.md`*
 
 Active backlog:
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - 9 more active item(s)
-❯ External edits cause duplicate turn responses. Please address root cause(s) including reducing the occurences of external edits.
-❯ spec-test-build-install-commit-push
-### Re: external edits causing duplicate turn responses — gpt-5
-
-Fixed the IPC timeout replay root cause. The CLI now treats `.agent-doc/claimed-patches/<patch_id>` as a durable per-patch skip sentinel instead of a one-shot token, so repeated editor watcher passes or multiple consumers cannot race the same stale timeout patch back into the editor after the CLI has already written and committed the response locally.
-
-I also tightened the JetBrains watcher inner EDT dedup path so a claimed/stale patch file is deleted when the late re-check skips it. That reduces the external-edit churn source directly: stale IPC files left behind after disk fallback should be cleaned instead of being eligible for a later duplicate response apply.
-
-Changed files are in `src/agent-doc`:
-- `src/ffi.rs`
-- `editors/vscode/src/patchGuard.ts`
-- `editors/vscode/src/patchGuard.test.ts`
-- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
-- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt`
-- `editors/jetbrains/gradle.properties`
-- `specs/06-config.md`
-- `VERSIONS.md`
-
-Verification and install completed:
-- `cargo test -p agent-doc test_is_claimed_by_force_disk_present`
-- `npm test` in `src/agent-doc/editors/vscode`
-- `make check` in `src/agent-doc`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
-- `make install` in `src/agent-doc`
-- `agent-doc --version` reports `agent-doc 0.33.16`
-- Installed the locally built JetBrains plugin `0.2.106` into the active IntelliJ IDEA 2026.1 config root; restart the IDE to activate it.
-
-Commits created:
-- `src/agent-doc`: `4f09f36 fix: make claimed ipc patches durable`
-- parent repo: `51d9fbfc5 agent-doc: durable ipc patch claims`
-### Re: external edits causing duplicate turn responses — gpt-5
-
-Fixed the IPC timeout replay root cause. The CLI now treats `.agent-doc/claimed-patches/<patch_id>` as a durable per-patch skip sentinel instead of a one-shot token, so repeated editor watcher passes or multiple consumers cannot race the same stale timeout patch back into the editor after the CLI has already written and committed the response locally.
-
-I also tightened the JetBrains watcher inner EDT dedup path so a claimed/stale patch file is deleted when the late re-check skips it. That reduces the external-edit churn source directly: stale IPC files left behind after disk fallback should be cleaned instead of being eligible for a later duplicate response apply.
-
-Changed files are in `src/agent-doc`:
-- `src/ffi.rs`
-- `editors/vscode/src/patchGuard.ts`
-- `editors/vscode/src/patchGuard.test.ts`
-- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt`
-- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt`
-- `editors/jetbrains/gradle.properties`
-- `specs/06-config.md`
-- `VERSIONS.md`
-
-Verification and install completed:
-- `cargo test -p agent-doc test_is_claimed_by_force_disk_present`
-- `npm test` in `src/agent-doc/editors/vscode`
-- `make check` in `src/agent-doc`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
-- `make install` in `src/agent-doc`
-- `agent-doc --version` reports `agent-doc 0.33.16`
-- Installed the locally built JetBrains plugin `0.2.106` into the active IntelliJ IDEA 2026.1 config root; restart the IDE to activate it.
-
-Commits created:
-- `src/agent-doc`: `4f09f36 fix: make claimed ipc patches durable`
-- parent repo: `51d9fbfc5 agent-doc: durable ipc patch claims`
-<!-- agent:boundary:cac3cd9c -->
+<!-- agent:boundary:8c6dc979 -->
 <!-- /agent:exchange -->
 ###
 

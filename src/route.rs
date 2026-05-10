@@ -860,7 +860,11 @@ fn reapply_codex_capability_contract_before_reuse(
     session_id: &str,
     file_path: &str,
     harness: &HarnessConfig,
+    enforce_capability_proof: bool,
 ) -> Result<String> {
+    if !enforce_capability_proof {
+        return Ok(pane.to_string());
+    }
     let Some(reason) = codex_managed_capability_proof_missing(file, session_id, harness)? else {
         return Ok(pane.to_string());
     };
@@ -921,6 +925,7 @@ fn reapply_codex_launch_contract_before_reuse(
     file_path: &str,
     harness: &HarnessConfig,
     respect_tracked_clear_restart: bool,
+    enforce_capability_proof: bool,
 ) -> Result<String> {
     let dispatch_pane = reapply_codex_launch_contract_after_clear(
         tmux,
@@ -938,6 +943,7 @@ fn reapply_codex_launch_contract_before_reuse(
         session_id,
         file_path,
         harness,
+        enforce_capability_proof,
     )
 }
 
@@ -1743,7 +1749,7 @@ fn dispatch_only_reopen_existing_pane(
     delivery: DispatchOnlyReopenDelivery,
 ) -> Result<String> {
     let dispatch_pane = reapply_codex_launch_contract_before_reuse(
-        tmux, file, pane_id, session_id, file_path, harness, false,
+        tmux, file, pane_id, session_id, file_path, harness, false, false,
     )?;
     let log_status = crate::startup_miss::session_log_status(file, session_id)
         .ok()
@@ -2030,6 +2036,7 @@ fn load_authoritative_actor_binding(
     file_path: &str,
     harness: &HarnessConfig,
     respect_tracked_clear_restart: bool,
+    enforce_capability_proof: bool,
 ) -> Result<Option<AuthoritativeActorDispatchTarget>> {
     if respect_tracked_clear_restart
         && tracked_codex_clear_requires_fresh_restart(
@@ -2068,7 +2075,9 @@ fn load_authoritative_actor_binding(
     if !tmux.pane_alive(&record.pane_id) {
         return Ok(None);
     }
-    if codex_managed_capability_proof_missing(file, session_id, harness)?.is_some() {
+    if enforce_capability_proof
+        && codex_managed_capability_proof_missing(file, session_id, harness)?.is_some()
+    {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -2190,6 +2199,7 @@ fn load_authoritative_actor_dispatch_target(
     file_path: &str,
     harness: &HarnessConfig,
     respect_tracked_clear_restart: bool,
+    enforce_capability_proof: bool,
 ) -> Result<Option<AuthoritativeActorDispatchTarget>> {
     Ok(load_authoritative_actor_binding(
         tmux,
@@ -2198,6 +2208,7 @@ fn load_authoritative_actor_dispatch_target(
         file_path,
         harness,
         respect_tracked_clear_restart,
+        enforce_capability_proof,
     )?
     .filter(authoritative_actor_dispatch_target_eligible))
 }
@@ -2583,7 +2594,7 @@ fn resolve_or_create_pane_dispatch_only(
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
     let authoritative_actor =
-        load_authoritative_actor_binding(tmux, file, session_id, file_path, harness, false)?;
+        load_authoritative_actor_binding(tmux, file, session_id, file_path, harness, false, false)?;
     if let Some(actor) = authoritative_actor
         .as_ref()
         .filter(|actor| authoritative_actor_dispatch_target_eligible(actor))
@@ -2915,9 +2926,9 @@ fn resolve_or_create_pane_with_auto_fix_retry(
     let cycle_baseline = crate::cycle_state::load(file)?;
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
-    if let Some(actor) =
-        load_authoritative_actor_dispatch_target(tmux, file, session_id, file_path, harness, true)?
-    {
+    if let Some(actor) = load_authoritative_actor_dispatch_target(
+        tmux, file, session_id, file_path, harness, true, true,
+    )? {
         return route_via_authoritative_actor(
             tmux,
             file,
@@ -3267,6 +3278,7 @@ fn resolve_or_create_pane_with_auto_fix_retry(
                     session_id,
                     file_path,
                     harness,
+                    true,
                     true,
                 )?;
                 register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
@@ -11016,7 +11028,10 @@ Body\n\
     #[test]
     fn resolve_or_create_pane_dispatch_only_fails_closed_when_live_submit_has_no_codex_hook_proof()
     {
-        use std::sync::{Arc, Mutex};
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
 
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
@@ -11048,7 +11063,7 @@ Body\n\
         );
 
         let doc = dir.path().join("dispatch-only-authoritative-unproven.md");
-        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let snapshot = "---\nagent_doc_session: route-dispatch-only-authoritative-unproven\nagent: codex\ncodex_network_access: enabled\n---\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
@@ -11073,6 +11088,8 @@ Body\n\
 
         let injects = Arc::new(Mutex::new(Vec::<String>::new()));
         let injects_for_ipc = injects.clone();
+        let restart_called = Arc::new(AtomicBool::new(false));
+        let restart_called_for_ipc = restart_called.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
             IpcMethod::State => IpcResponse::ok(serde_json::json!({
                 "running": true,
@@ -11084,7 +11101,10 @@ Body\n\
                 injects_for_ipc.lock().unwrap().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
-            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Restart { .. } => {
+                restart_called_for_ipc.store(true, Ordering::Relaxed);
+                IpcResponse::ok_empty()
+            }
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
             IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
         })
@@ -11110,6 +11130,10 @@ Body\n\
         assert!(
             injects.lock().unwrap().is_empty(),
             "ready authoritative dispatch-only path should stay on direct pane submit even when it later fails closed"
+        );
+        assert!(
+            !restart_called.load(Ordering::Relaxed),
+            "editor dispatch-only reroutes must not restart a live Codex pane just because the session log lacks a capability proof"
         );
 
         ipc.stop();
@@ -11385,6 +11409,7 @@ Body\n\
             session_id,
             &file_path,
             &HarnessConfig::claude(),
+            true,
             true,
         )
         .expect("normalized Claude harness name should not fail the authoritative actor lookup")

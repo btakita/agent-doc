@@ -50,7 +50,30 @@ Findings:
 Next steps are in the plan: test typed controller response envelopes, improve the `ok response without data` diagnostic, clear saved editor route errors after later successful same-document focus/sync/route, re-query the controller when route sees a starting projection, and keep latency work separate unless new logs again show over-budget `sync_lock_wait` or `prune_stash_panes`.
 
 I committed the plan file as `40e0339a0`. No code was changed, so I did not run the Rust test suite.
-<!-- agent:boundary:ff96471b -->
+❯ do [#syncroutelog]. spec-test-build-install-commit-push
+### Re: syncroutelog — gpt-5
+
+Implemented and pushed the sync-route diagnostic fix.
+
+What changed:
+- Typed controller RPC decode errors now include the controller command name and raw response envelope, and missing-data envelopes are logged to `ops.log` against the document when possible.
+- Successful binary route and focused sync calls now clear the matching `.agent-doc/state/editor-route-errors/<doc>.txt` diagnostic, matching and extending the editor-side cleanup behavior.
+- Dispatch-only route re-checks the authoritative controller actor when the local projection still says `starting`, so a just-ready actor can use the ready path instead of the stale starting direct-submit fallback.
+- Updated the JetBrains spec and added focused Rust coverage for the saved route-error cleanup path and missing controller data diagnostic.
+
+Verification completed:
+- `cargo fmt`
+- `cargo test -p agent-doc typed_controller_decode_reports_missing_data_with_command_and_raw_envelope`
+- `cargo test -p agent-doc editor_route_errors`
+- `cargo test -p agent-doc`
+- `cargo build -p agent-doc`
+- `cargo install --path . --force`
+- `make check`
+
+Commits pushed:
+- `src/agent-doc`: `c21ef89` (`fix: clear stale editor route diagnostics`) to `origin/20260422/codex-agent-backend`
+- parent repo: `00af0a2b7` (`chore: bump agent-doc submodule`) to `origin/main`
+<!-- agent:boundary:db7200ef -->
 <!-- /agent:exchange -->
 ###
 
@@ -71,7 +94,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#syncroutelog] Fix stale/opaque sync-route diagnostics: controller RPC can surface 'ok response without data', saved editor-route-errors can remain stale after later success, and route can submit on a stale starting projection. Plan: tasks/agent-doc/plan-sync-command-route-error-follow-up.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
@@ -141,6 +163,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-10 [#duppb] Duplicate response patchback after sidecar normalization fallback / full-content IPC re-delivery — the same response block can appear twice back-to-back after finalize reports success. Plan: tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md
 - 2026-05-10 [#runhb] [recommended] Add a parent-visible heartbeat/watchdog for long direct `agent-doc <file>` and child-agent waits: emit elapsed phase/cycle output every 30s, persist last-progress timestamps, and fail closed when capture/write/commit progress stalls past budget.
 - 2026-05-10 [#codexasyncnet] [recommended] Split Codex managed capability proof from pane startup: launch/render the Codex pane immediately, run network/SSH/write-root proof asynchronously, gate prompt dispatch until required proof succeeds, and fail closed with diagnostics if background proof fails.
+- 2026-05-10 [#syncroutelog] Fix stale/opaque sync-route diagnostics: controller RPC can surface 'ok response without data', saved editor-route-errors can remain stale after later success, and route can submit on a stale starting projection. Plan: tasks/agent-doc/plan-sync-command-route-error-follow-up.md
 <!-- /agent:pending-done -->
 
 

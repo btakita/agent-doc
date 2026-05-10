@@ -33,10 +33,35 @@ Implemented Codex capability proof timing diagnostics.
 
 Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
+- [ ] [#rootpbmiss] Root task response patchback missing after direct Codex closeout — `src/session-share/tasks/root.md` contained the prompt and all work was committed/pushed (`BuildParty 33646bb`, `SessionShare 0223139e`), but the final response never landed in the exchange until manual repair. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
 - 6 more active item(s)
-<!-- agent:boundary:463ef144 -->
+❯ do [#crossdocpend]. spec-test-build-install-commit-push
+### Re: cross-document pending adds — gpt-5
+
+Implemented `#crossdocpend`.
+
+Changed `agent-doc` so explicit backlog targets are no longer satisfied by a current-document pending mutation. `write`/`finalize` now support `--pending-add-to <file> <text>`, validate that the target exists and has a backlog component, and preserve item order per target. `plan` now exposes explicit target files in pending mutation output and emits finalize hints with `--pending-add-to`.
+
+Updated the skill instructions, pending/spec docs, changelog, and regression coverage for the wrong-document bypass and the new cross-document add path.
+
+Verification completed:
+- `cargo fmt`
+- `cargo check`
+- `cargo test --test pending_integration`
+- `cargo test --all-targets`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc skill install --harness codex --reload restart`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Pushed commits:
+- `src/agent-doc`: `74b620f fix: target cross-document pending adds`
+- parent repo `main`: `b85d7525f agent-doc response: cross-document pending adds`
+
+No follow-up backlog items.
+<!-- agent:boundary:2ed81f07 -->
 <!-- /agent:exchange -->
 ###
 
@@ -52,7 +77,6 @@ Active backlog:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
 - [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
@@ -123,6 +147,7 @@ Active backlog:
 - 2026-05-10 [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
 - 2026-05-10 [#oobtaildel] Valid deletion of escaped prompt content outside `agent:exchange` is misclassified as post-commit local drift; distinguish cleanup deletion from real later user edits without swallowing fresh prompts. Plan: tasks/agent-doc/plan-valid-oob-tail-deletion.md
 - 2026-05-10 [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
+- 2026-05-10 [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 <!-- /agent:pending-done -->
 
 

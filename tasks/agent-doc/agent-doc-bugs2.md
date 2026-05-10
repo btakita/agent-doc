@@ -29,34 +29,14 @@ Implemented Codex capability proof timing diagnostics.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-061451.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-062251.md`*
 
 Active backlog:
-- [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
-- 7 more active item(s)
-❯ do [#pendrev]. spec-test-build-install-commit-push
-### Re: #pendrev pending-add order — gpt-5
-
-Implemented `#pendrev`.
-
-What changed:
-- Documented the invariant that repeated `--pending-add` flags are inserted as one ordered batch at the top of the backlog.
-- Added write-path integration coverage for three repeated `--pending-add` flags preserving CLI order above existing backlog items.
-- Added finalize-path integration coverage for the same ordered batch behavior crossing the commit boundary.
-
-Verification:
-- `cargo test write_pending_add_multiple_flags_keep_cli_order_at_top`
-- `cargo test finalize_pending_add_multiple_flags_keep_cli_order_at_top`
-- `make check`
-- `cargo build`
-- `make install`
-
-Commits:
-- `src/agent-doc` `abae439` (`test: cover pending add order`) pushed to `origin/20260422/codex-agent-backend`
-- parent repo submodule pointer commit `dbbea8b` prepared on `main`
-<!-- agent:boundary:6ba86ee2 -->
+- [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
+- 6 more active item(s)
+<!-- agent:boundary:463ef144 -->
 <!-- /agent:exchange -->
 ###
 

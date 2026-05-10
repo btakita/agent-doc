@@ -93,7 +93,7 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
     let archive_ref = format!("[#{}]", id);
     for comp in components {
         let body = comp.content(&content);
-        if comp.name == "pending-done"
+        if crate::component::is_backlog_done_component(&comp.name)
             && body
                 .lines()
                 .any(|line| line.to_ascii_lowercase().contains(&archive_ref))
@@ -507,7 +507,7 @@ mod tests {
         archive_items: &str,
     ) -> (TempDir, PathBuf) {
         let content = format!(
-            "---\nagent_doc_session: test\n---\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n\n<!-- agent:pending-done -->\n{}\n<!-- /agent:pending-done -->\n",
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n\n<!-- agent:backlog-done -->\n{}\n<!-- /agent:backlog-done -->\n",
             pending_items, archive_items
         );
         let (tmp, doc) = setup_test_dir();
@@ -670,6 +670,23 @@ mod tests {
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("- [ ] [#keep1] Keep backlog item"));
         assert!(content.contains("- 2026-05-09 [#done1] Already completed"));
+    }
+
+    #[test]
+    fn done_noops_when_item_was_archived_in_legacy_pending_done() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] [#keep1] Keep backlog item\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "- 2026-05-09 [#done1] Already completed\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        let (tmp, doc) = setup_test_dir();
+        fs::write(&doc, content).unwrap();
+        done(&doc, "done1").unwrap();
+        drop(tmp);
     }
 
     #[test]

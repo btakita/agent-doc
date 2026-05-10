@@ -3,6 +3,7 @@
 //! ## Spec
 //! - Migrates session documents from deprecated component names and attributes to canonical forms.
 //! - Renames `<!-- agent:pending ... -->` to `<!-- agent:backlog ... -->` (open+close tags).
+//! - Renames `<!-- agent:pending-done -->` to `<!-- agent:backlog-done -->` (open+close tags).
 //! - Strips deprecated `patch=`/`mode=` attributes from backlog component tags.
 //! - Accepts one or more file paths, or `--all` to scan for session documents under the project root.
 //! - `--dry-run` previews changes without writing.
@@ -17,6 +18,7 @@
 //! ## Evals
 //! - pending_to_backlog: `<!-- agent:pending -->` → `<!-- agent:backlog -->`
 //! - pending_close_to_backlog: `<!-- /agent:pending -->` → `<!-- /agent:backlog -->`
+//! - pending_done_to_backlog_done: `<!-- agent:pending-done -->` → `<!-- agent:backlog-done -->`
 //! - strip_patch_attr: `<!-- agent:pending patch=replace -->` → `<!-- agent:backlog -->`
 //! - strip_mode_attr: `<!-- agent:backlog mode=append -->` → `<!-- agent:backlog -->`
 //! - preserves_other_attrs: `<!-- agent:pending foo=bar patch=replace -->` → `<!-- agent:backlog foo=bar -->`
@@ -124,11 +126,17 @@ fn migrate_comment(comment: &str) -> String {
     if comment.trim() == "<!-- /agent:pending -->" {
         return "<!-- /agent:backlog -->".to_string();
     }
+    if comment.trim() == "<!-- /agent:pending-done -->" {
+        return "<!-- /agent:backlog-done -->".to_string();
+    }
 
     // Open tag: <!-- agent:pending ... -->
     if let Some(rest) = comment.strip_prefix("<!-- agent:pending")
         && let Some(inner) = rest.strip_suffix("-->")
     {
+        if rest.starts_with("-done") {
+            return "<!-- agent:backlog-done -->".to_string();
+        }
         let trimmed = inner.trim();
         if trimmed.is_empty() {
             return "<!-- agent:backlog -->".to_string();
@@ -290,6 +298,16 @@ mod tests {
         assert_eq!(
             result,
             "<!-- agent:backlog -->\nContent\n<!-- /agent:backlog -->\n"
+        );
+    }
+
+    #[test]
+    fn pending_done_to_backlog_done() {
+        let input = "<!-- agent:pending-done -->\nDone\n<!-- /agent:pending-done -->\n";
+        let result = migrate_content(input);
+        assert_eq!(
+            result,
+            "<!-- agent:backlog-done -->\nDone\n<!-- /agent:backlog-done -->\n"
         );
     }
 

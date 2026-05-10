@@ -26,7 +26,7 @@
 //!   guidance instead of committing an empty cycle with no response body.
 //! - When there is no pending response/capture to replay, `run(file)` also reaps stale completed
 //!   backlog items (`- [x] ...`) that should already have been removed, synchronizing the reap
-//!   into the snapshot and `agent:pending-done` archive when present.
+//!   into the snapshot and `agent:backlog-done` archive when present.
 //! - When there is no pending response/capture to replay, `run(file)` also normalizes safe
 //!   template drift such as a stale `agent:boundary` marker left before an already-answered
 //!   exchange turn; the repair repositions the boundary to the true end of the completed turn
@@ -1501,8 +1501,8 @@ mod tests {
             "- [ ] [#aaaa] keep\n",
             "- [x] [#bbbb] drop\n",
             "<!-- /agent:pending -->\n\n",
-            "<!-- agent:pending-done -->\n",
-            "<!-- /agent:pending-done -->\n"
+            "<!-- agent:backlog-done -->\n",
+            "<!-- /agent:backlog-done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
@@ -1533,8 +1533,8 @@ mod tests {
             "- [ ] keep\n",
             "- [x] legacy drop\n",
             "<!-- /agent:pending -->\n\n",
-            "<!-- agent:pending-done -->\n",
-            "<!-- /agent:pending-done -->\n"
+            "<!-- agent:backlog-done -->\n",
+            "<!-- /agent:backlog-done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
@@ -1565,7 +1565,7 @@ mod tests {
         assert!(repaired_snapshot.contains("- [ ] [#"));
         assert!(!snapshot_pending_body.contains("legacy drop"));
         assert!(repaired_snapshot.contains("legacy drop"));
-        assert!(repaired_snapshot.contains("pending-done"));
+        assert!(repaired_snapshot.contains("backlog-done"));
     }
 
     #[test]
@@ -1580,8 +1580,8 @@ mod tests {
             "- [ ] [#aaaa] keep\n",
             "- [x] [#bbbb] drop\n",
             "<!-- /agent:pending -->\n\n",
-            "<!-- agent:pending-done -->\n",
-            "<!-- /agent:pending-done -->\n"
+            "<!-- agent:backlog-done -->\n",
+            "<!-- /agent:backlog-done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
@@ -1620,8 +1620,8 @@ mod tests {
             "<!-- agent:pending -->\n",
             "- [x] [#bbbb] drop\n",
             "<!-- /agent:pending -->\n\n",
-            "<!-- agent:pending-done -->\n",
-            "<!-- /agent:pending-done -->\n"
+            "<!-- agent:backlog-done -->\n",
+            "<!-- /agent:backlog-done -->\n"
         );
         let live_content = concat!(
             "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
@@ -1634,8 +1634,8 @@ mod tests {
             "<!-- agent:pending -->\n",
             "- [x] [#bbbb] drop\n",
             "<!-- /agent:pending -->\n\n",
-            "<!-- agent:pending-done -->\n",
-            "<!-- /agent:pending-done -->\n"
+            "<!-- agent:backlog-done -->\n",
+            "<!-- /agent:backlog-done -->\n"
         );
         std::fs::write(&doc, live_content).unwrap();
         snapshot::save(&doc, snapshot_content).unwrap();

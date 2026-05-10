@@ -2124,7 +2124,9 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
     })
 }
 
-/// Archive reaped pending items to `agent:pending-done`.
+/// Archive reaped pending items to `agent:backlog-done`.
+///
+/// `agent:pending-done` remains a deprecated alias for existing documents.
 ///
 /// When the archive component is absent, create a visible
 /// `## Completed / Reaped` section after the tracked work components before
@@ -2147,11 +2149,16 @@ pub(crate) fn archive_pending_done(
     }
     let mut content_with_archive = content.to_string();
     let components = crate::component::parse(&content_with_archive).ok()?;
-    if !components.iter().any(|c| c.name == "pending-done") {
+    if !components
+        .iter()
+        .any(|c| crate::component::is_backlog_done_component(&c.name))
+    {
         content_with_archive = insert_pending_done_component(&content_with_archive)?;
     }
     let components = crate::component::parse(&content_with_archive).ok()?;
-    let archive = components.into_iter().find(|c| c.name == "pending-done")?;
+    let archive = components
+        .into_iter()
+        .find(|c| crate::component::is_backlog_done_component(&c.name))?;
     let existing_body = &content_with_archive[archive.open_end..archive.close_start];
 
     // Use the `date` command so we stay on agent-doc's no-chrono policy
@@ -2201,7 +2208,7 @@ fn insert_pending_done_component(content: &str) -> Option<String> {
         result.push('\n');
     }
     result.push_str(
-        "## Completed / Reaped\n\n<!-- agent:pending-done -->\n<!-- /agent:pending-done -->\n",
+        "## Completed / Reaped\n\n<!-- agent:backlog-done -->\n<!-- /agent:backlog-done -->\n",
     );
     result.push_str(&content[insert_at..]);
     Some(result)
@@ -2905,7 +2912,7 @@ mod tests {
         assert!(!file_backlog_after.contains("[#reap1]"));
         assert!(file_after.contains("[#keep1]"));
         assert!(file_after.contains("## Completed / Reaped"));
-        assert!(file_after.contains("<!-- agent:pending-done -->"));
+        assert!(file_after.contains("<!-- agent:backlog-done -->"));
         assert!(file_after.contains("[#reap1] Reap me"));
 
         let snapshot_after = snapshot::load(&doc).unwrap().unwrap();
@@ -2919,8 +2926,61 @@ mod tests {
         assert!(!snapshot_backlog_after.contains("[#reap1]"));
         assert!(snapshot_after.contains("[#keep1]"));
         assert!(snapshot_after.contains("## Completed / Reaped"));
-        assert!(snapshot_after.contains("<!-- agent:pending-done -->"));
+        assert!(snapshot_after.contains("<!-- agent:backlog-done -->"));
         assert!(snapshot_after.contains("[#reap1] Reap me"));
+    }
+
+    #[test]
+    fn archive_pending_done_inserts_canonical_backlog_done_component() {
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let archived = archive_pending_done(
+            content,
+            &[crate::pending::PendingItem {
+                marker: crate::pending::PendingListMarker::Bullet,
+                id: "done1".to_string(),
+                state: crate::pending::PendingState::Done,
+                gate_type: None,
+                text: "completed item".to_string(),
+                continuation: String::new(),
+            }],
+        )
+        .unwrap();
+
+        assert!(archived.contains("<!-- agent:backlog-done -->"));
+        assert!(archived.contains("<!-- /agent:backlog-done -->"));
+        assert!(!archived.contains("<!-- agent:pending-done -->"));
+        assert!(archived.contains("[#done1] completed item"));
+    }
+
+    #[test]
+    fn archive_pending_done_delegates_to_legacy_pending_done_component() {
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        let archived = archive_pending_done(
+            content,
+            &[crate::pending::PendingItem {
+                marker: crate::pending::PendingListMarker::Bullet,
+                id: "done1".to_string(),
+                state: crate::pending::PendingState::Done,
+                gate_type: None,
+                text: "completed item".to_string(),
+                continuation: String::new(),
+            }],
+        )
+        .unwrap();
+
+        assert!(archived.contains("<!-- agent:pending-done -->"));
+        assert!(!archived.contains("<!-- agent:backlog-done -->"));
+        assert!(archived.contains("[#done1] completed item"));
     }
 
     #[test]
@@ -3379,8 +3439,8 @@ mod tests {
             "<!-- agent:backlog -->\n",
             "- [x] [#scopeid] completed item\n",
             "<!-- /agent:backlog -->\n\n",
-            "<!-- agent:pending-done -->\n",
-            "<!-- /agent:pending-done -->\n"
+            "<!-- agent:backlog-done -->\n",
+            "<!-- /agent:backlog-done -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
         snapshot::save(&doc, snapshot).unwrap();
@@ -3406,8 +3466,8 @@ mod tests {
             "<!-- agent:backlog -->\n",
             "- [x] [#scopeid] completed item\n",
             "<!-- /agent:backlog -->\n\n",
-            "<!-- agent:pending-done -->\n",
-            "<!-- /agent:pending-done -->\n"
+            "<!-- agent:backlog-done -->\n",
+            "<!-- /agent:backlog-done -->\n"
         );
         std::fs::write(&doc, live).unwrap();
 
@@ -3627,8 +3687,8 @@ mod tests {
             "Diff:\n",
             "@@ -1 +1 @@\n",
             "<!-- /agent:backlog -->\n\n",
-            "<!-- agent:pending-done -->\n",
-            "<!-- /agent:pending-done -->\n"
+            "<!-- agent:backlog-done -->\n",
+            "<!-- /agent:backlog-done -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
         snapshot::save(&doc, snapshot).unwrap();
@@ -3658,8 +3718,8 @@ mod tests {
             "Diff:\n",
             "@@ -1 +1 @@\n",
             "<!-- /agent:backlog -->\n\n",
-            "<!-- agent:pending-done -->\n",
-            "<!-- /agent:pending-done -->\n"
+            "<!-- agent:backlog-done -->\n",
+            "<!-- /agent:backlog-done -->\n"
         );
         std::fs::write(&doc, live).unwrap();
 

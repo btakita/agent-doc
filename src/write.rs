@@ -573,7 +573,7 @@ fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<O
 }
 
 fn grouped_pending_add_to(raw: &[String]) -> Result<Vec<(PathBuf, Vec<String>)>> {
-    if raw.len() % 2 != 0 {
+    if !raw.len().is_multiple_of(2) {
         anyhow::bail!("--pending-add-to expects repeated FILE TEXT pairs");
     }
 
@@ -709,7 +709,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     if options.pending_only && commit_mode == CommitMode::Required {
         anyhow::bail!("finalize does not support --pending-only");
     }
-    if options.pending_add_to.len() % 2 != 0 {
+    if !options.pending_add_to.len().is_multiple_of(2) {
         anyhow::bail!("--pending-add-to expects repeated FILE TEXT pairs");
     }
     let commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;

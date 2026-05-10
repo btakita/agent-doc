@@ -1091,6 +1091,8 @@ pub fn detect_dropped_from_history(
                     current_ids.insert(item.id);
                 }
             }
+        } else if crate::component::is_backlog_done_component(&comp.name) {
+            current_ids.extend(extract_pending_ids_from_text(comp.content(current_doc)));
         }
     }
 
@@ -1142,6 +1144,23 @@ pub fn detect_dropped_from_history(
     }
 
     Ok(DroppedBacklogReport { dropped })
+}
+
+fn extract_pending_ids_from_text(text: &str) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("[#") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find(']') else {
+            break;
+        };
+        let id = &after[..end];
+        if is_valid_pending_id(id) {
+            ids.insert(id.to_ascii_lowercase());
+        }
+        rest = &after[end + 1..];
+    }
+    ids
 }
 
 /// Generate a stable 4-char base32 hash from `(text, doc_id, counter)`.
@@ -1361,8 +1380,8 @@ pub fn reap(body: &str) -> Result<(String, Vec<String>)> {
 }
 
 /// Reap `[x]` items and return the removed items (with text), not just ids.
-/// Used by preflight to archive reaped items to an `agent:pending-done`
-/// component when one exists (spec §3 step 3).
+/// Used by preflight to archive reaped items to an `agent:backlog-done`
+/// component (`agent:pending-done` is a legacy alias).
 pub fn reap_with_items(body: &str) -> Result<(String, Vec<PendingItem>)> {
     let layout = PendingLayout::parse(body);
     let items = layout.items();
@@ -3163,6 +3182,42 @@ mod tests {
         let mut done = HashSet::new();
         done.insert("item1".to_string());
         let report = detect_dropped_from_history(current, baseline, &done).unwrap();
+        assert!(report.dropped.is_empty());
+    }
+
+    #[test]
+    fn detect_dropped_from_history_allows_completed_archive_id() {
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#item1] Was open\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:backlog-done -->\n",
+            "- 2026-05-10 [#item1] Was open\n",
+            "<!-- /agent:backlog-done -->\n"
+        );
+        let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
+        assert!(report.dropped.is_empty());
+    }
+
+    #[test]
+    fn detect_dropped_from_history_allows_legacy_completed_archive_id() {
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#item1] Was open\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:pending-done -->\n",
+            "- 2026-05-10 [#item1] Was open\n",
+            "<!-- /agent:pending-done -->\n"
+        );
+        let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
         assert!(report.dropped.is_empty());
     }
 

@@ -30,7 +30,26 @@ Implemented Codex capability proof timing diagnostics.
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-195328.md`*
-<!-- agent:boundary:f3bb2a4f -->
+❯ do [#backlogreap]. spec-test-build-install-commit-push
+### Re: #backlogreap — gpt-5
+
+Implemented `#backlogreap`.
+
+- Direct `agent-doc backlog <file> reap` now archives reaped `[x]` items into canonical `agent:done`, creating `## Completed / Reaped` when needed, instead of only deleting them from live tracked work.
+- Updated pending integration coverage for normal reap, malformed spill reap, and legacy done-id backfill so the live backlog loses completed entries while the archive keeps grep-visible ids/text.
+- Updated `src/agent-doc/specs/pending-system.md` with the direct maintenance visibility rule.
+
+Verification:
+- `cargo test -p agent-doc --test pending_integration pending_reap`
+- `make check`
+- `make install`
+
+Commits before this session closeout:
+- `src/agent-doc` `3c9d4a0 fix: archive direct backlog reaps`
+- parent repo `a5799b3d8 chore: update agent-doc submodule`
+
+No follow-up backlog items added.
+<!-- agent:boundary:52cdaaa6 -->
 <!-- /agent:exchange -->
 ###
 

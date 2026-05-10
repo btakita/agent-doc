@@ -44,7 +44,7 @@ Combine any number of flags in one `agent-doc write` call:
 
 | Flag | Purpose |
 |------|---------|
-| `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Bare `[#]` and stacked prefixes such as `[#a] [#b] ...` fail closed. Repeat for multiple adds. |
+| `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Bare `[#]` and stacked prefixes such as `[#a] [#b] ...` fail closed. Repeat for multiple adds; repeated flags keep caller order at the top of the backlog. |
 | `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
 | `--pending-edit "id=new text"` | Rewrite text, preserve hash. Repeat as needed. |
 | `--pending-clear` | Drop all items. |
@@ -55,6 +55,10 @@ Combine any number of flags in one `agent-doc write` call:
 `agent:icebox` is not populated by `--pending-add`. When the response needs to
 rewrite the icebox component, use a template patch block in the response body:
 `<!-- replace:icebox --> ... <!-- /replace:icebox -->`.
+
+Completed/reaped items are archived under canonical `agent:backlog-done`.
+Existing `agent:pending-done` components are deprecated but still accepted as
+the archive alias.
 
 ## Custom IDs
 

@@ -61,6 +61,10 @@ therefore target the same tracked item.
 rewrite the icebox component, use a template patch block in the response body:
 `<!-- replace:icebox --> ... <!-- /replace:icebox -->`.
 
+Completed/reaped items are archived under canonical `agent:backlog-done`.
+Existing `agent:pending-done` components are deprecated but still accepted as
+the archive alias.
+
 ## Custom IDs
 
 When you need a stable human-chosen identifier, start the add text with

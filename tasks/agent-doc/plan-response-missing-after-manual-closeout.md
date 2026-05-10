@@ -23,6 +23,27 @@ This may overlap with existing bugs:
 
 The distinct failure to preserve is: a successful `spec-test-commit-push` turn must not be allowed to end with only the prompt persisted in the exchange.
 
+## Additional Evidence: Root Task Patchback Miss
+
+On May 10, 2026, `src/session-share/tasks/root.md` recorded:
+
+```text
+Fix the test suite. The test suite must pass before completing the turn. Update the agent harness files to enforce this rule.
+spec-test-commit-push
+```
+
+The work completed and was pushed (`BuildParty 33646bb`, `SessionShare 0223139e`), but the assistant closeout did not land in the document. The user had to ask for manual patchback repair. This is the same prompt-only exchange shape, but against the root session-share task document and after a nested submodule commit plus parent pointer/news commit.
+
+## Additional Evidence: VT Agent Deploy Patchback Miss
+
+On May 10, 2026, `src/session-share/tasks/root.md` recorded:
+
+```text
+do [#vt-agent-deploy]. spec-test-news-commit-push
+```
+
+The work completed and was pushed (`BuildParty af7b9b7`, `SessionShare ebc806c2`, parent `agent-loop` 8d972190b), but the final response block was not written into the exchange. The user had to request manual repair with: "The response patchback is not written into the document." This is another prompt-only exchange closeout after a nested submodule commit, session-share commit, and parent pointer commit all succeeded.
+
 ## Fix Plan
 
 1. Add a regression fixture for a direct Codex/agent-doc turn that:

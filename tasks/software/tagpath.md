@@ -127,14 +127,48 @@ v0.6.1 published to crates.io
 
 Active backlog:
 - [ ] [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
-<!-- agent:boundary:3484b36e -->
+❯ do [#qont]. spec-test-build-install-commit-push
+### Re: #qont — gpt-5
+
+Completed `#qont`.
+
+Added explicit `normalize-query` and `ontology-refs` compactness cases to `fixtures/tsift-token-savings.json`, covering normalized query input and `.naming/tags/*.md` ontology refs. Updated the fixture tests so they now verify the new surfaces, expected normalized query tags, source handle preservation, ontology handle/path shape, and compact previews that keep ontology refs as handle rows instead of inline prose. Updated `SPEC.md` to document the six-surface fixture contract.
+
+Committed and pushed tagpath commit `c0bf84c` (`test: add query ontology compactness fixtures`) to `origin/main`.
+
+Verification run:
+- `cargo fmt --check`
+- `cargo test`
+- `cargo build`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo install --path . --force`
+- `tagpath --help`
+
+Note: the installed CLI does not currently support `tagpath --version`; clap rejects that flag, so I used `tagpath --help` as the local install smoke check.
+### Re: #qont — gpt-5
+
+Completed `#qont`.
+
+Added explicit `normalize-query` and `ontology-refs` compactness cases to `fixtures/tsift-token-savings.json`, covering normalized query input and `.naming/tags/*.md` ontology refs. Updated the fixture tests so they now verify the new surfaces, expected normalized query tags, source handle preservation, ontology handle/path shape, and compact previews that keep ontology refs as handle rows instead of inline prose. Updated `SPEC.md` to document the six-surface fixture contract.
+
+Committed and pushed tagpath commit `c0bf84c` (`test: add query ontology compactness fixtures`) to `origin/main`.
+
+Verification run:
+- `cargo fmt --check`
+- `cargo test`
+- `cargo build`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo install --path . --force`
+- `tagpath --help`
+
+Note: the installed CLI does not currently support `tagpath --version`; clap rejects that flag, so I used `tagpath --help` as the local install smoke check.
+<!-- agent:boundary:ad3e39bd -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped
@@ -142,4 +176,5 @@ Active backlog:
 <!-- agent:pending-done -->
 - 2026-05-09 [#ctxp] Add `context-pack` to `fixtures/tsift-token-savings.json` with raw refs, tagpath family rows, ontology_ref handles, and minimum savings thresholds; mirror the new case in tagpath + tsift fixture tests.
 - 2026-05-09 [#cmpa] Add a tagpath library/CLI compression-report helper that accepts raw symbol rows and emits grouped family previews plus byte/token savings metrics for tsift.
+- 2026-05-09 [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
 <!-- /agent:pending-done -->

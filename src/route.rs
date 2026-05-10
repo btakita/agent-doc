@@ -837,7 +837,8 @@ fn codex_managed_capability_proof_missing(
     let global_config = crate::config::Config::default();
     #[cfg(not(test))]
     let global_config = crate::config::load().unwrap_or_default();
-    if !crate::agent::codex::managed_capability_contract_required_for_doc(&fm, &global_config) {
+    if !crate::agent::codex::managed_capability_contract_required_for_doc(file, &fm, &global_config)
+    {
         return Ok(None);
     }
     let proven = crate::startup_miss::session_log_has_event_after_latest_start(

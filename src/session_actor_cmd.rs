@@ -798,7 +798,11 @@ fn codex_capability_proof_status(ctx: &SessionContext) -> String {
     let global_config = crate::config::Config::default();
     #[cfg(not(test))]
     let global_config = crate::config::load().unwrap_or_default();
-    if !crate::agent::codex::managed_capability_contract_required_for_doc(&fm, &global_config) {
+    if !crate::agent::codex::managed_capability_contract_required_for_doc(
+        &ctx.canonical_file,
+        &fm,
+        &global_config,
+    ) {
         return "not_required".to_string();
     }
     match crate::startup_miss::session_log_has_event_after_latest_start(

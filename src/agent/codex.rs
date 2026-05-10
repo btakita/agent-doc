@@ -104,6 +104,7 @@ struct StreamProcess {
 
 const CODEX_CHILD_NETWORK_PROBE_TIMEOUT: Duration = Duration::from_secs(45);
 const CODEX_CHILD_NETWORK_PROBE_MARKER: &str = "AGENT_DOC_NETWORK_PROBE_OK";
+const CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER: &str = "AGENT_DOC_WRITABLE_ROOT_PROBE_OK";
 
 fn looks_like_local_browser_cdp_permission_denied(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
@@ -394,6 +395,7 @@ fn classify_child_network_probe_failure(detail: &str) -> &'static str {
 fn wait_with_timeout(
     mut child: std::process::Child,
     timeout: Duration,
+    probe_name: &str,
 ) -> Result<std::process::Output> {
     let started = Instant::now();
     loop {
@@ -408,7 +410,7 @@ fn wait_with_timeout(
                 anyhow::anyhow!("failed to collect timed-out Codex child probe output: {e}")
             })?;
             anyhow::bail!(
-                "Codex child network probe timed out after {}s; stderr={}",
+                "Codex child {probe_name} probe timed out after {}s; stderr={}",
                 timeout.as_secs(),
                 String::from_utf8_lossy(&output.stderr).trim()
             );
@@ -491,7 +493,7 @@ fn prove_codex_child_network_access(
     }
     child.stdin.take();
 
-    let output = wait_with_timeout(child, CODEX_CHILD_NETWORK_PROBE_TIMEOUT)?;
+    let output = wait_with_timeout(child, CODEX_CHILD_NETWORK_PROBE_TIMEOUT, "network")?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
         let classification = classify_child_network_probe_failure(&detail);
@@ -502,6 +504,150 @@ fn prove_codex_child_network_access(
     }
 
     validate_codex_child_network_probe_output(
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    )
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn codex_child_writable_roots_probe_prompt(roots: &[PathBuf]) -> String {
+    let roots = roots
+        .iter()
+        .map(|root| shell_single_quote(&root.to_string_lossy()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "Run exactly one shell command to prove this Codex child can write every requested \
+         workspace root and any git metadata index lock in those roots. Use this command, \
+         then report only whether it succeeded:\n\n\
+         sh -lc 'set -eu; \
+         for dir do \
+           test -d \"$dir\"; \
+           probe=\"$dir/.agent-doc-write-probe-$$\"; \
+           printf \"%s\" agent-doc > \"$probe\"; \
+           rm -f \"$probe\"; \
+           if test -f \"$dir/HEAD\" || test -f \"$dir/commondir\" || test -d \"$dir/objects\"; then \
+             lock=\"$dir/index.lock\"; \
+             set -C; : > \"$lock\"; set +C; \
+             rm -f \"$lock\"; \
+           fi; \
+         done; \
+         printf \"{}\\n\"' sh {roots}",
+        CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER
+    )
+}
+
+fn classify_child_writable_root_probe_failure(detail: &str) -> &'static str {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("read-only file system")
+        || lower.contains("operation not permitted")
+        || lower.contains("permission denied")
+        || lower.contains("eperm")
+        || lower.contains("sandbox")
+    {
+        "Codex sandbox/write capability denied git metadata access"
+    } else if lower.contains("index.lock") || lower.contains("file exists") {
+        "Codex child could not create required git metadata lock"
+    } else if lower.contains("not a directory") || lower.contains("no such file or directory") {
+        "Codex writable-root probe target is missing"
+    } else {
+        "Codex child writable-root probe failed"
+    }
+}
+
+fn validate_codex_child_writable_root_probe_output(stdout: &str, stderr: &str) -> Result<()> {
+    let mut saw_command_execution = false;
+    let mut failure_detail: Option<String> = None;
+
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(item) = json.get("item") else {
+            continue;
+        };
+        if item.get("type").and_then(|value| value.as_str()) != Some("command_execution") {
+            continue;
+        }
+
+        saw_command_execution = true;
+        let command = item
+            .get("command")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let output = item
+            .get("aggregated_output")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let exit_code = item.get("exit_code").and_then(|value| value.as_i64());
+        if exit_code == Some(0) && output.contains(CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER) {
+            return Ok(());
+        }
+
+        failure_detail.get_or_insert_with(|| {
+            format!(
+                "command={command:?} exit_code={} output={}",
+                exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                output.trim()
+            )
+        });
+    }
+
+    let detail = failure_detail.unwrap_or_else(|| {
+        if saw_command_execution {
+            "Codex command execution did not emit the writable-root probe success marker"
+                .to_string()
+        } else {
+            format!(
+                "Codex child did not run a command_execution event; stderr={}",
+                stderr.trim()
+            )
+        }
+    });
+    let classification = classify_child_writable_root_probe_failure(&detail);
+    anyhow::bail!("{classification}: {detail}");
+}
+
+fn prove_codex_child_writable_roots(
+    command: &str,
+    launch_args: &[String],
+    env: &std::collections::HashMap<String, String>,
+    roots: &[PathBuf],
+) -> Result<()> {
+    if roots.is_empty() {
+        return Ok(());
+    }
+    let probe_args = codex_exec_args_for_probe(launch_args);
+    let codex =
+        Codex::new(Some(command.to_string()), Some(probe_args)).with_env(env_map_as_overrides(env));
+    let mut cmd = codex.build_command(None, false, None);
+    let mut child = cmd
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("failed to start Codex child writable-root probe: {e}"))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        Codex::write_prompt_to_child(stdin, &codex_child_writable_roots_probe_prompt(roots))?;
+    }
+    child.stdin.take();
+
+    let output = wait_with_timeout(child, CODEX_CHILD_NETWORK_PROBE_TIMEOUT, "writable-root")?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let classification = classify_child_writable_root_probe_failure(&detail);
+        anyhow::bail!(
+            "{classification}: Codex child writable-root probe command exited nonzero: {}",
+            detail.trim()
+        );
+    }
+
+    validate_codex_child_writable_root_probe_output(
         &String::from_utf8_lossy(&output.stdout),
         &String::from_utf8_lossy(&output.stderr),
     )
@@ -537,15 +683,40 @@ fn prove_writable_root(path: &Path) -> Result<()> {
             probe.display()
         )
     })?;
+    if path.join("HEAD").is_file()
+        || path.join("commondir").is_file()
+        || path.join("objects").is_dir()
+    {
+        let lock = path.join("index.lock");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "git metadata probe could not create {}: {e}",
+                    lock.display()
+                )
+            })?;
+        drop(file);
+        std::fs::remove_file(&lock).map_err(|e| {
+            anyhow::anyhow!(
+                "git metadata probe created but could not remove {}: {e}",
+                lock.display()
+            )
+        })?;
+    }
     Ok(())
 }
 
 pub(crate) fn managed_capability_contract_required_for_doc(
+    file: &Path,
     fm: &Frontmatter,
     global_config: &crate::config::Config,
 ) -> bool {
     super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled
         || !fm.required_ssh_targets.is_empty()
+        || !crate::git::workspace_access_dirs_for_doc(file).is_empty()
         || fm.agent_args.as_deref().is_some_and(args_contain_add_dir)
         || fm.codex_args.as_deref().is_some_and(args_contain_add_dir)
         || global_config
@@ -603,6 +774,7 @@ pub(crate) fn prove_managed_session_capabilities(
     for root in &writable_roots {
         prove_writable_root(root)?;
     }
+    prove_codex_child_writable_roots(command, args, env, &writable_roots)?;
 
     Ok(Some(format!(
         "codex_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={}",
@@ -1484,6 +1656,88 @@ mod tests {
         (dir, dir_path)
     }
 
+    fn init_repo(root: &Path) {
+        let init = Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        assert!(
+            init.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&init.stderr)
+        );
+        for (key, value) in [("user.email", "test@test.com"), ("user.name", "Test")] {
+            let config = Command::new("git")
+                .current_dir(root)
+                .args(["config", key, value])
+                .output()
+                .unwrap();
+            assert!(
+                config.status.success(),
+                "git config failed: {}",
+                String::from_utf8_lossy(&config.stderr)
+            );
+        }
+    }
+
+    fn commit_file(root: &Path, rel: &str, content: &str, message: &str) {
+        let path = root.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, content).unwrap();
+        let add = Command::new("git")
+            .current_dir(root)
+            .args(["add", rel])
+            .output()
+            .unwrap();
+        assert!(
+            add.status.success(),
+            "git add failed: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        let commit = Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", message, "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(
+            commit.status.success(),
+            "git commit failed: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+    }
+
+    fn add_submodule(repo: &Path, origin: &Path, target: &str) {
+        let url = format!("file://{}", origin.display());
+        let add = Command::new("git")
+            .current_dir(repo)
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &url,
+                target,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            add.status.success(),
+            "git submodule add failed: {}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        let commit = Command::new("git")
+            .current_dir(repo)
+            .args(["commit", "-m", "add submodule", "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(
+            commit.status.success(),
+            "git commit submodule failed: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+    }
+
     #[test]
     fn streaming_stderr_surfaced_on_nonzero_exit() {
         let codex = Codex::new(
@@ -1895,6 +2149,15 @@ mod tests {
     #[test]
     fn managed_capability_proof_checks_writable_add_dirs() {
         let dir = TempDir::new().unwrap();
+        let (_script_dir, script) = write_fake_codex_script(&format!(
+            r#"#!/bin/sh
+cat >/dev/null
+printf '%s\n' '{{"type":"thread.started","thread_id":"probe-thread"}}'
+printf '%s\n' '{{"type":"item.completed","item":{{"type":"command_execution","command":"sh -lc probe","aggregated_output":"{}\n","exit_code":0}}}}'
+printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
+"#,
+            CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER
+        ));
         let args = vec![
             "exec".to_string(),
             "--json".to_string(),
@@ -1905,7 +2168,7 @@ mod tests {
         let env = std::collections::HashMap::new();
 
         let event = prove_managed_session_capabilities(
-            "codex",
+            &script,
             &args,
             &env,
             &fm,
@@ -1916,6 +2179,43 @@ mod tests {
 
         assert!(event.contains("codex_capability_proof status=proven"));
         assert!(event.contains("writable_roots=1"));
+    }
+
+    #[test]
+    fn managed_capability_contract_for_doc_requires_auto_submodule_gitdirs() {
+        let outer_dir = TempDir::new().unwrap();
+        let outer = outer_dir.path();
+        init_repo(outer);
+        commit_file(outer, "README.md", "# outer\n", "init outer");
+
+        let sub_origin_dir = TempDir::new().unwrap();
+        let sub_origin = sub_origin_dir.path();
+        init_repo(sub_origin);
+        commit_file(sub_origin, "README.md", "# sub\n", "init sub");
+
+        add_submodule(outer, sub_origin, "src/sub");
+        let doc = outer.join("src/sub/tasks/session.md");
+        fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        fs::write(&doc, "test\n").unwrap();
+
+        let fm = Frontmatter::default();
+        assert!(managed_capability_contract_required_for_doc(
+            &doc,
+            &fm,
+            &crate::config::Config::default()
+        ));
+    }
+
+    #[test]
+    fn codex_child_writable_probe_classifies_read_only_gitdir_lock() {
+        let stdout = "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"sh -lc probe\",\"aggregated_output\":\"sh: cannot create /repo/.git/modules/sub/index.lock: Read-only file system\\n\",\"exit_code\":1}}\n";
+
+        let err = validate_codex_child_writable_root_probe_output(stdout, "").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Codex sandbox/write capability denied git metadata access"),
+            "unexpected error: {err:#}"
+        );
     }
 
     #[test]

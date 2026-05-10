@@ -36,11 +36,58 @@ Active backlog:
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - 9 more active item(s)
-<!-- agent:boundary:8c6dc979 -->
+❯ do [#codexnonet]. spec-test-build-install-commit-push
+### Re: codex network sandbox denial — gpt-5
+
+Implemented `#codexnonet`.
+
+Codex managed startup now proves explicit network access from inside a Codex child, not just from the parent process. For `codex_network_access: enabled`, `start` still clears inherited `CODEX_SANDBOX_NETWORK_DISABLED`, then runs host DNS plus a bounded `codex exec --json` probe under the same launch args. The child must run DNS and HTTPS and emit the success marker through a `command_execution` event before `codex_capability_proof` is recorded.
+
+The failure path now classifies child DNS failures, sandbox/network denial such as `Operation not permitted`, timeouts, and refused connections so route/reuse fails closed with the real capability diagnostic. I also updated the README/spec/changelog surfaces and marked `tasks/agent-doc/plan-codex-network-sandbox-denial.md` implemented.
+
+Verification:
+- `cargo test network_probe`
+- `cargo test prove_codex_child`
+- `cargo test managed_capability_proof_checks_writable_add_dirs`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `make check TEST_THREADS=1`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commit / push:
+- `src/agent-doc`: `01302d9` pushed to `origin/20260422/codex-agent-backend`
+- root repo: `9aa7a86b0` pushed to `origin/main`
+-
+### Re: codex network sandbox denial — gpt-5
+
+Implemented `#codexnonet`.
+
+Codex managed startup now proves explicit network access from inside a Codex child, not just from the parent process. For `codex_network_access: enabled`, `start` still clears inherited `CODEX_SANDBOX_NETWORK_DISABLED`, then runs host DNS plus a bounded `codex exec --json` probe under the same launch args. The child must run DNS and HTTPS and emit the success marker through a `command_execution` event before `codex_capability_proof` is recorded.
+
+The failure path now classifies child DNS failures, sandbox/network denial such as `Operation not permitted`, timeouts, and refused connections so route/reuse fails closed with the real capability diagnostic. I also updated the README/spec/changelog surfaces and marked `tasks/agent-doc/plan-codex-network-sandbox-denial.md` implemented.
+
+Verification:
+- `cargo test network_probe`
+- `cargo test prove_codex_child`
+- `cargo test managed_capability_proof_checks_writable_add_dirs`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `make check TEST_THREADS=1`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commit / push:
+- `src/agent-doc`: `01302d9` pushed to `origin/20260422/codex-agent-backend`
+- root repo: `9aa7a86b0` pushed to `origin/main`
+<!-- agent:boundary:6bedba8d -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+`Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
+spec-test-build-install-commit-push
+---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
 `❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?
@@ -117,6 +164,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-09 [#stashprunefast] [recommended] Make safe-passive editor sync skip or amortize expensive registered-live stash pane pruning; current logs spend 2.7-4.7s in prune_stash_panes on routine selection changes.
 - 2026-05-09 [#panehang] Post-completion pane not reaped + startup routing miss — agent-doc start spawns Claude Code panes that either (1) complete their cycle but stay alive at idle prompt, or (2) never receive the /agent-doc routing command and sit idle indefinitely. Plan: tasks/agent-doc/plan-hung-pane-reap-and-routing.md
 - 2026-05-09 [#codexcapstale] Managed Codex pane capability drift — ready actor/process args can show `-s danger-full-access` and expected `--add-dir` roots while the long-lived pane still lacks DNS/SSH/write access that a fresh runtime has. Plan: tasks/agent-doc/plan-codex-managed-session-capability-proof.md
+- 2026-05-09 [#codexnonet] Codex sandbox denies all network calls in agent-doc-managed sessions even when the intended launch contract requires network access; prove live network capability before dispatch/reuse and fail closed with sandbox-specific diagnostics. Plan: tasks/agent-doc/plan-codex-network-sandbox-denial.md
 <!-- /agent:pending-done -->
 
 

@@ -104,7 +104,7 @@ Verification:
 ❯ Commit / push:
 - `src/agent-doc`: `7cef057` pushed to `origin/20260422/codex-agent-backend`
 - root repo: `7062ca01c` pushed to `origin/main`
-### Re: direct invocation preflight hang — gpt-5 (HEAD)
+### Re: direct invocation preflight hang — gpt-5
 
 ❯ Implemented `#preflighthang`.
 
@@ -126,12 +126,35 @@ Verification:
 ❯ Commit / push:
 ❯ - `src/agent-doc`: `7cef057` pushed to `origin/20260422/codex-agent-backend`
 ❯ - root repo: `7062ca01c` pushed to `origin/main`
-<!-- agent:boundary:29a22822 -->
+### Re: prefixed response repair — gpt-5
+
+Implemented the follow-up prefix repair.
+
+The repair path now treats `❯ ### Re:` as an assistant response boundary, so stale prefix-normalization targets cannot cascade `❯ ` onto the response body, verification list, or commit evidence after a temporarily prefixed response heading. I added a regression for that exact shape and updated the spec/changelog invariant.
+
+Verification:
+- `cargo test normalize_exchange_prefixes_for_targets_treats_prefixed_response_heading_as_assistant_boundary`
+- `cargo check`
+- `cargo test -- --test-threads=1` (`fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs` failed once in the full run, then passed on immediate isolated rerun)
+- `cargo test fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs -- --test-threads=1`
+- `cargo build`
+- `make check TEST_THREADS=1`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commit / push:
+- `src/agent-doc`: `710c11e` pushed to `origin/20260422/codex-agent-backend`
+- root repo: `e0b88e035` pushed to `origin/main`
+<!-- agent:boundary:946e6a41 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-A large part of the previous response has the `❯ `  
+do [#commitfs].
+Fix the parallel test suite. The parallel test suite must pass ending the turn.
+spec-test-build-install-commit-push
+---
+A large part of the previous response has the `❯ ` prefix. spec-test-build-install-commit-push 
 ---
 `Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
 spec-test-build-install-commit-push
@@ -154,7 +177,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 <!-- agent:backlog -->
 - [ ] [#commitfs] Codex commit filesystem sandbox denial — managed session can edit nested submodule files but cannot create the backing `.git/modules/.../index.lock`, so `git add`/commit fails late with `Read-only file system`. Plan: tasks/agent-doc/plan-codex-commit-filesystem-sandbox.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
-- [x] [#preflighthang] Direct `agent-doc <file>` invocation can hang after opening `preflight_started` when it self-dispatches into the same active Codex pane; detect recursive/self dispatch, bound the wait for capture progress, and persist a recoverable timeout state. Plan: tasks/agent-doc/plan-direct-invocation-preflight-hang.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
@@ -215,6 +237,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-09 [#panehang] Post-completion pane not reaped + startup routing miss — agent-doc start spawns Claude Code panes that either (1) complete their cycle but stay alive at idle prompt, or (2) never receive the /agent-doc routing command and sit idle indefinitely. Plan: tasks/agent-doc/plan-hung-pane-reap-and-routing.md
 - 2026-05-09 [#codexcapstale] Managed Codex pane capability drift — ready actor/process args can show `-s danger-full-access` and expected `--add-dir` roots while the long-lived pane still lacks DNS/SSH/write access that a fresh runtime has. Plan: tasks/agent-doc/plan-codex-managed-session-capability-proof.md
 - 2026-05-09 [#codexnonet] Codex sandbox denies all network calls in agent-doc-managed sessions even when the intended launch contract requires network access; prove live network capability before dispatch/reuse and fail closed with sandbox-specific diagnostics. Plan: tasks/agent-doc/plan-codex-network-sandbox-denial.md
+- 2026-05-09 [#preflighthang] Direct `agent-doc <file>` invocation can hang after opening `preflight_started` when it self-dispatches into the same active Codex pane; detect recursive/self dispatch, bound the wait for capture progress, and persist a recoverable timeout state. Plan: tasks/agent-doc/plan-direct-invocation-preflight-hang.md
 <!-- /agent:pending-done -->
 
 

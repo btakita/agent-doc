@@ -124,7 +124,25 @@ Commits:
 - Parent repo: `3152a0c27 chore: update agent-doc completion flag surfaces` pushed to `origin/main` before this document closeout; I will push the session closeout commit next.
 
 No follow-up backlog items from this cycle.
-<!-- agent:boundary:f806381f -->
+❯ Please review activity + session logs for any regressions and issues. Add #next-steps
+### Re: activity/session log review — gpt-5
+
+I reviewed the recent activity, session, hook, and controller logs for this document.
+
+Current healthy signals:
+- `agent-doc-bugs2.md` is bound to pane `%268`, generation 117, actor state `ready`.
+- Recent route dispatches are proven and fast: direct pane submit is about 355-356ms and dispatch proof is 1ms.
+- Recent safe-passive syncs are under budget: total is roughly 629-834ms, with prune and ownership proof both inside budget.
+- There are no current `editor-route-errors` files, and the controller reports stable handoff with no stale duplicate pids.
+
+Issues still visible in the logs:
+- The sidecar/content-ours fallback is still active: the 1778430898 closeout logged `dedupe_consecutive_response_blocks`, `sidecar_normalization_fallback reason=prefix_divergence`, working-tree repair, and editor re-delivery. It succeeded, but this is still a fragile recovery path rather than a quiet steady state.
+- Stale actor state still exists outside this document: `agent-doc-bugs.md`, `agent-doc-bugs4.md`, and `interior-design.md` are still recorded as `starting` in `session-actors.json` despite old timestamps.
+- There is a recent blocked Codex stop/replay payload for this document at 1778389034/1778389040 because the payload contained extra transcript content around patch blocks. That is exactly the kind of closeout-boundary issue that should stay visible until reaped or converted into a targeted regression.
+- Codex managed-session capability proof still put about 10.1s on startup at 1778388204, almost entirely in the child network probe. The proof succeeded, but the user-visible latency problem is real.
+
+I added `#next-steps` to the backlog with those four concrete follow-ups. I did not change code in this cycle; this was log review and backlog capture only.
+<!-- agent:boundary:33a6e10f -->
 <!-- /agent:exchange -->
 ###
 
@@ -142,6 +160,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#next-steps] Triage the current activity/session-log findings: sidecar prefix-divergence fallback still fires, stale starting actors remain in session-actors, blocked-stop repair payloads exist for transcript-wrapped patch responses, and Codex child network proof still adds about 10s on restart.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

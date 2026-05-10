@@ -27,9 +27,8 @@
 //!   committed in its owning git root (narrowed to submodule when applicable). Compares the
 //!   snapshot content (modulo transient markers) against `git show HEAD:<file>`. Returns
 //!   `Committed`, `SnapshotDiffersFromHead`, `NoSnapshot`, `NoHead`, or `NotInGitRepo`.
-//! - `is_submodule_pointer_stale(file)`: checks whether the parent repo's submodule pointer
-//!   needs updating for a file in a submodule. Returns `true` when the submodule is dirty
-//!   in the parent diff.
+//! - `is_submodule_pointer_stale(file)`: checks whether the parent repo's committed submodule
+//!   pointer still differs from the submodule HEAD for a file in a submodule.
 //! - `last_commit_mtime(file)`: returns the author timestamp of the most recent commit touching the
 //!   file, or `None` if none exists.
 //! - `create_branch(file)`: creates and checks out `agent-doc/<stem>`, or switches to it if it
@@ -2606,6 +2605,13 @@ pub enum SnapshotCommitStatus {
     NotInGitRepo,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SubmodulePointerDrift {
+    pub relative_path: String,
+    pub parent_head: Option<String>,
+    pub submodule_head: String,
+}
+
 /// Verify that the current snapshot for `file` is committed in its owning git root.
 ///
 /// Compares the snapshot content (modulo transient markers) against `git show HEAD:<file>`
@@ -2679,27 +2685,62 @@ pub(crate) fn tracked_modified_paths(file: &Path) -> Result<Vec<String>> {
     Ok(paths)
 }
 
-/// Check whether the parent repo's submodule pointer is current for a file in a submodule.
-/// Returns `true` if the pointer needs updating (submodule is dirty in parent), `false` otherwise.
+/// Check whether the parent repo's committed submodule pointer is current for a file in a submodule.
+/// Returns `true` if the parent gitlink still differs from the submodule HEAD, `false` otherwise.
 pub(crate) fn is_submodule_pointer_stale(file: &Path) -> bool {
+    submodule_pointer_drift(file)
+        .map(|drift| drift.is_some())
+        .unwrap_or(false)
+}
+
+/// Return the exact parent gitlink drift for a document inside a submodule.
+///
+/// This compares the superproject's committed gitlink (`HEAD:<submodule>`)
+/// against the submodule's current `HEAD`. Working-tree dirt inside the
+/// submodule is intentionally ignored; closeout only owns the parent pointer
+/// needed to make an already-created submodule commit reachable from the
+/// parent repository.
+pub(crate) fn submodule_pointer_drift(file: &Path) -> Result<Option<SubmodulePointerDrift>> {
     let Ok((super_root, resolved)) = resolve_to_git_root(file) else {
-        return false;
+        return Ok(None);
     };
     let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
     if !in_submodule {
-        return false;
+        return Ok(None);
     }
     let rel = match git_root.strip_prefix(&super_root) {
         Ok(r) => r.to_string_lossy().to_string(),
-        Err(_) => return false,
+        Err(_) => return Ok(None),
     };
+    let Some(submodule_head) = git_rev_parse(&git_root, "HEAD")? else {
+        return Ok(None);
+    };
+    let parent_spec = format!("HEAD:{rel}");
+    let parent_head = git_rev_parse(&super_root, &parent_spec)?;
+    if parent_head.as_deref() == Some(submodule_head.as_str()) {
+        Ok(None)
+    } else {
+        Ok(Some(SubmodulePointerDrift {
+            relative_path: rel,
+            parent_head,
+            submodule_head,
+        }))
+    }
+}
+
+fn git_rev_parse(repo: &Path, rev: &str) -> Result<Option<String>> {
     let output = Command::new("git")
-        .current_dir(&super_root)
-        .args(["diff", "--name-only", "--", &rel])
-        .output();
-    match output {
-        Ok(o) => !String::from_utf8_lossy(&o.stdout).trim().is_empty(),
-        Err(_) => false,
+        .current_dir(repo)
+        .args(["rev-parse", rev])
+        .output()?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(value))
     }
 }
 

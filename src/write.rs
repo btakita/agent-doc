@@ -854,6 +854,11 @@ pub(crate) fn complete_required_closeout(file: &Path) -> Result<bool> {
         did_commit |= crate::git::commit(file)?;
         ensure_cycle_committed(file)?;
     }
+    if crate::git::submodule_pointer_drift(file)?.is_some() {
+        eprintln!("[commit] parent submodule pointer still stale after commit — retrying");
+        did_commit |= crate::git::commit(file)?;
+        ensure_cycle_committed(file)?;
+    }
     crate::session_check::enforce_clean_closeout(file)?;
     Ok(did_commit)
 }
@@ -9411,6 +9416,90 @@ mod submodule_patch_routing_tests {
         assert_ne!(
             project_root, parent,
             "must not return the superproject — ack-content written at submodule root would not be found"
+        );
+    }
+
+    #[test]
+    fn required_closeout_fails_when_parent_submodule_pointer_commit_fails() {
+        let parent_dir = TempDir::new().unwrap();
+        let sub_src_dir = TempDir::new().unwrap();
+        let parent = parent_dir.path().canonicalize().unwrap();
+        let sub_src = sub_src_dir.path().canonicalize().unwrap();
+
+        git(&sub_src, &["init"]);
+        std::fs::write(sub_src.join("README.md"), "sub").unwrap();
+        git(&sub_src, &["add", "README.md"]);
+        git(&sub_src, &["commit", "-m", "init"]);
+
+        git(&parent, &["init"]);
+        std::fs::write(parent.join("README.md"), "parent").unwrap();
+        git(&parent, &["add", "README.md"]);
+        git(&parent, &["commit", "-m", "init"]);
+        git(
+            &parent,
+            &[
+                "submodule",
+                "add",
+                sub_src.to_string_lossy().as_ref(),
+                "src/submodule",
+            ],
+        );
+        git(&parent, &["commit", "-m", "add submodule"]);
+
+        let submodule_root = parent.join("src/submodule");
+        git(
+            &submodule_root,
+            &["config", "user.email", "test@example.com"],
+        );
+        git(&submodule_root, &["config", "user.name", "Test"]);
+        std::fs::create_dir_all(submodule_root.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(submodule_root.join(".agent-doc/state/cycles")).unwrap();
+
+        let doc = submodule_root.join("session.md");
+        let initial = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, initial).unwrap();
+        git(&submodule_root, &["add", "session.md"]);
+        git(&submodule_root, &["commit", "-m", "add doc"]);
+        git(&parent, &["add", "src/submodule"]);
+        git(&parent, &["commit", "-m", "record doc commit"]);
+
+        let parent_git_dir = Command::new("git")
+            .current_dir(&parent)
+            .args(["rev-parse", "--absolute-git-dir"])
+            .output()
+            .unwrap();
+        assert!(parent_git_dir.status.success());
+        let parent_git_dir = PathBuf::from(String::from_utf8_lossy(&parent_git_dir.stdout).trim());
+        std::fs::write(parent_git_dir.join("index.lock"), "held by test").unwrap();
+
+        let updated = initial.replace(
+            "<!-- /agent:exchange -->\n",
+            "### Re: reply — gpt-5\nbody\n<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, &updated).unwrap();
+        crate::snapshot::save(&doc, &updated).unwrap();
+
+        let err = super::complete_required_closeout(&doc).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("parent submodule pointer is not committed"),
+            "strict closeout should name the missing parent layer, got: {message}"
+        );
+        assert!(
+            message.contains("agent-doc commit"),
+            "strict closeout should prescribe the idempotent commit recovery, got: {message}"
+        );
+        assert!(
+            crate::git::submodule_pointer_drift(&doc).unwrap().is_some(),
+            "parent gitlink should remain stale when parent commit fails"
         );
     }
 

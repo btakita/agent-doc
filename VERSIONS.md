@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Submodule closeout now fails closed on stale parent gitlinks.** Strict `finalize` / `write --commit` and `session-check` now verify that a submodule-hosted document response is committed both in the submodule and through the parent repository submodule pointer. If the inner document commit succeeds but the parent pointer commit fails, closeout reports the missing parent layer and prescribes idempotent `agent-doc commit <file>` recovery. This closes `#rspcmt2` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Managed Codex capability proof now reports phase timings.** Successful `codex_capability_proof` events include `timings_ms` for host DNS, child network, required SSH, launcher writable-root checks, child writable-root checks, and total proof time, so slow `agent-doc start` runs show which capability phase is expensive. The Codex child probe prompts are also shorter while keeping the same shell checks and success markers. This closes `#caplat` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Prompt-prefix repair no longer treats prefixed response headings as prompt starts.** Prefix normalization now recognizes `❯ ### Re:` as an assistant response boundary, so a stale repair target list cannot cascade `❯ ` onto the response body, verification bullets, or commit evidence after a temporarily prefixed heading.

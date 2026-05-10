@@ -158,6 +158,14 @@ pub fn inspect_with_warnings(file: &Path) -> Result<SessionCheckReport> {
                 return Ok(report);
             }
         }
+        match check_parent_submodule_pointer_guard(file)? {
+            GuardResult::None => {}
+            GuardResult::Warn(lines) => report.warnings.extend(lines),
+            GuardResult::Error(message) => {
+                report.status = SessionCheckStatus::Interrupted(message);
+                return Ok(report);
+            }
+        }
         for guard in [
             check_pending_capture_guard(file)?,
             check_pending_done_guard(file)?,
@@ -286,6 +294,56 @@ fn closeout_recovery_hint(file: &Path) -> String {
     )
 }
 
+fn parent_pointer_recovery_hint(file: &Path) -> String {
+    format!(
+        "Use `agent-doc commit {}` to finish the missing parent pointer commit, then re-run `agent-doc session-check {}`.",
+        file.display(),
+        file.display()
+    )
+}
+
+fn short_oid(value: Option<&str>) -> String {
+    value
+        .map(|oid| oid.chars().take(12).collect::<String>())
+        .filter(|oid| !oid.is_empty())
+        .unwrap_or_else(|| "<missing>".to_string())
+}
+
+fn parent_submodule_pointer_message(
+    drift: &crate::git::SubmodulePointerDrift,
+    file: &Path,
+) -> String {
+    format!(
+        "parent submodule pointer is not committed for {} (parent HEAD {}, submodule HEAD {}). The response patchback crossed the submodule repo but not the parent commit boundary. {}",
+        drift.relative_path,
+        short_oid(drift.parent_head.as_deref()),
+        short_oid(Some(&drift.submodule_head)),
+        parent_pointer_recovery_hint(file)
+    )
+}
+
+fn check_parent_submodule_pointer_guard(file: &Path) -> Result<GuardResult> {
+    let Some(drift) = crate::git::submodule_pointer_drift(file)? else {
+        return Ok(GuardResult::None);
+    };
+    let msg = format!(
+        "[session-check] INTERRUPTED: {}",
+        parent_submodule_pointer_message(&drift, file)
+    );
+    eprintln!("{}", msg);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "parent_submodule_pointer_guard_failed file={} submodule={} parent_head={} submodule_head={}",
+            file.display(),
+            drift.relative_path,
+            short_oid(drift.parent_head.as_deref()),
+            short_oid(Some(&drift.submodule_head))
+        ),
+    );
+    Ok(GuardResult::Error(msg))
+}
+
 fn tracked_side_effect_paths(file: &Path) -> Result<Vec<String>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let doc_name = canonical
@@ -317,6 +375,9 @@ fn tracked_side_effect_note(file: &Path) -> Result<String> {
 pub(crate) fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<String>> {
     if crate::git::repair_committed_historical_snapshot_drift(file)?.is_some() {
         return Ok(None);
+    }
+    if let Some(drift) = crate::git::submodule_pointer_drift(file)? {
+        return Ok(Some(parent_submodule_pointer_message(&drift, file)));
     }
     if let Some(marker) = detect_bypassed_response_write(file)? {
         return Ok(Some(format!(

@@ -15,6 +15,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Direct assistant patchback in the working tree without a newer binary-owned cycle must fail closed.
 - Historical self-heal must fail closed if typed components such as `status`, backlog, or pending changed, or if the repaired tail would still contain a bare prompt target.
 - The command serializes the staging/commit critical section with a git-dir scoped advisory lock.
+- For submodule-hosted documents, `commit` must carry the closeout through the parent repository gitlink commit. If the document snapshot is committed in the submodule but the parent `HEAD:<submodule>` pointer still differs from the submodule `HEAD`, closeout remains incomplete and recovery is `agent-doc commit <FILE>`.
 - Successful post-commit cleanup must leave the committed blob, snapshot, and user-facing file in the same clean shape except for genuine later user edits.
 
 ## compact
@@ -66,6 +67,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 
 - Strict happy-path closeout for session responses.
 - Validates git-backed context before mutation, runs the normal write pipeline, forces `git::commit(<FILE>)` even after partial write errors, and fails unless the final cycle state is `committed`.
+- For submodule-hosted documents, strict closeout also verifies the parent repository pointer reached the new submodule commit; a best-effort pointer update failure must interrupt instead of reporting success.
 - When `--baseline-file` points at a missing hash-keyed preflight baseline because the session document was moved after preflight, closeout must retry the current document hash's migrated baseline before failing. This preserves the explicit baseline contract across `git mv` / rename migration.
 - Empty normalization-only template payloads are invalid; the response must contain real response-body proof.
 - The same pre-write pending-capture, backlog-required, and pending-done gates apply here before the document mutates.
@@ -104,12 +106,13 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 
 - Verifies that the latest response cycle reached a terminal committed state and that no likely direct assistant patchback bypassed the binary-owned write path.
 - Fails on open cycle states, uncommitted visible `### Re:` / `## Assistant` patchbacks, or hidden `snapshot != HEAD` closeout drift.
+- Fails when a committed submodule document snapshot still leaves the parent repository submodule pointer uncommitted, naming the submodule path and prescribing `agent-doc commit <FILE>` recovery.
 - Fails after a committed closeout when the working tree still contains prompt-bearing user edits that were added concurrently with the write and therefore are absent from the committed snapshot.
 - Plain `content_edit` drift without a new prompt target or response patchback is not an unstarted closeout by itself; session-check must leave that to the next normal preflight diff instead of forcing another finalize cycle after a committed turn.
 - The active Codex post-commit drift guard is scoped the same way: exchange-only content edits with no unresolved prompt target are allowed to wait for the next preflight diff, while typed-component drift, fresh prompt targets, or response patchback markers still fail closed.
 - May self-heal only narrow exchange-only already-committed historical drift proven by `HEAD`.
 - Must fail closed when the repaired tail would still include a bare prompt target or typed-component drift.
 - Optional closeout sidecars such as cycle-state, capture, startup-miss, and ops-log files are advisory; if one disappears between discovery and read, session-check treats it as absent state instead of surfacing a transient `ENOENT`.
-- Runs the pending-capture, pending-done, backlog-shadow, backlog-replay, completed-item reap, and snapshot-vs-HEAD closeout guards after a committed cycle.
+- Runs the pending-capture, pending-done, backlog-shadow, backlog-replay, completed-item reap, snapshot-vs-HEAD, and parent-submodule-pointer closeout guards after a committed cycle.
 - Fails closed when a live backlog/icebox line looks like a tracked checklist item with an id but is not parseable as a canonical pending item. This prevents malformed prefixes from hiding an open item from the pending-done guard.
 - The Codex/direct-exec harness path is expected to run this immediately after `finalize` or strict `write --commit`, and must fail closed if the check reports an open or bypassed cycle.

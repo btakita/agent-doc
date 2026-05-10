@@ -54,11 +54,16 @@ Commits:
 - Parent repo: `32fdc0bf2 chore: update agent-doc backlog archive docs` committed; I will push `main` after this document closeout.
 
 No follow-up backlog items from this cycle.
-<!-- agent:boundary:a3d685d5 -->
+Rename agent:backlog-done to agent:done. Remove support for agent:backlog-done and agent:pending-done tags.
+spec-test-build-install-commit-push
+<!-- agent:boundary:c6a0b821 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+Rename `--pending-done` and `--backlog-done` arguments to `--done`. `--done` will look in both the `agent:backlog` and `agent:icebox` items.
+spec-test-build-install-commit-push
+---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---
 "Press Enter to restart, or 'q' to exit."
@@ -77,7 +82,7 @@ No follow-up backlog items from this cycle.
 
 ## Completed / Reaped
 
-<!-- agent:pending-done -->
+<!-- agent:done -->
 - 2026-05-07 [#backlogreap] [recommended] Make completed/reaped backlog items visible in the session document or closeout response so items like #commenttail, #tmuxcoord, and #coordspike do not look silently removed after --pending-done.
 - 2026-05-07 [#sqliterepros] [recommended] Before prototyping .agent-doc/state.db, capture 2-3 current agent-doc failures where cross-file authority drift or non-atomic state writes would have been fixed by one transactional store rather than by the single-owner actor/supervisor model alone.
 - 2026-05-07 [#sqliteeval] [recommended] Review plan tasks/agent-doc/plan-sqlite-session-store-concurrency.md against the single-owner actor rollout and decide whether to prototype .agent-doc/state.db as the authoritative session store.
@@ -141,4 +146,4 @@ No follow-up backlog items from this cycle.
 - 2026-05-10 [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
 - 2026-05-10 [#pfxleak2] content_ours prefix leak + commit churn — plan: tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - 2026-05-10 [#bppfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
-<!-- /agent:pending-done -->
+<!-- /agent:done -->

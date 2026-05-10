@@ -152,6 +152,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#commitfs] Codex commit filesystem sandbox denial — managed session can edit nested submodule files but cannot create the backing `.git/modules/.../index.lock`, so `git add`/commit fails late with `Read-only file system`. Plan: tasks/agent-doc/plan-codex-commit-filesystem-sandbox.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [x] [#preflighthang] Direct `agent-doc <file>` invocation can hang after opening `preflight_started` when it self-dispatches into the same active Codex pane; detect recursive/self dispatch, bound the wait for capture progress, and persist a recoverable timeout state. Plan: tasks/agent-doc/plan-direct-invocation-preflight-hang.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.

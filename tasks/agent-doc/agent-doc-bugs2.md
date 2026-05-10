@@ -29,65 +29,19 @@ Implemented Codex capability proof timing diagnostics.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-035514.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-040749.md`*
 
 Active backlog:
-- [ ] [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
+- [ ] [#duppb] Duplicate response patchback after sidecar normalization fallback / full-content IPC re-delivery — the same response block can appear twice back-to-back after finalize reports success. Plan: tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - 10 more active item(s)
-❯ do [#rspcmt2]. spec-test-build-install-commit-push
-### Re: #rspcmt2 stale parent pointer closeout — gpt-5
-
-Implemented `#rspcmt2`.
-
-Changed `src/agent-doc` so strict closeout and `session-check` now verify submodule-hosted response patchbacks across both layers: the submodule document snapshot must be committed in the submodule, and the parent repository gitlink must point at that submodule `HEAD`. If the inner commit succeeds but the parent pointer commit fails, closeout now interrupts with the submodule path, short parent/submodule SHAs, and `agent-doc commit <FILE>` recovery guidance.
-
-Updated specs and release notes for the new invariant, and added a regression that forces the parent pointer commit to fail after the submodule response commit succeeds.
-
-Verification:
-- `cargo test required_closeout_fails_when_parent_submodule_pointer_commit_fails`
-- `cargo test submodule`
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits created:
-- `src/agent-doc` `771089c` (`fix: fail closed on stale submodule pointers`) and pushed to `origin/20260422/codex-agent-backend`
-- parent repo `65685eb02` (`agent-doc: update submodule closeout guard`)
-
-The parent repo push is intentionally after this finalize boundary so the pushed `main` includes the session-document closeout commit as well.
-### Re: #rspcmt2 stale parent pointer closeout — gpt-5
-
-Implemented `#rspcmt2`.
-
-Changed `src/agent-doc` so strict closeout and `session-check` now verify submodule-hosted response patchbacks across both layers: the submodule document snapshot must be committed in the submodule, and the parent repository gitlink must point at that submodule `HEAD`. If the inner commit succeeds but the parent pointer commit fails, closeout now interrupts with the submodule path, short parent/submodule SHAs, and `agent-doc commit <FILE>` recovery guidance.
-
-Updated specs and release notes for the new invariant, and added a regression that forces the parent pointer commit to fail after the submodule response commit succeeds.
-
-Verification:
-- `cargo test required_closeout_fails_when_parent_submodule_pointer_commit_fails`
-- `cargo test submodule`
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits created:
-- `src/agent-doc` `771089c` (`fix: fail closed on stale submodule pointers`) and pushed to `origin/20260422/codex-agent-backend`
-- parent repo `65685eb02` (`agent-doc: update submodule closeout guard`)
-
-The parent repo push is intentionally after this finalize boundary so the pushed `main` includes the session-document closeout commit as well.
-### Re: duplicated #rspcmt2 patchback — gpt-5
-
-Confirmed the duplicate: the `#rspcmt2` response block appears twice back-to-back in `tasks/agent-doc/agent-doc-bugs2.md` after the sidecar-normalization fallback path re-delivered full content to the editor.
-
-Created the plan at `tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md` and added backlog item `#duppb` for the root cause and regression work.
-<!-- agent:boundary:d183855f -->
+<!-- agent:boundary:401c4ad7 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-do [#stateproj]. spec-test-build-install-commit-push
+do [#duppb]. spec-test-build-install-commit-push
 ---
 `Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
 spec-test-build-install-commit-push

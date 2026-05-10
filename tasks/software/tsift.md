@@ -30,58 +30,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260510-041448.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260510-042213.md`*
 
 Active backlog:
-- [ ] [#real] Add a real-session token-savings benchmark from recent tsift/agent-doc transcripts, covering session-review and context-pack paths that dominate actual prompt volume.
 - [ ] [#budg] Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
 
 Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-❯ do [#real]. spec-test-build-install-commit-push
-### Re: #real real-session token savings — gpt-5
-
-Completed `#real`.
-
-- Added `fixtures/real-session-token-savings.json`, a tsift-owned benchmark derived from recent tsift/agent-doc session material. It covers `session-review` and `context-pack` cases with realistic prompt-target, transcript, diff, test, build, install, and push rows.
-- Extended `tsift token-savings` fixtures with optional `session_review_inputs`, so session-review benchmarks measure the high-volume raw sections (`prompt_targets`, `sessions`, `commands`, `touched_files`, `touched_symbols`, `failures`, `guardrails`, and `largest_turns`) against compact section handles and expansion commands.
-- Added compiled-binary regression coverage for the new fixture and updated `SPEC.md` to document the real-session contract.
-
-Measured fixture result: `4050` raw estimated tokens vs `588` envelope estimated tokens, `3462` estimated-token delta, `85.5%` total savings. Case savings: `session-review` `86.0%`, `context-pack` `84.8%`.
-
-Verification completed:
-
-- `cargo test token_savings_accepts_real_session_fixture --test exit_code`
-- `cargo run -- token-savings --fixture fixtures/real-session-token-savings.json --fail-under --json`
-- `TMPDIR=/home/brian/.tmp-tsift-tests-full make check`
-- `cargo build --release`
-- `cargo install --path .`
-- `tsift --version` -> `tsift 0.1.42`
-
-Committed and pushed in `src/tsift`: `6b30947` (`test: add real session token savings fixture`).
-### Re: #real real-session token savings — gpt-5
-
-Completed `#real`.
-
-- Added `fixtures/real-session-token-savings.json`, a tsift-owned benchmark derived from recent tsift/agent-doc session material. It covers `session-review` and `context-pack` cases with realistic prompt-target, transcript, diff, test, build, install, and push rows.
-- Extended `tsift token-savings` fixtures with optional `session_review_inputs`, so session-review benchmarks measure the high-volume raw sections (`prompt_targets`, `sessions`, `commands`, `touched_files`, `touched_symbols`, `failures`, `guardrails`, and `largest_turns`) against compact section handles and expansion commands.
-- Added compiled-binary regression coverage for the new fixture and updated `SPEC.md` to document the real-session contract.
-
-Measured fixture result: `4050` raw estimated tokens vs `588` envelope estimated tokens, `3462` estimated-token delta, `85.5%` total savings. Case savings: `session-review` `86.0%`, `context-pack` `84.8%`.
-
-Verification completed:
-
-- `cargo test token_savings_accepts_real_session_fixture --test exit_code`
-- `cargo run -- token-savings --fixture fixtures/real-session-token-savings.json --fail-under --json`
-- `TMPDIR=/home/brian/.tmp-tsift-tests-full make check`
-- `cargo build --release`
-- `cargo install --path .`
-- `tsift --version` -> `tsift 0.1.42`
-
-Committed and pushed in `src/tsift`: `6b30947` (`test: add real session token savings fixture`).
-<!-- agent:boundary:4ef9f9ce -->
+<!-- agent:boundary:2617e7d2 -->
 <!-- /agent:exchange -->
 ###
 

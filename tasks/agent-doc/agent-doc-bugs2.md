@@ -54,7 +54,32 @@ The safer shape is:
 So: optimistic pane start is valid and should help. Optimistic network-dependent dispatch is not safe; it would reopen the `#codexnonet` / `#codexcapstale` failure class where the model starts working in a sandbox that cannot actually perform the required network calls.
 
 I added a focused backlog item for that next latency fix, since the earlier timing-diagnostics item is already reaped.
-<!-- agent:boundary:24b7a282 -->
+❯ do [#codexasyncnet]. spec-test-build-install-commit-push
+### Re: #codexasyncnet — gpt-5
+
+Implemented and pushed the async Codex capability proof path.
+
+What changed:
+- `agent-doc start` now records `codex_capability_proof status=pending`, launches the Codex pane, and runs the managed network/SSH/write-root proof in a background thread.
+- Supervisor IPC injection and auto-trigger dispatch are gated until the proof succeeds.
+- Managed route and dispatch-only route now wait for a current proof before prompt dispatch, fail closed on failed proof, and keep missing-proof fresh-restart behavior for managed non-dispatch reuse.
+- Failed background proof marks the actor blocked and terminates the unusable child session.
+- `agent-doc session status` now reports `pending` and `failed` proof states in addition to `not_required`, `proven`, `missing`, and `unknown`.
+- Updated README/spec docs and added focused regressions for pending/failed proof state and dispatch gating.
+
+Verification:
+- `cargo test capability_proof`
+- `cargo test`
+- `cargo build`
+- `make check`
+- `cargo install --path .`
+
+Commits pushed:
+- `src/agent-doc`: `275e82b` (`feat: async codex capability proof`) to `origin/20260422/codex-agent-backend`
+- parent repo: `aec3e6f1e` (`agent-doc: async codex capability proof`) to `origin/main`
+
+No follow-up backlog items from this pass.
+<!-- agent:boundary:4a2ac1d1 -->
 <!-- /agent:exchange -->
 ###
 
@@ -75,7 +100,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#codexasyncnet] [recommended] Split Codex managed capability proof from pane startup: launch/render the Codex pane immediately, run network/SSH/write-root proof asynchronously, gate prompt dispatch until required proof succeeds, and fail closed with diagnostics if background proof fails.
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
@@ -144,6 +168,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-10 [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - 2026-05-10 [#duppb] Duplicate response patchback after sidecar normalization fallback / full-content IPC re-delivery — the same response block can appear twice back-to-back after finalize reports success. Plan: tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md
 - 2026-05-10 [#runhb] [recommended] Add a parent-visible heartbeat/watchdog for long direct `agent-doc <file>` and child-agent waits: emit elapsed phase/cycle output every 30s, persist last-progress timestamps, and fail closed when capture/write/commit progress stalls past budget.
+- 2026-05-10 [#codexasyncnet] [recommended] Split Codex managed capability proof from pane startup: launch/render the Codex pane immediately, run network/SSH/write-root proof asynchronously, gate prompt dispatch until required proof succeeds, and fail closed with diagnostics if background proof fails.
 <!-- /agent:pending-done -->
 
 

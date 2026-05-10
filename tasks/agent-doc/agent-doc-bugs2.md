@@ -73,13 +73,34 @@ Verification/build/install:
 Commit / push:
 - agent-doc submodule: `8d09d99` (`fix: store sync layout state in controller db`) pushed to `origin/20260422/codex-agent-backend`
 - parent repo: `4a37b6b20` (`chore: update agent-doc submodule`) pushed to `origin/main`
-<!-- agent:boundary:4eecdaf7 -->
+❯ do [#duppb]. spec-test-build-install-commit-push
+### Re: #duppb — gpt-5
+
+Implemented `#duppb`.
+
+Changed the template closeout path so consecutive duplicate `### Re:` response blocks are deduped before snapshots, CRDT state, disk writes, and sidecar-normalization full-content IPC repair payloads are saved or redelivered. Added a `session-check` backstop that fails closed if a duplicate response patchback survives closeout.
+
+Updated the core command spec and added regressions for final template normalization plus the sidecar fallback case where the editor has already applied the response before full-content repair.
+
+Verification/build/install:
+- `cargo test dedupe`
+- `cargo test normalize_final_template_content_removes_adjacent_duplicate_response_blocks`
+- `cargo test normalization_fallback_dedupes_already_applied_editor_response`
+- `make check`
+- `cargo install --path .`
+- `cargo build --release --lib`
+- `agent-doc lib-install`
+
+Commit / push:
+- agent-doc submodule: `2bf50c5` (`fix: dedupe duplicate response closeouts`) pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `88678fa96` (`chore: update agent-doc submodule`) pushed to `origin/main`
+
+No follow-up backlog items were created.
+<!-- agent:boundary:048eea8a -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-do [#duppb]. spec-test-build-install-commit-push
----
 `Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
 spec-test-build-install-commit-push
 ---
@@ -99,7 +120,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#duppb] Duplicate response patchback after sidecar normalization fallback / full-content IPC re-delivery — the same response block can appear twice back-to-back after finalize reports success. Plan: tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
@@ -166,6 +186,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-09 [#tmuxdevci] Split agent-doc test budgets: keep default development tests pure/fast by gating real tmux-backed tests behind an explicit CI target, add GitHub Actions coverage for that target, and require matching SimWorld edge-case traces before demoting any tmux regression.
 - 2026-05-10 [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 - 2026-05-10 [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
+- 2026-05-10 [#duppb] Duplicate response patchback after sidecar normalization fallback / full-content IPC re-delivery — the same response block can appear twice back-to-back after finalize reports success. Plan: tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md
 <!-- /agent:pending-done -->
 
 

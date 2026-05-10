@@ -36,7 +36,24 @@ Active backlog:
 - [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
 - [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
 - 5 more active item(s)
-<!-- agent:boundary:5d7a490b -->
+❯ Review the backlog items. These items are potentially stale due to being authored a few days ago.
+### Re: backlog staleness review — gpt-5
+
+I reviewed the eight active backlog items against the current repo state. They are stale and should be reaped from the active backlog.
+
+Evidence by item:
+
+- `#iceboxpatch` is closed by the `replace:icebox` template-patch support recorded in `src/agent-doc/VERSIONS.md`.
+- `#staleflt` is closed by stale empty `preflight_started` auto-close support in `repair.rs`, also recorded in `VERSIONS.md`.
+- `#busychk` is closed by sync reconcile preserving panes with open closeout cycles, recorded in `VERSIONS.md`.
+- `#chkptcap` is closed by durable partial checkpoint capture during streaming, recorded in `VERSIONS.md`.
+- `#257p` is closed by the Codex Stop/auth-interrupted closeout diagnostics plus the updated MCP-auth closeout contract, recorded in `VERSIONS.md`.
+- `#oobpmt` is covered by the OOB/status prompt absorption fix: `git.rs` now rejects safe status absorbs when the inserted status text contains prompt work, and `preflight.rs` has `preflight_status_prompt_preset_addition_does_not_swallow_diff`.
+- `#pfxleak2` is covered by the later `content_ours` prefix fallback repair work: `write.rs` now diff-normalizes from snapshot to baseline instead of prefixing inserted assistant response lines, preserves HEAD prefix state, and `session_check.rs` no longer reopens committed cycles for plain exchange-only `content_edit` drift.
+- `#bppfxstrip2` is covered by the same prefix-state repair path plus the multi-line prompt regressions in `write.rs`; the version log records this as `#pfxstrip2` rather than this backlog id.
+
+I marked all eight active items done. I did not add replacement backlog items because the remaining work here is bookkeeping, not a new defect.
+<!-- agent:boundary:797ecd37 -->
 <!-- /agent:exchange -->
 ###
 
@@ -52,14 +69,6 @@ Active backlog:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
-- [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
-- [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
-- [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
-- [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death doesn't lose work entirely.
-- [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
-- [ ] [#pfxleak2] content_ours prefix leak + commit churn — plan: tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
-- [ ] [#bppfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -123,6 +132,14 @@ Active backlog:
 - 2026-05-10 [#oobtaildel] Valid deletion of escaped prompt content outside `agent:exchange` is misclassified as post-commit local drift; distinguish cleanup deletion from real later user edits without swallowing fresh prompts. Plan: tasks/agent-doc/plan-valid-oob-tail-deletion.md
 - 2026-05-10 [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - 2026-05-10 [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
+- 2026-05-10 [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
+- 2026-05-10 [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
+- 2026-05-10 [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
+- 2026-05-10 [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
+- 2026-05-10 [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death doesn't lose work entirely.
+- 2026-05-10 [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
+- 2026-05-10 [#pfxleak2] content_ours prefix leak + commit churn — plan: tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
+- 2026-05-10 [#bppfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
 <!-- /agent:pending-done -->
 
 

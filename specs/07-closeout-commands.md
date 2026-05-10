@@ -12,6 +12,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Narrow self-heal is allowed only for agent-owned drift that preserves the redacted component structure, or for exchange-only already-committed historical response growth proven by `HEAD`.
 - Plain user prompts must remain uncommitted.
 - If `snapshot == HEAD` but the working tree still differs, `commit` must classify that state as later local drift rather than a missed patchback.
+- If `snapshot == HEAD` and the only working-tree difference is deletion of safe escaped conversation content outside `agent:exchange`, `commit` may adopt and commit that cleanup. If the same diff also contains a fresh prompt inside `agent:exchange`, the prompt must remain uncommitted for the next cycle.
 - Direct assistant patchback in the working tree without a newer binary-owned cycle must fail closed.
 - Historical self-heal must fail closed if typed components such as `status`, backlog, or pending changed, or if the repaired tail would still contain a bare prompt target.
 - The command serializes the staging/commit critical section with a git-dir scoped advisory lock.

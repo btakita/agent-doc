@@ -869,6 +869,122 @@ pub fn strip_conversation_tail_outside_exchange(doc: &str) -> Result<Option<Stri
     Ok(Some(stripped))
 }
 
+/// Return `after` when it is exactly `before` with one safe escaped exchange
+/// tail outside `agent:exchange` deleted.
+pub fn deleted_conversation_tail_cleanup(before: &str, after: &str) -> Result<Option<String>> {
+    if before == after || after.len() >= before.len() {
+        return Ok(None);
+    }
+
+    if let Some(stripped) = strip_conversation_tail_outside_exchange(before)?
+        && stripped == after
+    {
+        return Ok(Some(stripped));
+    }
+
+    let Some(deleted) = single_deleted_range(before, after) else {
+        return Ok(None);
+    };
+
+    let components = component::parse(before).context("failed to parse components")?;
+    let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
+        return Ok(None);
+    };
+    if deleted.start < exchange.close_end {
+        return Ok(None);
+    }
+    if components
+        .iter()
+        .any(|component| component.open_start < deleted.end && component.close_end > deleted.start)
+    {
+        return Ok(None);
+    }
+
+    let tail = &before[deleted.clone()];
+    if !tail_is_safe_exchange_content(tail) || !tail_contains_exchange_signal(tail) {
+        return Ok(None);
+    }
+
+    Ok(Some(after.to_string()))
+}
+
+fn single_deleted_range(before: &str, after: &str) -> Option<std::ops::Range<usize>> {
+    let prefix = common_prefix_boundary_len(before, after);
+    let mut before_end = before.len();
+    let mut after_end = after.len();
+
+    while before_end > prefix && after_end > prefix {
+        let (before_prev, before_ch) = previous_char(before, before_end)?;
+        let (after_prev, after_ch) = previous_char(after, after_end)?;
+        if before_ch != after_ch {
+            break;
+        }
+        before_end = before_prev;
+        after_end = after_prev;
+    }
+
+    if prefix >= before_end {
+        return None;
+    }
+
+    let mut reconstructed = String::with_capacity(after.len());
+    reconstructed.push_str(&before[..prefix]);
+    reconstructed.push_str(&before[before_end..]);
+    if reconstructed == after {
+        Some(prefix..before_end)
+    } else {
+        None
+    }
+}
+
+fn common_prefix_boundary_len(a: &str, b: &str) -> usize {
+    let mut len = 0usize;
+    for ((a_idx, a_ch), (_b_idx, b_ch)) in a.char_indices().zip(b.char_indices()) {
+        if a_ch != b_ch {
+            break;
+        }
+        len = a_idx + a_ch.len_utf8();
+    }
+    len
+}
+
+fn previous_char(s: &str, end: usize) -> Option<(usize, char)> {
+    s.get(..end)?.char_indices().next_back()
+}
+
+fn tail_contains_exchange_signal(tail: &str) -> bool {
+    tail.lines().any(|line| {
+        let trimmed = line.trim();
+        is_exchange_turn_heading(trimmed)
+            || text_line_looks_like_prompt_target(trimmed)
+            || line_looks_like_prompt_preset_reference(trimmed)
+    })
+}
+
+fn line_looks_like_prompt_preset_reference(line: &str) -> bool {
+    let trimmed = line
+        .trim_start_matches('❯')
+        .trim_start()
+        .trim_start_matches("- ")
+        .trim_start_matches("* ")
+        .trim_start_matches("+ ")
+        .trim_start();
+    let Some(rest) = trimmed.strip_prefix('#') else {
+        return false;
+    };
+    let id_len = rest
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .last()
+        .unwrap_or(0);
+    id_len > 0
+        && rest[id_len..]
+            .chars()
+            .next()
+            .is_none_or(|ch| ch.is_whitespace())
+}
+
 /// Strip trailing bare `❯` lines from exchange-bound content.
 ///
 /// `❯` is the user's submit-prompt glyph. When an agent ends a response with a bare
@@ -4108,6 +4224,59 @@ Existing answer.
         assert!(
             !stripped.contains("### Re: gap — gpt-5"),
             "escaped response should be removed from the gap:\n{stripped}"
+        );
+    }
+
+    #[test]
+    fn deleted_conversation_tail_cleanup_accepts_prompt_prelude_deletion() {
+        let before = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "I see this routed prompt sitting outside exchange.\n",
+            "It should have been entered by the managed pane.\n\n",
+            "do #oobtaildel. spec-test-build-install-commit-push\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let after = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let cleaned = deleted_conversation_tail_cleanup(before, after)
+            .unwrap()
+            .expect("prompt-prelude cleanup should be accepted");
+        assert_eq!(cleaned, after);
+    }
+
+    #[test]
+    fn deleted_conversation_tail_cleanup_rejects_plain_note_deletion() {
+        let before = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "<!-- /agent:exchange -->\n\n",
+            "Design note: keep this outside exchange.\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let after = before.replace("Design note: keep this outside exchange.\n\n", "");
+
+        let cleaned = deleted_conversation_tail_cleanup(before, &after).unwrap();
+        assert!(
+            cleaned.is_none(),
+            "ordinary note deletion should not be treated as escaped conversation cleanup"
         );
     }
 

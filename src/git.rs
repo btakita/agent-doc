@@ -1565,10 +1565,30 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         snapshot_content = Some(file_content.clone());
     }
 
-    let snapshot_matches_head = snapshot_content
+    let mut snapshot_matches_head = snapshot_content
         .as_deref()
         .zip(head_doc.as_deref())
         .is_some_and(|(snapshot, head)| strip_head_markers(snapshot) == head);
+    if snapshot_matches_head
+        && let Some(head) = head_doc.as_deref()
+        && let Some(cleaned) =
+            crate::template::deleted_conversation_tail_cleanup(head, &file_content)?
+    {
+        eprintln!(
+            "[commit] committing manual escaped conversation tail cleanup for {}",
+            file.display()
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "post_commit_escaped_tail_cleanup file={} basis=head",
+                file.display()
+            ),
+        );
+        crate::snapshot::save(file, &cleaned)?;
+        snapshot_content = Some(cleaned);
+        snapshot_matches_head = false;
+    }
     let post_commit_local_drift = if snapshot_matches_head {
         head_doc
             .as_deref()
@@ -2433,6 +2453,12 @@ fn classify_post_commit_local_drift(
         return None;
     }
     if is_safe_user_only_follow_up_after_committed_head(head_doc, current_doc) {
+        return Some(PostCommitLocalDriftKind::UserFollowUp);
+    }
+    if let Ok(Some(cleaned_head)) =
+        crate::template::strip_conversation_tail_outside_exchange(head_doc)
+        && is_safe_user_only_follow_up_after_committed_head(&cleaned_head, current_doc)
+    {
         return Some(PostCommitLocalDriftKind::UserFollowUp);
     }
     Some(PostCommitLocalDriftKind::WorkingTreeEdits)
@@ -4440,6 +4466,208 @@ Done.
             log.contains("post_commit_local_drift file=")
                 && log.contains("kind=working_tree_edits"),
             "out-of-component local edits should be classified as working-tree drift:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_adopts_manual_escaped_tail_cleanup_after_head_current_snapshot() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let committed = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:head -->\n\
+            <!-- /agent:exchange -->\n\n\
+            The routed prompt escaped below the exchange block.\n\
+            It should be cleaned up without being treated as later drift.\n\n\
+            do #oobtaildel. spec-test-build-install-commit-push\n\n\
+            <!-- agent:backlog -->\n\
+            - [ ] keep me\n\
+            <!-- /agent:backlog -->\n";
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let cleaned = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:head -->\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:backlog -->\n\
+            - [ ] keep me\n\
+            <!-- /agent:backlog -->\n";
+        fs::write(&doc, cleaned).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+
+        let did_commit = commit(&doc).expect("escaped tail cleanup should commit");
+        assert!(did_commit, "cleanup deletion should create a commit");
+
+        let head = show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&head),
+            normalize_transient_agent_doc_markers(cleaned),
+            "HEAD should contain the cleanup deletion"
+        );
+        let snap = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&snap),
+            normalize_transient_agent_doc_markers(cleaned),
+            "snapshot should advance to the cleaned file"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("post_commit_escaped_tail_cleanup file="),
+            "cleanup should get a specific ops-log marker:\n{log}"
+        );
+        assert!(
+            !log.contains("post_commit_local_drift file="),
+            "cleanup-only deletion must not be classified as local drift:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_preserves_fresh_prompt_when_escaped_tail_cleanup_is_mixed() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let readme = root.join("README.md");
+        fs::write(&readme, "# test\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "README.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        let committed = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- agent:boundary:head -->\n\
+            <!-- /agent:exchange -->\n\n\
+            do #oobtaildel. spec-test-build-install-commit-push\n\n\
+            <!-- agent:backlog -->\n\
+            - [ ] keep me\n\
+            <!-- /agent:backlog -->\n";
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let mixed = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ❯ fresh follow-up prompt\n\
+            <!-- agent:boundary:live -->\n\
+            <!-- /agent:exchange -->\n\n\
+            <!-- agent:backlog -->\n\
+            - [ ] keep me\n\
+            <!-- /agent:backlog -->\n";
+        fs::write(&doc, mixed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+
+        let did_commit = commit(&doc).expect("mixed cleanup should close as no-op");
+        assert!(
+            !did_commit,
+            "mixed cleanup plus prompt must not commit the fresh prompt"
+        );
+
+        let head = show_head(&doc).unwrap().unwrap();
+        assert_eq!(
+            head, committed,
+            "HEAD should remain unchanged when fresh prompt drift is present"
+        );
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working.contains("❯ fresh follow-up prompt"),
+            "fresh prompt must remain visible for the next cycle:\n{working}"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("post_commit_local_drift file=") && log.contains("kind=user_follow_up"),
+            "mixed cleanup should be diagnosed as preserved user follow-up drift:\n{log}"
+        );
+        assert!(
+            !log.contains("post_commit_escaped_tail_cleanup file="),
+            "mixed cleanup must not be auto-adopted:\n{log}"
         );
     }
 

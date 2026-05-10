@@ -30,7 +30,31 @@ Implemented Codex capability proof timing diagnostics.
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-063826.md`*
-<!-- agent:boundary:23468067 -->
+❯ Rename agent:pending-done to agent:backlog-done. Deprecate agent:pending-done and delegate to agent:backlog-done.
+❯ spec-test-build-install-commit-push
+### Re: backlog-done archive rename — gpt-5
+
+Implemented the archive rename and compatibility path.
+
+- Added canonical `agent:backlog-done` handling with `agent:pending-done` retained as a deprecated archive alias.
+- Updated migration so `agent:pending-done` markers rewrite to `agent:backlog-done`.
+- Updated archive insertion to create `agent:backlog-done` for new documents while appending to existing legacy `agent:pending-done` components in place.
+- Updated tracked-work dropped-history/idempotent done checks so ids already present in either archive marker count as resolved.
+- Updated specs, pending-ops runbooks, focused unit tests, and finalize integration coverage.
+
+Verification completed:
+- `cargo test backlog_done`
+- `cargo test legacy_pending_done`
+- `make check`
+- `make install`
+- `cargo run --quiet -- audit-docs`
+
+Commits:
+- `src/agent-doc`: `1d7aed9 fix: rename backlog done archive` pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo: `32fdc0bf2 chore: update agent-doc backlog archive docs` committed; I will push `main` after this document closeout.
+
+No follow-up backlog items from this cycle.
+<!-- agent:boundary:a3d685d5 -->
 <!-- /agent:exchange -->
 ###
 
@@ -118,23 +142,3 @@ Implemented Codex capability proof timing diagnostics.
 - 2026-05-10 [#pfxleak2] content_ours prefix leak + commit churn — plan: tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
 - 2026-05-10 [#bppfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
 <!-- /agent:pending-done -->
-
-
-
-<!--
-I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
-```
-› echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do
-  #ppct. spec-test-build-install-commit-push. Run '\''agent-doc start tasks/agent-doc/agent-doc-bugs2.md'\'' to retry.'
-```
--->
-
-
-
-<!--
-I see the following in the binding codex session prompt. Why is it there? Why was it not Entered? spec-test-build-install-commit-push
-```
-› echo '[agent-doc] startup-miss: routed trigger accepted but no document cycle started for pending prompt_target: do
-  #ppct. spec-test-build-install-commit-push. Run '\''agent-doc start tasks/agent-doc/agent-doc-bugs2.md'\'' to retry.'
-```
--->

@@ -29,39 +29,14 @@ Implemented Codex capability proof timing diagnostics.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-062251.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-063530.md`*
 
 Active backlog:
-- [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
-- [ ] [#rootpbmiss] Root task response patchback missing after direct Codex closeout — `src/session-share/tasks/root.md` contained the prompt and all work was committed/pushed (`BuildParty 33646bb`, `SessionShare 0223139e`), but the final response never landed in the exchange until manual repair. Plan: tasks/agent-doc/plan-response-missing-after-manual-closeout.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
-- 6 more active item(s)
-❯ do [#crossdocpend]. spec-test-build-install-commit-push
-### Re: cross-document pending adds — gpt-5
-
-Implemented `#crossdocpend`.
-
-Changed `agent-doc` so explicit backlog targets are no longer satisfied by a current-document pending mutation. `write`/`finalize` now support `--pending-add-to <file> <text>`, validate that the target exists and has a backlog component, and preserve item order per target. `plan` now exposes explicit target files in pending mutation output and emits finalize hints with `--pending-add-to`.
-
-Updated the skill instructions, pending/spec docs, changelog, and regression coverage for the wrong-document bypass and the new cross-document add path.
-
-Verification completed:
-- `cargo fmt`
-- `cargo check`
-- `cargo test --test pending_integration`
-- `cargo test --all-targets`
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc skill install --harness codex --reload restart`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Pushed commits:
-- `src/agent-doc`: `74b620f fix: target cross-document pending adds`
-- parent repo `main`: `b85d7525f agent-doc response: cross-document pending adds`
-
-No follow-up backlog items.
-<!-- agent:boundary:2ed81f07 -->
+- [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
+- 5 more active item(s)
+<!-- agent:boundary:5d7a490b -->
 <!-- /agent:exchange -->
 ###
 

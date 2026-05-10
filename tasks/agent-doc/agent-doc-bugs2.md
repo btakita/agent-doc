@@ -36,7 +36,27 @@ Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 7 more active item(s)
-<!-- agent:boundary:bed87c77 -->
+❯ do [#pendrev]. spec-test-build-install-commit-push
+### Re: #pendrev pending-add order — gpt-5
+
+Implemented `#pendrev`.
+
+What changed:
+- Documented the invariant that repeated `--pending-add` flags are inserted as one ordered batch at the top of the backlog.
+- Added write-path integration coverage for three repeated `--pending-add` flags preserving CLI order above existing backlog items.
+- Added finalize-path integration coverage for the same ordered batch behavior crossing the commit boundary.
+
+Verification:
+- `cargo test write_pending_add_multiple_flags_keep_cli_order_at_top`
+- `cargo test finalize_pending_add_multiple_flags_keep_cli_order_at_top`
+- `make check`
+- `cargo build`
+- `make install`
+
+Commits:
+- `src/agent-doc` `abae439` (`test: cover pending add order`) pushed to `origin/20260422/codex-agent-backend`
+- parent repo submodule pointer commit `dbbea8b` prepared on `main`
+<!-- agent:boundary:6ba86ee2 -->
 <!-- /agent:exchange -->
 ###
 
@@ -52,7 +72,6 @@ Active backlog:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
@@ -123,6 +142,7 @@ Active backlog:
 - 2026-05-10 [#syncroutelog] Fix stale/opaque sync-route diagnostics: controller RPC can surface 'ok response without data', saved editor-route-errors can remain stale after later success, and route can submit on a stale starting projection. Plan: tasks/agent-doc/plan-sync-command-route-error-follow-up.md
 - 2026-05-10 [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
 - 2026-05-10 [#oobtaildel] Valid deletion of escaped prompt content outside `agent:exchange` is misclassified as post-commit local drift; distinguish cleanup deletion from real later user edits without swallowing fresh prompts. Plan: tasks/agent-doc/plan-valid-oob-tail-deletion.md
+- 2026-05-10 [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 <!-- /agent:pending-done -->
 
 

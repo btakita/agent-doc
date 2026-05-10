@@ -36,13 +36,34 @@ Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-<!-- agent:boundary:0d107626 -->
+❯ `Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
+❯ spec-test-build-install-commit-push
+### Re: Compact Exchange external file change — gpt-5
+
+Implemented and pushed the Compact Exchange fix.
+
+What changed:
+- `src/agent-doc/src/compact.rs` now routes compacted full-document replacements through the existing editor IPC full-content path before falling back to atomic disk writes. That means JetBrains and VS Code apply the active markdown mutation through their editor document APIs instead of discovering an external rewrite.
+- Updated `src/agent-doc/SPEC.md`, `src/agent-doc/editors/SPEC.md`, `src/agent-doc/editors/PLUGIN-SPEC.md`, and `src/agent-doc/VERSIONS.md` to make the compact/editor IPC contract explicit.
+- Added a compact regression that simulates the editor watcher consuming the `fullContent` IPC payload and verifies the file and snapshot land on the editor-applied content.
+
+Verification:
+- `cargo test component_compact_delivers_active_document_replacement_via_editor_ipc`
+- `cargo check`
+- `cargo test`
+- `make check`
+- `cargo build --release`
+- `cargo install --path . --force`
+
+Commit / push:
+- `src/agent-doc`: `4b0d119` (`fix: route compact exchange through editor IPC`) pushed to `origin/20260422/codex-agent-backend`.
+- parent `agent-loop`: `d1a5e6a04` (`agent-doc: route compact exchange through editor IPC`) pushed to `origin/main`.
+<!-- agent:boundary:07e9c9c1 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-`Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
-spec-test-build-install-commit-push
+/home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md agent-doc runs that take a long time give no output to Codex. So Codex keeps checking to see if the agent-doc process is still alive. Why is agent-doc taking so long to give feedback to Codex in this file? Is there a performance issue? Should we have a heartbeat that Codex sees to validate that agent-doc is still progressing? How can we guard against true deadlocks?
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---

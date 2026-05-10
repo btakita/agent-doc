@@ -80,8 +80,9 @@ Two modes:
 
 `agent-doc gc [--root DIR] [--dry-run]`
 
-- Garbage-collects orphaned snapshots, captures, locks, hooks, status files, repair diagnostics, sockets, and dead registry entries under `.agent-doc/`.
+- Garbage-collects orphaned snapshots, captures, locks, hooks, status files, repair diagnostics, Codex blocked-stop diagnostics, sockets, and dead registry entries under `.agent-doc/`.
 - The orphaned-socket cleanup keeps sockets whose supervisor PID is alive or whose socket still answers.
+- Stale `starting` actor records older than one hour are closed when no fresh supervisor lease or live supervisor PID still proves the actor is booting; this updates the controller SQLite store and re-emits `session-actors.json` as a projection.
 - `preflight` runs this automatically at most once per day via `.agent-doc/gc.stamp`.
 
 ## audit-docs

@@ -12,6 +12,9 @@
 //! - Removes stale `.agent-doc/typing/` indicator files (>7 days).
 //! - Removes stale `.agent-doc/status/` files (>24 hours).
 //! - Removes old `.agent-doc/repair-blocked/` diagnostic files (>7 days).
+//! - Removes old `.agent-doc/codex-hooks/blocked-stop/` diagnostic files (>7 days).
+//! - Closes stale `starting` actor records when no fresh supervisor lease proves
+//!   that the actor is still booting.
 //! - `--dry-run` flag shows what would be deleted without deleting.
 //!
 //! ## Agentic Contracts
@@ -158,6 +161,36 @@ pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     }
     total_deleted += repair_deleted;
     total_skipped += repair_kept;
+
+    // Clean old Codex blocked-stop diagnostics (>7 days)
+    let (blocked_stop_deleted, blocked_stop_kept) = clean_stale_ephemeral_files(
+        &agent_doc_dir.join("codex-hooks/blocked-stop"),
+        Duration::from_secs(7 * 86400),
+        dry_run,
+    )?;
+    if blocked_stop_deleted > 0 {
+        eprintln!(
+            "[gc] codex blocked-stop: {} old diagnostics deleted, {} kept",
+            blocked_stop_deleted, blocked_stop_kept
+        );
+    }
+    total_deleted += blocked_stop_deleted;
+    total_skipped += blocked_stop_kept;
+
+    // Close stale starting actor projections (>1 hour, no fresh supervisor lease)
+    let (actors_closed, actors_kept) = crate::project_controller::close_stale_starting_actors(
+        &project_root,
+        Duration::from_secs(3600),
+        dry_run,
+    )?;
+    if actors_closed > 0 {
+        eprintln!(
+            "[gc] actors: {} stale starting closed, {} still active",
+            actors_closed, actors_kept
+        );
+    }
+    total_deleted += actors_closed;
+    total_skipped += actors_kept;
 
     // Clean orphaned supervisor sockets + stale sessions.json entries
     let (sock_deleted, sock_kept) = clean_orphaned_sockets(&project_root, dry_run)?;
@@ -764,6 +797,33 @@ mod tests {
         assert!(result.deleted >= 1);
         assert!(!stale.exists(), "old repair-blocked should be removed");
         assert!(fresh.exists(), "recent repair-blocked should be kept");
+    }
+
+    #[test]
+    fn gc_removes_old_codex_blocked_stop_diagnostics() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let blocked_dir = root.join(".agent-doc/codex-hooks/blocked-stop");
+        std::fs::create_dir_all(&blocked_dir).unwrap();
+
+        let stale = blocked_dir.join("abc123-1000000000.json");
+        std::fs::write(&stale, r#"{"kind":"blocked_replay_payload"}"#).unwrap();
+        let old_time = std::time::SystemTime::now() - Duration::from_secs(8 * 86400);
+        let _ = filetime::set_file_mtime(&stale, filetime::FileTime::from_system_time(old_time));
+
+        let fresh = blocked_dir.join("def456-9999999999.json");
+        std::fs::write(&fresh, r#"{"kind":"blocked_replay_payload"}"#).unwrap();
+
+        let result = run(Some(root), false).unwrap();
+        assert!(result.deleted >= 1);
+        assert!(
+            !stale.exists(),
+            "old blocked-stop diagnostic should be removed"
+        );
+        assert!(
+            fresh.exists(),
+            "recent blocked-stop diagnostic should be kept"
+        );
     }
 
     #[test]

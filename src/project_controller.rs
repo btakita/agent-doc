@@ -1104,6 +1104,81 @@ pub fn store_actor_record(
     Ok(record.clone())
 }
 
+fn supervisor_lease_is_fresh_or_alive(
+    lease: &SupervisorLeaseStatus,
+    now: u64,
+    stale_after: Duration,
+) -> bool {
+    let fresh_heartbeat = lease
+        .last_heartbeat
+        .map(|timestamp| now.saturating_sub(timestamp) <= stale_after.as_secs())
+        .unwrap_or(false);
+    let live_process = lease.supervisor_pid.map(process_is_alive).unwrap_or(false);
+    fresh_heartbeat || live_process
+}
+
+pub fn close_stale_starting_actors(
+    project_root: &Path,
+    stale_after: Duration,
+    dry_run: bool,
+) -> Result<(usize, usize)> {
+    let now = timestamp_secs();
+    let store = load_actor_store(project_root)?;
+    let conn = open_state_db(project_root)?;
+    let mut closed = 0;
+    let mut kept = 0;
+
+    for record in store.values() {
+        if record.state != crate::session_actor::ActorState::Starting {
+            continue;
+        }
+        let age = now.saturating_sub(record.last_transition.timestamp);
+        if age <= stale_after.as_secs() {
+            kept += 1;
+            continue;
+        }
+
+        let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
+        if lease
+            .as_ref()
+            .is_some_and(|lease| supervisor_lease_is_fresh_or_alive(lease, now, stale_after))
+        {
+            kept += 1;
+            continue;
+        }
+
+        if dry_run {
+            eprintln!(
+                "[gc] would close stale starting actor: {} session={} pane={} generation={} age_secs={}",
+                record.document_id, record.session_id, record.pane_id, record.generation, age
+            );
+            closed += 1;
+            continue;
+        }
+
+        let mut next = record.clone();
+        next.state = crate::session_actor::ActorState::Closed;
+        next.last_transition = crate::session_actor::ActorLastTransition {
+            caller: "gc".to_string(),
+            reason: "stale_starting_actor".to_string(),
+            timestamp: now,
+            prior_generation: record.generation,
+            new_generation: record.generation,
+        };
+        store_actor_record(project_root, Some(record.generation), &next)?;
+        crate::ops_log::log_op(
+            Path::new(&record.document_id),
+            &format!(
+                "gc_closed_stale_starting_actor file={} session={} pane={} generation={} age_secs={}",
+                record.document_id, record.session_id, record.pane_id, record.generation, age
+            ),
+        );
+        closed += 1;
+    }
+
+    Ok((closed, kept))
+}
+
 fn emit_actor_projection(project_root: &Path) -> Result<()> {
     let store = load_actor_store(project_root)?;
     let path = actor_projection_path(project_root);
@@ -3516,6 +3591,94 @@ mod tests {
             2,
             "heartbeat must not create an actor transition"
         );
+    }
+
+    #[test]
+    fn gc_closes_stale_starting_actor_without_fresh_supervisor_lease() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/stale-starting.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-stale-starting\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let record = crate::session_actor::record_session_start_direct(
+            &doc,
+            "session-stale-starting",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        let old = timestamp_secs() - 7200;
+        Connection::open(state_db_path(dir.path()))
+            .unwrap()
+            .execute(
+                "UPDATE actor_transitions SET timestamp = ?1 WHERE new_generation = 1",
+                params![sqlite_i64(old, "old timestamp").unwrap()],
+            )
+            .unwrap();
+
+        let (closed, kept) =
+            close_stale_starting_actors(dir.path(), Duration::from_secs(3600), false).unwrap();
+        assert_eq!(closed, 1);
+        assert_eq!(kept, 0);
+
+        let updated = load_actor_record(dir.path(), &record.document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.state, crate::session_actor::ActorState::Closed);
+        assert_eq!(updated.last_transition.caller, "gc");
+        assert_eq!(updated.last_transition.reason, "stale_starting_actor");
+    }
+
+    #[test]
+    fn gc_keeps_stale_starting_actor_with_fresh_supervisor_lease() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/live-starting.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-live-starting\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let record = crate::session_actor::record_session_start_direct(
+            &doc,
+            "session-live-starting",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        upsert_supervisor_lease(
+            dir.path(),
+            &record,
+            Some(std::process::id()),
+            Some("/tmp/live-starting.sock"),
+            "starting",
+        )
+        .unwrap();
+        let old = timestamp_secs() - 7200;
+        Connection::open(state_db_path(dir.path()))
+            .unwrap()
+            .execute(
+                "UPDATE actor_transitions SET timestamp = ?1 WHERE new_generation = 1",
+                params![sqlite_i64(old, "old timestamp").unwrap()],
+            )
+            .unwrap();
+
+        let (closed, kept) =
+            close_stale_starting_actors(dir.path(), Duration::from_secs(3600), false).unwrap();
+        assert_eq!(closed, 0);
+        assert_eq!(kept, 1);
+
+        let updated = load_actor_record(dir.path(), &record.document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.state, crate::session_actor::ActorState::Starting);
     }
 
     #[test]

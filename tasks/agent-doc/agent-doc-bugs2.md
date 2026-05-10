@@ -53,7 +53,30 @@ What I would still add is a parent-visible heartbeat. The useful heartbeat is no
 - recursive self-dispatch: current pane already owns the target document, so fail before waiting on itself
 
 I added a recommended backlog item for that remaining heartbeat/watchdog work. It should complement the existing timeout fix rather than replace it.
-<!-- agent:boundary:336ba27a -->
+❯ do [#runhb]. spec-test-build-install-commit-push
+### Re: #runhb heartbeat/watchdog — gpt-5
+
+Implemented `#runhb`.
+
+What changed:
+- `agent-doc run` now emits parent-visible `[run] heartbeat ...` stderr while waiting on a non-streaming child agent.
+- Heartbeats default to 30 seconds and can be tuned with `AGENT_DOC_RUN_HEARTBEAT_SECS` for tests/diagnostics.
+- Each heartbeat persists open-cycle progress by updating the cycle state's `updated_at` and `last_event` without advancing the phase.
+- `run` also records visible progress before response capture/write and starts the same heartbeat wrapper around strict commit closeout.
+- Specs and version notes now document the direct-run heartbeat contract.
+
+Verification:
+- `cargo test --test run_integration run_`
+- `cargo test --test run_integration run_heartbeats_are_visible_and_persisted_while_child_is_waiting`
+- `make check`
+- `make install`
+
+Commit / push:
+- `src/agent-doc`: `6e8b241` pushed to `origin/20260422/codex-agent-backend`
+- `agent-loop`: `cdbf4f273` pushed to `origin/main`
+
+No follow-up backlog items are needed for this change.
+<!-- agent:boundary:30a418c9 -->
 <!-- /agent:exchange -->
 ###
 
@@ -74,7 +97,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#runhb] [recommended] Add a parent-visible heartbeat/watchdog for long direct `agent-doc <file>` and child-agent waits: emit elapsed phase/cycle output every 30s, persist last-progress timestamps, and fail closed when capture/write/commit progress stalls past budget.
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
@@ -142,6 +164,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-10 [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 - 2026-05-10 [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - 2026-05-10 [#duppb] Duplicate response patchback after sidecar normalization fallback / full-content IPC re-delivery — the same response block can appear twice back-to-back after finalize reports success. Plan: tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md
+- 2026-05-10 [#runhb] [recommended] Add a parent-visible heartbeat/watchdog for long direct `agent-doc <file>` and child-agent waits: emit elapsed phase/cycle output every 30s, persist last-progress timestamps, and fail closed when capture/write/commit progress stalls past budget.
 <!-- /agent:pending-done -->
 
 

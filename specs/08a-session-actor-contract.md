@@ -78,6 +78,11 @@ Later phases may refine caller values without changing the field names.
   controller for the actor binding before consulting legacy compatibility
   evidence; the JSON projection must not become an independent write authority
   again.
+- Editor layout memory is controller state too. Sync reads and writes the
+  remembered column layout through `.agent-doc/state.db` `layout_states` rows;
+  `.agent-doc/last_layout.json` may be imported once as legacy state and then
+  emitted only as a compatibility projection. If the JSON projection drifts
+  from SQLite, sync must prefer the SQLite row.
 - Actor-record `harness` values use canonical ids rather than raw binary names:
   `claude` normalizes to `claude-code`, `codex` stays `codex`, and empty values
   collapse to `default`. Normal-path route/start/sync checks must compare

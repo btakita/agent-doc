@@ -29,6 +29,8 @@ const SOCKET_FILE: &str = "controller.sock";
 const STATE_FILE: &str = "controller-state.json";
 const STATE_DB_FILE: &str = "state.db";
 const ACTOR_PROJECTION_FILE: &str = "session-actors.json";
+const LAYOUT_PROJECTION_FILE: &str = "last_layout.json";
+const DEFAULT_LAYOUT_SCOPE: &str = "default";
 const LOCK_FILE: &str = "controller-launch.lock";
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
 const CONNECT_POLL: Duration = Duration::from_millis(50);
@@ -322,6 +324,10 @@ fn actor_projection_path(project_root: &Path) -> PathBuf {
     project_root.join(".agent-doc").join(ACTOR_PROJECTION_FILE)
 }
 
+fn layout_projection_path(project_root: &Path) -> PathBuf {
+    project_root.join(".agent-doc").join(LAYOUT_PROJECTION_FILE)
+}
+
 pub fn launch_lock_path(project_root: &Path) -> PathBuf {
     project_root.join(".agent-doc/locks").join(LOCK_FILE)
 }
@@ -550,6 +556,12 @@ fn initialize_state_db(conn: &Connection) -> Result<()> {
             document_id TEXT NOT NULL,
             message TEXT NOT NULL,
             timestamp INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS layout_states (
+            scope TEXT PRIMARY KEY,
+            columns_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
         );
         "#,
     )?;
@@ -1112,6 +1124,130 @@ fn emit_actor_projection(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn insert_projection_diagnostic(
+    conn: &Connection,
+    projection: &str,
+    document_id: &str,
+    message: &str,
+) -> Result<()> {
+    conn.execute(
+        r#"
+        INSERT INTO projection_diagnostics (projection, document_id, message, timestamp)
+        VALUES (?1, ?2, ?3, ?4)
+        "#,
+        params![
+            projection,
+            document_id,
+            message,
+            sqlite_i64(timestamp_secs(), "projection diagnostic timestamp")?
+        ],
+    )?;
+    Ok(())
+}
+
+fn load_layout_state_from_db(conn: &Connection, scope: &str) -> Result<Vec<String>> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT columns_json FROM layout_states WHERE scope = ?1",
+            params![scope],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match raw {
+        Some(raw) => serde_json::from_str(&raw).context("failed to parse layout state from sqlite"),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn store_layout_state_in_db(conn: &Connection, scope: &str, columns: &[String]) -> Result<()> {
+    let columns_json = serde_json::to_string(columns)?;
+    conn.execute(
+        r#"
+        INSERT INTO layout_states (scope, columns_json, updated_at)
+        VALUES (?1, ?2, ?3)
+        ON CONFLICT(scope) DO UPDATE SET
+            columns_json = excluded.columns_json,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            scope,
+            columns_json,
+            sqlite_i64(timestamp_secs(), "layout state timestamp")?
+        ],
+    )?;
+    Ok(())
+}
+
+fn migrate_legacy_layout_projection(project_root: &Path, conn: &Connection) -> Result<()> {
+    let exists: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM layout_states WHERE scope = ?1",
+            params![DEFAULT_LAYOUT_SCOPE],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if exists.is_some() {
+        return Ok(());
+    }
+
+    let path = layout_projection_path(project_root);
+    let Some(content) = crate::fs_util::read_optional_text(&path)? else {
+        return Ok(());
+    };
+    match serde_json::from_str::<Vec<String>>(&content) {
+        Ok(columns) => store_layout_state_in_db(conn, DEFAULT_LAYOUT_SCOPE, &columns),
+        Err(err) => {
+            let _ = insert_projection_diagnostic(
+                conn,
+                LAYOUT_PROJECTION_FILE,
+                "__layout__",
+                &format!("failed to migrate legacy layout projection: {err}"),
+            );
+            Ok(())
+        }
+    }
+}
+
+fn emit_layout_projection(project_root: &Path) -> Result<()> {
+    let conn = open_state_db(project_root)?;
+    let layout_state = load_layout_state_from_db(&conn, DEFAULT_LAYOUT_SCOPE)?;
+    let path = layout_projection_path(project_root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string(&layout_state)?;
+    std::fs::write(&path, &content)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    let written = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let projected: Vec<String> = serde_json::from_str(&written)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    if projected != layout_state {
+        anyhow::bail!("last_layout.json projection drifted from sqlite state");
+    }
+    Ok(())
+}
+
+pub fn load_layout_state(project_root: &Path) -> Result<Vec<String>> {
+    let conn = open_state_db(project_root)?;
+    migrate_legacy_layout_projection(project_root, &conn)?;
+    load_layout_state_from_db(&conn, DEFAULT_LAYOUT_SCOPE)
+}
+
+pub fn store_layout_state(project_root: &Path, columns: &[String]) -> Result<()> {
+    let conn = open_state_db(project_root)?;
+    store_layout_state_in_db(&conn, DEFAULT_LAYOUT_SCOPE, columns)?;
+    if let Err(err) = emit_layout_projection(project_root) {
+        record_projection_diagnostic(
+            project_root,
+            LAYOUT_PROJECTION_FILE,
+            "__layout__",
+            &format!("failed to emit layout projection after sqlite commit: {err}"),
+        );
+    }
+    Ok(())
+}
+
 pub fn project_sessions_projection_for_actor(project_root: &Path, document_id: &str) -> Result<()> {
     let Some(record) = load_actor_record(project_root, document_id)? else {
         return Ok(());
@@ -1187,18 +1323,7 @@ fn record_projection_diagnostic(
         projection, document_id, message
     );
     if let Ok(conn) = open_state_db(project_root) {
-        let _ = conn.execute(
-            r#"
-            INSERT INTO projection_diagnostics (projection, document_id, message, timestamp)
-            VALUES (?1, ?2, ?3, ?4)
-            "#,
-            params![
-                projection,
-                document_id,
-                message,
-                sqlite_i64(timestamp_secs(), "projection diagnostic timestamp").unwrap_or_default()
-            ],
-        );
+        let _ = insert_projection_diagnostic(&conn, projection, document_id, message);
     }
     crate::ops_log::log_op(
         Path::new(document_id),
@@ -2829,6 +2954,49 @@ mod tests {
             )
             .unwrap();
         assert!(message.contains("no registry entry"));
+    }
+
+    #[test]
+    fn layout_state_migrates_legacy_projection_to_sqlite() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            layout_projection_path(dir.path()),
+            serde_json::to_string(&vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()])
+                .unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_layout_state(dir.path()).unwrap();
+
+        assert_eq!(loaded, vec!["tasks/a.md", "tasks/b.md"]);
+        let conn = Connection::open(state_db_path(dir.path())).unwrap();
+        let stored: String = conn
+            .query_row(
+                "SELECT columns_json FROM layout_states WHERE scope = ?1",
+                params![DEFAULT_LAYOUT_SCOPE],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&stored).unwrap(),
+            loaded
+        );
+    }
+
+    #[test]
+    fn layout_state_prefers_sqlite_over_drifted_projection() {
+        let dir = tempfile::TempDir::new().unwrap();
+        store_layout_state(dir.path(), &["tasks/current.md".to_string()]).unwrap();
+        std::fs::write(
+            layout_projection_path(dir.path()),
+            serde_json::to_string(&vec!["tasks/stale.md".to_string()]).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_layout_state(dir.path()).unwrap();
+
+        assert_eq!(loaded, vec!["tasks/current.md"]);
     }
 
     #[test]

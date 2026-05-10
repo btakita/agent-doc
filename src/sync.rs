@@ -2428,10 +2428,15 @@ fn sync_scope_root(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> 
         })
 }
 
+fn layout_state_scope_root_for_sync(col_args: &[String], focus: Option<&str>) -> PathBuf {
+    sync_scope_root(col_args, focus)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
 fn layout_state_path_for_sync(col_args: &[String], focus: Option<&str>) -> PathBuf {
-    let base = sync_scope_root(col_args, focus)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    base.join(".agent-doc").join("last_layout.json")
+    layout_state_scope_root_for_sync(col_args, focus)
+        .join(".agent-doc")
+        .join("last_layout.json")
 }
 
 fn sync_prune_state_path_for_sync(col_args: &[String], focus: Option<&str>) -> PathBuf {
@@ -2792,11 +2797,22 @@ fn run_with_options(
     // Column memory: for columns with non-agent files, substitute the last known
     // agent doc so the reconciler preserves the pane from the previous layout.
     // When sync is called without explicit columns, fall back to that recorded layout.
+    let layout_state_root = layout_state_scope_root_for_sync(col_args, focus);
     let layout_state_path = layout_state_path_for_sync(col_args, focus);
-    let saved_layout: Vec<String> = std::fs::read_to_string(&layout_state_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    let saved_layout = match crate::project_controller::load_layout_state(&layout_state_root) {
+        Ok(layout) => layout,
+        Err(err) => {
+            eprintln!(
+                "[sync] warning: failed to load controller layout state from {}: {}",
+                layout_state_root.display(),
+                err
+            );
+            std::fs::read_to_string(&layout_state_path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default()
+        }
+    };
 
     let input_cols = effective_sync_columns(col_args, &saved_layout, &layout_state_path)?;
     let mut col_args: Vec<String> = apply_column_memory(&input_cols, &saved_layout)
@@ -4006,12 +4022,14 @@ fn run_with_options(
         let layout_state = build_layout_state(col_args, &saved_layout);
         // Only save if at least one column has an agent doc
         if layout_state.iter().any(|s| !s.is_empty())
-            && let Ok(json) = serde_json::to_string(&layout_state)
+            && let Err(err) =
+                crate::project_controller::store_layout_state(&layout_state_root, &layout_state)
         {
-            if let Some(parent) = layout_state_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(&layout_state_path, json);
+            eprintln!(
+                "[sync] warning: failed to persist controller layout state for {}: {}",
+                layout_state_root.display(),
+                err
+            );
         }
     }
 

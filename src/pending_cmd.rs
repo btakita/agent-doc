@@ -262,7 +262,8 @@ pub fn reap(file: &Path) -> Result<()> {
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = doc_id_for(file);
     let (canonical_content, changed) = pending::backfill(existing, &doc_id, &HashSet::new());
-    let (new_content, removed) = pending::reap(&canonical_content)?;
+    let (new_content, removed_items) = pending::reap_with_items(&canonical_content)?;
+    let removed: Vec<String> = removed_items.iter().map(|item| item.id.clone()).collect();
     let final_content = if removed.is_empty() {
         canonical_content
     } else {
@@ -273,7 +274,11 @@ pub fn reap(file: &Path) -> Result<()> {
         return Ok(());
     }
     let canonical = canonicalize_component_content(file, &final_content);
-    let new_doc = comp.replace_content(&full_content, &canonical);
+    let mut new_doc = comp.replace_content(&full_content, &canonical);
+    if !removed_items.is_empty() {
+        new_doc = crate::preflight::archive_pending_done(&new_doc, &removed_items)
+            .context("failed to archive reaped item(s) to agent:done")?;
+    }
     std::fs::write(file, &new_doc)?;
     if changed {
         eprintln!("[pending] backfilled missing hash ids / checkboxes before reap");

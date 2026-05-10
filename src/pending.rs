@@ -1373,6 +1373,7 @@ pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (St
 
 /// Reap `[x]` items. `[/]` (gated) items are never reaped.
 /// Returns `(new_body, removed_ids)`.
+#[allow(dead_code)]
 pub fn reap(body: &str) -> Result<(String, Vec<String>)> {
     let (new_body, removed) = reap_with_items(body)?;
     let ids = removed.iter().map(|i| i.id.clone()).collect();

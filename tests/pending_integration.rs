@@ -29,6 +29,16 @@ fn setup_doc(body: &str) -> (TempDir, PathBuf) {
     (tmp, doc)
 }
 
+fn component_body<'a>(content: &'a str, name: &str) -> &'a str {
+    let open = format!("<!-- agent:{} -->\n", name);
+    let close = format!("\n<!-- /agent:{} -->", name);
+    content
+        .split(&open)
+        .nth(1)
+        .and_then(|rest| rest.split(&close).next())
+        .unwrap_or("")
+}
+
 #[test]
 fn pending_backfill_assigns_hashes_to_legacy_items() {
     let (_tmp, doc) = setup_doc("- legacy one\n- legacy two");
@@ -221,9 +231,13 @@ fn pending_reap_removes_checked_items() {
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("aaaa"));
-    assert!(!content.contains("bbbb"));
-    assert!(content.contains("cccc"));
+    let backlog = component_body(&content, "pending");
+    assert!(backlog.contains("aaaa"));
+    assert!(!backlog.contains("bbbb"));
+    assert!(backlog.contains("cccc"));
+    assert!(content.contains("## Completed / Reaped"));
+    assert!(content.contains("<!-- agent:done -->"));
+    assert!(content.contains("[#bbbb] drop"));
 }
 
 #[test]
@@ -241,10 +255,14 @@ fn pending_reap_removes_malformed_flush_left_spill_with_done_parent() {
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(!content.contains("[#bbbb]"));
-    assert!(!content.contains("Commands:"));
-    assert!(!content.contains("@@ -1 +1 @@"));
-    assert!(content.contains("- [ ] [#cccc] keep2"));
+    let backlog = component_body(&content, "pending");
+    assert!(!backlog.contains("[#bbbb]"));
+    assert!(!backlog.contains("Commands:"));
+    assert!(!backlog.contains("@@ -1 +1 @@"));
+    assert!(backlog.contains("- [ ] [#cccc] keep2"));
+    assert!(content.contains("[#bbbb] drop"));
+    assert!(content.contains("Commands:"));
+    assert!(content.contains("@@ -1 +1 @@"));
 }
 
 #[test]
@@ -260,7 +278,10 @@ fn pending_reap_backfills_legacy_done_ids_before_removing_items() {
         "open legacy item should be backfilled: {content}"
     );
     assert!(content.contains("keep"));
-    assert!(!content.contains("legacy drop"));
+    let backlog = component_body(&content, "pending");
+    assert!(!backlog.contains("legacy drop"));
+    assert!(content.contains("<!-- agent:done -->"));
+    assert!(content.contains("legacy drop"));
 }
 
 #[test]

@@ -135,6 +135,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 
 ### 2.8 Session Operator Actions
 
+- **Compact Exchange:** Run `agent-doc compact <relative-path> --component exchange --commit`. The binary owns archive/snapshot/commit semantics and will prefer editor IPC full-content delivery when the plugin is present; the plugin watcher must apply that `fullContent` payload through the editor document API and save before ACK so the active buffer does not report an external file change.
 - **Show Session Status:** Run `agent-doc session status <relative-path>`. Plugins must display the exact CLI output instead of paraphrasing actor/registry/supervisor state themselves. A successful status command for the same document must clear any persisted editor route-error diagnostic for that document because the old failure is no longer the latest observed state.
 - **Restart Supervisor Process:** Run `agent-doc session restart-supervisor <relative-path>` (the legacy `session restart` alias remains valid). Plugins must not send raw tmux control keys as a substitute for the actor-owned restart path.
 - **Clear Session Context:** Run `agent-doc session clear <relative-path>` so Codex/Claude clear behavior stays aligned with the binary-owned clear-command path. The next Run action must still dispatch the bare reopen into the same live session.

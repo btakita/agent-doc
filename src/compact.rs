@@ -20,7 +20,10 @@
 //!     before the component replacement.
 //! - Archive filenames are derived from the snapshot hash + a UTC timestamp computed without
 //!   the `chrono` crate.
-//! - All writes are atomic (temp file + rename); the snapshot is updated after each write.
+//! - Document replacement prefers the editor IPC full-content path when an official plugin is
+//!   present, so active editor buffers are updated through editor APIs. If IPC is unavailable or
+//!   times out, writes fall back to atomic temp-file rename. The snapshot is updated after each
+//!   successful replacement.
 //! - `commit: true` closes out compaction through the binary-owned `agent-doc commit` path and
 //!   verifies the VCS refresh signal when that channel exists.
 //!
@@ -44,6 +47,8 @@
 //! - `commit: true` uses `git::commit_with_outcome` after a successful mutation. If the commit
 //!   path reports that a VCS refresh signal target existed but writing it failed, compact fails
 //!   closed instead of silently accepting the closeout.
+//! - `apply_compacted_document` is the single replacement boundary used by inline, full component,
+//!   and partial component compaction.
 //!
 //! ## Evals
 //! - parse_basic: two complete exchanges + trailing User → 2 exchanges parsed, trailing skipped
@@ -60,6 +65,8 @@
 //!   carries forward backlog/queue/icebox context when present
 //! - compact_with_commit_writes_vcs_refresh_signal: `--commit` closeout creates an `agent-doc`
 //!   commit and updates `.agent-doc/patches/vcs-refresh.signal` when that refresh channel exists
+//! - component_compact_delivers_active_document_replacement_via_editor_ipc: compact sends a
+//!   fullContent IPC patch and commits the editor-applied result instead of rewriting the open file
 //! - message_dash_reads_stdin: `--message -` reads from stdin instead of using literal "-"
 
 use anyhow::{Context, Result};
@@ -175,11 +182,7 @@ pub fn run(
         // Build compacted document
         let compacted = build_compacted(&content, body, to_keep, &archive_path, to_archive.len());
 
-        // Atomic write
-        crate::write::atomic_write_pub(file, &compacted)?;
-
-        // Update snapshot
-        snapshot::save(file, &compacted)?;
+        apply_compacted_document(file, &compacted, &compacted, false)?;
 
         eprintln!(
             "[compact] Archived {} exchange(s) to {}",
@@ -219,6 +222,46 @@ fn closeout_compact_with_commit(file: &Path) -> Result<()> {
     eprintln!(
         "[compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange`"
     );
+    Ok(())
+}
+
+fn apply_compacted_document(
+    file: &Path,
+    compacted: &str,
+    snapshot_content: &str,
+    refresh_crdt: bool,
+) -> Result<()> {
+    let mut applied_via_editor = false;
+    match crate::write::try_ipc_full_content(file, compacted) {
+        Ok(true) => {
+            applied_via_editor = true;
+            eprintln!(
+                "[compact] delivered compacted document through editor IPC for {}",
+                file.display()
+            );
+        }
+        Ok(false) => {}
+        Err(err) => {
+            eprintln!(
+                "[compact] warning: editor IPC compact delivery failed for {}: {}; falling back to direct disk write",
+                file.display(),
+                err
+            );
+        }
+    }
+
+    if !applied_via_editor {
+        crate::write::atomic_write_pub(file, compacted)?;
+    }
+
+    snapshot::save(file, snapshot_content)?;
+
+    if refresh_crdt {
+        let new_crdt = crate::crdt::CrdtDoc::from_text(compacted).encode_state();
+        snapshot::save_crdt(file, &new_crdt)?;
+        eprintln!("[compact] CRDT state refreshed from post-compact content");
+    }
+
     Ok(())
 }
 
@@ -263,21 +306,10 @@ fn run_component_compact(
         ),
     };
 
-    // Single atomic write: replace component content + update snapshot
     let compacted = comp.replace_content(content, &summary);
     let compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
         .unwrap_or(compacted);
-    crate::write::atomic_write_pub(file, &compacted)?;
-    snapshot::save(file, &compacted)?;
-
-    // Refresh CRDT state to match post-compact content. Without this, the stale
-    // CRDT (pre-compact) can clobber non-target components (e.g. pending) on the
-    // next merge.
-    if is_crdt {
-        let new_crdt = crate::crdt::CrdtDoc::from_text(&compacted).encode_state();
-        snapshot::save_crdt(file, &new_crdt)?;
-        eprintln!("[compact] CRDT state refreshed from post-compact content");
-    }
+    apply_compacted_document(file, &compacted, &compacted, is_crdt)?;
 
     let line_count = old_content.lines().count();
     eprintln!(
@@ -394,14 +426,7 @@ fn run_component_compact_partial(
         crate::template::repair_conversation_tail_outside_exchange(&snapshot_content)?
             .unwrap_or(snapshot_content)
     };
-    crate::write::atomic_write_pub(file, &compacted)?;
-    snapshot::save(file, &snapshot_compacted)?;
-
-    if is_crdt {
-        let new_crdt = crate::crdt::CrdtDoc::from_text(&compacted).encode_state();
-        snapshot::save_crdt(file, &new_crdt)?;
-        eprintln!("[compact] CRDT state refreshed from post-compact content");
-    }
+    apply_compacted_document(file, &compacted, &snapshot_compacted, is_crdt)?;
 
     eprintln!(
         "[compact] Archived {} topic(s) from component '{}' to {}",
@@ -1257,6 +1282,71 @@ mod tests {
             .to_string();
         assert!(exchange_after.contains("Compacted summary."));
         assert!(!exchange_after.contains("### Re: topic one"));
+    }
+
+    #[test]
+    fn component_compact_delivers_active_document_replacement_via_editor_ipc() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let doc = concat!(
+            "---\nagent_doc_session: test-ipc\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n\n",
+            "### Re: topic two\n\nResponse two.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        let patches_dir = agent_doc_dir.join("patches");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(&patches_dir).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let watcher_dir = patches_dir.clone();
+        let watcher_file = file.clone();
+        let watcher = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                let Ok(entries) = std::fs::read_dir(&watcher_dir) else {
+                    std::thread::sleep(Duration::from_millis(20));
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let raw = std::fs::read_to_string(&path).unwrap();
+                    let payload: serde_json::Value = serde_json::from_str(&raw).unwrap();
+                    let full_content = payload
+                        .get("fullContent")
+                        .and_then(|value| value.as_str())
+                        .expect("compact IPC payload should carry fullContent")
+                        .to_string();
+                    std::fs::write(&watcher_file, &full_content).unwrap();
+                    std::fs::remove_file(&path).unwrap();
+                    tx.send(full_content).unwrap();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+
+        run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false).unwrap();
+        watcher.join().unwrap();
+        let ipc_content = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        assert!(ipc_content.contains("Compacted summary."));
+        assert!(!ipc_content.contains("### Re: topic one"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), ipc_content);
+        assert_eq!(snapshot::load(&file).unwrap().unwrap(), ipc_content);
     }
 
     #[test]

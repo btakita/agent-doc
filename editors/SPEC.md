@@ -91,6 +91,8 @@ Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that
 | Preserve | `agent_doc_reposition_boundary_to_end_preserve_head()` | Keeps `(HEAD)`, collapses boundaries |
 | Preserve + ID | `agent_doc_reposition_boundary_to_end_preserve_head_with_id(doc, id)` | Same + reuses explicit boundary ID |
 
+**Compact full-content patches:** When `agent-doc compact <file> --component exchange --commit` emits an IPC payload with `fullContent` and no component patches, both editor plugins must apply the replacement through the editor-native document API (`Document.setText` / `WorkspaceEdit`) and save the document before acknowledging the patch. This keeps Compact Exchange from surfacing an external-file-change dialog for the active markdown buffer while still letting the binary own archive, snapshot, and commit closeout.
+
 **Recommended implementation:** Call the appropriate FFI variant via JNA on the shared library (`libagent_doc.so` / `libagent_doc.dylib`). This ensures identical cleanup logic across all platforms and prevents divergence between plugin and binary behavior.
 
 **When to reposition:**

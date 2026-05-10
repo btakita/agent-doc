@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Compact Exchange now uses editor IPC before falling back to disk writes.** `agent-doc compact <file> --component exchange --commit` delivers its full-document replacement through the existing JetBrains/VS Code IPC watcher when available, so the active markdown buffer is mutated through the editor document API instead of triggering an external-file-change dialog. Added compact IPC regression coverage and refreshed the shared editor specs.
+
 - **Sync layout memory now lives in the project controller store.** `agent-doc sync` imports legacy `.agent-doc/last_layout.json` once when `.agent-doc/state.db` has no layout row, then reads and writes the controller-backed `layout_states` table as the authoritative column-memory state. `last_layout.json` is still emitted for compatibility, but drifted JSON no longer overrides SQLite. This closes `#stateproj` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Submodule closeout now fails closed on stale parent gitlinks.** Strict `finalize` / `write --commit` and `session-check` now verify that a submodule-hosted document response is committed both in the submodule and through the parent repository submodule pointer. If the inner document commit succeeds but the parent pointer commit fails, closeout reports the missing parent layer and prescribes idempotent `agent-doc commit <file>` recovery. This closes `#rspcmt2` in `tasks/agent-doc/agent-doc-bugs2.md`.

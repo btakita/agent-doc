@@ -235,6 +235,7 @@ pub struct CommandOptions {
     pub force_disk: bool,
     pub origin: Option<String>,
     pub pending_add: Vec<String>,
+    pub pending_add_to: Vec<String>,
     pub pending_add_gated: Vec<String>,
     pub pending_done: Vec<String>,
     pub pending_edit: Vec<String>,
@@ -454,6 +455,13 @@ fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -
         args.push("--pending-add".to_string());
         args.push(value.clone());
     }
+    for pair in options.pending_add_to.chunks(2) {
+        if let [target, value] = pair {
+            args.push("--pending-add-to".to_string());
+            args.push(target.clone());
+            args.push(value.clone());
+        }
+    }
     for value in &options.pending_add_gated {
         args.push("--pending-add-gated".to_string());
         args.push(value.clone());
@@ -564,6 +572,55 @@ fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<O
     }
 }
 
+fn grouped_pending_add_to(raw: &[String]) -> Result<Vec<(PathBuf, Vec<String>)>> {
+    if raw.len() % 2 != 0 {
+        anyhow::bail!("--pending-add-to expects repeated FILE TEXT pairs");
+    }
+
+    let mut grouped: Vec<(PathBuf, Vec<String>)> = Vec::new();
+    for pair in raw.chunks(2) {
+        let target = PathBuf::from(&pair[0]);
+        let text = pair[1].clone();
+        if let Some((_, items)) = grouped.iter_mut().find(|(existing, _)| existing == &target) {
+            items.push(text);
+        } else {
+            grouped.push((target, vec![text]));
+        }
+    }
+    Ok(grouped)
+}
+
+fn ensure_pending_add_target(target: &Path) -> Result<()> {
+    if !target.exists() {
+        anyhow::bail!(
+            "--pending-add-to target file not found: {}",
+            target.display()
+        );
+    }
+    let content = std::fs::read_to_string(target).with_context(|| {
+        format!(
+            "failed to read --pending-add-to target {}",
+            target.display()
+        )
+    })?;
+    let components = crate::component::parse(&content).with_context(|| {
+        format!(
+            "failed to parse --pending-add-to target {}",
+            target.display()
+        )
+    })?;
+    if !components
+        .iter()
+        .any(|component| crate::component::is_backlog_component(&component.name))
+    {
+        anyhow::bail!(
+            "--pending-add-to target {} has no agent:backlog/agent:pending component",
+            target.display()
+        );
+    }
+    Ok(())
+}
+
 fn is_session_document(file: &Path) -> Result<bool> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -632,6 +689,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     let has_pending_ops = !options.pending_add.is_empty()
+        || !options.pending_add_to.is_empty()
         || !options.pending_add_gated.is_empty()
         || !options.pending_done.is_empty()
         || !options.pending_edit.is_empty()
@@ -651,6 +709,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     if options.pending_only && commit_mode == CommitMode::Required {
         anyhow::bail!("finalize does not support --pending-only");
     }
+    if options.pending_add_to.len() % 2 != 0 {
+        anyhow::bail!("--pending-add-to expects repeated FILE TEXT pairs");
+    }
     let commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;
     if commit_mode == CommitMode::Required && !crate::git::is_in_git_repo(file) {
         if is_session_document(file)? {
@@ -668,8 +729,21 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             crate::pending_cmd::clear(file)?;
         }
         crate::pending_cmd::add_many(file, &options.pending_add, false)?;
+        let pending_add_targets = grouped_pending_add_to(&options.pending_add_to)?;
+        for (target, items) in &pending_add_targets {
+            ensure_pending_add_target(target)?;
+            crate::pending_cmd::add_many(target, items, false).with_context(|| {
+                format!(
+                    "failed to apply --pending-add-to target {}",
+                    target.display()
+                )
+            })?;
+        }
         crate::pending_cmd::add_many(file, &options.pending_add_gated, true)?;
-        if !options.pending_add.is_empty() || !options.pending_add_gated.is_empty() {
+        if !options.pending_add.is_empty()
+            || !options.pending_add_to.is_empty()
+            || !options.pending_add_gated.is_empty()
+        {
             crate::cycle_state::mark_pending_mutations(file)?;
         }
         for pair in &options.pending_edit {
@@ -721,7 +795,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
 
     let write_flags = WriteFlags {
         allow_replace_pending: options.allow_replace_pending,
-        has_pending_add: !options.pending_add.is_empty() || !options.pending_add_gated.is_empty(),
+        has_pending_add: !options.pending_add.is_empty()
+            || !options.pending_add_to.is_empty()
+            || !options.pending_add_gated.is_empty(),
         has_pending_done: !options.pending_done.is_empty(),
         pending_done_ids: options.pending_done.clone(),
         strict_closeout: commit_mode == CommitMode::Required,
@@ -1106,7 +1182,7 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     let Some(state) = crate::cycle_state::load(file)? else {
         return Ok(());
     };
-    if state.had_pending_mutations {
+    if state.had_pending_mutations && state.required_backlog_targets.is_empty() {
         return Ok(());
     }
 
@@ -1210,6 +1286,10 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         );
     }
 
+    if state.had_pending_mutations {
+        return Ok(());
+    }
+
     let mode = crate::session_check::resolve_pending_capture_guard_mode(file)?;
     if mode != crate::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
@@ -1245,11 +1325,15 @@ fn prewrite_pending_capture_check(
     }
 
     let state = crate::cycle_state::load(file)?;
-    if state
+    let has_explicit_targets = state
         .as_ref()
-        .is_some_and(|state| state.had_pending_mutations)
-        || flags.has_pending_add
-        || flags.has_pending_done
+        .is_some_and(|state| !state.required_backlog_targets.is_empty());
+    if !has_explicit_targets
+        && (state
+            .as_ref()
+            .is_some_and(|state| state.had_pending_mutations)
+            || flags.has_pending_add
+            || flags.has_pending_done)
     {
         return Ok(());
     }
@@ -1363,6 +1447,15 @@ fn prewrite_pending_capture_check(
              add <!-- no-pending-capture --> to suppress, \
              or set pending_capture_guard = \"warn\" to downgrade heuristic-only captures"
         );
+    }
+
+    if state
+        .as_ref()
+        .is_some_and(|state| state.had_pending_mutations)
+        || flags.has_pending_add
+        || flags.has_pending_done
+    {
+        return Ok(());
     }
 
     let mode = crate::session_check::resolve_pending_capture_guard_mode(file)?;
@@ -2377,11 +2470,9 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
                     // prose is user input. Only explicit prompt-run starts below
                     // can return the scanner to user-owned transcript lines.
                 } else if in_agent_block
-                    && starts_targeted_prompt_repair_after_response(trimmed, true)
-                {
-                    in_agent_block = false;
-                } else if in_agent_block
-                    && (trimmed.starts_with('❯') || trimmed.starts_with("<!--"))
+                    && (starts_targeted_prompt_repair_after_response(trimmed, true)
+                        || trimmed.starts_with('❯')
+                        || trimmed.starts_with("<!--"))
                 {
                     in_agent_block = false;
                 }
@@ -10750,6 +10841,79 @@ mod precommit_pending_capture_tests {
         .unwrap();
 
         let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(err.to_string().contains("required backlog capture in"));
+        assert!(err.to_string().contains(target.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn precommit_still_checks_explicit_backlog_target_after_current_pending_add() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: #agent-doc-bug — opus-4-6\n\nPlanned item:\n- [ ] [#new1] New transferred item\n",
+            true,
+        );
+        let target = tmp.path().join("bugs.md");
+        write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
+
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        crate::cycle_state::record_backlog_target_requirements(
+            &doc,
+            &[crate::cycle_state::BacklogTargetRequirement {
+                path: std::fs::canonicalize(&target)
+                    .unwrap()
+                    .display()
+                    .to_string(),
+                component: Some("backlog".to_string()),
+                baseline_hash: Some(backlog_component_hash(&target)),
+                baseline_item_ids: vec!["old1".to_string()],
+            }],
+        )
+        .unwrap();
+
+        let err = super::precommit_pending_capture_check(&doc).unwrap_err();
+        assert!(err.to_string().contains("required backlog capture in"));
+        assert!(err.to_string().contains(target.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn prewrite_still_checks_explicit_backlog_target_after_pending_add_flag() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit(
+            tmp.path(),
+            "---\nagent_doc_session: test\npending_capture_guard: warn\n---\n\n",
+            "### Re: #agent-doc-bug — gpt-5\n\nPlanned item:\n- [ ] [#new1] New transferred item\n",
+            false,
+        );
+        let target = tmp.path().join("bugs.md");
+        write_backlog_doc(&target, "- [ ] [#old1] Existing item\n");
+
+        crate::cycle_state::record_backlog_capture_requirement(&doc, true).unwrap();
+        crate::cycle_state::record_backlog_target_requirements(
+            &doc,
+            &[crate::cycle_state::BacklogTargetRequirement {
+                path: std::fs::canonicalize(&target)
+                    .unwrap()
+                    .display()
+                    .to_string(),
+                component: Some("backlog".to_string()),
+                baseline_hash: Some(backlog_component_hash(&target)),
+                baseline_item_ids: vec!["old1".to_string()],
+            }],
+        )
+        .unwrap();
+
+        let err = super::prewrite_pending_capture_check(
+            &doc,
+            "### Re: #agent-doc-bug — gpt-5\n\nPlanned item:\n- [ ] [#new1] New transferred item\n",
+            &super::WriteFlags {
+                has_pending_add: true,
+                strict_closeout: true,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("required backlog capture in"));
         assert!(err.to_string().contains(target.to_string_lossy().as_ref()));
     }

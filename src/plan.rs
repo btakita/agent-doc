@@ -69,6 +69,8 @@ pub struct PendingMutationPlan {
     pub kind: PendingMutationKind,
     pub id: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,8 +156,13 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let orchestration_request = diff::detect_orchestration_request(&diff_text);
     let exchange_compaction_requested = diff::detect_exchange_compaction_request(&diff_text);
     let parsed_commands = diff::parse_slash_commands_classified(&diff_text);
-    let pending_mutations =
-        pending_mutations_for_doc(&content, &repo_actions, &prompt_targets, &added_diff_lines)?;
+    let pending_mutations = pending_mutations_for_doc(
+        file,
+        &content,
+        &repo_actions,
+        &prompt_targets,
+        &added_diff_lines,
+    )?;
     let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
 
     let mut required_commands = Vec::new();
@@ -271,6 +278,16 @@ fn finalize_placeholder_commands(
         finalize.push_str(" --pending-done ");
         finalize.push_str(&mutation.id);
     }
+    for mutation in pending_mutations
+        .iter()
+        .filter(|mutation| mutation.kind == PendingMutationKind::ExpectAdd)
+    {
+        for target in &mutation.target_files {
+            finalize.push_str(" --pending-add-to ");
+            finalize.push_str(target);
+            finalize.push_str(" \"<item>\"");
+        }
+    }
     if fm.resolve_mode().is_crdt() {
         finalize.push_str(" --stream");
     } else if fm.resolve_mode().is_template() {
@@ -281,6 +298,7 @@ fn finalize_placeholder_commands(
 }
 
 fn pending_mutations_for_doc(
+    file: &Path,
     content: &str,
     repo_actions: &[String],
     prompt_targets: &[String],
@@ -325,6 +343,7 @@ fn pending_mutations_for_doc(
             kind: PendingMutationKind::ResolveExisting,
             id: item.id.clone(),
             text: item.text.clone(),
+            target_files: Vec::new(),
         });
     }
 
@@ -333,10 +352,20 @@ fn pending_mutations_for_doc(
         added_diff_lines,
         &fm.prompt_presets,
     ) {
+        let target_files = crate::prompt_contract::explicit_backlog_targets(
+            file,
+            prompt_targets,
+            added_diff_lines,
+            &fm.prompt_presets,
+        )
+        .into_iter()
+        .map(|path| path.display().to_string())
+        .collect();
         pending_mutations.push(PendingMutationPlan {
             kind: PendingMutationKind::ExpectAdd,
             id: String::new(),
             text: "user requested backlog/recommendations".to_string(),
+            target_files,
         });
     }
 
@@ -799,6 +828,70 @@ add to backlog: what tasks remain?
             expect_add.is_some(),
             "expected ExpectAdd mutation, got: {:?}",
             plan.pending_mutations
+        );
+    }
+
+    #[test]
+    fn plan_expect_add_carries_explicit_backlog_target() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let target = dir.path().join("bugs.md");
+        std::fs::write(
+            &target,
+            "<!-- agent:backlog -->\n- [ ] [#old1] Existing\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+
+        let baseline = format!(
+            r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+prompt_presets:
+  '#agent-doc-bug': Please create a plan. Add to the backlog of {}
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#,
+            target.display()
+        );
+
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "#agent-doc-bug\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, &baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+        let expect_add = plan
+            .pending_mutations
+            .iter()
+            .find(|m| m.kind == PendingMutationKind::ExpectAdd)
+            .expect("expected ExpectAdd mutation");
+        assert_eq!(
+            expect_add.target_files,
+            vec![
+                std::fs::canonicalize(&target)
+                    .unwrap()
+                    .display()
+                    .to_string()
+            ]
+        );
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|cmd| cmd.contains("--pending-add-to") && cmd.contains("bugs.md")),
+            "expected finalize hint to include --pending-add-to, got {:?}",
+            plan.required_commands
         );
     }
 

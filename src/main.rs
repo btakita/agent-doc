@@ -226,6 +226,10 @@ struct WriteArgs {
     /// Leading `[#custom] ` is also accepted as compatibility input.
     #[arg(long = "pending-add")]
     pending_add: Vec<String>,
+    /// Add a new pending item to another document's backlog (repeatable pairs: FILE TEXT).
+    /// Prefix TEXT with canonical `id=<custom> ` to preserve a custom id.
+    #[arg(long = "pending-add-to", num_args = 2, value_names = ["FILE", "TEXT"])]
+    pending_add_to: Vec<String>,
     /// Add a new gated pending item at the beginning of the list (repeatable).
     /// Prefix with canonical `id=<custom> ` to preserve a custom id instead of generating one.
     /// Leading `[#custom] ` is also accepted as compatibility input.
@@ -1598,6 +1602,7 @@ fn main() -> anyhow::Result<()> {
                 force_disk: args.force_disk,
                 origin: args.origin,
                 pending_add: args.pending_add,
+                pending_add_to: args.pending_add_to,
                 pending_add_gated: args.pending_add_gated,
                 pending_done: args.pending_done,
                 pending_edit: args.pending_edit,
@@ -1627,6 +1632,7 @@ fn main() -> anyhow::Result<()> {
                 force_disk: args.force_disk,
                 origin: args.origin,
                 pending_add: args.pending_add,
+                pending_add_to: args.pending_add_to,
                 pending_add_gated: args.pending_add_gated,
                 pending_done: args.pending_done,
                 pending_edit: args.pending_edit,

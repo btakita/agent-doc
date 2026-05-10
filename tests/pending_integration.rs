@@ -294,6 +294,60 @@ fn write_pending_add_creates_item_with_hash() {
 }
 
 #[test]
+fn write_pending_add_to_updates_target_not_current_doc() {
+    let (tmp, doc) = setup_doc("");
+    let target = tmp.path().join("target.md");
+    fs::write(
+        &target,
+        "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n- [ ] [#old1] existing target task\n<!-- /agent:backlog -->\n",
+    )
+    .unwrap();
+
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-add-to",
+            target.to_str().unwrap(),
+            "id=xdoc cross document task",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+
+    let current = fs::read_to_string(&doc).unwrap();
+    let target_content = fs::read_to_string(&target).unwrap();
+    assert!(!current.contains("cross document task"));
+    assert!(target_content.contains("- [ ] [#xdoc] cross document task"));
+    let added = target_content.find("[#xdoc] cross document task").unwrap();
+    let existing = target_content.find("[#old1] existing target task").unwrap();
+    assert!(added < existing, "new target item should be prepended");
+}
+
+#[test]
+fn write_pending_add_to_missing_target_fails_closed() {
+    let (tmp, doc) = setup_doc("");
+    let missing = tmp.path().join("missing.md");
+
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-add-to",
+            missing.to_str().unwrap(),
+            "id=xdoc cross document task",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "--pending-add-to target file not found",
+        ));
+}
+
+#[test]
 fn write_pending_add_multiple_flags_keep_cli_order_at_top() {
     let (_tmp, doc) = setup_doc("- [ ] [#old1] existing task");
     agent_doc()

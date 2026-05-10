@@ -36,15 +36,44 @@ Active backlog:
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - 10 more active item(s)
-<!-- agent:boundary:40e5f8d2 -->
+❯ do [#commitfs].
+❯ Fix the parallel test suite. The parallel test suite must pass ending the turn.
+❯ spec-test-build-install-commit-push
+### Re: #commitfs — gpt-5
+
+Implemented and pushed the Codex git metadata capability fix.
+
+The fix makes managed Codex capability proof cover auto-injected submodule/superproject git metadata roots, not only explicit `--add-dir` frontmatter/config. It now probes writable roots from inside a bounded `codex exec --json` child under the same launch args, and git metadata roots specifically prove `index.lock` creation/removal before commit work can start. Route/session status now treats submodule gitdir access as proof-required, so stale ready panes without a current proof are restarted fresh before reuse.
+
+Verification completed:
+- `cargo test agent::codex::tests -- --test-threads=2`
+- `make check` passed, including clippy, the parallel test suite, medium simulator, and version sync
+- `make build-release`
+- `make install`
+
+Commits pushed:
+- `src/agent-doc`: `05a61cb` (`fix: prove codex gitdir write access`)
+- parent repo `main`: `c50acb7fa` (`agent-doc: prove codex gitdir write access`)
+### Re: #commitfs — gpt-5
+
+Implemented and pushed the Codex git metadata capability fix.
+
+The fix makes managed Codex capability proof cover auto-injected submodule/superproject git metadata roots, not only explicit `--add-dir` frontmatter/config. It now probes writable roots from inside a bounded `codex exec --json` child under the same launch args, and git metadata roots specifically prove `index.lock` creation/removal before commit work can start. Route/session status now treats submodule gitdir access as proof-required, so stale ready panes without a current proof are restarted fresh before reuse.
+
+Verification completed:
+- `cargo test agent::codex::tests -- --test-threads=2`
+- `make check` passed, including clippy, the parallel test suite, medium simulator, and version sync
+- `make build-release`
+- `make install`
+
+Commits pushed:
+- `src/agent-doc`: `05a61cb` (`fix: prove codex gitdir write access`)
+- parent repo `main`: `c50acb7fa` (`agent-doc: prove codex gitdir write access`)
+<!-- agent:boundary:0dffc840 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-do [#commitfs].
-Fix the parallel test suite. The parallel test suite must pass ending the turn.
-spec-test-build-install-commit-push
----
 `Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
 spec-test-build-install-commit-push
 ---
@@ -64,7 +93,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#commitfs] Codex commit filesystem sandbox denial — managed session can edit nested submodule files but cannot create the backing `.git/modules/.../index.lock`, so `git add`/commit fails late with `Read-only file system`. Plan: tasks/agent-doc/plan-codex-commit-filesystem-sandbox.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
@@ -127,6 +155,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-09 [#codexcapstale] Managed Codex pane capability drift — ready actor/process args can show `-s danger-full-access` and expected `--add-dir` roots while the long-lived pane still lacks DNS/SSH/write access that a fresh runtime has. Plan: tasks/agent-doc/plan-codex-managed-session-capability-proof.md
 - 2026-05-09 [#codexnonet] Codex sandbox denies all network calls in agent-doc-managed sessions even when the intended launch contract requires network access; prove live network capability before dispatch/reuse and fail closed with sandbox-specific diagnostics. Plan: tasks/agent-doc/plan-codex-network-sandbox-denial.md
 - 2026-05-09 [#preflighthang] Direct `agent-doc <file>` invocation can hang after opening `preflight_started` when it self-dispatches into the same active Codex pane; detect recursive/self dispatch, bound the wait for capture progress, and persist a recoverable timeout state. Plan: tasks/agent-doc/plan-direct-invocation-preflight-hang.md
+- 2026-05-09 [#commitfs] Codex commit filesystem sandbox denial — managed session can edit nested submodule files but cannot create the backing `.git/modules/.../index.lock`, so `git add`/commit fails late with `Read-only file system`. Plan: tasks/agent-doc/plan-codex-commit-filesystem-sandbox.md
 <!-- /agent:pending-done -->
 
 

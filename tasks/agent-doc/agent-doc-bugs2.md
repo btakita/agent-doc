@@ -29,74 +29,14 @@ Implemented Codex capability proof timing diagnostics.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-040749.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-042541.md`*
 
 Active backlog:
-- [ ] [#duppb] Duplicate response patchback after sidecar normalization fallback / full-content IPC re-delivery — the same response block can appear twice back-to-back after finalize reports success. Plan: tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
-- [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
-- 10 more active item(s)
-❯ do [#stateproj]. spec-test-build-install-commit-push
-### Re: #stateproj — gpt-5
-Implemented `#stateproj`.
-
-Changed `agent-doc sync` so editor column-memory state is authoritative in the project controller SQLite store instead of `.agent-doc/last_layout.json`. Legacy `last_layout.json` is imported only when `state.db` has no `layout_states` row, future sync writes go to SQLite, and `last_layout.json` is emitted only as a compatibility projection. If JSON drifts, SQLite wins.
-
-Updated the controller/session specs and changelog, and added regressions for legacy projection migration plus SQLite-over-JSON precedence.
-
-Verification/build/install:
-- `cargo test project_controller::tests::layout_state`
-- `cargo test sync::tests::layout_state`
-- `make check`
-- `cargo install --path .`
-- `cargo build --release --lib`
-- `agent-doc lib-install`
-
-Commit / push:
-- agent-doc submodule: `8d09d99` (`fix: store sync layout state in controller db`) pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `4a37b6b20` (`chore: update agent-doc submodule`) pushed to `origin/main`
-### Re: #stateproj — gpt-5
-Implemented `#stateproj`.
-
-Changed `agent-doc sync` so editor column-memory state is authoritative in the project controller SQLite store instead of `.agent-doc/last_layout.json`. Legacy `last_layout.json` is imported only when `state.db` has no `layout_states` row, future sync writes go to SQLite, and `last_layout.json` is emitted only as a compatibility projection. If JSON drifts, SQLite wins.
-
-Updated the controller/session specs and changelog, and added regressions for legacy projection migration plus SQLite-over-JSON precedence.
-
-Verification/build/install:
-- `cargo test project_controller::tests::layout_state`
-- `cargo test sync::tests::layout_state`
-- `make check`
-- `cargo install --path .`
-- `cargo build --release --lib`
-- `agent-doc lib-install`
-
-Commit / push:
-- agent-doc submodule: `8d09d99` (`fix: store sync layout state in controller db`) pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `4a37b6b20` (`chore: update agent-doc submodule`) pushed to `origin/main`
-❯ do [#duppb]. spec-test-build-install-commit-push
-### Re: #duppb — gpt-5
-
-Implemented `#duppb`.
-
-Changed the template closeout path so consecutive duplicate `### Re:` response blocks are deduped before snapshots, CRDT state, disk writes, and sidecar-normalization full-content IPC repair payloads are saved or redelivered. Added a `session-check` backstop that fails closed if a duplicate response patchback survives closeout.
-
-Updated the core command spec and added regressions for final template normalization plus the sidecar fallback case where the editor has already applied the response before full-content repair.
-
-Verification/build/install:
-- `cargo test dedupe`
-- `cargo test normalize_final_template_content_removes_adjacent_duplicate_response_blocks`
-- `cargo test normalization_fallback_dedupes_already_applied_editor_response`
-- `make check`
-- `cargo install --path .`
-- `cargo build --release --lib`
-- `agent-doc lib-install`
-
-Commit / push:
-- agent-doc submodule: `2bf50c5` (`fix: dedupe duplicate response closeouts`) pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `88678fa96` (`chore: update agent-doc submodule`) pushed to `origin/main`
-
-No follow-up backlog items were created.
-<!-- agent:boundary:048eea8a -->
+- [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
+- [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
+- 8 more active item(s)
+<!-- agent:boundary:0d107626 -->
 <!-- /agent:exchange -->
 ###
 

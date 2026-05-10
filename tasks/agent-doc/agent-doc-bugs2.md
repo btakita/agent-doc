@@ -29,126 +29,14 @@ Added Codex manifest warning cleanup to the backlog.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-003516.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-023250.md`*
 
-❯ Active backlog:
-❯ - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
-❯ - [ ] [#preflighthang] Direct `agent-doc <file>` invocation can hang after opening `preflight_started` when it self-dispatches into the same active Codex pane; detect recursive/self dispatch, bound the wait for capture progress, and persist a recoverable timeout state. Plan: tasks/agent-doc/plan-direct-invocation-preflight-hang.md
-❯ - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
-❯ - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
-❯ - 9 more active item(s)
-❯ do [#codexnonet]. spec-test-build-install-commit-push
-❯ ### Re: codex network sandbox denial — gpt-5
-
-Implemented `#codexnonet`.
-
-Codex managed startup now proves explicit network access from inside a Codex child, not just from the parent process. For `codex_network_access: enabled`, `start` still clears inherited `CODEX_SANDBOX_NETWORK_DISABLED`, then runs host DNS plus a bounded `codex exec --json` probe under the same launch args. The child must run DNS and HTTPS and emit the success marker through a `command_execution` event before `codex_capability_proof` is recorded.
-
-The failure path now classifies child DNS failures, sandbox/network denial such as `Operation not permitted`, timeouts, and refused connections so route/reuse fails closed with the real capability diagnostic. I also updated the README/spec/changelog surfaces and marked `tasks/agent-doc/plan-codex-network-sandbox-denial.md` implemented.
-
-Verification:
-- `cargo test network_probe`
-- `cargo test prove_codex_child`
-- `cargo test managed_capability_proof_checks_writable_add_dirs`
-- `cargo test -- --test-threads=1`
-- `cargo build`
-- `make check TEST_THREADS=1`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-❯ Commit / push:
-❯ - `src/agent-doc`: `01302d9` pushed to `origin/20260422/codex-agent-backend`
-❯ - root repo: `9aa7a86b0` pushed to `origin/main`
--
-❯ ### Re: codex network sandbox denial — gpt-5
-
-Implemented `#codexnonet`.
-
-Codex managed startup now proves explicit network access from inside a Codex child, not just from the parent process. For `codex_network_access: enabled`, `start` still clears inherited `CODEX_SANDBOX_NETWORK_DISABLED`, then runs host DNS plus a bounded `codex exec --json` probe under the same launch args. The child must run DNS and HTTPS and emit the success marker through a `command_execution` event before `codex_capability_proof` is recorded.
-
-The failure path now classifies child DNS failures, sandbox/network denial such as `Operation not permitted`, timeouts, and refused connections so route/reuse fails closed with the real capability diagnostic. I also updated the README/spec/changelog surfaces and marked `tasks/agent-doc/plan-codex-network-sandbox-denial.md` implemented.
-
-Verification:
-- `cargo test network_probe`
-- `cargo test prove_codex_child`
-- `cargo test managed_capability_proof_checks_writable_add_dirs`
-- `cargo test -- --test-threads=1`
-- `cargo build`
-- `make check TEST_THREADS=1`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-❯ Commit / push:
-❯ - `src/agent-doc`: `01302d9` pushed to `origin/20260422/codex-agent-backend`
-❯ - root repo: `9aa7a86b0` pushed to `origin/main`
-❯ do [#preflighthang]. This was from the same session where the Codex sandbox was blocking the network requests.. spec-test-build-install-commit-push
-❯ ### Re: direct invocation preflight hang — gpt-5
-
-Implemented `#preflighthang`.
-
-Direct `agent-doc <file>` runs now fail closed instead of staying silent after `Submitting to codex...`. The non-streaming Claude/Codex child wait is bounded by `AGENT_DOC_RUN_AGENT_TIMEOUT_SECS` with a default of 1800 seconds, timeout records a recoverable `preflight_started` event with cycle/pane/actor diagnostics, and Codex direct invocation from the same tmux pane that already owns the document is rejected before nesting another Codex child. `session-check` now surfaces that timeout or recursive state with retry/restart guidance.
-
-Updated the spec/version docs and marked `tasks/agent-doc/plan-direct-invocation-preflight-hang.md` implemented.
-
-Verification:
-- `cargo test run_times_out_agent_child_and_marks_recoverable_preflight`
-- `cargo test codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`
-- `cargo test mark_response_captured_sets_capture_metadata`
-- `cargo check`
-- `cargo test -- --test-threads=1`
-- `cargo build`
-- `make check TEST_THREADS=1`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-❯ Commit / push:
-- `src/agent-doc`: `7cef057` pushed to `origin/20260422/codex-agent-backend`
-- root repo: `7062ca01c` pushed to `origin/main`
-### Re: direct invocation preflight hang — gpt-5
-
-❯ Implemented `#preflighthang`.
-
-❯ Direct `agent-doc <file>` runs now fail closed instead of staying silent after `Submitting to codex...`. The non-streaming Claude/Codex child wait is bounded by `AGENT_DOC_RUN_AGENT_TIMEOUT_SECS` with a default of 1800 seconds, timeout records a recoverable `preflight_started` event with cycle/pane/actor diagnostics, and Codex direct invocation from the same tmux pane that already owns the document is rejected before nesting another Codex child. `session-check` now surfaces that timeout or recursive state with retry/restart guidance.
-
-❯ Updated the spec/version docs and marked `tasks/agent-doc/plan-direct-invocation-preflight-hang.md` implemented.
-
-❯ Verification:
-❯ - `cargo test run_times_out_agent_child_and_marks_recoverable_preflight`
-❯ - `cargo test codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`
-❯ - `cargo test mark_response_captured_sets_capture_metadata`
-❯ - `cargo check`
-❯ - `cargo test -- --test-threads=1`
-❯ - `cargo build`
-❯ - `make check TEST_THREADS=1`
-❯ - `make install`
-❯ - `agent-doc --version` -> `agent-doc 0.33.16`
-
-❯ Commit / push:
-❯ - `src/agent-doc`: `7cef057` pushed to `origin/20260422/codex-agent-backend`
-❯ - root repo: `7062ca01c` pushed to `origin/main`
-### Re: prefixed response repair — gpt-5
-
-Implemented the follow-up prefix repair.
-
-The repair path now treats `❯ ### Re:` as an assistant response boundary, so stale prefix-normalization targets cannot cascade `❯ ` onto the response body, verification list, or commit evidence after a temporarily prefixed response heading. I added a regression for that exact shape and updated the spec/changelog invariant.
-
-Verification:
-- `cargo test normalize_exchange_prefixes_for_targets_treats_prefixed_response_heading_as_assistant_boundary`
-- `cargo check`
-- `cargo test -- --test-threads=1` (`fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs` failed once in the full run, then passed on immediate isolated rerun)
-- `cargo test fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs -- --test-threads=1`
-- `cargo build`
-- `make check TEST_THREADS=1`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commit / push:
-- `src/agent-doc`: `710c11e` pushed to `origin/20260422/codex-agent-backend`
-- root repo: `e0b88e035` pushed to `origin/main`
-### Re: foregrounded check run — gpt-5
-
-Brought the interrupted `make check TEST_THREADS=1` run back into view and let it finish. It passed, then I completed install, commit, push, and session closeout for the prefix-repair fix.
-<!-- agent:boundary:61fadd7e -->
+Active backlog:
+- [ ] [#commitfs] Codex commit filesystem sandbox denial — managed session can edit nested submodule files but cannot create the backing `.git/modules/.../index.lock`, so `git add`/commit fails late with `Read-only file system`. Plan: tasks/agent-doc/plan-codex-commit-filesystem-sandbox.md
+- [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
+- [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
+- 10 more active item(s)
+<!-- agent:boundary:40e5f8d2 -->
 <!-- /agent:exchange -->
 ###
 

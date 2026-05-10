@@ -87,7 +87,9 @@ After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execut
 
 ### 1b. Update pending (template mode)
 
-If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only through granular `agent-doc write` flags: `--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`. Full-replace via `<!-- patch:backlog -->` is rejected; see [runbooks/pending-ops.md](runbooks/pending-ops.md). For `<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
+If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only through granular `agent-doc write` flags: `--pending-add`, `--done <id>`, `--pending-edit "id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`. Full-replace via `<!-- patch:backlog -->` is rejected; see [runbooks/pending-ops.md](runbooks/pending-ops.md). For `<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
+
+Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent:backlog-done` and `agent:pending-done` tags require `agent-doc migrate`.
 
 **Pending capture rule:** if the response creates concrete follow-up work, add it to `agent:backlog` in the same cycle. Put new items at the beginning of `agent:backlog`; if you are extending an ordered batch already in pending, insert the new item adjacent to its predecessor. If the item is only a recommendation, include `[recommended]`.
 
@@ -95,7 +97,7 @@ If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only t
 
 **Plan-backed pending items:** create the plan file first and include that exact plan file path in the pending text.
 
-**`do #id` closeout rule:** when the user directs `do #id ...`, record the pending outcome before persistence: `--pending-done <id>` if completed, `--pending-gate <id>` if code-complete but externally blocked, or explain concretely why it stays open. `session-check` enforces the `pending_done_guard`.
+**`do #id` closeout rule:** when the user directs `do #id ...`, record the pending outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if code-complete but externally blocked, or explain concretely why it stays open. `session-check` enforces the `pending_done_guard`.
 
 ### 2. Persist the response (MANDATORY — never skip)
 
@@ -113,7 +115,7 @@ cat <<'RESPONSE' | agent-doc finalize <FILE> --baseline-file <preflight.baseline
 RESPONSE
 ```
 
-`finalize` requires the cycle to reach `committed` and the post-commit `session-check` guard to pass before success. `agent-doc write --commit <FILE>` shares that fail-closed boundary for repair writes. If `finalize`, `write --commit`, or `repair` surfaces a `session-check` interruption, continue recovery instead of reporting success. `session-check` also enforces pending capture / `pending_done_guard`. Use [runbooks/commit.md](runbooks/commit.md) and [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for the full closeout contract.
+`finalize` requires the cycle to reach `committed` and the post-commit `session-check` guard to pass before success, including prompt-only exchange-tail checks. `agent-doc write --commit <FILE>` shares that fail-closed boundary for repair writes. If `finalize`, `write --commit`, or `repair` surfaces a `session-check` interruption, continue recovery instead of reporting success. `session-check` also enforces pending capture / `pending_done_guard`. Use [runbooks/commit.md](runbooks/commit.md) and [runbooks/harness-invocation.md](runbooks/harness-invocation.md) for the full closeout contract.
 
 After `finalize` / `write --commit`, do not start more long-running task work for that same turn. Codex hooks in `.codex/hooks.json` and `.codex/config.toml` are a fail-closed backstop, not a replacement for explicit closeout.
 

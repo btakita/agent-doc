@@ -467,7 +467,7 @@ fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -
         args.push(value.clone());
     }
     for value in &options.pending_done {
-        args.push("--pending-done".to_string());
+        args.push("--done".to_string());
         args.push(value.clone());
     }
     for value in &options.pending_edit {
@@ -1527,13 +1527,13 @@ fn precommit_pending_done_check(file: &Path) -> Result<()> {
         .join(", ");
     let hint = missing
         .iter()
-        .map(|id| format!("--pending-done {}", id))
+        .map(|id| format!("--done {}", id))
         .collect::<Vec<_>>()
         .join(" ");
 
     anyhow::bail!(
         "[finalize] pre-commit gate: response appears to complete existing pending {} \
-         but no matching `--pending-done` was recorded this cycle\n\
+         but no matching `--done` was recorded this cycle\n\
          [finalize] hint: re-run finalize with {}, \
          add <!-- no-pending-done-guard --> to suppress, \
          or set pending_done_guard = \"warn\" to downgrade",
@@ -1583,7 +1583,7 @@ fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFl
         .join(", ");
     let hint = missing
         .iter()
-        .map(|id| format!("--pending-done {}", id))
+        .map(|id| format!("--done {}", id))
         .collect::<Vec<_>>()
         .join(" ");
     let recovery = flags
@@ -1599,7 +1599,7 @@ fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFl
 
     anyhow::bail!(
         "[finalize] pre-write gate: response appears to complete existing pending {} \
-         but no matching `--pending-done` was recorded this cycle\n\
+         but no matching `--done` was recorded this cycle\n\
          [finalize] hint: re-run finalize with {}, \
          add <!-- no-pending-done-guard --> to suppress, \
          or set pending_done_guard = \"warn\" to downgrade{}",
@@ -6124,7 +6124,7 @@ fn normalize_final_template_content(
 /// Transfer the tracked backlog/pending component content from `source` into
 /// `target`.
 ///
-/// When the on-disk file has pending mutations applied (e.g. `--pending-done`)
+/// When the on-disk file has pending mutations applied (e.g. `--done`)
 /// that are not reflected in `content_ours` (which was built from a pre-mutation
 /// baseline), this function preserves those mutations by splicing the tracked
 /// backlog component from `source` into `target`.
@@ -11090,7 +11090,7 @@ mod precommit_pending_capture_tests {
         let err = super::precommit_pending_done_check(&doc).unwrap_err();
         assert!(err.to_string().contains("[finalize] pre-commit gate"));
         assert!(err.to_string().contains("#4qja"));
-        assert!(err.to_string().contains("--pending-done 4qja"));
+        assert!(err.to_string().contains("--done 4qja"));
     }
 
     #[test]
@@ -11122,7 +11122,7 @@ mod precommit_pending_capture_tests {
 
         let err = super::precommit_pending_done_check(&doc).unwrap_err();
         assert!(err.to_string().contains("#ice01"));
-        assert!(err.to_string().contains("--pending-done ice01"));
+        assert!(err.to_string().contains("--done ice01"));
     }
 
     #[test]

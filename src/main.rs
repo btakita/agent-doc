@@ -199,6 +199,11 @@ fn deprecated_pending_alias_used(args: &[OsString]) -> bool {
     matches!(args.get(1).and_then(|arg| arg.to_str()), Some("pending"))
 }
 
+fn deprecated_done_flag_used(args: &[OsString]) -> bool {
+    args.iter()
+        .any(|arg| matches!(arg.to_str(), Some("--pending-done" | "--backlog-done")))
+}
+
 #[derive(Args, Clone)]
 struct WriteArgs {
     /// Path to the session document
@@ -235,8 +240,9 @@ struct WriteArgs {
     /// Leading `[#custom] ` is also accepted as compatibility input.
     #[arg(long = "pending-add-gated")]
     pending_add_gated: Vec<String>,
-    /// Mark a pending item `[x]` by hash id (repeatable).
-    #[arg(long = "pending-done")]
+    /// Mark a backlog or icebox item `[x]` by hash id (repeatable).
+    /// `--pending-done` and `--backlog-done` are deprecated aliases.
+    #[arg(long = "done", alias = "pending-done", alias = "backlog-done")]
     pending_done: Vec<String>,
     /// Edit a pending item: `id=new text` (repeatable).
     #[arg(long = "pending-edit")]
@@ -1339,6 +1345,7 @@ fn main() -> anyhow::Result<()> {
 
     let raw_args: Vec<OsString> = std::env::args_os().collect();
     let pending_alias_used = deprecated_pending_alias_used(&raw_args);
+    let done_flag_alias_used = deprecated_done_flag_used(&raw_args);
     let cli = Cli::parse_from(rewrite_bare_file_invocation(raw_args));
 
     // Warn about newer versions on startup, but skip if running the upgrade command itself.
@@ -1349,6 +1356,16 @@ fn main() -> anyhow::Result<()> {
     if pending_alias_used && matches!(cli.command, Commands::Backlog { .. }) {
         eprintln!(
             "[deprecation] `agent-doc pending` is deprecated — use `agent-doc backlog` instead"
+        );
+    }
+    if done_flag_alias_used
+        && matches!(
+            cli.command,
+            Commands::Write { .. } | Commands::Finalize { .. }
+        )
+    {
+        eprintln!(
+            "[deprecation] `--pending-done` and `--backlog-done` are deprecated — use `--done` instead"
         );
     }
 

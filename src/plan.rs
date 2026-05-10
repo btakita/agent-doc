@@ -275,7 +275,7 @@ fn finalize_placeholder_commands(
         .iter()
         .filter(|mutation| mutation.kind == PendingMutationKind::ResolveExisting)
     {
-        finalize.push_str(" --pending-done ");
+        finalize.push_str(" --done ");
         finalize.push_str(&mutation.id);
     }
     for mutation in pending_mutations
@@ -634,9 +634,9 @@ do [#dodone]. spec-test-build-install-commit-push
             plan.required_commands
                 .iter()
                 .any(|cmd| cmd.contains("agent-doc finalize")
-                    && cmd.contains("--pending-done dodone")
+                    && cmd.contains("--done dodone")
                     && cmd.contains("--stream")),
-            "expected finalize command to carry pending-done, got: {:?}",
+            "expected finalize command to carry --done, got: {:?}",
             plan.required_commands
         );
     }

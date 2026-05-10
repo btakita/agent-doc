@@ -2,7 +2,7 @@
 //!
 //! Covers:
 //! - `agent-doc pending <file> add/backfill/done/edit/reorder/clear/reap`
-//! - `agent-doc write --pending-add/done/...`
+//! - `agent-doc write --pending-add/--done/...`
 //! - `replace:pending` block rejection (and `--allow-replace-pending` escape hatch)
 //! - `patch:pending` dual-accept with deprecation warning (#25ag migration)
 
@@ -662,7 +662,7 @@ fn write_pending_done_marks_checked() {
             "write",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--pending-done",
+            "--done",
             "abcd",
         ])
         .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
@@ -680,7 +680,7 @@ fn write_pending_done_accepts_hash_prefixed_id() {
             "write",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--pending-done",
+            "--done",
             "#abcd",
         ])
         .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
@@ -688,6 +688,48 @@ fn write_pending_done_accepts_hash_prefixed_id() {
         .success();
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("- [x] [#abcd]"));
+}
+
+#[test]
+fn write_done_accepts_deprecated_pending_done_alias_with_warning() {
+    let (_tmp, doc) = setup_doc("- [ ] [#abcd] task");
+    let assert_result = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-done",
+            "abcd",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [x] [#abcd]"));
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(stderr.contains("deprecated"), "got stderr: {}", stderr);
+    assert!(stderr.contains("--done"), "got stderr: {}", stderr);
+}
+
+#[test]
+fn write_done_accepts_deprecated_backlog_done_alias_with_warning() {
+    let (_tmp, doc) = setup_doc("- [ ] [#abcd] task");
+    let assert_result = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-done",
+            "abcd",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("- [x] [#abcd]"));
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(stderr.contains("deprecated"), "got stderr: {}", stderr);
+    assert!(stderr.contains("--done"), "got stderr: {}", stderr);
 }
 
 // ---- Phase 2: gate / ungate ----
@@ -798,7 +840,7 @@ fn write_pending_gate_then_done_in_one_call() {
             "--force-disk",
             "--pending-gate",
             "abcd",
-            "--pending-done",
+            "--done",
             "abcd",
         ])
         .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")

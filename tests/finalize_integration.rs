@@ -497,7 +497,7 @@ fn finalize_blocks_session_closeout_when_completed_pending_lacks_pending_done() 
         .assert()
         .failure()
         .stderr(predicates::str::contains("[finalize] pre-write gate"))
-        .stderr(predicates::str::contains("--pending-done 4qja"))
+        .stderr(predicates::str::contains("--done 4qja"))
         .stderr(predicates::str::contains("agent-doc finalize"))
         .stderr(predicates::str::contains("re-run the same response"));
 
@@ -576,7 +576,7 @@ fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--pending-done",
+            "--done",
             "done1",
         ])
         .write_stdin(
@@ -629,7 +629,7 @@ fn finalize_accepts_hash_prefixed_pending_done_id() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--pending-done",
+            "--done",
             "#done1",
         ])
         .write_stdin(
@@ -648,12 +648,41 @@ fn finalize_accepts_hash_prefixed_pending_done_id() {
     let head_text = head_blob(tmp.path());
     assert!(
         !head_text.contains("- [ ] [#done1] Close the loop"),
-        "HEAD backlog should not keep the completed item open when --pending-done uses #id"
+        "HEAD backlog should not keep the completed item open when --done uses #id"
     );
     assert!(
         head_text.contains("<!-- agent:done -->") && head_text.contains("[#done1] Close the loop"),
         "HEAD should create a completed/reaped archive when the session did not already have one"
     );
+}
+
+#[test]
+fn finalize_accepts_deprecated_pending_done_alias_with_warning() {
+    let (tmp, doc) = setup_session_template_doc();
+    insert_pending_item(&doc, "- [ ] [#done1] Close the loop\n");
+    init_git_repo(tmp.path(), &doc);
+
+    let assert_result = agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--pending-done",
+            "done1",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: #done1 close the loop — gpt-5"));
+    assert!(content.contains("<!-- agent:done -->"));
+    assert!(content.contains("[#done1] Close the loop"));
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(stderr.contains("deprecated"), "got stderr: {}", stderr);
+    assert!(stderr.contains("--done"), "got stderr: {}", stderr);
 }
 
 #[test]
@@ -672,7 +701,7 @@ fn finalize_pending_done_is_noop_when_item_was_already_reaped() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--pending-done",
+            "--done",
             "done1",
         ])
         .write_stdin(

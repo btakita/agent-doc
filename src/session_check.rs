@@ -1013,11 +1013,11 @@ fn check_pending_done_guard(file: &Path) -> Result<GuardResult> {
         .join(", ");
     let hint = missing
         .iter()
-        .map(|id| format!("--pending-done {}", id))
+        .map(|id| format!("--done {}", id))
         .collect::<Vec<_>>()
         .join(" ");
     let warn_line = format!(
-        "[session-check] warn: response appears to complete existing pending {} but no matching `--pending-done` was recorded this cycle",
+        "[session-check] warn: response appears to complete existing pending {} but no matching `--done` was recorded this cycle",
         ids
     );
 
@@ -3584,7 +3584,7 @@ Body\n\
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         assert_eq!(report.warnings.len(), 2);
         assert!(report.warnings[0].contains("#4qja"));
-        assert!(report.warnings[1].contains("--pending-done 4qja"));
+        assert!(report.warnings[1].contains("--done 4qja"));
     }
 
     #[test]
@@ -3603,7 +3603,7 @@ Body\n\
         match report.status {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("[session-check] error:"));
-                assert!(message.contains("--pending-done 4qja"));
+                assert!(message.contains("--done 4qja"));
                 assert!(message.contains("pending_done_guard = \"warn\""));
             }
             other => panic!("expected default strict-mode failure for session doc, got {other:?}"),
@@ -3701,7 +3701,7 @@ Body\n\
         let report = inspect_with_warnings(&doc).unwrap();
         match report.status {
             SessionCheckStatus::Interrupted(message) => {
-                assert!(message.contains("--pending-done ice01"));
+                assert!(message.contains("--done ice01"));
                 assert!(message.contains("#ice01"));
             }
             other => {
@@ -3842,7 +3842,7 @@ Body\n\
         match report.status {
             SessionCheckStatus::Interrupted(message) => {
                 assert!(message.contains("[session-check] error:"));
-                assert!(message.contains("--pending-done 4qja"));
+                assert!(message.contains("--done 4qja"));
                 assert!(message.contains("pending_done_guard = \"warn\""));
             }
             other => panic!("expected strict-mode failure, got {other:?}"),

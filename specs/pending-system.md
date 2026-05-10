@@ -12,7 +12,7 @@ owner: btakita
 
 ## Problem
 
-The `agent:backlog` component drifts between cycles. Current enforcement requires a full `patch:pending` block on every response — when the skill forgets, or rewrites the wrong item, or reorders the list, downstream cycles can't tell which item was "the same bullet as last time." Full-replace is lossy: text drift and reorder both destroy identity, so `--pending-done 3` (numeric index) is unsafe and `--pending-done "text"` (exact match) is fragile.
+The `agent:backlog` component drifts between cycles. Current enforcement requires a full `patch:pending` block on every response — when the skill forgets, or rewrites the wrong item, or reorders the list, downstream cycles can't tell which item was "the same bullet as last time." Full-replace is lossy: text drift and reorder both destroy identity, so `--done 3` (numeric index) is unsafe and `--done "text"` (exact match) is fragile.
 
 Three symptoms observed in practice:
 
@@ -57,7 +57,7 @@ Every bullet carries a GFM-style checkbox that encodes a three-state lifecycle:
 **Lifecycle diagram:**
 
 ```
-┌─────┐   --pending-gate     ┌─────┐   --pending-done     ┌─────┐
+┌─────┐   --pending-gate     ┌─────┐   --done     ┌─────┐
 │ [ ] │ ───────────────────► │ [/] │ ───────────────────► │ [x] │ ──► (reaped)
 │ open│                      │gated│                      │ done│
 └─────┘                      └─────┘                      └─────┘
@@ -66,7 +66,7 @@ Every bullet carries a GFM-style checkbox that encodes a three-state lifecycle:
    └────────────────────────────┘
 
 Direct path (no gating needed):
-[ ] ──── --pending-done ────► [x] ──► (reaped)
+[ ] ──── --done ────► [x] ──► (reaped)
 ```
 
 **State semantics:**
@@ -125,7 +125,7 @@ On every preflight run:
      without a local record.
    - Persistence invariant: the reap must land in both the working tree document and the snapshot that the commit boundary stages. If preflight cannot persist that synchronized reap safely, it must fail closed instead of continuing with completed tracked-work items still present in backlog or icebox.
 - Same-cycle resurrection invariant: once a cycle reaps a tracked `[#id]`, closeout must fail closed if that same id reappears in the live `agent:backlog` or `agent:icebox` before commit. Do not silently treat the stale rewrite as generic local drift.
-- Same-cycle completion invariant: when preflight/repair reap a user-authored `[x]` tracked item directly from the document, that id counts as intentionally resolved for the current cycle's history-replay guards even if no explicit `--pending-done <id>` flag was recorded. Do not restore the older `[ ]` or `[/]` history entry just because the completion came from a manual document edit.
+- Same-cycle completion invariant: when preflight/repair reap a user-authored `[x]` tracked item directly from the document, that id counts as intentionally resolved for the current cycle's history-replay guards even if no explicit `--done <id>` flag was recorded. Do not restore the older `[ ]` or `[/]` history entry just because the completion came from a manual document edit.
 - No-partial-reap invariant: if a completed tracked item is followed by malformed flush-left spill such as pasted command/diff transcript lines, reap/archive the whole logical block with that parent item. Do not delete only the tracked parent line and leave orphan prose behind in the live backlog.
 4. Commit the rewritten component as part of the existing boundary-maintenance commit.
 
@@ -143,7 +143,7 @@ The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch
 |------|----------|
 | `--pending-add "text"` | Add new item at the beginning of the list. Binary assigns hash and `[ ]` unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is accepted as compatibility input. When repeated in one command, all added items are inserted as one ordered batch: the first flag appears above the second, and the full batch appears above existing backlog items. |
 | `--pending-add-to <file> "text"` | Add a new `[ ]` item to another document's backlog. The target file must exist and contain an `agent:backlog` / legacy `agent:pending` component; missing targets fail closed instead of falling back to the current document. Repeated pairs are grouped per target and preserve caller order at the top of each target backlog. |
-| `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). If the id is already present in canonical `agent:done` or the current cycle's resolved-id ledger, treat it as an idempotent resolution warning rather than a fatal missing-id error. |
+| `--done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). If the id is already present in canonical `agent:done` or the current cycle's resolved-id ledger, treat it as an idempotent resolution warning rather than a fatal missing-id error. |
 | `--pending-gate <id>` | Mark `[/]` — code-complete, awaiting gate. Valid from `[ ]`. No-op (logged) if already `[/]`. Error if source is `[x]`. |
 | `--pending-ungate <id>` | Return `[/]` → `[ ]` — gate failed, back to active. Error if source is `[ ]` or `[x]`. |
 | `--pending-edit <id> "new text"` | Rewrite text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. |
@@ -152,8 +152,10 @@ The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch
 
 For every id-based pending flag except `--pending-add`, the binary normalizes
 the id by trimming whitespace, stripping one optional leading `#`, and
-lowercasing before lookup. `--pending-done 4qja` and `--pending-done #4QJA`
+lowercasing before lookup. `--done 4qja` and `--done #4QJA`
 must therefore resolve the same tracked item.
+`--pending-done` and `--backlog-done` are deprecated command-line aliases for
+`--done`; generated plans and closeout guidance must use `--done`.
 
 **Plan-backed item rule:** when a pending bullet depends on a dedicated plan
 document, the operator must create that plan file before adding the pending
@@ -163,7 +165,7 @@ discover which `plan-*.md` file was intended.
 
 **State transition matrix:**
 
-| From \ Op | `--pending-done` | `--pending-gate` | `--pending-ungate` |
+| From \ Op | `--done` | `--pending-gate` | `--pending-ungate` |
 |-----------|------------------|------------------|--------------------|
 | `[ ]` Open  | → `[x]` Done     | → `[/]` Gated    | error              |
 | `[/]` Gated | → `[x]` Done     | no-op (log)      | → `[ ]` Open       |
@@ -228,7 +230,7 @@ Indented child task lines are canonicalized when they look like list items: the 
 1. **Rust — commands** (`src/write.rs`, `src/pending.rs`):
    - `--pending-add <text>` (supports canonical `id=<custom> ` syntax and compatibility `[#custom] ` input)
    - `--pending-add-to <file> <text>` for explicit cross-document backlog targets
-   - `--pending-done <id>`
+   - `--done <id>`
    - `--pending-gate <id>` (new — Gated lifecycle)
    - `--pending-ungate <id>` (new — Gated lifecycle)
    - `--pending-edit <id> <text>`
@@ -267,7 +269,7 @@ No explicit migration command. First preflight after upgrade lazy-backfills. Doc
 
 ## Open questions
 
-- Should `--pending-done` reap immediately, or only mark `[x]` and let preflight reap on the next cycle? Default: mark-only (preflight is the single reap path). Add `--reap` flag later if needed.
+- Should `--done` reap immediately, or only mark `[x]` and let preflight reap on the next cycle? Default: mark-only (preflight is the single reap path). Add `--reap` flag later if needed.
 - `agent:done` is the canonical completed/reaped archive component. `agent:backlog-done` and `agent:pending-done` are not accepted as aliases; migration rewrites both to the canonical marker.
 - Should the hash prefix be rendered-visible or hidden behind a comment? Visible — transparency wins, and grep-ability is too useful to lose.
 - Reorder flag scope: one cycle, or persistent until user signals otherwise? One cycle — simpler invariant, lower risk of the skill getting stuck refusing to reorder.

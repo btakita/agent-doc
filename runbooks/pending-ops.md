@@ -45,12 +45,15 @@ Combine any number of flags in one `agent-doc write` call:
 | Flag | Purpose |
 |------|---------|
 | `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Bare `[#]` and stacked prefixes such as `[#a] [#b] ...` fail closed. Repeat for multiple adds; repeated flags keep caller order at the top of the backlog. |
-| `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
+| `--done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
 | `--pending-edit "id=new text"` | Rewrite text, preserve hash. Repeat as needed. |
 | `--pending-clear` | Drop all items. |
 | `--pending-reorder <id1,id2,...>` | Reorder by id. Missing ids keep their relative order. |
 | `--pending-gate <id>` | Transition to `[/]` gated state. Reaper skips gated items. |
 | `--pending-ungate <id>` | Return `[/]` to `[ ]`. |
+
+`--pending-done <id>` and `--backlog-done <id>` are deprecated aliases for
+`--done <id>`; new guidance, plans, and recovery hints must emit `--done`.
 
 `agent:icebox` is not populated by `--pending-add`. When the response needs to
 rewrite the icebox component, use a template patch block in the response body:
@@ -134,13 +137,13 @@ plan path into another `.md` file.
 
 ## What to decide each cycle
 
-- Items completed during this response → `--pending-done <id>`
+- Items completed during this response → `--done <id>`
 - New items discovered → `--pending-add "text"`
 - **Agent-proposed forward actions** → `--pending-add "text"` for each concrete
   follow-up that should be tracked across cycles.
 - **Unaccepted recommendations** → `--pending-add "[recommended] text"` so the
   item is visibly provisional until the user opts in.
-- **Existing `do #id` work that completed this cycle** → `--pending-done <id>` in
+- **Existing `do #id` work that completed this cycle** → `--done <id>` in
   the same closeout command whether the item lived in the live backlog or the
   icebox. Session-doc closeouts now fail before commit when a response clearly
   completes `#id` but omits the matching done mutation. If the item is
@@ -162,7 +165,7 @@ Add one, mark two done, reword another:
 ```bash
 cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline> --stream --origin skill \
   --pending-add "integration test for --pending-reorder" \
-  --pending-done a3f2 --pending-done b1c4 \
+  --done a3f2 --done b1c4 \
   --pending-edit "c9e0=refactor preflight: use single exit point"
 <response body — patch:exchange allowed, replace:pending forbidden>
 RESPONSE

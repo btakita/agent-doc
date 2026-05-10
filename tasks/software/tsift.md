@@ -39,14 +39,32 @@ Icebox:
 - [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-<!-- agent:boundary:2617e7d2 -->
+❯ do [#budg]. spec-test-build-install-commit-push
+### Re: #budg response-budget follow-up commands — gpt-5
+
+Done. I tuned the budgeted next-context path so preview lists stay capped while follow-up digest commands have their own 4-command floor and are preserved verbatim. That prevents `small` previews from hiding or corrupting the resumable `session-review`, `diff-digest`, `test-digest`, and `log-digest` commands.
+
+Updated `src/tsift/src/main.rs`, `src/tsift/SPEC.md`, and `src/tsift/VERSIONS.md`. The spec now records the real-session token-savings measurement: 85.5% overall savings, about 3.4k estimated tokens saved, while retaining the follow-up command surface.
+
+Verification completed:
+
+- `cargo test` — 552 unit tests and 88 integration tests passed
+- `cargo build --release` — passed
+- `cargo install --path . --force` — installed `tsift 0.1.42`
+- `tsift --version` — `tsift 0.1.42`
+
+Committed and pushed in `src/tsift`:
+
+- `d3a12a1 fix: preserve budgeted follow-up commands`
+
+The parent workspace had unrelated dirty state and an already-dirty `src/tsift` gitlink before this cycle, so I left parent non-session files untouched.
+<!-- agent:boundary:eb7c55e3 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#budg] Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -60,6 +78,7 @@ Icebox:
 <!-- agent:pending-done -->
 - 2026-05-09 [#ctxp] Add context-pack to the token-savings fixture/regression, including diff/test/log/next-context inputs and a fail-under threshold for its envelope preview.
 - 2026-05-10 [#real] Add a real-session token-savings benchmark from recent tsift/agent-doc transcripts, covering session-review and context-pack paths that dominate actual prompt volume.
+- 2026-05-10 [#budg] Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
 <!-- /agent:pending-done -->
 
 <!--

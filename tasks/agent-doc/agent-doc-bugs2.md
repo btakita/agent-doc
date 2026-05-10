@@ -77,7 +77,7 @@ Commits:
 - Parent repo: `8dd7e11af chore: update agent-doc archive component` committed; I will push `main` after this document closeout.
 
 There were no actionable follow-up items to capture.
-<!-- agent:boundary:50c187c1 --> 
+<!-- agent:boundary:9f121e19 -->
 <!-- /agent:exchange -->
 ###
 
@@ -96,7 +96,6 @@ spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rootpatchmiss] Direct Codex agent-doc turn completed commits/pushes but did not write the final response into `src/session-share/tasks/root.md`; extend `tasks/agent-doc/plan-response-missing-after-manual-closeout.md` with the May 10 `#vt-agent-deploy` reproduction and fail closed on prompt-only exchange closeout.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

@@ -99,13 +99,37 @@ Commits:
 - Parent repo: `599a3b578 agent-doc response: prompt-only closeout guard` committed; I will push `main` after this document closeout.
 
 No follow-up backlog items from this cycle.
-<!-- agent:boundary:84d3dad2 -->
+❯ Rename `--pending-done` and `--backlog-done` arguments to `--done`. `--done` will look in both the `agent:backlog` and `agent:icebox` items. Deprecate `--pending-done`.
+❯ spec-test-build-install-commit-push
+### Re: tracked completion flag — gpt-5
+
+Implemented the tracked-work completion flag rename.
+
+- `write` and `finalize` now expose `--done <id>` as the canonical public flag for marking tracked work complete.
+- `--pending-done` and `--backlog-done` remain accepted as deprecated aliases and print a deprecation warning that points to `--done`.
+- `--done` resolves both `agent:backlog` / legacy `agent:pending` and `agent:icebox` items through the existing tracked-work mutation path.
+- `agent-doc plan`, closeout recovery hints, specs, skill/runbook text, generated instruction surfaces, and regression tests now use `--done`.
+
+Verification completed:
+- `cargo test done`
+- `cargo test pending_done_guard`
+- `make check`
+- `cargo build`
+- `make install`
+- `agent-doc skill install --all`
+- `cargo run --quiet -- audit-docs`
+
+Commits:
+- `src/agent-doc`: `1466fc1 fix: rename tracked completion flag` pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo: `3152a0c27 chore: update agent-doc completion flag surfaces` pushed to `origin/main` before this document closeout; I will push the session closeout commit next.
+
+No follow-up backlog items from this cycle.
+<!-- agent:boundary:f806381f -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-Rename `--pending-done` and `--backlog-done` arguments to `--done`. `--done` will look in both the `agent:backlog` and `agent:icebox` items.
-spec-test-build-install-commit-push
+minor (v0.34.0) release + publish. merge into main
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
 ---

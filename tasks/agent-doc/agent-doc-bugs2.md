@@ -29,51 +29,14 @@ Implemented Codex capability proof timing diagnostics.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-051416.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-052902.md`*
 
 Active backlog:
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-❯ Please review the logs for sync command issues. Plan #next-steps.
-### Re: sync command logs — gpt-5
-
-I reviewed the current sync/route logs and captured a focused plan at `tasks/agent-doc/plan-sync-command-route-error-follow-up.md`.
-
-Findings:
-- The current saved editor route error for `agent-doc-bugs5.md` shows sync recovering panes, then route failing with `Error: project controller returned ok response without data`. That is the sharpest current issue.
-- Recent safe-passive sync entries are mostly healthy: `sync_lock_wait=0ms`, `prune_stash_panes=0ms`, and totals around 725-839ms. Older over-budget records remain in the log history, but the current evidence points more to stale/opaque route diagnostics than slow stash pruning.
-- Route still sometimes logs `route_dispatch_only_starting_actor_direct_pane_submit` immediately before the controller accepts dispatch as `ready`, so there is still a stale-starting projection edge.
-- The saved editor-route-error cleanup is still suspect because a route error file remains visible after later successful routing activity elsewhere.
-
-Next steps are in the plan: test typed controller response envelopes, improve the `ok response without data` diagnostic, clear saved editor route errors after later successful same-document focus/sync/route, re-query the controller when route sees a starting projection, and keep latency work separate unless new logs again show over-budget `sync_lock_wait` or `prune_stash_panes`.
-
-I committed the plan file as `40e0339a0`. No code was changed, so I did not run the Rust test suite.
-❯ do [#syncroutelog]. spec-test-build-install-commit-push
-### Re: syncroutelog — gpt-5
-
-Implemented and pushed the sync-route diagnostic fix.
-
-What changed:
-- Typed controller RPC decode errors now include the controller command name and raw response envelope, and missing-data envelopes are logged to `ops.log` against the document when possible.
-- Successful binary route and focused sync calls now clear the matching `.agent-doc/state/editor-route-errors/<doc>.txt` diagnostic, matching and extending the editor-side cleanup behavior.
-- Dispatch-only route re-checks the authoritative controller actor when the local projection still says `starting`, so a just-ready actor can use the ready path instead of the stale starting direct-submit fallback.
-- Updated the JetBrains spec and added focused Rust coverage for the saved route-error cleanup path and missing controller data diagnostic.
-
-Verification completed:
-- `cargo fmt`
-- `cargo test -p agent-doc typed_controller_decode_reports_missing_data_with_command_and_raw_envelope`
-- `cargo test -p agent-doc editor_route_errors`
-- `cargo test -p agent-doc`
-- `cargo build -p agent-doc`
-- `cargo install --path . --force`
-- `make check`
-
-Commits pushed:
-- `src/agent-doc`: `c21ef89` (`fix: clear stale editor route diagnostics`) to `origin/20260422/codex-agent-backend`
-- parent repo: `00af0a2b7` (`chore: bump agent-doc submodule`) to `origin/main`
-<!-- agent:boundary:db7200ef -->
+<!-- agent:boundary:cb542279 -->
 <!-- /agent:exchange -->
 ###
 

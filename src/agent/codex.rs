@@ -56,6 +56,7 @@ use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use super::streaming::{StreamChunk, StreamingAgent};
 use super::{Agent, AgentResponse};
@@ -100,6 +101,9 @@ struct StreamProcess {
     stderr_handle: Option<std::thread::JoinHandle<()>>,
     stderr_buf: Arc<Mutex<String>>,
 }
+
+const CODEX_CHILD_NETWORK_PROBE_TIMEOUT: Duration = Duration::from_secs(45);
+const CODEX_CHILD_NETWORK_PROBE_MARKER: &str = "AGENT_DOC_NETWORK_PROBE_OK";
 
 fn looks_like_local_browser_cdp_permission_denied(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
@@ -333,6 +337,176 @@ fn prove_dns_resolution() -> Result<()> {
     Ok(())
 }
 
+fn codex_exec_args_for_probe(launch_args: &[String]) -> Vec<String> {
+    if launch_args.first().is_some_and(|arg| arg == "exec") {
+        let mut args = launch_args.to_vec();
+        if !args.iter().any(|arg| arg == "--json") {
+            args.insert(1, "--json".to_string());
+        }
+        return args;
+    }
+
+    let mut args = structural_base_args();
+    args.extend(launch_args.iter().cloned());
+    args
+}
+
+fn codex_child_network_probe_prompt() -> String {
+    format!(
+        "Run exactly one shell command to prove this Codex child can use outbound network. \
+         Use this command, then report only whether it succeeded:\n\n\
+         sh -lc 'set -eu; \
+         if command -v getent >/dev/null 2>&1; then getent hosts github.com >/dev/null; \
+         else python3 -c \"import socket; socket.getaddrinfo(\\\"github.com\\\", 443)\"; fi; \
+         if command -v curl >/dev/null 2>&1; then curl -fsSIL --max-time 10 https://github.com >/dev/null; \
+         else python3 -c \"import urllib.request; urllib.request.urlopen(\\\"https://github.com\\\", timeout=10).close()\"; fi; \
+         printf \"{}\\n\"'",
+        CODEX_CHILD_NETWORK_PROBE_MARKER
+    )
+}
+
+fn classify_child_network_probe_failure(detail: &str) -> &'static str {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("could not resolve")
+        || lower.contains("temporary failure in name resolution")
+        || lower.contains("name or service not known")
+        || lower.contains("nodename nor servname provided")
+        || lower.contains("getaddrinfo")
+    {
+        "DNS resolution failed inside the Codex child"
+    } else if lower.contains("operation not permitted")
+        || lower.contains("network is unreachable")
+        || lower.contains("permission denied")
+        || lower.contains("eperm")
+        || lower.contains("sandbox")
+        || lower.contains("network disabled")
+    {
+        "Codex sandbox/network capability denied outbound access"
+    } else if lower.contains("connection refused") {
+        "remote network service refused the Codex child connection"
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        "Codex child network probe timed out"
+    } else {
+        "Codex child network probe failed"
+    }
+}
+
+fn wait_with_timeout(
+    mut child: std::process::Child,
+    timeout: Duration,
+) -> Result<std::process::Output> {
+    let started = Instant::now();
+    loop {
+        if child.try_wait()?.is_some() {
+            return child
+                .wait_with_output()
+                .map_err(|e| anyhow::anyhow!("failed to collect Codex child probe output: {e}"));
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let output = child.wait_with_output().map_err(|e| {
+                anyhow::anyhow!("failed to collect timed-out Codex child probe output: {e}")
+            })?;
+            anyhow::bail!(
+                "Codex child network probe timed out after {}s; stderr={}",
+                timeout.as_secs(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn validate_codex_child_network_probe_output(stdout: &str, stderr: &str) -> Result<()> {
+    let mut saw_command_execution = false;
+    let mut failure_detail: Option<String> = None;
+
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(item) = json.get("item") else {
+            continue;
+        };
+        if item.get("type").and_then(|value| value.as_str()) != Some("command_execution") {
+            continue;
+        }
+
+        saw_command_execution = true;
+        let command = item
+            .get("command")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let output = item
+            .get("aggregated_output")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let exit_code = item.get("exit_code").and_then(|value| value.as_i64());
+        if exit_code == Some(0) && output.contains(CODEX_CHILD_NETWORK_PROBE_MARKER) {
+            return Ok(());
+        }
+
+        failure_detail.get_or_insert_with(|| {
+            format!(
+                "command={command:?} exit_code={} output={}",
+                exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                output.trim()
+            )
+        });
+    }
+
+    let detail = failure_detail.unwrap_or_else(|| {
+        if saw_command_execution {
+            "Codex command execution did not emit the network probe success marker".to_string()
+        } else {
+            format!(
+                "Codex child did not run a command_execution event; stderr={}",
+                stderr.trim()
+            )
+        }
+    });
+    let classification = classify_child_network_probe_failure(&detail);
+    anyhow::bail!("{classification}: {detail}");
+}
+
+fn prove_codex_child_network_access(
+    command: &str,
+    launch_args: &[String],
+    env: &std::collections::HashMap<String, String>,
+) -> Result<()> {
+    let probe_args = codex_exec_args_for_probe(launch_args);
+    let codex =
+        Codex::new(Some(command.to_string()), Some(probe_args)).with_env(env_map_as_overrides(env));
+    let mut cmd = codex.build_command(None, false, None);
+    let mut child = cmd
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("failed to start Codex child network probe: {e}"))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        Codex::write_prompt_to_child(stdin, &codex_child_network_probe_prompt())?;
+    }
+    child.stdin.take();
+
+    let output = wait_with_timeout(child, CODEX_CHILD_NETWORK_PROBE_TIMEOUT)?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let classification = classify_child_network_probe_failure(&detail);
+        anyhow::bail!(
+            "{classification}: Codex child probe command exited nonzero: {}",
+            detail.trim()
+        );
+    }
+
+    validate_codex_child_network_probe_output(
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    )
+}
+
 fn prove_writable_root(path: &Path) -> Result<()> {
     let metadata = std::fs::metadata(path).map_err(|e| {
         anyhow::anyhow!("writable-root probe could not stat {}: {e}", path.display())
@@ -400,6 +574,7 @@ pub(crate) fn managed_capability_contract_required(
 }
 
 pub(crate) fn prove_managed_session_capabilities(
+    command: &str,
     args: &[String],
     env: &std::collections::HashMap<String, String>,
     fm: &Frontmatter,
@@ -413,6 +588,7 @@ pub(crate) fn prove_managed_session_capabilities(
         super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled;
     if network_required {
         prove_dns_resolution()?;
+        prove_codex_child_network_access(command, args, env)?;
     }
 
     if !fm.required_ssh_targets.is_empty() {
@@ -429,8 +605,13 @@ pub(crate) fn prove_managed_session_capabilities(
     }
 
     Ok(Some(format!(
-        "codex_capability_proof status=proven network={} ssh_targets={} writable_roots={}",
+        "codex_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={}",
         proof_status_label(network_required, network_required),
+        if network_required {
+            "codex_child_dns_https"
+        } else {
+            "not_required"
+        },
         fm.required_ssh_targets.len(),
         writable_roots.len()
     )))
@@ -1722,13 +1903,83 @@ mod tests {
         let fm = Frontmatter::default();
         let env = std::collections::HashMap::new();
 
-        let event =
-            prove_managed_session_capabilities(&args, &env, &fm, &crate::config::Config::default())
-                .unwrap()
-                .unwrap();
+        let event = prove_managed_session_capabilities(
+            "codex",
+            &args,
+            &env,
+            &fm,
+            &crate::config::Config::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert!(event.contains("codex_capability_proof status=proven"));
         assert!(event.contains("writable_roots=1"));
+    }
+
+    #[test]
+    fn codex_network_probe_exec_args_wrap_interactive_launch_args() {
+        let args = codex_exec_args_for_probe(&[
+            "-s".to_string(),
+            "danger-full-access".to_string(),
+            "--add-dir".to_string(),
+            "/tmp/repo".to_string(),
+        ]);
+
+        assert_eq!(
+            args,
+            vec![
+                "exec",
+                "--json",
+                "-s",
+                "danger-full-access",
+                "--add-dir",
+                "/tmp/repo",
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_child_network_probe_requires_command_marker() {
+        let stdout = format!(
+            "{{\"type\":\"item.completed\",\"item\":{{\"type\":\"command_execution\",\"command\":\"sh -lc probe\",\"aggregated_output\":\"{}\\n\",\"exit_code\":0}}}}\n",
+            CODEX_CHILD_NETWORK_PROBE_MARKER
+        );
+
+        validate_codex_child_network_probe_output(&stdout, "").unwrap();
+    }
+
+    #[test]
+    fn codex_child_network_probe_classifies_sandbox_denial() {
+        let stdout = "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"sh -lc probe\",\"aggregated_output\":\"socket: Operation not permitted\\n\",\"exit_code\":1}}\n";
+
+        let err = validate_codex_child_network_probe_output(stdout, "").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Codex sandbox/network capability denied outbound access"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn prove_codex_child_network_access_runs_fake_codex_child_probe() {
+        let (_dir, script) = write_fake_codex_script(&format!(
+            r#"#!/bin/sh
+cat >/dev/null
+printf '%s\n' '{{"type":"thread.started","thread_id":"probe-thread"}}'
+printf '%s\n' '{{"type":"item.completed","item":{{"type":"command_execution","command":"sh -lc probe","aggregated_output":"{}\n","exit_code":0}}}}'
+printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
+"#,
+            CODEX_CHILD_NETWORK_PROBE_MARKER
+        ));
+        let env = std::collections::HashMap::new();
+
+        prove_codex_child_network_access(
+            &script,
+            &["-s".to_string(), "danger-full-access".to_string()],
+            &env,
+        )
+        .unwrap();
     }
 
     #[test]

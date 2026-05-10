@@ -1986,6 +1986,7 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
             anyhow::bail!(err);
         }
         match crate::agent::codex::prove_managed_session_capabilities(
+            &harness.binary,
             &base_args,
             &resolved_env,
             &fm,

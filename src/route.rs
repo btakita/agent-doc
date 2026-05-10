@@ -917,6 +917,7 @@ fn reapply_codex_capability_contract_before_reuse(
     Ok(dispatch_pane)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn reapply_codex_launch_contract_before_reuse(
     tmux: &Tmux,
     file: &Path,

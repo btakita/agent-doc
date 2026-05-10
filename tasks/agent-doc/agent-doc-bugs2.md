@@ -36,7 +36,27 @@ Active backlog:
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - 8 more active item(s)
-<!-- agent:boundary:9946be8f -->
+❯ do [#oobtaildel]. spec-test-build-install-commit-push
+### Re: #oobtaildel — gpt-5
+Implemented `#oobtaildel`.
+
+Changed `src/agent-doc` so a HEAD-current closeout can adopt and commit a safe manual deletion of escaped conversation content outside `agent:exchange`, while a mixed diff with a fresh prompt inside `agent:exchange` remains uncommitted for the next cycle. The cleanup detector is constrained to one deleted range after the exchange close, outside all agent components, and requires an exchange/prompt signal so ordinary notes outside components remain protected.
+
+Updated the closeout spec and added regressions for prompt-prelude cleanup deletion, ordinary note deletion rejection, cleanup-only commit adoption, and mixed cleanup plus fresh prompt preservation.
+
+Verification passed:
+- `cargo test deleted_conversation_tail_cleanup`
+- `cargo test commit_adopts_manual_escaped_tail_cleanup_after_head_current_snapshot`
+- `cargo test commit_preserves_fresh_prompt_when_escaped_tail_cleanup_is_mixed`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commit / push:
+- `src/agent-doc`: `e1ef3c9` (`fix: adopt escaped tail cleanup deletion`) pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `3275d9ac8` (`agent-doc: adopt escaped tail cleanup deletion`) pushed to `origin/main`
+<!-- agent:boundary:ae392351 -->
 <!-- /agent:exchange -->
 ###
 
@@ -52,7 +72,6 @@ Active backlog:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#oobtaildel] Valid deletion of escaped prompt content outside `agent:exchange` is misclassified as post-commit local drift; distinguish cleanup deletion from real later user edits without swallowing fresh prompts. Plan: tasks/agent-doc/plan-valid-oob-tail-deletion.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
@@ -123,6 +142,7 @@ Active backlog:
 - 2026-05-10 [#codexasyncnet] [recommended] Split Codex managed capability proof from pane startup: launch/render the Codex pane immediately, run network/SSH/write-root proof asynchronously, gate prompt dispatch until required proof succeeds, and fail closed with diagnostics if background proof fails.
 - 2026-05-10 [#syncroutelog] Fix stale/opaque sync-route diagnostics: controller RPC can surface 'ok response without data', saved editor-route-errors can remain stale after later success, and route can submit on a stale starting projection. Plan: tasks/agent-doc/plan-sync-command-route-error-follow-up.md
 - 2026-05-10 [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
+- 2026-05-10 [#oobtaildel] Valid deletion of escaped prompt content outside `agent:exchange` is misclassified as post-commit local drift; distinguish cleanup deletion from real later user edits without swallowing fresh prompts. Plan: tasks/agent-doc/plan-valid-oob-tail-deletion.md
 <!-- /agent:pending-done -->
 
 

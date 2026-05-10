@@ -145,7 +145,10 @@ Verification:
 Commit / push:
 - `src/agent-doc`: `710c11e` pushed to `origin/20260422/codex-agent-backend`
 - root repo: `e0b88e035` pushed to `origin/main`
-<!-- agent:boundary:946e6a41 -->
+### Re: foregrounded check run — gpt-5
+
+Brought the interrupted `make check TEST_THREADS=1` run back into view and let it finish. It passed, then I completed install, commit, push, and session closeout for the prefix-repair fix.
+<!-- agent:boundary:61fadd7e -->
 <!-- /agent:exchange -->
 ###
 

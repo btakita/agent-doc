@@ -71,7 +71,50 @@ The change I would make:
 I would not disable all tmux tests from normal development blindly until the SimWorld model covers the edge families those tests protect: actor lifecycle transitions, stale/dead pane observations, registry/projection drift, protected closeout panes, focus-only editor switches, fresh-start/startup-miss handoff, dispatch accepted-but-unproven cases, cross-root split preservation, and finalize/session-check guard interactions.
 
 I added a backlog item for that test-budget split so it can be implemented as one coherent change instead of scattering the policy across individual regressions.
-<!-- agent:boundary:0244cc00 -->
+❯ do [#tmuxdevci]. spec-test-commit-push
+### Re: #tmuxdevci — gpt-5
+
+Implemented `#tmuxdevci`.
+
+What changed:
+
+- Default development verification now skips live tmux tests by marking `IsolatedTmux`-backed tests ignored.
+- Added `make tmux-ci` to run the ignored live tmux integration sweep explicitly with one test thread.
+- Updated GitHub Actions to install `tmux`, run `make check`, then run `make tmux-ci`.
+- Updated the deterministic simulation spec to make the budget split explicit: pure/fast SimWorld coverage stays in the default suite, live pane/window/process behavior runs through the CI tmux target.
+- Added a non-tmux guard test that fails if a future test creates `IsolatedTmux` without being ignored.
+
+Verification:
+
+- `make check` passed.
+- `make tmux-ci` passed: 217 ignored live-tmux tests ran successfully.
+
+Commits pushed:
+
+- `src/agent-doc`: `be36d3c` (`test: split live tmux suite from dev checks`)
+- parent `agent-loop`: `7a54934c4` (`agent-doc: split live tmux suite from dev checks`)
+### Re: #tmuxdevci — gpt-5
+
+Implemented `#tmuxdevci`.
+
+What changed:
+
+- Default development verification now skips live tmux tests by marking `IsolatedTmux`-backed tests ignored.
+- Added `make tmux-ci` to run the ignored live tmux integration sweep explicitly with one test thread.
+- Updated GitHub Actions to install `tmux`, run `make check`, then run `make tmux-ci`.
+- Updated the deterministic simulation spec to make the budget split explicit: pure/fast SimWorld coverage stays in the default suite, live pane/window/process behavior runs through the CI tmux target.
+- Added a non-tmux guard test that fails if a future test creates `IsolatedTmux` without being ignored.
+
+Verification:
+
+- `make check` passed.
+- `make tmux-ci` passed: 217 ignored live-tmux tests ran successfully.
+
+Commits pushed:
+
+- `src/agent-doc`: `be36d3c` (`test: split live tmux suite from dev checks`)
+- parent `agent-loop`: `7a54934c4` (`agent-doc: split live tmux suite from dev checks`)
+<!-- agent:boundary:2e044cfb -->
 <!-- /agent:exchange -->
 ###
 
@@ -95,7 +138,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxdevci] Split agent-doc test budgets: keep default development tests pure/fast by gating real tmux-backed tests behind an explicit CI target, add GitHub Actions coverage for that target, and require matching SimWorld edge-case traces before demoting any tmux regression.
 - [ ] [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
@@ -161,6 +203,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-09 [#preflighthang] Direct `agent-doc <file>` invocation can hang after opening `preflight_started` when it self-dispatches into the same active Codex pane; detect recursive/self dispatch, bound the wait for capture progress, and persist a recoverable timeout state. Plan: tasks/agent-doc/plan-direct-invocation-preflight-hang.md
 - 2026-05-09 [#commitfs] Codex commit filesystem sandbox denial — managed session can edit nested submodule files but cannot create the backing `.git/modules/.../index.lock`, so `git add`/commit fails late with `Read-only file system`. Plan: tasks/agent-doc/plan-codex-commit-filesystem-sandbox.md
 - 2026-05-09 [#caplat] [recommended] Reduce Codex managed capability proof latency and surface phase timings for network/SSH/write-root probes so slow agent-doc start checks identify the expensive step.
+- 2026-05-09 [#tmuxdevci] Split agent-doc test budgets: keep default development tests pure/fast by gating real tmux-backed tests behind an explicit CI target, add GitHub Actions coverage for that target, and require matching SimWorld edge-case traces before demoting any tmux regression.
 <!-- /agent:pending-done -->
 
 

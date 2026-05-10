@@ -321,6 +321,36 @@ fn proof_status_label(required: bool, proven: bool) -> &'static str {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct ManagedCapabilityProofTimings {
+    network_host_dns: Option<Duration>,
+    network_child: Option<Duration>,
+    ssh: Option<Duration>,
+    writable_launcher: Option<Duration>,
+    writable_child: Option<Duration>,
+    total: Duration,
+}
+
+fn proof_timing_ms(duration: Option<Duration>) -> String {
+    duration
+        .map(|value| value.as_millis().to_string())
+        .unwrap_or_else(|| "not_required".to_string())
+}
+
+impl ManagedCapabilityProofTimings {
+    fn event_fields(&self) -> String {
+        format!(
+            "timings_ms=network_host_dns:{},network_child:{},ssh:{},writable_launcher:{},writable_child:{},total:{}",
+            proof_timing_ms(self.network_host_dns),
+            proof_timing_ms(self.network_child),
+            proof_timing_ms(self.ssh),
+            proof_timing_ms(self.writable_launcher),
+            proof_timing_ms(self.writable_child),
+            self.total.as_millis()
+        )
+    }
+}
+
 fn env_map_as_overrides(
     env: &std::collections::HashMap<String, String>,
 ) -> Vec<(String, Option<String>)> {
@@ -354,8 +384,7 @@ fn codex_exec_args_for_probe(launch_args: &[String]) -> Vec<String> {
 
 fn codex_child_network_probe_prompt() -> String {
     format!(
-        "Run exactly one shell command to prove this Codex child can use outbound network. \
-         Use this command, then report only whether it succeeded:\n\n\
+        "Run exactly this command:\n\n\
          sh -lc 'set -eu; \
          if command -v getent >/dev/null 2>&1; then getent hosts github.com >/dev/null; \
          else python3 -c \"import socket; socket.getaddrinfo(\\\"github.com\\\", 443)\"; fi; \
@@ -520,9 +549,7 @@ fn codex_child_writable_roots_probe_prompt(roots: &[PathBuf]) -> String {
         .collect::<Vec<_>>()
         .join(" ");
     format!(
-        "Run exactly one shell command to prove this Codex child can write every requested \
-         workspace root and any git metadata index lock in those roots. Use this command, \
-         then report only whether it succeeded:\n\n\
+        "Run exactly this command:\n\n\
          sh -lc 'set -eu; \
          for dir do \
            test -d \"$dir\"; \
@@ -755,29 +782,47 @@ pub(crate) fn prove_managed_session_capabilities(
         return Ok(None);
     }
 
+    let total_start = Instant::now();
+    let mut timings = ManagedCapabilityProofTimings::default();
     let network_required =
         super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled;
     if network_required {
+        let phase_start = Instant::now();
         prove_dns_resolution()?;
+        timings.network_host_dns = Some(phase_start.elapsed());
+
+        let phase_start = Instant::now();
         prove_codex_child_network_access(command, args, env)?;
+        timings.network_child = Some(phase_start.elapsed());
     }
 
     if !fm.required_ssh_targets.is_empty() {
+        let phase_start = Instant::now();
         let env = env_map_as_overrides(env);
         Codex::new(None, None)
             .with_env(env)
             .with_required_ssh_targets(fm.required_ssh_targets.clone())
             .prove_required_ssh_capability()?;
+        timings.ssh = Some(phase_start.elapsed());
     }
 
     let writable_roots = add_dirs_from_args(args);
+    let phase_start = Instant::now();
     for root in &writable_roots {
         prove_writable_root(root)?;
     }
+    if !writable_roots.is_empty() {
+        timings.writable_launcher = Some(phase_start.elapsed());
+    }
+    let phase_start = Instant::now();
     prove_codex_child_writable_roots(command, args, env, &writable_roots)?;
+    if !writable_roots.is_empty() {
+        timings.writable_child = Some(phase_start.elapsed());
+    }
+    timings.total = total_start.elapsed();
 
     Ok(Some(format!(
-        "codex_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={}",
+        "codex_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={} {}",
         proof_status_label(network_required, network_required),
         if network_required {
             "codex_child_dns_https"
@@ -785,7 +830,8 @@ pub(crate) fn prove_managed_session_capabilities(
             "not_required"
         },
         fm.required_ssh_targets.len(),
-        writable_roots.len()
+        writable_roots.len(),
+        timings.event_fields()
     )))
 }
 
@@ -2179,6 +2225,9 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
 
         assert!(event.contains("codex_capability_proof status=proven"));
         assert!(event.contains("writable_roots=1"));
+        assert!(event.contains("timings_ms="), "{event}");
+        assert!(event.contains("writable_launcher:"), "{event}");
+        assert!(event.contains("writable_child:"), "{event}");
     }
 
     #[test]

@@ -566,7 +566,7 @@ fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
     let current = fs::read_to_string(&doc).unwrap();
     let updated = current.replace(
         "<!-- /agent:pending -->\n",
-        "<!-- /agent:pending -->\n\n<!-- agent:pending-done -->\n<!-- /agent:pending-done -->\n",
+        "<!-- /agent:pending -->\n\n<!-- agent:done -->\n<!-- /agent:done -->\n",
     );
     fs::write(&doc, &updated).unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -589,7 +589,7 @@ fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
     assert!(!content.contains("- [x] [#done1] Close the loop"));
     assert!(content.contains("[#keep1] Keep tracking follow-up"));
     assert!(content.contains("### Re: #done1 close the loop — gpt-5"));
-    assert!(content.contains("<!-- agent:pending-done -->"));
+    assert!(content.contains("<!-- agent:done -->"));
     assert!(content.contains("[#done1] Close the loop"));
 
     let head_blob = ProcessCommand::new("git")
@@ -607,9 +607,8 @@ fn finalize_reaps_completed_pending_items_in_same_closeout_commit() {
         "HEAD backlog should retain remaining live work"
     );
     assert!(
-        head_text.contains("<!-- agent:pending-done -->")
-            && head_text.contains("[#done1] Close the loop"),
-        "HEAD should archive reaped items when a pending-done component exists"
+        head_text.contains("<!-- agent:done -->") && head_text.contains("[#done1] Close the loop"),
+        "HEAD should archive reaped items when a done component exists"
     );
 
     agent_doc()
@@ -643,7 +642,7 @@ fn finalize_accepts_hash_prefixed_pending_done_id() {
     assert!(!content.contains("- [ ] [#done1] Close the loop"));
     assert!(content.contains("### Re: #done1 close the loop — gpt-5"));
     assert!(content.contains("## Completed / Reaped"));
-    assert!(content.contains("<!-- agent:backlog-done -->"));
+    assert!(content.contains("<!-- agent:done -->"));
     assert!(content.contains("[#done1] Close the loop"));
 
     let head_text = head_blob(tmp.path());
@@ -652,8 +651,7 @@ fn finalize_accepts_hash_prefixed_pending_done_id() {
         "HEAD backlog should not keep the completed item open when --pending-done uses #id"
     );
     assert!(
-        head_text.contains("<!-- agent:backlog-done -->")
-            && head_text.contains("[#done1] Close the loop"),
+        head_text.contains("<!-- agent:done -->") && head_text.contains("[#done1] Close the loop"),
         "HEAD should create a completed/reaped archive when the session did not already have one"
     );
 }
@@ -664,7 +662,7 @@ fn finalize_pending_done_is_noop_when_item_was_already_reaped() {
     let current = fs::read_to_string(&doc).unwrap();
     let updated = current.replace(
         "<!-- /agent:pending -->\n",
-        "<!-- /agent:pending -->\n\n<!-- agent:pending-done -->\n- 2026-05-09 [#done1] Close the loop\n<!-- /agent:pending-done -->\n",
+        "<!-- /agent:pending -->\n\n<!-- agent:done -->\n- 2026-05-09 [#done1] Close the loop\n<!-- /agent:done -->\n",
     );
     fs::write(&doc, updated).unwrap();
     init_git_repo(tmp.path(), &doc);

@@ -3,7 +3,8 @@
 //! ## Spec
 //! - Migrates session documents from deprecated component names and attributes to canonical forms.
 //! - Renames `<!-- agent:pending ... -->` to `<!-- agent:backlog ... -->` (open+close tags).
-//! - Renames `<!-- agent:pending-done -->` to `<!-- agent:backlog-done -->` (open+close tags).
+//! - Renames `<!-- agent:pending-done -->` and `<!-- agent:backlog-done -->` to
+//!   `<!-- agent:done -->` (open+close tags).
 //! - Strips deprecated `patch=`/`mode=` attributes from backlog component tags.
 //! - Accepts one or more file paths, or `--all` to scan for session documents under the project root.
 //! - `--dry-run` previews changes without writing.
@@ -18,7 +19,8 @@
 //! ## Evals
 //! - pending_to_backlog: `<!-- agent:pending -->` → `<!-- agent:backlog -->`
 //! - pending_close_to_backlog: `<!-- /agent:pending -->` → `<!-- /agent:backlog -->`
-//! - pending_done_to_backlog_done: `<!-- agent:pending-done -->` → `<!-- agent:backlog-done -->`
+//! - pending_done_to_done: `<!-- agent:pending-done -->` → `<!-- agent:done -->`
+//! - backlog_done_to_done: `<!-- agent:backlog-done -->` → `<!-- agent:done -->`
 //! - strip_patch_attr: `<!-- agent:pending patch=replace -->` → `<!-- agent:backlog -->`
 //! - strip_mode_attr: `<!-- agent:backlog mode=append -->` → `<!-- agent:backlog -->`
 //! - preserves_other_attrs: `<!-- agent:pending foo=bar patch=replace -->` → `<!-- agent:backlog foo=bar -->`
@@ -127,7 +129,10 @@ fn migrate_comment(comment: &str) -> String {
         return "<!-- /agent:backlog -->".to_string();
     }
     if comment.trim() == "<!-- /agent:pending-done -->" {
-        return "<!-- /agent:backlog-done -->".to_string();
+        return "<!-- /agent:done -->".to_string();
+    }
+    if comment.trim() == "<!-- /agent:backlog-done -->" {
+        return "<!-- /agent:done -->".to_string();
     }
 
     // Open tag: <!-- agent:pending ... -->
@@ -135,7 +140,7 @@ fn migrate_comment(comment: &str) -> String {
         && let Some(inner) = rest.strip_suffix("-->")
     {
         if rest.starts_with("-done") {
-            return "<!-- agent:backlog-done -->".to_string();
+            return "<!-- agent:done -->".to_string();
         }
         let trimmed = inner.trim();
         if trimmed.is_empty() {
@@ -154,6 +159,12 @@ fn migrate_comment(comment: &str) -> String {
             return "<!-- agent:backlog -->".to_string();
         }
         return format!("<!-- agent:backlog {} -->", tokens.join(" "));
+    }
+
+    if let Some(rest) = comment.strip_prefix("<!-- agent:backlog-done")
+        && rest.strip_suffix("-->").is_some()
+    {
+        return "<!-- agent:done -->".to_string();
     }
 
     comment.to_string()
@@ -302,13 +313,24 @@ mod tests {
     }
 
     #[test]
-    fn pending_done_to_backlog_done() {
+    fn pending_done_to_done() {
         let input = "<!-- agent:pending-done -->\nDone\n<!-- /agent:pending-done -->\n";
         let result = migrate_content(input);
-        assert_eq!(
-            result,
-            "<!-- agent:backlog-done -->\nDone\n<!-- /agent:backlog-done -->\n"
-        );
+        assert_eq!(result, "<!-- agent:done -->\nDone\n<!-- /agent:done -->\n");
+    }
+
+    #[test]
+    fn backlog_done_to_done() {
+        let input = "<!-- agent:backlog-done -->\nDone\n<!-- /agent:backlog-done -->\n";
+        let result = migrate_content(input);
+        assert_eq!(result, "<!-- agent:done -->\nDone\n<!-- /agent:done -->\n");
+    }
+
+    #[test]
+    fn backlog_done_with_attrs_to_done() {
+        let input = "<!-- agent:backlog-done patch=append extra=true -->\nDone\n<!-- /agent:backlog-done -->\n";
+        let result = migrate_content(input);
+        assert_eq!(result, "<!-- agent:done -->\nDone\n<!-- /agent:done -->\n");
     }
 
     #[test]

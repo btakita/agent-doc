@@ -86,6 +86,8 @@ After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execut
 
 If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only through granular `agent-doc write` flags: `--pending-add`, `--pending-done <id>`, `--pending-edit "id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`. Full-replace via `<!-- patch:backlog -->` is rejected; see [runbooks/pending-ops.md](runbooks/pending-ops.md). For `<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
 
+Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent:backlog-done` and `agent:pending-done` tags require `agent-doc migrate`.
+
 **Pending capture rule:** if the response creates concrete follow-up work, add it to `agent:backlog` in the same cycle. Put new items at the beginning of `agent:backlog`; if you are extending an ordered batch already in pending, insert the new item adjacent to its predecessor. If the item is only a recommendation, include `[recommended]`.
 
 **Cross-document pending rule:** if a prompt preset or user instruction names another backlog file, add the item to that target with `--pending-add-to <target-file> "<item>"` on the final `agent-doc finalize` command. Do not satisfy an explicit target by running `--pending-add` against the current session document. If the target is missing or lacks a backlog component, stop on the binary error and report the blocker.

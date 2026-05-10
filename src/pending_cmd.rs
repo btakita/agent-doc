@@ -507,7 +507,7 @@ mod tests {
         archive_items: &str,
     ) -> (TempDir, PathBuf) {
         let content = format!(
-            "---\nagent_doc_session: test\n---\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n\n<!-- agent:backlog-done -->\n{}\n<!-- /agent:backlog-done -->\n",
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:pending -->\n{}\n<!-- /agent:pending -->\n\n<!-- agent:done -->\n{}\n<!-- /agent:done -->\n",
             pending_items, archive_items
         );
         let (tmp, doc) = setup_test_dir();
@@ -673,7 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn done_noops_when_item_was_archived_in_legacy_pending_done() {
+    fn done_rejects_item_archived_only_in_removed_pending_done_alias() {
         let content = concat!(
             "---\nagent_doc_session: test\n---\n\n",
             "<!-- agent:pending -->\n",
@@ -685,7 +685,8 @@ mod tests {
         );
         let (tmp, doc) = setup_test_dir();
         fs::write(&doc, content).unwrap();
-        done(&doc, "done1").unwrap();
+        let err = done(&doc, "done1").unwrap_err();
+        assert!(err.to_string().contains("id not found in backlog/icebox"));
         drop(tmp);
     }
 

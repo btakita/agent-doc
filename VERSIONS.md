@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **BREAKING CHANGE: completed backlog archives now use `agent:done`.** The completed/reaped archive component was renamed from `agent:backlog-done` to `agent:done`, and `agent:backlog-done` / `agent:pending-done` are no longer accepted as archive aliases by closeout, history replay, or pending resolution. `agent-doc migrate` rewrites both legacy tags to `agent:done`, and newly reaped items create or append to `agent:done`. This closes the follow-up archive rename request in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Cross-document backlog capture now has a binary-owned target path.** `write` and `finalize` accept `--pending-add-to <file> <text>` for explicit backlog targets, fail closed when the target file is missing or lacks a backlog component, and `plan` now surfaces those target files in `pending_mutations` / finalize hints. Closeout guards no longer let a current-document `--pending-add` bypass explicit target validation, preventing `#agent-doc-bug` items from landing in the wrong session document. This closes `#crossdocpend` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Prompt-prefix normalization now uses opt-in response-block exits.** The `content_ours` normalizer no longer leaves an inserted assistant response block just because a response sentence looks prompt-like, and target-based prefix repair must match an explicit `normalize_prefix_lines` target before it can resume after a `### Re:` block. This keeps assistant questions and preset-looking evidence lines bare while still repairing real follow-up prompts after a boundary or canonical prompt-target diff. This closes `#spfxnorm` in `tasks/agent-doc/agent-doc-bugs2.md`.

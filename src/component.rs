@@ -76,10 +76,7 @@ pub const BACKLOG_COMPONENT: &str = "backlog";
 pub const BACKLOG_ALIAS: &str = "pending";
 
 /// Canonical component name for the completed/reaped backlog archive.
-pub const BACKLOG_DONE_COMPONENT: &str = "backlog-done";
-
-/// Legacy alias for the completed/reaped backlog archive.
-pub const BACKLOG_DONE_ALIAS: &str = "pending-done";
+pub const BACKLOG_DONE_COMPONENT: &str = "done";
 
 /// Canonical component name for the icebox component.
 pub const ICEBOX_COMPONENT: &str = "icebox";
@@ -90,10 +87,9 @@ pub fn is_backlog_component(name: &str) -> bool {
     name == BACKLOG_COMPONENT || name == BACKLOG_ALIAS
 }
 
-/// Check whether a component name refers to the completed/reaped backlog
-/// archive (accepts canonical `"backlog-done"` and legacy `"pending-done"`).
+/// Check whether a component name refers to the completed/reaped backlog archive.
 pub fn is_backlog_done_component(name: &str) -> bool {
-    name == BACKLOG_DONE_COMPONENT || name == BACKLOG_DONE_ALIAS
+    name == BACKLOG_DONE_COMPONENT
 }
 
 /// Check whether a component name refers to the icebox component.
@@ -1463,12 +1459,14 @@ Fix applied to skip non-agent <!-- sequences.
         assert!(!is_backlog_component("status"));
         assert!(!is_backlog_component("pending-done"));
         assert!(!is_backlog_component("backlog-done"));
+        assert!(!is_backlog_component("done"));
     }
 
     #[test]
-    fn is_backlog_done_component_accepts_canonical_and_alias() {
-        assert!(is_backlog_done_component("backlog-done"));
-        assert!(is_backlog_done_component("pending-done"));
+    fn is_backlog_done_component_accepts_only_canonical_done() {
+        assert!(is_backlog_done_component("done"));
+        assert!(!is_backlog_done_component("backlog-done"));
+        assert!(!is_backlog_done_component("pending-done"));
         assert!(!is_backlog_done_component("backlog"));
         assert!(!is_backlog_done_component("pending"));
         assert!(!is_backlog_done_component("icebox"));

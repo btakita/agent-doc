@@ -56,9 +56,9 @@ Combine any number of flags in one `agent-doc write` call:
 rewrite the icebox component, use a template patch block in the response body:
 `<!-- replace:icebox --> ... <!-- /replace:icebox -->`.
 
-Completed/reaped items are archived under canonical `agent:backlog-done`.
-Existing `agent:pending-done` components are deprecated but still accepted as
-the archive alias.
+Completed/reaped items are archived under canonical `agent:done`.
+Legacy `agent:backlog-done` and `agent:pending-done` components are not
+accepted as archive aliases; run `agent-doc migrate` to rewrite them.
 
 ## Custom IDs
 

@@ -1380,8 +1380,7 @@ pub fn reap(body: &str) -> Result<(String, Vec<String>)> {
 }
 
 /// Reap `[x]` items and return the removed items (with text), not just ids.
-/// Used by preflight to archive reaped items to an `agent:backlog-done`
-/// component (`agent:pending-done` is a legacy alias).
+/// Used by preflight to archive reaped items to an `agent:done` component.
 pub fn reap_with_items(body: &str) -> Result<(String, Vec<PendingItem>)> {
     let layout = PendingLayout::parse(body);
     let items = layout.items();
@@ -3195,16 +3194,16 @@ mod tests {
         let current = concat!(
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n\n",
-            "<!-- agent:backlog-done -->\n",
+            "<!-- agent:done -->\n",
             "- 2026-05-10 [#item1] Was open\n",
-            "<!-- /agent:backlog-done -->\n"
+            "<!-- /agent:done -->\n"
         );
         let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
         assert!(report.dropped.is_empty());
     }
 
     #[test]
-    fn detect_dropped_from_history_allows_legacy_completed_archive_id() {
+    fn detect_dropped_from_history_rejects_removed_completed_archive_alias() {
         let baseline = concat!(
             "<!-- agent:backlog -->\n",
             "- [ ] [#item1] Was open\n",
@@ -3218,7 +3217,8 @@ mod tests {
             "<!-- /agent:pending-done -->\n"
         );
         let report = detect_dropped_from_history(current, baseline, &HashSet::new()).unwrap();
-        assert!(report.dropped.is_empty());
+        assert_eq!(report.dropped.len(), 1);
+        assert_eq!(report.dropped[0].id, "item1");
     }
 
     #[test]

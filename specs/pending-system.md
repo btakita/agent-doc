@@ -115,11 +115,12 @@ On every preflight run:
    - If a completed item still lacks an id (legacy/manual form such as `- [x] shipped` or `- [x] [#] shipped`), backfill its hash first, then reap/archive that canonicalized item in the same pass. Reap must never silently drop a done line that cannot be referenced in the archive or logs.
    - Remove the line from the component.
    - `[ ]` and `[/]` are never auto-reaped. `[/]` explicitly survives forever until an operator moves it to `[x]`. No TTL on gated state — the operator owns the gate.
-   - Append an archive entry to canonical `agent:backlog-done`. If the component does not
+   - Append an archive entry to canonical `agent:done`. If the component does not
      already exist, create a visible `## Completed / Reaped` section after the
-     tracked work components first, then append the entry. Existing
-     `agent:pending-done` components remain a deprecated alias and receive
-     archive entries in place. Completed tracked work must remain grep-visible
+     tracked work components first, then append the entry. Legacy
+     `agent:backlog-done` and `agent:pending-done` components are not accepted
+     as archive aliases; run `agent-doc migrate` to rewrite them to `agent:done`.
+     Completed tracked work must remain grep-visible
      in the session document instead of disappearing from the live backlog
      without a local record.
    - Persistence invariant: the reap must land in both the working tree document and the snapshot that the commit boundary stages. If preflight cannot persist that synchronized reap safely, it must fail closed instead of continuing with completed tracked-work items still present in backlog or icebox.
@@ -142,7 +143,7 @@ The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch
 |------|----------|
 | `--pending-add "text"` | Add new item at the beginning of the list. Binary assigns hash and `[ ]` unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is accepted as compatibility input. When repeated in one command, all added items are inserted as one ordered batch: the first flag appears above the second, and the full batch appears above existing backlog items. |
 | `--pending-add-to <file> "text"` | Add a new `[ ]` item to another document's backlog. The target file must exist and contain an `agent:backlog` / legacy `agent:pending` component; missing targets fail closed instead of falling back to the current document. Repeated pairs are grouped per target and preserve caller order at the top of each target backlog. |
-| `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). If the id is already present in canonical `agent:backlog-done`, legacy `agent:pending-done`, or the current cycle's resolved-id ledger, treat it as an idempotent resolution warning rather than a fatal missing-id error. |
+| `--pending-done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). If the id is already present in canonical `agent:done` or the current cycle's resolved-id ledger, treat it as an idempotent resolution warning rather than a fatal missing-id error. |
 | `--pending-gate <id>` | Mark `[/]` — code-complete, awaiting gate. Valid from `[ ]`. No-op (logged) if already `[/]`. Error if source is `[x]`. |
 | `--pending-ungate <id>` | Return `[/]` → `[ ]` — gate failed, back to active. Error if source is `[ ]` or `[x]`. |
 | `--pending-edit <id> "new text"` | Rewrite text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. |
@@ -267,6 +268,6 @@ No explicit migration command. First preflight after upgrade lazy-backfills. Doc
 ## Open questions
 
 - Should `--pending-done` reap immediately, or only mark `[x]` and let preflight reap on the next cycle? Default: mark-only (preflight is the single reap path). Add `--reap` flag later if needed.
-- `agent:backlog-done` is the canonical completed/reaped archive component. `agent:pending-done` is deprecated but remains accepted as an alias for existing documents and migration rewrites it to the canonical marker.
+- `agent:done` is the canonical completed/reaped archive component. `agent:backlog-done` and `agent:pending-done` are not accepted as aliases; migration rewrites both to the canonical marker.
 - Should the hash prefix be rendered-visible or hidden behind a comment? Visible — transparency wins, and grep-ability is too useful to lose.
 - Reorder flag scope: one cycle, or persistent until user signals otherwise? One cycle — simpler invariant, lower risk of the skill getting stuck refusing to reorder.

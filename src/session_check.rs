@@ -61,7 +61,7 @@
 //! - `session_check_snapshot_committed_guard_fails_when_snapshot_differs`
 //! - `session_check_snapshot_committed_guard_passes_when_committed`
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::component::{is_backlog_component, is_tracked_work_component};
@@ -529,6 +529,14 @@ pub fn enforce_clean_closeout(file: &Path) -> Result<()> {
 }
 
 fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
+    if let Some(heading) = detect_duplicate_response_patchback(file)? {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: found consecutive duplicate response patchback at `{}`. Run `agent-doc dedupe {}` or rerun closeout so the write path can repair it before commit.",
+            heading,
+            file.display()
+        )));
+    }
+
     if let Some(state) = crate::cycle_state::load(file)? {
         if state.is_open() {
             if let Some(reason) = crate::repair::recover_missing_commit_boundary(
@@ -769,6 +777,12 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             )))
         }
     }
+}
+
+fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    Ok(crate::dedupe::first_duplicate_response_heading(&content))
 }
 
 fn check_pending_capture_guard(file: &Path) -> Result<GuardResult> {

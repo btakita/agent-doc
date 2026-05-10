@@ -3252,9 +3252,30 @@ pub fn lift_pending_from_exchange_safe(content: &str, file: &std::path::Path) ->
     }
 }
 
+fn dedupe_consecutive_response_blocks(content: &str, file: &Path) -> String {
+    let deduped = crate::dedupe::dedupe_responses(content);
+    if deduped != content {
+        eprintln!(
+            "[write] dedup: removed consecutive duplicate response block(s) from {} before closeout",
+            file.display()
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "dedupe_consecutive_response_blocks file={} before_closeout=true",
+                file.display()
+            ),
+        );
+    }
+    deduped
+}
+
 pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
     let lifted = lift_pending_from_exchange_safe(content, file);
-    let normalized = crate::component::strip_backlog_patch_attr(&lifted);
+    let normalized = dedupe_consecutive_response_blocks(
+        &crate::component::strip_backlog_patch_attr(&lifted),
+        file,
+    );
     match crate::template::guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
         Err(err)
@@ -3274,7 +3295,7 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
                             file.display()
                         )
                     })?;
-                return Ok(repaired);
+                return Ok(dedupe_consecutive_response_blocks(&repaired, file));
             }
             Err(err)
                 .with_context(|| format!("template structure guard failed for {}", file.display()))
@@ -4779,7 +4800,8 @@ fn normalized_content_ours_fallback(
     normalize_prefix_lines: &[String],
 ) -> String {
     let fallback = content_ours_merged_with_disk_edits(file, baseline, content_ours);
-    normalize_exchange_prefixes_for_targets(&fallback, normalize_prefix_lines)
+    let normalized = normalize_exchange_prefixes_for_targets(&fallback, normalize_prefix_lines);
+    dedupe_consecutive_response_blocks(&normalized, file)
 }
 
 fn repair_disk_from_normalization_fallback(file: &Path, fallback: &str) -> Result<()> {
@@ -8724,6 +8746,48 @@ agent response
     }
 
     #[test]
+    fn normalization_fallback_dedupes_already_applied_editor_response() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let baseline = "\
+<!-- agent:exchange patch=append -->
+do #duppb. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+❯ do #duppb. spec-test-build-install-commit-push
+### Re: #duppb — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        let editor_already_applied = "\
+<!-- agent:exchange patch=append -->
+do #duppb. spec-test-build-install-commit-push
+### Re: #duppb — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, editor_already_applied).unwrap();
+
+        let fallback = normalized_content_ours_fallback(
+            &doc,
+            Some(baseline),
+            content_ours,
+            &["do #duppb. spec-test-build-install-commit-push".to_string()],
+        );
+
+        assert_eq!(
+            fallback.matches("### Re: #duppb — gpt-5").count(),
+            1,
+            "fallback full-content repair must not redeliver duplicate responses: {fallback}"
+        );
+        assert!(fallback.contains("❯ do #duppb. spec-test-build-install-commit-push"));
+    }
+
+    #[test]
     fn normalization_fallback_splices_pending_mutations_from_disk() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
@@ -9832,6 +9896,44 @@ Implemented.
         assert!(repaired.contains("❯ do #dupfx. spec-test-build-install-commit-push"));
         assert!(!repaired.contains("\ndo #dupfx. spec-test-build-install-commit-push\n"));
         assert_eq!(repaired.matches("### Re: #dupfx — gpt-5").count(), 1);
+    }
+
+    #[test]
+    fn normalize_final_template_content_removes_adjacent_duplicate_response_blocks() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let baseline = "\
+<!-- agent:exchange patch=append -->
+❯ do #duppb. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let duplicated = "\
+<!-- agent:exchange patch=append -->
+❯ do #duppb. spec-test-build-install-commit-push
+### Re: #duppb — gpt-5
+
+Implemented.
+
+Verification:
+- `cargo test`
+### Re: #duppb — gpt-5
+
+Implemented.
+
+Verification:
+- `cargo test`
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_final_template_content(&doc, baseline, Some(baseline), duplicated)
+            .expect("duplicate response repair should succeed");
+
+        assert_eq!(
+            repaired.matches("### Re: #duppb — gpt-5").count(),
+            1,
+            "closeout normalization must remove adjacent duplicate response blocks: {repaired}"
+        );
+        assert!(repaired.contains("Verification:\n- `cargo test`"));
     }
 
     #[test]

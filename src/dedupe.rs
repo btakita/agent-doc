@@ -66,7 +66,15 @@ pub fn run(file: &Path) -> Result<()> {
 }
 
 /// Remove consecutive duplicate `### Re:` blocks from document content.
-fn dedupe_responses(content: &str) -> String {
+pub(crate) fn dedupe_responses(content: &str) -> String {
+    dedupe_responses_with_report(content).0
+}
+
+pub(crate) fn first_duplicate_response_heading(content: &str) -> Option<String> {
+    dedupe_responses_with_report(content).1
+}
+
+fn dedupe_responses_with_report(content: &str) -> (String, Option<String>) {
     let lines: Vec<&str> = content.lines().collect();
     let mut result_lines: Vec<&str> = Vec::new();
 
@@ -91,11 +99,12 @@ fn dedupe_responses(content: &str) -> String {
     }
 
     if blocks.len() < 2 {
-        return content.to_string();
+        return (content.to_string(), None);
     }
 
     // Find consecutive duplicates (ignoring boundary markers)
     let mut skip_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut first_duplicate = None;
     for pair in blocks.windows(2) {
         let (s1, e1) = pair[0];
         let (s2, e2) = pair[1];
@@ -118,12 +127,15 @@ fn dedupe_responses(content: &str) -> String {
                 s2 + 1,
                 e2
             );
+            if first_duplicate.is_none() {
+                first_duplicate = Some(lines[s2].trim().to_string());
+            }
             skip_ranges.push((s2, e2));
         }
     }
 
     if skip_ranges.is_empty() {
-        return content.to_string();
+        return (content.to_string(), None);
     }
 
     // Rebuild content, skipping duplicate ranges
@@ -138,7 +150,7 @@ fn dedupe_responses(content: &str) -> String {
     if content.ends_with('\n') && !result.ends_with('\n') {
         result.push('\n');
     }
-    result
+    (result, first_duplicate)
 }
 
 #[cfg(test)]
@@ -150,6 +162,10 @@ mod tests {
         let content = "### Re: Foo\nContent A.\n### Re: Foo\nContent A.\n### Re: Bar\nContent B.\n";
         let result = dedupe_responses(content);
         assert_eq!(result, "### Re: Foo\nContent A.\n### Re: Bar\nContent B.\n");
+        assert_eq!(
+            first_duplicate_response_heading(content).as_deref(),
+            Some("### Re: Foo")
+        );
     }
 
     #[test]

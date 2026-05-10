@@ -105,7 +105,7 @@ I checked the current launcher environment during this turn: `CODEX_SANDBOX_NETW
 SSH is a separate question. `CODEX_SANDBOX_NETWORK_DISABLED` only gates network. SSH also depends on the sandbox being able to read the needed SSH config/keys and open the target socket. This document does not declare `required_ssh_targets`, and the shown line is only the network policy summary, not an SSH proof. So from this output I would say: network would likely have worked in the current parent env; SSH was not proven by this start line.
 
 I added `#caplat` as a recommended follow-up to make the slow managed capability check expose phase timings and target the expensive probe instead of leaving it as one long opaque startup wait.
-<!-- agent:boundary:256ca1bf -->
+<!-- agent:boundary:9295ec11 -->
 <!-- /agent:exchange -->
 ###
 
@@ -129,7 +129,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#caplat] [recommended] Reduce Codex managed capability proof latency and surface phase timings for network/SSH/write-root probes so slow  checks identify the expensive step.
+- [ ] [#caplat] [recommended] Reduce Codex managed capability proof latency and surface phase timings for network/SSH/write-root probes so slow agent-doc start checks identify the expensive step.
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md

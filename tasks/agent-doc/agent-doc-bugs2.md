@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Answered Codex network policy question and added a capability-check latency follow-up.
+Implemented Codex capability proof timing diagnostics.
 <!-- /agent:status -->
 
 ## Exchange
@@ -90,8 +90,30 @@ I checked the current launcher environment during this turn: `CODEX_SANDBOX_NETW
 SSH is a separate question. `CODEX_SANDBOX_NETWORK_DISABLED` only gates network. SSH also depends on the sandbox being able to read the needed SSH config/keys and open the target socket. This document does not declare `required_ssh_targets`, and the shown line is only the network policy summary, not an SSH proof. So from this output I would say: network would likely have worked in the current parent env; SSH was not proven by this start line.
 
 I added `#caplat` as a recommended follow-up to make the slow managed capability check expose phase timings and target the expensive probe instead of leaving it as one long opaque startup wait.
-<!-- agent:boundary:ff8dad94 -->
-do [#caplat]. spec-test-build-install-commit-push
+❯ do [#caplat]. spec-test-build-install-commit-push
+### Re: #caplat — gpt-5
+
+Implemented and pushed `#caplat`.
+
+The managed Codex capability proof now records phase timing diagnostics in successful `codex_capability_proof` events via `timings_ms`, covering host DNS, child network, required SSH, launcher writable-root checks, child writable-root checks, and total proof time. Skipped phases are reported as `not_required`, so slow `agent-doc start` runs should point at the expensive capability phase instead of only reporting eventual success.
+
+I also shortened the Codex child probe prompts while preserving the same shell probes and success markers, and updated the README/spec/version docs to capture the new event contract.
+
+Verification completed:
+
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test managed_capability --manifest-path src/agent-doc/Cargo.toml`
+- `cargo test codex_child_network_probe --manifest-path src/agent-doc/Cargo.toml`
+- `make check`
+- `make build-release`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits pushed:
+
+- `src/agent-doc`: `b77249c` (`fix: time codex capability proof`)
+- parent repo: `1d9f3dafe` (`agent-doc: update capability proof timing`)
+<!-- agent:boundary:63b74807 -->
 <!-- /agent:exchange -->
 ###
 
@@ -116,7 +138,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 
 <!-- agent:backlog -->
 - [ ] [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
-- [ ] [#caplat] [recommended] Reduce Codex managed capability proof latency and surface phase timings for network/SSH/write-root probes so slow agent-doc start checks identify the expensive step.
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
@@ -180,6 +201,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-09 [#codexnonet] Codex sandbox denies all network calls in agent-doc-managed sessions even when the intended launch contract requires network access; prove live network capability before dispatch/reuse and fail closed with sandbox-specific diagnostics. Plan: tasks/agent-doc/plan-codex-network-sandbox-denial.md
 - 2026-05-09 [#preflighthang] Direct `agent-doc <file>` invocation can hang after opening `preflight_started` when it self-dispatches into the same active Codex pane; detect recursive/self dispatch, bound the wait for capture progress, and persist a recoverable timeout state. Plan: tasks/agent-doc/plan-direct-invocation-preflight-hang.md
 - 2026-05-09 [#commitfs] Codex commit filesystem sandbox denial — managed session can edit nested submodule files but cannot create the backing `.git/modules/.../index.lock`, so `git add`/commit fails late with `Read-only file system`. Plan: tasks/agent-doc/plan-codex-commit-filesystem-sandbox.md
+- 2026-05-09 [#caplat] [recommended] Reduce Codex managed capability proof latency and surface phase timings for network/SSH/write-root probes so slow agent-doc start checks identify the expensive step.
 <!-- /agent:pending-done -->
 
 

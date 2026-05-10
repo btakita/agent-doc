@@ -2938,11 +2938,19 @@ fn exchange_user_region(content: &str) -> &str {
 }
 
 fn is_exchange_response_heading_for_prefix_repair(trimmed: &str) -> bool {
+    let trimmed = trimmed.strip_prefix("❯ ").unwrap_or(trimmed);
     trimmed == "## Assistant"
         || trimmed.starts_with("### Re:")
         || trimmed.starts_with("#### Re:")
         || trimmed.starts_with("##### Re:")
         || trimmed.starts_with("###### Re:")
+}
+
+fn is_prefixed_exchange_response_heading_for_prefix_repair(trimmed: &str) -> bool {
+    let Some(stripped) = trimmed.strip_prefix("❯ ") else {
+        return false;
+    };
+    is_exchange_response_heading_for_prefix_repair(stripped)
 }
 
 fn starts_prompt_run_after_response(trimmed: &str, is_target: bool) -> bool {
@@ -2956,23 +2964,29 @@ fn exchange_prompt_prefix_eligible_lines<'a>(
     let boundary_prefix = "<!-- agent:boundary:";
     let mut eligible = Vec::new();
     let mut in_response_block = false;
+    let mut response_heading_was_prefixed = false;
 
     for line in exchange_user_region(content).lines() {
         let trimmed = line.trim();
         if trimmed.starts_with(boundary_prefix) {
             in_response_block = false;
+            response_heading_was_prefixed = false;
             continue;
         }
         if is_exchange_response_heading_for_prefix_repair(trimmed) {
             in_response_block = true;
+            response_heading_was_prefixed =
+                is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
             continue;
         }
 
         let normalized = line.trim_end();
         let is_target = target_counts.is_some_and(|counts| counts.contains_key(normalized));
         if in_response_block {
-            if starts_prompt_run_after_response(trimmed, is_target) {
+            let target_can_start_prompt = is_target && !response_heading_was_prefixed;
+            if starts_prompt_run_after_response(trimmed, target_can_start_prompt) {
                 in_response_block = false;
+                response_heading_was_prefixed = false;
             } else {
                 continue;
             }
@@ -3111,23 +3125,29 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
     }
 
     let mut in_response_block = false;
+    let mut response_heading_was_prefixed = false;
     let normalized_user_region = user_region
         .split('\n')
         .map(|doc_line| {
             let trimmed = doc_line.trim();
             if trimmed.starts_with(boundary_prefix) {
                 in_response_block = false;
+                response_heading_was_prefixed = false;
                 return doc_line.to_string();
             }
             if is_exchange_response_heading_for_prefix_repair(trimmed) {
                 in_response_block = true;
+                response_heading_was_prefixed =
+                    is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
                 return doc_line.to_string();
             }
             let normalized = doc_line.trim_end();
             let is_target = remaining.contains_key(normalized);
             if in_response_block {
-                if starts_prompt_run_after_response(trimmed, is_target) {
+                let target_can_start_prompt = is_target && !response_heading_was_prefixed;
+                if starts_prompt_run_after_response(trimmed, target_can_start_prompt) {
                     in_response_block = false;
+                    response_heading_was_prefixed = false;
                 } else {
                     return doc_line.to_string();
                 }
@@ -9135,6 +9155,50 @@ Commit / push:
         assert!(
             !repaired.contains("\n❯ Commit / push:\n- `new-sha`\n"),
             "later assistant commit label must not become a prompt:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_treats_prefixed_response_heading_as_assistant_boundary()
+     {
+        let working = "\
+<!-- agent:exchange patch=append -->
+❯ do [#done]. spec-test-build-install-commit-push
+❯ ### Re: #done — gpt-5
+
+Implemented.
+
+Verification:
+- `cargo test normalize_prefix`
+
+Commit / push:
+- `abc123`
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &[
+                "Implemented.".to_string(),
+                "Verification:".to_string(),
+                "- `cargo test normalize_prefix`".to_string(),
+                "Commit / push:".to_string(),
+                "- `abc123`".to_string(),
+            ],
+        );
+
+        assert!(
+            repaired.contains("\n❯ ### Re: #done — gpt-5\n\nImplemented.\n"),
+            "prefixed response heading must still start an assistant block:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\n❯ Implemented.")
+                && !repaired.contains("\n❯ Verification:")
+                && !repaired.contains("\n❯ - `cargo test normalize_prefix`")
+                && !repaired.contains("\n❯ Commit / push:")
+                && !repaired.contains("\n❯ - `abc123`"),
+            "assistant response body after a prefixed heading must not be prompt-prefixed:\n{repaired}"
         );
     }
 

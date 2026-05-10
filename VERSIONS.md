@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Prompt-prefix repair no longer treats prefixed response headings as prompt starts.** Prefix normalization now recognizes `❯ ### Re:` as an assistant response boundary, so a stale repair target list cannot cascade `❯ ` onto the response body, verification bullets, or commit evidence after a temporarily prefixed heading.
+
 - **Direct `agent-doc <file>` invocation can no longer hang silently after opening preflight.** `run` now bounds the agent-child wait with `AGENT_DOC_RUN_AGENT_TIMEOUT_SECS` (default 1800s), records a recoverable `preflight_started` timeout event with cycle/pane/actor diagnostics on timeout, and rejects recursive Codex direct invocations from the same tmux pane that already owns the document before nesting another Codex child. `session-check` now surfaces those timeout events with concrete retry/restart guidance. This closes `#preflighthang` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Codex network-required sessions now prove network from inside a Codex child.** `codex_network_access: enabled` still clears inherited `CODEX_SANDBOX_NETWORK_DISABLED`, but managed `start` now also runs a bounded `codex exec --json` probe under the same launch args and requires a successful command-execution marker from DNS plus HTTPS checks. Failures distinguish host DNS, child DNS, sandbox/network denial, timeouts, and refused connections before route trusts or reuses the pane. This closes `#codexnonet` in `tasks/agent-doc/agent-doc-bugs2.md`.

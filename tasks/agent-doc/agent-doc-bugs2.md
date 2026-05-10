@@ -104,10 +104,35 @@ Verification:
 ❯ Commit / push:
 - `src/agent-doc`: `7cef057` pushed to `origin/20260422/codex-agent-backend`
 - root repo: `7062ca01c` pushed to `origin/main`
+### Re: direct invocation preflight hang — gpt-5
+
+❯ Implemented `#preflighthang`.
+
+❯ Direct `agent-doc <file>` runs now fail closed instead of staying silent after `Submitting to codex...`. The non-streaming Claude/Codex child wait is bounded by `AGENT_DOC_RUN_AGENT_TIMEOUT_SECS` with a default of 1800 seconds, timeout records a recoverable `preflight_started` event with cycle/pane/actor diagnostics, and Codex direct invocation from the same tmux pane that already owns the document is rejected before nesting another Codex child. `session-check` now surfaces that timeout or recursive state with retry/restart guidance.
+
+❯ Updated the spec/version docs and marked `tasks/agent-doc/plan-direct-invocation-preflight-hang.md` implemented.
+
+❯ Verification:
+❯ - `cargo test run_times_out_agent_child_and_marks_recoverable_preflight`
+❯ - `cargo test codex_bare_run_inside_owning_pane_fails_before_nested_dispatch`
+❯ - `cargo test mark_response_captured_sets_capture_metadata`
+❯ - `cargo check`
+❯ - `cargo test -- --test-threads=1`
+❯ - `cargo build`
+❯ - `make check TEST_THREADS=1`
+❯ - `make install`
+❯ - `agent-doc --version` -> `agent-doc 0.33.16`
+
+❯ Commit / push:
+❯ - `src/agent-doc`: `7cef057` pushed to `origin/20260422/codex-agent-backend`
+❯ - root repo: `7062ca01c` pushed to `origin/main`
+<!-- agent:boundary:29a22822 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+`❯ Commit / push:` in the last response should not have
+---
 `Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
 spec-test-build-install-commit-push
 ---

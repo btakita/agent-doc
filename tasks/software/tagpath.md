@@ -114,8 +114,7 @@ presets/               Convention presets (immutable-tag.toml)
 ## Status
 
 <!-- agent:status patch=replace -->
-
-v0.6.1 published to crates.io
+v0.6.2 published to crates.io
 <!-- /agent:status -->
 
 ## Exchange
@@ -162,7 +161,31 @@ Verification run:
 - `tagpath --help`
 
 Note: the installed CLI does not currently support `tagpath --version`; clap rejects that flag, so I used `tagpath --help` as the local install smoke check.
-<!-- agent:boundary:ad3e39bd -->
+❯ release + publish
+### Re: release + publish — gpt-5
+
+Released and published `tagpath` v0.6.2.
+
+Release actions completed:
+- Bumped `Cargo.toml` and `Cargo.lock` from `0.6.1` to `0.6.2`.
+- Committed release bump as `f03e40f` (`chore: release v0.6.2`).
+- Tagged `v0.6.2` at `f03e40f`.
+- Pushed `main` and tag `v0.6.2` to `origin`.
+- Published `tagpath v0.6.2` to crates.io.
+- Installed the local binary from the release tree with `cargo install --path . --force`.
+
+Verification run:
+- `cargo fmt --check`
+- `cargo test`
+- `cargo build`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo publish --dry-run`
+- `cargo publish`
+- `cargo install --path . --force`
+- `tagpath --help`
+
+Cargo printed the existing workspace patch warnings for `agent-kit` and `tmux-router`; they did not block build, dry-run, install, or publish.
+<!-- agent:boundary:03b51a22 -->
 <!-- /agent:exchange -->
 ###
 

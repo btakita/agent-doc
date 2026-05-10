@@ -122,70 +122,8 @@ v0.6.2 published to crates.io
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260510-032532.md`*
-
-Active backlog:
-- [ ] [#qont] Add query/ontology compactness fixture cases that cover normalize-query input and `.naming/tags` ontology_refs so tsift can keep context-pack refs as handles instead of prose.
-❯ do [#qont]. spec-test-build-install-commit-push
-### Re: #qont — gpt-5
-
-Completed `#qont`.
-
-Added explicit `normalize-query` and `ontology-refs` compactness cases to `fixtures/tsift-token-savings.json`, covering normalized query input and `.naming/tags/*.md` ontology refs. Updated the fixture tests so they now verify the new surfaces, expected normalized query tags, source handle preservation, ontology handle/path shape, and compact previews that keep ontology refs as handle rows instead of inline prose. Updated `SPEC.md` to document the six-surface fixture contract.
-
-Committed and pushed tagpath commit `c0bf84c` (`test: add query ontology compactness fixtures`) to `origin/main`.
-
-Verification run:
-- `cargo fmt --check`
-- `cargo test`
-- `cargo build`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo install --path . --force`
-- `tagpath --help`
-
-Note: the installed CLI does not currently support `tagpath --version`; clap rejects that flag, so I used `tagpath --help` as the local install smoke check.
-### Re: #qont — gpt-5
-
-Completed `#qont`.
-
-Added explicit `normalize-query` and `ontology-refs` compactness cases to `fixtures/tsift-token-savings.json`, covering normalized query input and `.naming/tags/*.md` ontology refs. Updated the fixture tests so they now verify the new surfaces, expected normalized query tags, source handle preservation, ontology handle/path shape, and compact previews that keep ontology refs as handle rows instead of inline prose. Updated `SPEC.md` to document the six-surface fixture contract.
-
-Committed and pushed tagpath commit `c0bf84c` (`test: add query ontology compactness fixtures`) to `origin/main`.
-
-Verification run:
-- `cargo fmt --check`
-- `cargo test`
-- `cargo build`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo install --path . --force`
-- `tagpath --help`
-
-Note: the installed CLI does not currently support `tagpath --version`; clap rejects that flag, so I used `tagpath --help` as the local install smoke check.
-❯ release + publish
-### Re: release + publish — gpt-5
-
-Released and published `tagpath` v0.6.2.
-
-Release actions completed:
-- Bumped `Cargo.toml` and `Cargo.lock` from `0.6.1` to `0.6.2`.
-- Committed release bump as `f03e40f` (`chore: release v0.6.2`).
-- Tagged `v0.6.2` at `f03e40f`.
-- Pushed `main` and tag `v0.6.2` to `origin`.
-- Published `tagpath v0.6.2` to crates.io.
-- Installed the local binary from the release tree with `cargo install --path . --force`.
-
-Verification run:
-- `cargo fmt --check`
-- `cargo test`
-- `cargo build`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo publish --dry-run`
-- `cargo publish`
-- `cargo install --path . --force`
-- `tagpath --help`
-
-Cargo printed the existing workspace patch warnings for `agent-kit` and `tmux-router`; they did not block build, dry-run, install, or publish.
-<!-- agent:boundary:03b51a22 -->
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/55560c2f12047b1a846ebab88214cfbaa57574433d92d6c9900e3a05507a01aa-20260510-034519.md`*
+<!-- agent:boundary:d282e412 -->
 <!-- /agent:exchange -->
 ###
 

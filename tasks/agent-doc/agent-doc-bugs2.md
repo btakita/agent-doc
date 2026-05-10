@@ -36,7 +36,21 @@ Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-<!-- agent:boundary:abd66994 -->
+❯ Please review the logs for sync command issues. Plan #next-steps.
+### Re: sync command logs — gpt-5
+
+I reviewed the current sync/route logs and captured a focused plan at `tasks/agent-doc/plan-sync-command-route-error-follow-up.md`.
+
+Findings:
+- The current saved editor route error for `agent-doc-bugs5.md` shows sync recovering panes, then route failing with `Error: project controller returned ok response without data`. That is the sharpest current issue.
+- Recent safe-passive sync entries are mostly healthy: `sync_lock_wait=0ms`, `prune_stash_panes=0ms`, and totals around 725-839ms. Older over-budget records remain in the log history, but the current evidence points more to stale/opaque route diagnostics than slow stash pruning.
+- Route still sometimes logs `route_dispatch_only_starting_actor_direct_pane_submit` immediately before the controller accepts dispatch as `ready`, so there is still a stale-starting projection edge.
+- The saved editor-route-error cleanup is still suspect because a route error file remains visible after later successful routing activity elsewhere.
+
+Next steps are in the plan: test typed controller response envelopes, improve the `ok response without data` diagnostic, clear saved editor route errors after later successful same-document focus/sync/route, re-query the controller when route sees a starting projection, and keep latency work separate unless new logs again show over-budget `sync_lock_wait` or `prune_stash_panes`.
+
+I committed the plan file as `40e0339a0`. No code was changed, so I did not run the Rust test suite.
+<!-- agent:boundary:ff96471b -->
 <!-- /agent:exchange -->
 ###
 
@@ -57,6 +71,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#syncroutelog] Fix stale/opaque sync-route diagnostics: controller RPC can surface 'ok response without data', saved editor-route-errors can remain stale after later success, and route can submit on a stale starting projection. Plan: tasks/agent-doc/plan-sync-command-route-error-follow-up.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.

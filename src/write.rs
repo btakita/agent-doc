@@ -2330,13 +2330,19 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
         }
     }
 
+    let diff_text = crate::diff::unified_diff_from_contents(&snap_stripped, &baseline_stripped);
+    let prompt_prefix_targets = diff_text
+        .as_deref()
+        .map(crate::diff::prompt_prefix_normalization_targets)
+        .unwrap_or_default();
+
     let diff = TextDiff::from_lines(snap_stripped.as_str(), baseline_stripped.as_str());
     let mut user_added = std::collections::HashSet::<String>::new();
+    let mut agent_inserted = std::collections::HashSet::<String>::new();
     let mut in_baseline_fence = false;
     let mut baseline_fence_char = '`';
     let mut baseline_fence_len = 3usize;
     let mut in_agent_block = false;
-    let mut agent_block_had_blank = false;
     let mut saw_deleted_heading = false;
     for change in diff.iter_all_changes() {
         let line = change.value().trim_end_matches('\n');
@@ -2366,18 +2372,18 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
                 if heading_level(trimmed).is_some() {
                     in_agent_block =
                         change.tag() == ChangeTag::Insert && !heading_replaces_deleted_heading;
-                    agent_block_had_blank = false;
                 } else if in_agent_block && trimmed.is_empty() {
-                    agent_block_had_blank = true;
+                    // Blank assistant-response lines do not prove the following
+                    // prose is user input. Only explicit prompt-run starts below
+                    // can return the scanner to user-owned transcript lines.
                 } else if in_agent_block
-                    && (trimmed.starts_with('❯')
-                        || trimmed.starts_with("<!--")
-                        || crate::diff::line_looks_like_fresh_prompt_after_response(trimmed)
-                        || (agent_block_had_blank
-                            && crate::diff::line_looks_like_soft_prompt_request(trimmed)))
+                    && starts_targeted_prompt_repair_after_response(trimmed, true)
                 {
                     in_agent_block = false;
-                    agent_block_had_blank = false;
+                } else if in_agent_block
+                    && (trimmed.starts_with('❯') || trimmed.starts_with("<!--"))
+                {
+                    in_agent_block = false;
                 }
             }
         }
@@ -2395,13 +2401,13 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             && !is_fence_delim
         {
             user_added.insert(line.to_string());
+        } else if change.tag() == ChangeTag::Insert && in_agent_block {
+            agent_inserted.insert(line.to_string());
         }
     }
 
-    if let Some(diff_text) =
-        crate::diff::unified_diff_from_contents(&snap_stripped, &baseline_stripped)
-    {
-        for line in crate::diff::prompt_prefix_normalization_targets(&diff_text) {
+    for line in prompt_prefix_targets {
+        if !agent_inserted.contains(&line) {
             user_added.insert(line);
         }
     }
@@ -2958,8 +2964,33 @@ fn is_prefixed_exchange_response_heading_for_prefix_repair(trimmed: &str) -> boo
     is_exchange_response_heading_for_prefix_repair(stripped)
 }
 
+fn normalization_target_matches_line(
+    line: &str,
+    target_counts: &std::collections::HashMap<String, usize>,
+) -> bool {
+    let normalized = line.trim_end();
+    target_counts.contains_key(normalized)
+        || normalized
+            .strip_prefix("❯ ")
+            .is_some_and(|stripped| target_counts.contains_key(stripped))
+}
+
 fn starts_prompt_run_after_response(trimmed: &str, is_target: bool) -> bool {
     crate::diff::line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
+}
+
+fn starts_targeted_prompt_repair_after_response(trimmed: &str, is_target: bool) -> bool {
+    crate::diff::line_looks_like_targeted_prompt_prefix_repair_start(trimmed, is_target)
+}
+
+fn starts_targeted_or_prefixed_prompt_repair_after_response(
+    trimmed: &str,
+    is_target: bool,
+) -> bool {
+    starts_targeted_prompt_repair_after_response(
+        trimmed,
+        is_target || trimmed.trim_start().starts_with('❯'),
+    )
 }
 
 fn exchange_prompt_prefix_eligible_lines<'a>(
@@ -2985,11 +3016,18 @@ fn exchange_prompt_prefix_eligible_lines<'a>(
             continue;
         }
 
-        let normalized = line.trim_end();
-        let is_target = target_counts.is_some_and(|counts| counts.contains_key(normalized));
+        let is_target =
+            target_counts.is_some_and(|counts| normalization_target_matches_line(line, counts));
         if in_response_block {
-            let target_can_start_prompt = is_target && !response_heading_was_prefixed;
-            if starts_prompt_run_after_response(trimmed, target_can_start_prompt) {
+            let starts_prompt = if target_counts.is_some() {
+                starts_targeted_or_prefixed_prompt_repair_after_response(
+                    trimmed,
+                    is_target && !response_heading_was_prefixed,
+                )
+            } else {
+                starts_prompt_run_after_response(trimmed, false)
+            };
+            if starts_prompt {
                 in_response_block = false;
                 response_heading_was_prefixed = false;
             } else {
@@ -3147,10 +3185,12 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
                 return doc_line.to_string();
             }
             let normalized = doc_line.trim_end();
-            let is_target = remaining.contains_key(normalized);
+            let is_target = normalization_target_matches_line(doc_line, &remaining);
             if in_response_block {
-                let target_can_start_prompt = is_target && !response_heading_was_prefixed;
-                if starts_prompt_run_after_response(trimmed, target_can_start_prompt) {
+                if starts_targeted_or_prefixed_prompt_repair_after_response(
+                    trimmed,
+                    is_target && !response_heading_was_prefixed,
+                ) {
                     in_response_block = false;
                     response_heading_was_prefixed = false;
                 } else {
@@ -7345,6 +7385,87 @@ mod tests {
     }
 
     #[test]
+    fn normalize_user_prompts_keeps_inserted_assistant_question_bare() {
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+❯ do #old
+<!-- /agent:exchange -->
+";
+        let baseline = "\
+<!-- agent:exchange patch=append -->
+❯ do #old
+### Re: old — gpt-5
+
+Why did this happen?
+This should stay answer prose.
+<!-- /agent:exchange -->
+";
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #old
+### Re: old — gpt-5
+
+Why did this happen?
+This should stay answer prose.
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+
+        assert!(
+            result.contains("\nWhy did this happen?\nThis should stay answer prose.\n"),
+            "assistant question/prose must stay bare:\n{result}"
+        );
+        assert!(
+            !result.contains("\n❯ Why did this happen?")
+                && !result.contains("\n❯ This should stay answer prose."),
+            "inserted assistant response lines must not be prompt-prefixed:\n{result}"
+        );
+    }
+
+    #[test]
+    fn normalize_user_prompts_still_prefixes_real_followup_after_inserted_response() {
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+❯ do #old
+<!-- /agent:exchange -->
+";
+        let baseline = "\
+<!-- agent:exchange patch=append -->
+❯ do #old
+### Re: old — gpt-5
+
+Done.
+
+do #next. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+";
+        let content = "\
+<!-- agent:exchange patch=append -->
+❯ do #old
+### Re: old — gpt-5
+
+Done.
+
+do #next. spec-test-build-install-commit-push
+<!-- agent:boundary:abc -->
+<!-- /agent:exchange -->
+";
+
+        let result = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+
+        assert!(
+            result.contains("\n❯ do #next. spec-test-build-install-commit-push\n"),
+            "canonical prompt-target extraction must still prefix the follow-up:\n{result}"
+        );
+        assert!(
+            result.contains("\nDone.\n"),
+            "assistant response prose must stay bare:\n{result}"
+        );
+    }
+
+    #[test]
     fn extract_normalization_targets_preserves_duplicate_lines() {
         let before = "<!-- agent:exchange patch=append -->\nQuestion?\nspec-test-build-install-commit-push\nQuestion?\nspec-test-build-install-commit-push\n<!-- /agent:exchange -->\n";
         let after = "<!-- agent:exchange patch=append -->\n❯ Question?\n❯ spec-test-build-install-commit-push\n❯ Question?\n❯ spec-test-build-install-commit-push\n<!-- /agent:exchange -->\n";
@@ -9162,6 +9283,43 @@ do #verfpfx. spec-test-build-install-commit-push
                 && !repaired.contains("\n❯   - `cargo test normalize_prefix`")
                 && !repaired.contains("\n❯ - `cargo test` is still red on a pre-existing failure."),
             "assistant list items must not receive prompt prefixes:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_for_targets_requires_targeted_prompt_start_after_response() {
+        let working = "\
+<!-- agent:exchange patch=append -->
+### Re: previous — gpt-5
+
+Why did this keep happening?
+spec-test-build-install-commit-push
+<!-- agent:boundary:previous -->
+do #spfxnorm. spec-test-build-install-commit-push
+<!-- agent:boundary:working -->
+<!-- /agent:exchange -->
+";
+
+        let repaired = normalize_exchange_prefixes_for_targets(
+            working,
+            &[
+                "spec-test-build-install-commit-push".to_string(),
+                "do #spfxnorm. spec-test-build-install-commit-push".to_string(),
+            ],
+        );
+
+        assert!(
+            repaired
+                .contains("\nWhy did this keep happening?\nspec-test-build-install-commit-push\n"),
+            "assistant question and preset-looking prose must stay bare:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n❯ do #spfxnorm. spec-test-build-install-commit-push\n"),
+            "real prompt after the boundary must still be repaired:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains("\n❯ spec-test-build-install-commit-push\n"),
+            "a stale target inside assistant prose must not be enough to start repair:\n{repaired}"
         );
     }
 

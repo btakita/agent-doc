@@ -442,6 +442,44 @@ pub(crate) fn line_looks_like_prompt_prefix_repair_start(trimmed: &str, is_targe
         || line_looks_like_soft_prompt_request(unprefixed)
 }
 
+pub(crate) fn line_looks_like_targeted_prompt_prefix_repair_start(
+    trimmed: &str,
+    is_target: bool,
+) -> bool {
+    if !is_target {
+        return false;
+    }
+
+    let unprefixed = trimmed
+        .strip_prefix("❯ ")
+        .or_else(|| trimmed.strip_prefix('❯'))
+        .map(str::trim_start)
+        .unwrap_or(trimmed);
+
+    if unprefixed.is_empty() || line_looks_like_plain_response_after_prompt(unprefixed) {
+        return false;
+    }
+
+    if trimmed.starts_with('❯') || line_looks_like_soft_prompt_request(unprefixed) {
+        return true;
+    }
+
+    let lower = unprefixed.to_ascii_lowercase();
+    lower == "go"
+        || lower == "continue"
+        || lower.starts_with("do #")
+        || lower.starts_with("do [#")
+        || lower.starts_with("fix #")
+        || lower.starts_with("run ")
+        || lower.starts_with("rerun ")
+        || lower.starts_with("build ")
+        || lower.starts_with("test ")
+        || lower.starts_with("commit ")
+        || lower.starts_with("push ")
+        || lower.starts_with("verify ")
+        || lower.starts_with("investigate ")
+}
+
 pub(crate) fn line_looks_like_plain_response_after_prompt(trimmed: &str) -> bool {
     if trimmed.is_empty() {
         return false;
@@ -948,6 +986,7 @@ fn prompt_prefix_lines_from_block(block: &str) -> Vec<PromptPrefixLine> {
     let mut in_fence = false;
     let mut fence_char = '`';
     let mut fence_len = 3usize;
+    let mut in_response_block = false;
 
     for line in block.lines() {
         let trimmed = line.trim();
@@ -965,6 +1004,19 @@ fn prompt_prefix_lines_from_block(block: &str) -> Vec<PromptPrefixLine> {
 
         if in_fence || trimmed.is_empty() || trimmed.starts_with("<!--") {
             continue;
+        }
+
+        if is_exchange_response_heading(trimmed) {
+            in_response_block = true;
+            continue;
+        }
+
+        if in_response_block {
+            if line_looks_like_targeted_prompt_prefix_repair_start(trimmed, true) {
+                in_response_block = false;
+            } else {
+                continue;
+            }
         }
 
         lines.push(PromptPrefixLine {

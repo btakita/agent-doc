@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Prompt-prefix normalization now uses opt-in response-block exits.** The `content_ours` normalizer no longer leaves an inserted assistant response block just because a response sentence looks prompt-like, and target-based prefix repair must match an explicit `normalize_prefix_lines` target before it can resume after a `### Re:` block. This keeps assistant questions and preset-looking evidence lines bare while still repairing real follow-up prompts after a boundary or canonical prompt-target diff. This closes `#spfxnorm` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Direct `agent-doc run` waits now emit and persist heartbeats.** After preflight opens the response cycle, long non-streaming child-agent waits print `[run] heartbeat ...` progress every `AGENT_DOC_RUN_HEARTBEAT_SECS` seconds (default 30) and update the open cycle state's `updated_at` / `last_event` without advancing the phase. Timeout diagnostics still replace the heartbeat with the recoverable timeout event, but operators and Codex can now see phase/cycle progress while the child is legitimately still running. This closes `#runhb` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Compact Exchange now uses editor IPC before falling back to disk writes.** `agent-doc compact <file> --component exchange --commit` delivers its full-document replacement through the existing JetBrains/VS Code IPC watcher when available, so the active markdown buffer is mutated through the editor document API instead of triggering an external-file-change dialog. Added compact IPC regression coverage and refreshed the shared editor specs.

@@ -36,7 +36,44 @@ Active backlog:
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - 10 more active item(s)
-<!-- agent:boundary:401c4ad7 -->
+❯ do [#stateproj]. spec-test-build-install-commit-push
+### Re: #stateproj — gpt-5
+Implemented `#stateproj`.
+
+Changed `agent-doc sync` so editor column-memory state is authoritative in the project controller SQLite store instead of `.agent-doc/last_layout.json`. Legacy `last_layout.json` is imported only when `state.db` has no `layout_states` row, future sync writes go to SQLite, and `last_layout.json` is emitted only as a compatibility projection. If JSON drifts, SQLite wins.
+
+Updated the controller/session specs and changelog, and added regressions for legacy projection migration plus SQLite-over-JSON precedence.
+
+Verification/build/install:
+- `cargo test project_controller::tests::layout_state`
+- `cargo test sync::tests::layout_state`
+- `make check`
+- `cargo install --path .`
+- `cargo build --release --lib`
+- `agent-doc lib-install`
+
+Commit / push:
+- agent-doc submodule: `8d09d99` (`fix: store sync layout state in controller db`) pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `4a37b6b20` (`chore: update agent-doc submodule`) pushed to `origin/main`
+### Re: #stateproj — gpt-5
+Implemented `#stateproj`.
+
+Changed `agent-doc sync` so editor column-memory state is authoritative in the project controller SQLite store instead of `.agent-doc/last_layout.json`. Legacy `last_layout.json` is imported only when `state.db` has no `layout_states` row, future sync writes go to SQLite, and `last_layout.json` is emitted only as a compatibility projection. If JSON drifts, SQLite wins.
+
+Updated the controller/session specs and changelog, and added regressions for legacy projection migration plus SQLite-over-JSON precedence.
+
+Verification/build/install:
+- `cargo test project_controller::tests::layout_state`
+- `cargo test sync::tests::layout_state`
+- `make check`
+- `cargo install --path .`
+- `cargo build --release --lib`
+- `agent-doc lib-install`
+
+Commit / push:
+- agent-doc submodule: `8d09d99` (`fix: store sync layout state in controller db`) pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `4a37b6b20` (`chore: update agent-doc submodule`) pushed to `origin/main`
+<!-- agent:boundary:4eecdaf7 -->
 <!-- /agent:exchange -->
 ###
 
@@ -64,7 +101,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 <!-- agent:backlog -->
 - [ ] [#duppb] Duplicate response patchback after sidecar normalization fallback / full-content IPC re-delivery — the same response block can appear twice back-to-back after finalize reports success. Plan: tasks/agent-doc/plan-duplicate-sidecar-fallback-patchback.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
-- [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
@@ -129,6 +165,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-09 [#caplat] [recommended] Reduce Codex managed capability proof latency and surface phase timings for network/SSH/write-root probes so slow agent-doc start checks identify the expensive step.
 - 2026-05-09 [#tmuxdevci] Split agent-doc test budgets: keep default development tests pure/fast by gating real tmux-backed tests behind an explicit CI target, add GitHub Actions coverage for that target, and require matching SimWorld edge-case traces before demoting any tmux regression.
 - 2026-05-10 [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
+- 2026-05-10 [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 <!-- /agent:pending-done -->
 
 

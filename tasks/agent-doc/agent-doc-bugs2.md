@@ -91,6 +91,7 @@ SSH is a separate question. `CODEX_SANDBOX_NETWORK_DISABLED` only gates network.
 
 I added `#caplat` as a recommended follow-up to make the slow managed capability check expose phase timings and target the expensive probe instead of leaving it as one long opaque startup wait.
 <!-- agent:boundary:ff8dad94 -->
+do [#caplat]. spec-test-build-install-commit-push
 <!-- /agent:exchange -->
 ###
 
@@ -114,6 +115,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#caplat] [recommended] Reduce Codex managed capability proof latency and surface phase timings for network/SSH/write-root probes so slow agent-doc start checks identify the expensive step.
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.

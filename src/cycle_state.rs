@@ -345,6 +345,20 @@ pub fn mark_recoverable_preflight_timeout(file: &Path, event: &str) -> Result<Op
     Ok(Some(state))
 }
 
+pub fn record_open_cycle_progress(file: &Path, event: &str) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.is_open() {
+        return Ok(Some(state));
+    }
+    state.last_event = event.to_string();
+    state.updated_at = now_secs();
+    save(file, &state)?;
+    append_phase_event_to_session_log(file, &state);
+    Ok(Some(state))
+}
+
 pub fn mark_committed(
     file: &Path,
     event: &str,

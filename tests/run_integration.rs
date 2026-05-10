@@ -98,6 +98,28 @@ fn write_sleeping_agent(root: &Path) -> PathBuf {
     script
 }
 
+fn write_delayed_mock_agent(root: &Path, response: &str, delay_secs: u64) -> PathBuf {
+    let script = root.join("mock-delayed-agent.sh");
+    let payload = serde_json::json!({
+        "result": response,
+        "session_id": "sess-delayed"
+    })
+    .to_string();
+    fs::write(
+        &script,
+        format!("#!/bin/sh\ncat >/dev/null\nsleep {delay_secs}\ncat <<'JSON'\n{payload}\nJSON\n"),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+    }
+    script
+}
+
 fn write_config(root: &Path, script: &Path) -> PathBuf {
     let config_root = root.join("config");
     let agent_doc_dir = config_root.join("agent-doc");
@@ -256,11 +278,15 @@ fn run_times_out_agent_child_and_marks_recoverable_preflight() {
     agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
-        .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "1")
+        .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "2")
+        .env("AGENT_DOC_RUN_HEARTBEAT_SECS", "1")
         .args(["run", doc.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("timed out after waiting 1s"));
+        .stderr(predicate::str::contains(
+            "[run] heartbeat phase=child_agent_wait",
+        ))
+        .stderr(predicate::str::contains("timed out after waiting 2s"));
 
     let state = read_cycle_state(tmp.path());
     assert_eq!(state["phase"].as_str().unwrap(), "preflight_started");
@@ -270,6 +296,56 @@ fn run_times_out_agent_child_and_marks_recoverable_preflight() {
             .unwrap()
             .contains("direct_invocation_timeout")
     );
+}
+
+#[test]
+fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let script = write_delayed_mock_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: delayed — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        3,
+    );
+    let config_root = write_config(tmp.path(), &script);
+    let bin = std::env::var("CARGO_BIN_EXE_agent-doc").unwrap();
+
+    let mut child = ProcessCommand::new(bin)
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "10")
+        .env("AGENT_DOC_RUN_HEARTBEAT_SECS", "1")
+        .args(["run", doc.to_str().unwrap()])
+        .spawn()
+        .unwrap();
+
+    let mut saw_persisted_heartbeat = false;
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(100));
+        if let Ok(state) = std::panic::catch_unwind(|| read_cycle_state(tmp.path()))
+            && state["last_event"]
+                .as_str()
+                .unwrap_or("")
+                .contains("run_heartbeat phase=child_agent_wait")
+        {
+            saw_persisted_heartbeat = true;
+            break;
+        }
+    }
+
+    let status = child.wait().unwrap();
+    assert!(status.success());
+    assert!(
+        saw_persisted_heartbeat,
+        "expected run heartbeat to update cycle progress while the child was still running"
+    );
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: delayed — gpt-5"));
+    assert_eq!(read_cycle_phase(tmp.path()), "committed");
 }
 
 #[test]

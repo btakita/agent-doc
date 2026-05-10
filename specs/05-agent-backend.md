@@ -43,6 +43,12 @@ That section must preserve the diff encounter order across mixed kinds. If a `co
 - Partial checkpoints live beside final response captures at `.agent-doc/captures/<doc-hash>/<cycle-id>.partial.json`.
 - Partial checkpoints are recovery evidence only: they must not advance the document cycle to `response_captured`, and automatic replay still requires a final validated response capture or an already-visible response in the document.
 
+## Direct Run Heartbeats
+
+- Non-streaming `agent-doc run` child waits are parent-visible: while the backend blocks, `run` emits `[run] heartbeat phase=child_agent_wait ...` stderr every 30 seconds by default.
+- `AGENT_DOC_RUN_HEARTBEAT_SECS` overrides the interval for tests and local diagnostics; values below 1 second clamp to 1.
+- Each heartbeat also updates the open cycle state's `updated_at` and `last_event` without advancing the phase, so `session-check` and operators can distinguish a progressing long wait from a stale `preflight_started` cycle.
+
 ## Custom Backends
 
 Config overrides `command` and `args` for any agent name.

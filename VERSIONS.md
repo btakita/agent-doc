@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Direct `agent-doc run` waits now emit and persist heartbeats.** After preflight opens the response cycle, long non-streaming child-agent waits print `[run] heartbeat ...` progress every `AGENT_DOC_RUN_HEARTBEAT_SECS` seconds (default 30) and update the open cycle state's `updated_at` / `last_event` without advancing the phase. Timeout diagnostics still replace the heartbeat with the recoverable timeout event, but operators and Codex can now see phase/cycle progress while the child is legitimately still running. This closes `#runhb` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Compact Exchange now uses editor IPC before falling back to disk writes.** `agent-doc compact <file> --component exchange --commit` delivers its full-document replacement through the existing JetBrains/VS Code IPC watcher when available, so the active markdown buffer is mutated through the editor document API instead of triggering an external-file-change dialog. Added compact IPC regression coverage and refreshed the shared editor specs.
 
 - **Sync layout memory now lives in the project controller store.** `agent-doc sync` imports legacy `.agent-doc/last_layout.json` once when `.agent-doc/state.db` has no layout row, then reads and writes the controller-backed `layout_states` table as the authoritative column-memory state. `last_layout.json` is still emitted for compatibility, but drifted JSON no longer overrides SQLite. This closes `#stateproj` in `tasks/agent-doc/agent-doc-bugs2.md`.

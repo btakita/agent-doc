@@ -109,8 +109,14 @@ use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs::OpenOptions;
 use std::path::Path;
+use std::sync::mpsc;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use crate::{agent, config::Config, diff, frontmatter, git, merge, snapshot, template, write};
+
+const AGENT_DOC_RUN_HEARTBEAT_SECS_ENV: &str = "AGENT_DOC_RUN_HEARTBEAT_SECS";
+const DEFAULT_RUN_HEARTBEAT_SECS: u64 = 30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RunMode {
@@ -231,7 +237,16 @@ pub fn run(
     let fork = fm.resume.is_none();
     let harness = agent_doc::model_tier::detect_harness();
     let model = model.or(fm.resolve_harness_model(&harness));
-    let response = match backend.send(&prompt, fm.resume.as_deref(), fork, model) {
+    let response_result = {
+        let _heartbeat = RunHeartbeat::start(
+            file,
+            "child_agent_wait",
+            agent_name,
+            Some(crate::agent::run_agent_timeout()),
+        );
+        backend.send(&prompt, fm.resume.as_deref(), fork, model)
+    };
+    let response = match response_result {
         Ok(response) => response,
         Err(err) if is_timeout_error(&err) => {
             let diagnostic = run_dispatch_timeout_diagnostic(file, agent_name);
@@ -246,8 +261,10 @@ pub fn run(
         RunMode::Template => response.text.clone(),
     };
     write::enforce_imperative_response_contract_for_diff(file, &the_diff, &response_text)?;
+    record_run_progress(file, "response_capture", agent_name, None);
     crate::repair::save_pending(file, &response_text)?;
 
+    record_run_progress(file, "response_write", agent_name, None);
     match run_mode {
         RunMode::Append => apply_append_response(file, &content_original, &response_text)?,
         RunMode::Template => apply_template_response(
@@ -268,11 +285,102 @@ pub fn run(
     maybe_abort_after_write_applied_for_test()?;
 
     if !no_git {
+        let _heartbeat = RunHeartbeat::start(file, "commit_closeout", agent_name, None);
         write::complete_required_closeout(file)?;
     }
 
     eprintln!("Response written to {}", file.display());
     Ok(())
+}
+
+struct RunHeartbeat {
+    stop: mpsc::Sender<()>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl RunHeartbeat {
+    fn start(
+        file: &Path,
+        phase: &'static str,
+        agent_name: &str,
+        timeout: Option<Duration>,
+    ) -> Self {
+        let file = file.to_path_buf();
+        let agent_name = agent_name.to_string();
+        let (stop, stop_rx) = mpsc::channel();
+        let interval = run_heartbeat_interval();
+        let handle = std::thread::spawn(move || {
+            let started = Instant::now();
+            loop {
+                if stop_rx.recv_timeout(interval).is_ok() {
+                    break;
+                }
+                let elapsed = started.elapsed();
+                let timeout_detail = timeout
+                    .map(|timeout| format!(" timeout_s={}", timeout.as_secs()))
+                    .unwrap_or_default();
+                let event = format!(
+                    "run_heartbeat phase={} agent={} elapsed_s={}{}",
+                    phase,
+                    agent_name,
+                    elapsed.as_secs(),
+                    timeout_detail
+                );
+                let state = crate::cycle_state::record_open_cycle_progress(&file, &event)
+                    .ok()
+                    .flatten();
+                let (cycle_id, cycle_phase, last_event_age) = state
+                    .as_ref()
+                    .map(|state| {
+                        (
+                            state.cycle_id.as_str(),
+                            cycle_phase_label(state.phase),
+                            state.updated_at.saturating_sub(state.started_at),
+                        )
+                    })
+                    .unwrap_or(("<unknown>", "<unknown>", 0));
+                eprintln!(
+                    "[run] heartbeat phase={} elapsed_s={}{} cycle_id={} cycle_phase={} cycle_age_s={}",
+                    phase,
+                    elapsed.as_secs(),
+                    timeout_detail,
+                    cycle_id,
+                    cycle_phase,
+                    last_event_age
+                );
+            }
+        });
+        Self {
+            stop,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for RunHeartbeat {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn run_heartbeat_interval() -> Duration {
+    let secs = std::env::var(AGENT_DOC_RUN_HEARTBEAT_SECS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_RUN_HEARTBEAT_SECS);
+    Duration::from_secs(secs.max(1))
+}
+
+fn record_run_progress(file: &Path, phase: &str, agent_name: &str, timeout: Option<Duration>) {
+    let timeout_detail = timeout
+        .map(|timeout| format!(" timeout_s={}", timeout.as_secs()))
+        .unwrap_or_default();
+    let event = format!("run_progress phase={phase} agent={agent_name}{timeout_detail}");
+    let _ = crate::cycle_state::record_open_cycle_progress(file, &event);
+    eprintln!("[run] progress phase={phase}{timeout_detail}");
 }
 
 fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {

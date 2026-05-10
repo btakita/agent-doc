@@ -154,8 +154,6 @@ do [#commitfs].
 Fix the parallel test suite. The parallel test suite must pass ending the turn.
 spec-test-build-install-commit-push
 ---
-A large part of the previous response has the `❯ ` prefix. spec-test-build-install-commit-push 
----
 `Compact Exchange` causes an External File Change. Please integrate with the FFI plugin and JB/VSCode plugin to avoid the External File Change dialog.
 spec-test-build-install-commit-push
 ---

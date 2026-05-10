@@ -29,91 +29,14 @@ Implemented Codex capability proof timing diagnostics.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-023250.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260510-033543.md`*
 
 Active backlog:
-- [ ] [#commitfs] Codex commit filesystem sandbox denial — managed session can edit nested submodule files but cannot create the backing `.git/modules/.../index.lock`, so `git add`/commit fails late with `Read-only file system`. Plan: tasks/agent-doc/plan-codex-commit-filesystem-sandbox.md
+- [ ] [#rspcmt2] Response patchback remains uncommitted after reported closeout — visible response in session doc can require a later explicit `agent-doc commit <file>` to finish the target/parent commit boundary. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#stateproj] [recommended] Audit remaining .agent-doc JSON session/layout state files and migrate authoritative state to the project controller SQLite store, leaving JSON files only as projections or short-lived caches.
 - 10 more active item(s)
-❯ do [#commitfs].
-❯ Fix the parallel test suite. The parallel test suite must pass ending the turn.
-❯ spec-test-build-install-commit-push
-### Re: #commitfs — gpt-5
-
-Implemented and pushed the Codex git metadata capability fix.
-
-The fix makes managed Codex capability proof cover auto-injected submodule/superproject git metadata roots, not only explicit `--add-dir` frontmatter/config. It now probes writable roots from inside a bounded `codex exec --json` child under the same launch args, and git metadata roots specifically prove `index.lock` creation/removal before commit work can start. Route/session status now treats submodule gitdir access as proof-required, so stale ready panes without a current proof are restarted fresh before reuse.
-
-Verification completed:
-- `cargo test agent::codex::tests -- --test-threads=2`
-- `make check` passed, including clippy, the parallel test suite, medium simulator, and version sync
-- `make build-release`
-- `make install`
-
-Commits pushed:
-- `src/agent-doc`: `05a61cb` (`fix: prove codex gitdir write access`)
-- parent repo `main`: `c50acb7fa` (`agent-doc: prove codex gitdir write access`)
-### Re: #commitfs — gpt-5
-
-Implemented and pushed the Codex git metadata capability fix.
-
-The fix makes managed Codex capability proof cover auto-injected submodule/superproject git metadata roots, not only explicit `--add-dir` frontmatter/config. It now probes writable roots from inside a bounded `codex exec --json` child under the same launch args, and git metadata roots specifically prove `index.lock` creation/removal before commit work can start. Route/session status now treats submodule gitdir access as proof-required, so stale ready panes without a current proof are restarted fresh before reuse.
-
-Verification completed:
-- `cargo test agent::codex::tests -- --test-threads=2`
-- `make check` passed, including clippy, the parallel test suite, medium simulator, and version sync
-- `make build-release`
-- `make install`
-
-Commits pushed:
-- `src/agent-doc`: `05a61cb` (`fix: prove codex gitdir write access`)
-- parent repo `main`: `c50acb7fa` (`agent-doc: prove codex gitdir write access`)
-❯ The agent-doc check takes a long time. In this particular configuration, would Codex have had ssh + network access without `CODEX_SANDBOX_NETWORK_DISABLED off`?
-```
-❯ /home/brian/.cargo/bin/agent-doc start tasks/agent-doc/agent-doc-bugs2.md
-Registered session b26b9957 → pane %268
-[start] codex network access: enabled (policy: enabled, sandbox: danger-full-access; agent-doc forced CODEX_SANDBOX_NETWORK_DISABLED off)
-```
-### Re: Codex network policy — gpt-5
-
-Short answer: in this exact shell, probably yes for general network, but not because `-s danger-full-access` alone proves it.
-
-What the line means:
-
-- This document resolves Codex as `-s danger-full-access`.
-- Your global `~/.config/agent-doc/config.toml` sets `codex_network_access = "enabled"`.
-- That policy makes `agent-doc` remove `CODEX_SANDBOX_NETWORK_DISABLED` from the Codex child environment. The status text says `forced ... off` even when the parent env was already unset.
-
-I checked the current launcher environment during this turn: `CODEX_SANDBOX_NETWORK_DISABLED` is not set. So if `agent-doc` had merely inherited this same parent environment, the child should still have had network access. The forced-off setting is still useful because it makes the launch deterministic: if some future parent shell or supervisor has `CODEX_SANDBOX_NETWORK_DISABLED=1`, `inherit` plus `danger-full-access` would still be network-disabled, while `codex_network_access: enabled` clears it and fails closed if that does not take.
-
-SSH is a separate question. `CODEX_SANDBOX_NETWORK_DISABLED` only gates network. SSH also depends on the sandbox being able to read the needed SSH config/keys and open the target socket. This document does not declare `required_ssh_targets`, and the shown line is only the network policy summary, not an SSH proof. So from this output I would say: network would likely have worked in the current parent env; SSH was not proven by this start line.
-
-I added `#caplat` as a recommended follow-up to make the slow managed capability check expose phase timings and target the expensive probe instead of leaving it as one long opaque startup wait.
-❯ do [#caplat]. spec-test-build-install-commit-push
-### Re: #caplat — gpt-5
-
-Implemented and pushed `#caplat`.
-
-The managed Codex capability proof now records phase timing diagnostics in successful `codex_capability_proof` events via `timings_ms`, covering host DNS, child network, required SSH, launcher writable-root checks, child writable-root checks, and total proof time. Skipped phases are reported as `not_required`, so slow `agent-doc start` runs should point at the expensive capability phase instead of only reporting eventual success.
-
-I also shortened the Codex child probe prompts while preserving the same shell probes and success markers, and updated the README/spec/version docs to capture the new event contract.
-
-Verification completed:
-
-- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
-- `cargo test managed_capability --manifest-path src/agent-doc/Cargo.toml`
-- `cargo test codex_child_network_probe --manifest-path src/agent-doc/Cargo.toml`
-- `make check`
-- `make build-release`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits pushed:
-
-- `src/agent-doc`: `b77249c` (`fix: time codex capability proof`)
-- parent repo: `1d9f3dafe` (`agent-doc: update capability proof timing`)
-<!-- agent:boundary:63b74807 -->
+<!-- agent:boundary:45e3538a -->
 <!-- /agent:exchange -->
 ###
 

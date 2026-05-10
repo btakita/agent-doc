@@ -36,7 +36,25 @@ Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-<!-- agent:boundary:7fade083 -->
+❯ The Codex start is still slow due to the Network checks. Can we optimistically start Codex, run the network check in the background, and surface an error if the network check fails?
+### Re: optimistic Codex network check — gpt-5
+
+Yes, but I would keep the optimization at the UI/startup boundary, not at the work-dispatch boundary.
+
+The current implementation blocks before launching the child session: `start.rs` calls `prove_managed_session_capabilities(...)`, and for network-required Codex sessions that runs host DNS plus a child Codex network probe before the pane is allowed to start. That preserves the fail-closed invariant, but it also puts the slowest check directly on the perceived startup path.
+
+The safer shape is:
+
+1. Launch/render the Codex pane immediately after static launch-contract validation.
+2. Start the capability proof in the background and record the actor as `capability=pending`.
+3. Allow startup/progress UI while the proof runs, but hold prompt dispatch for network-dependent work until the required proof succeeds.
+4. If the proof fails, surface the same fail-closed diagnostic, mark or terminate that pane as unusable for the document, and do not let the model answer inside an unproven network sandbox.
+5. Cache successful proof by actor generation plus launch contract, invalidating on `/clear`, resume/restart, controller handoff, arg/env changes, or later sandbox-signature failures.
+
+So: optimistic pane start is valid and should help. Optimistic network-dependent dispatch is not safe; it would reopen the `#codexnonet` / `#codexcapstale` failure class where the model starts working in a sandbox that cannot actually perform the required network calls.
+
+I added a focused backlog item for that next latency fix, since the earlier timing-diagnostics item is already reaped.
+<!-- agent:boundary:24b7a282 -->
 <!-- /agent:exchange -->
 ###
 
@@ -57,6 +75,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#codexasyncnet] [recommended] Split Codex managed capability proof from pane startup: launch/render the Codex pane immediately, run network/SSH/write-root proof asynchronously, gate prompt dispatch until required proof succeeds, and fail closed with diagnostics if background proof fails.
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.

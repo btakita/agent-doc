@@ -36,15 +36,37 @@ Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 8 more active item(s)
-<!-- agent:boundary:cb542279 -->
+❯ do [#spfxnorm]. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead? spec-test-build-install-commit-push
+### Re: #spfxnorm — gpt-5
+
+Implemented. Yes, the recurring failure was from brittle opt-out classification: after an inserted `### Re:` block, generic prompt-shaped assistant prose, especially questions, could end the assistant block and let prefix repair treat later response text as user prompt text.
+
+I changed the normalization paths to use opt-in response-block exits. Inserted assistant blocks now stay assistant-owned unless an explicit prompt-run start appears, and target-based repair must match the explicit `normalize_prefix_lines` target set before it can resume after a response heading. Already-prefixed follow-up prompts still act as prompt boundaries, so duplicate prompt-line repair continues to work.
+
+Updated:
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/src/diff.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification:
+- `cargo test normalize_user_prompts`
+- `cargo test normalize_exchange_prefixes_for_targets`
+- `cargo test prompt_prefix_normalization_targets`
+- `cargo test`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commit / push:
+- `src/agent-doc`: `4811dd1 fix: narrow prompt prefix repair`, pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `2913fefe3 agent-doc: narrow prompt prefix repair`, pushed to `origin/main`
+<!-- agent:boundary:406b58ff -->
 <!-- /agent:exchange -->
 ###
 
 <!--
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
----
-`❯ The current tree has already started making this accountable...` had the `❯ ` prefix stripped during the patchback. This issue keeps on reoccurring. Is the logic too brittle? Is the selection criteria opt out? If yes, can we make the criteria opt in instead?
-spec-test-build-install-commit-push
 ---
 Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
 ---
@@ -60,7 +82,6 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - [ ] [#pendrev] --pending-add inserts multiple items in reverse order — second item ends up above first (LIFO instead of FIFO). Fix: batch-insert all adds at once in specified order. Plan: tasks/agent-doc/plan-pending-add-reverse-order.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
-- [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
 - [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
 - [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
 - [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
@@ -127,6 +148,7 @@ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain ef
 - 2026-05-10 [#runhb] [recommended] Add a parent-visible heartbeat/watchdog for long direct `agent-doc <file>` and child-agent waits: emit elapsed phase/cycle output every 30s, persist last-progress timestamps, and fail closed when capture/write/commit progress stalls past budget.
 - 2026-05-10 [#codexasyncnet] [recommended] Split Codex managed capability proof from pane startup: launch/render the Codex pane immediately, run network/SSH/write-root proof asynchronously, gate prompt dispatch until required proof succeeds, and fail closed with diagnostics if background proof fails.
 - 2026-05-10 [#syncroutelog] Fix stale/opaque sync-route diagnostics: controller RPC can surface 'ok response without data', saved editor-route-errors can remain stale after later success, and route can submit on a stale starting projection. Plan: tasks/agent-doc/plan-sync-command-route-error-follow-up.md
+- 2026-05-10 [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
 <!-- /agent:pending-done -->
 
 

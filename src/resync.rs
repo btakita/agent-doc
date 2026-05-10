@@ -2821,6 +2821,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn detect_dead_pane_not_flagged_as_issue() {
         // Dead panes are handled by prune(), not detect_issues.
         // detect_issues should skip dead panes entirely.
@@ -2838,6 +2839,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn detect_wrong_session_pane() {
         // A pane in tmux session "wrong" but frontmatter expects "correct"
         let iso = IsolatedTmux::new("resync-test-wrong-sess");
@@ -2876,6 +2878,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn detect_wrong_process_pane() {
         // A pane running a non-agent-doc process (e.g., "sleep")
         let iso = IsolatedTmux::new("resync-test-wrong-proc");
@@ -2917,6 +2920,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn detect_no_live_owner_pane() {
         let iso = IsolatedTmux::new("resync-test-no-live-owner");
         let cwd = std::env::current_dir().unwrap();
@@ -2944,6 +2948,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn fix_wrong_session_kills_pane_and_deregisters() {
         let iso = IsolatedTmux::new("resync-test-fix-sess");
         let cwd = std::env::current_dir().unwrap();
@@ -2974,6 +2979,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn fix_wrong_process_deregisters_but_keeps_pane() {
         let iso = IsolatedTmux::new("resync-test-fix-proc");
         let cwd = std::env::current_dir().unwrap();
@@ -3004,6 +3010,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn fix_no_live_owner_deregisters_but_keeps_pane() {
         let iso = IsolatedTmux::new("resync-test-fix-no-owner");
         let cwd = std::env::current_dir().unwrap();
@@ -3033,6 +3040,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn no_fix_without_flag() {
         // detect_issues returns issues but apply_fixes is only called with --fix.
         // This test verifies the reporting path doesn't mutate anything.
@@ -3061,6 +3069,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn healthy_pane_has_no_issues() {
         // A pane running a shell (idle) with no tmux_session mismatch should be clean.
         let iso = IsolatedTmux::new("resync-test-healthy");
@@ -3085,6 +3094,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn detect_wrong_window_panes_in_different_windows() {
         // Two panes in the same tmux session but different non-stash windows
         // should trigger WrongWindow.
@@ -3137,6 +3147,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn no_wrong_window_when_panes_in_same_window() {
         // Two panes in the same window should NOT trigger WrongWindow.
         let iso = IsolatedTmux::new("resync-test-same-win");
@@ -3187,6 +3198,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn no_wrong_window_for_stash_panes() {
         // A pane in a stash window should NOT trigger WrongWindow.
         let iso = IsolatedTmux::new("resync-test-stash-excl");
@@ -3218,6 +3230,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn fix_wrong_window_stashes_pane() {
         // --fix for WrongWindow should move the pane to stash.
         let iso = IsolatedTmux::new("resync-test-fix-win");
@@ -3260,6 +3273,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_kills_unregistered_shell_in_stash() {
         // An unregistered idle shell in the stash should be killed.
         let iso = IsolatedTmux::new("resync-purge-shell");
@@ -3286,6 +3300,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_preserves_registered_pane_in_stash() {
         // A registered pane in stash should NOT be killed.
         let iso = IsolatedTmux::new("resync-purge-registered");
@@ -3309,6 +3324,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_preserves_user_process_in_stash() {
         // A pane running a user process (not shell/agent) should NOT be killed.
         let iso = IsolatedTmux::new("resync-purge-userproc");
@@ -3349,6 +3365,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_kills_unregistered_agent_in_stash_without_live_owner() {
         let iso = IsolatedTmux::new("resync-purge-agent-no-owner");
         let cwd = std::env::current_dir().unwrap();
@@ -3373,6 +3390,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_stash_panes_bulk_kills_unregistered_agent_without_live_owner() {
         let iso = IsolatedTmux::new("resync-purge-agent-no-owner-bulk");
         let cwd = std::env::current_dir().unwrap();
@@ -3404,6 +3422,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn safe_passive_stash_cleanup_defers_live_agent_owner_proof() {
         let iso = IsolatedTmux::new("resync-safe-passive-defer-agent-proof");
         let cwd = std::env::current_dir().unwrap();
@@ -3443,6 +3462,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_stash_panes_kills_retained_dead_stash_pane() {
         let iso = IsolatedTmux::new("resync-purge-dead-stash");
         let cwd = std::env::current_dir().unwrap();
@@ -3469,6 +3489,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_preserves_unregistered_agent_in_stash_with_live_supervisor() {
         let iso = IsolatedTmux::new("resync-purge-agent-live-supervisor");
         let cwd = std::env::current_dir().unwrap();
@@ -3526,6 +3547,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_stash_panes_bulk_preserves_live_supervisor() {
         let iso = IsolatedTmux::new("resync-purge-agent-live-supervisor-bulk");
         let cwd = std::env::current_dir().unwrap();
@@ -3584,6 +3606,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_stash_panes_bulk_preserves_live_supervisor_in_pane_project_root() {
         let root = tempfile::tempdir().unwrap();
         let child_root = root.path().join("src/session-share");
@@ -3639,6 +3662,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_preserves_unregistered_agent_in_stash_with_live_owner() {
         let iso = IsolatedTmux::new("resync-purge-agent-live-owner");
         let cwd = std::env::current_dir().unwrap();
@@ -3700,6 +3724,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_orphan_agent_in_non_stash_window() {
         // An unregistered agent-doc pane in a regular window (not stash) should be killed
         // if the window has other panes.
@@ -3724,6 +3749,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_dead_non_stash_pane() {
         let iso = IsolatedTmux::new("resync-purge-dead-non-stash");
         let cwd = std::env::current_dir().unwrap();
@@ -3751,6 +3777,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_orphan_does_not_kill_last_pane() {
         // A window with only one pane (even if orphaned agent) should not be touched.
         let iso = IsolatedTmux::new("resync-purge-last-pane");
@@ -3770,6 +3797,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_dead_non_stash_panes_skips_last_pane() {
         let iso = IsolatedTmux::new("resync-purge-dead-last-pane");
         let cwd = std::env::current_dir().unwrap();
@@ -3805,6 +3833,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn return_stashed_panes_moves_active_pane_back() {
         // A registered pane running an active process (sleep) in stash should be
         // returned to its original session window.
@@ -3862,6 +3891,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn return_stashed_panes_skips_idle_shells() {
         // An idle shell in stash should NOT be returned — it's handled by purge.
         let iso = IsolatedTmux::new("resync-return-idle");
@@ -3901,6 +3931,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn fix_wrong_session_idle_shell_still_killed() {
         // Regression: idle shells in the wrong session should still be killed
         // even with the new agent-preservation logic.
@@ -3935,6 +3966,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn fix_wrong_session_deregisters_agent_without_kill_when_expected_session_dead() {
         // When the expected session doesn't exist, active agent panes should be
         // deregistered but NOT killed.
@@ -3974,6 +4006,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn registered_pane_still_owns_file_returns_false_when_file_missing() {
         let iso = IsolatedTmux::new("resync-live-owner-missing-file");
         assert!(!registered_pane_still_owns_file(
@@ -3985,6 +4018,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn fix_wrong_session_relocates_agent_when_expected_session_alive() {
         // When the expected session exists, active agent panes should be relocated
         // via join-pane, not killed.
@@ -4102,6 +4136,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn prune_targeted_in_uses_submodule_registry() {
         let iso = IsolatedTmux::new("resync-test-submod-prune");
 

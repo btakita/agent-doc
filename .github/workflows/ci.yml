@@ -12,10 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
 
-      - run: cargo clippy -- -D warnings
+      - run: make check
 
-      - run: cargo test
+      - run: make tmux-ci

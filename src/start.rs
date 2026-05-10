@@ -3042,6 +3042,7 @@ mod tests {
     // --- relocate_if_wrong_session tests ---
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn relocate_noop_when_already_correct_session() {
         let iso = IsolatedTmux::new("start-reloc-noop");
         let pane = iso
@@ -3059,6 +3060,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn relocate_succeeds_cross_session() {
         let iso = IsolatedTmux::new("start-reloc-cross");
         let _pane_a = iso
@@ -3075,6 +3077,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn relocate_fails_gracefully_when_no_anchor() {
         let iso = IsolatedTmux::new("start-reloc-noanchor");
         let pane = iso
@@ -3095,6 +3098,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn start_rebinds_dead_project_session_to_current_pane_session() {
         let dir = TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -3123,6 +3127,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn start_does_not_rebind_live_project_session_pin() {
         let dir = TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -3225,6 +3230,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn existing_session_pane_action_refuses_proven_live_owner() {
         let iso = IsolatedTmux::new("start-duplicate-live-pane");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -3250,6 +3256,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn existing_session_refusal_keeps_launcher_pane_in_original_session() {
         let iso = IsolatedTmux::new("start-reuse-keeps-launcher-session");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -3285,6 +3292,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn existing_session_pane_action_ignores_same_pane() {
         let iso = IsolatedTmux::new("start-duplicate-same-pane");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -3305,6 +3313,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn existing_session_pane_action_refuses_alive_stale_registration_without_owner() {
         let iso = IsolatedTmux::new("start-stale-alive-pane");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -3329,6 +3338,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn existing_session_pane_action_ignores_dead_registered_pane() {
         let iso = IsolatedTmux::new("start-duplicate-dead-pane");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -3349,6 +3359,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn format_existing_pane_conflict_error_includes_manual_tmux_commands() {
         let iso = IsolatedTmux::new("start-conflict-error");
         let tmp = TempDir::new().unwrap();
@@ -3861,6 +3872,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn dispatch_submit_text_to_tmux_uses_pane_submit_path() {
         let tmp = TempDir::new().unwrap();
         let iso = IsolatedTmux::new("start-ipc-submit-path");
@@ -3896,6 +3908,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn supervisor_ipc_inject_reaches_live_tmux_pane_submit_path() {
         let _env_guard = crate::test_support::env_lock();
         let tmp = TempDir::new().unwrap();

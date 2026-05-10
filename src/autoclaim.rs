@@ -247,6 +247,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn autoclaim_focuses_pane_with_claim() {
         let _env_guard = env_lock();
         let iso = IsolatedTmux::new("agent-doc-test-autoclaim-focus");
@@ -308,6 +309,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn autoclaim_syncs_layout_with_multiple_files() {
         let _env_guard = env_lock();
         let iso = IsolatedTmux::new("agent-doc-test-autoclaim-sync");

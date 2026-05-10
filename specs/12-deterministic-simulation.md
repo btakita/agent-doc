@@ -58,6 +58,13 @@ Every generated failure must include a stable seed and command trace. The
 normal fast corpus runs in `cargo test`; the wider deterministic corpus is an
 ignored test that `make check` runs explicitly after the normal suite.
 
+The default development suite must stay pure/fast. Tests that create an
+`IsolatedTmux` server are live integration tests and must be marked ignored so
+plain `cargo test`, `make test`, and `make check` do not pay tmux startup,
+window reconciliation, shell readiness, or process-tree sampling costs. The
+explicit `make tmux-ci` target owns the ignored live-tmux sweep and GitHub
+Actions must run that target on Linux with `tmux` installed.
+
 Current deterministic budgets:
 
 - Fast corpus: seeds `0..512`, `24` commands per seed, budget `3s`, always run
@@ -145,11 +152,11 @@ live tmux server:
   variant: a hidden requested pane is attached while an open-cycle owner can be
   stashed and sync still focuses an already-visible requested sibling.
 
-Real tmux tests are still required for pane/window movement, `tmux-router`
-reconcile behavior, shell/process ownership proof, and end-to-end editor
-smokes. Pure ownership/cardinality variants should be promoted to named
-SimWorld traces before the duplicate tmux-backed edge test is removed from the
-default suite.
+Real tmux tests are still required in `make tmux-ci` for pane/window movement,
+`tmux-router` reconcile behavior, shell/process ownership proof, and end-to-end
+editor smokes. Pure ownership/cardinality variants should be promoted to named
+SimWorld traces before the duplicate tmux-backed edge test is demoted from
+local default coverage to the ignored live-tmux sweep.
 
 The simulator tests print schedule count, command count, elapsed time, and the
 active budget for each corpus so CI logs show when generated coverage starts to

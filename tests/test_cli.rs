@@ -64,6 +64,46 @@ fn test_binary_exists() {
 }
 
 #[test]
+fn live_tmux_tests_are_not_in_default_development_suite() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let sources = [
+        "src/autoclaim.rs",
+        "src/focus.rs",
+        "src/resync.rs",
+        "src/route.rs",
+        "src/session_actor_cmd.rs",
+        "src/sessions.rs",
+        "src/start.rs",
+        "src/sync.rs",
+    ];
+    let mut unignored = Vec::new();
+
+    for source in sources {
+        let path = manifest_dir.join(source);
+        let content = fs::read_to_string(&path).unwrap();
+        for block in content.split("#[test]").skip(1) {
+            if !block.contains("IsolatedTmux::new") {
+                continue;
+            }
+            let header_and_body = block.split("#[test]").next().unwrap_or(block);
+            if !header_and_body.contains("#[ignore") {
+                let name = header_and_body
+                    .split("fn ")
+                    .nth(1)
+                    .and_then(|rest| rest.split('(').next())
+                    .unwrap_or("<unknown>");
+                unignored.push(format!("{source}::{name}"));
+            }
+        }
+    }
+
+    assert!(
+        unignored.is_empty(),
+        "live tmux tests must be #[ignore] and run through `make tmux-ci`: {unignored:?}"
+    );
+}
+
+#[test]
 fn test_cli_help() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("--help");

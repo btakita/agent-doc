@@ -165,6 +165,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn focus_prefers_local_actor_projection_over_stale_registry() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -218,6 +219,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn focus_ignores_closed_local_actor_projection() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();

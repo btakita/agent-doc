@@ -5613,6 +5613,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn find_live_owner_pane_reuses_latest_open_session_log_owner() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -5638,6 +5639,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn find_live_owner_pane_prefers_latest_open_session_log_owner_over_stale_process_tree_match() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -5704,6 +5706,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn find_live_owner_pane_reuses_live_registry_rebind_successor() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -5730,6 +5733,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_actor_or_live_owner_matches_prefers_authoritative_actor_record() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -5777,6 +5781,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_proof_cache_reuses_actor_lookup_within_one_sync_cycle() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -5849,6 +5854,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn recover_existing_associated_pane_reuses_latest_open_session_log_owner() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -5900,6 +5906,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn recover_existing_associated_pane_reuses_live_registry_rebind_successor() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -5945,6 +5952,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn open_session_log_owner_fail_closed_diagnostic_requires_same_alive_open_pane() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -6006,6 +6014,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn recover_existing_associated_pane_reregisters_supervisor_owned_pane() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -6069,6 +6078,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn reregister_recovered_owner_preserves_existing_supervisor_identity_without_socket() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -6165,6 +6175,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn passive_autostart_allows_cleanly_closed_latest_session() {
         let tmp = tempfile::TempDir::new().unwrap();
         let iso = IsolatedTmux::new("sync-passive-closed");
@@ -6190,6 +6201,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn passive_autostart_blocks_open_latest_session() {
         let tmp = tempfile::TempDir::new().unwrap();
         let iso = IsolatedTmux::new("sync-passive-open");
@@ -6213,6 +6225,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn passive_autostart_blocks_live_registry_rebind_successor() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -6242,6 +6255,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn passive_autostart_allows_stale_registry_rebind_successor() {
         let tmp = tempfile::TempDir::new().unwrap();
         let iso = IsolatedTmux::new("sync-passive-rebind-stale");
@@ -6267,6 +6281,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn passive_autostart_blocks_unresolved_startup_miss() {
         let tmp = tempfile::TempDir::new().unwrap();
         let iso = IsolatedTmux::new("sync-passive-miss");
@@ -6650,6 +6665,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_missing_registered_pane_captures_retained_dead_pane_diagnostics() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -6804,6 +6820,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_skips_correct_state() {
         let iso = IsolatedTmux::new("sync-repair-skip-correct");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -6826,6 +6843,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_moves_window_to_index_0() {
         let iso = IsolatedTmux::new("sync-repair-move-idx0");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -6865,6 +6883,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_moves_stash_directly_after_agent_doc() {
         let iso = IsolatedTmux::new("sync-repair-stash-index");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -6908,6 +6927,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_rescues_pane_from_stash() {
         let iso = IsolatedTmux::new("sync-repair-rescue-stash");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -6939,6 +6959,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_consolidates_multiple_stash_windows() {
         let iso = IsolatedTmux::new("sync-repair-consolidate");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -7033,6 +7054,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_swaps_when_index_0_occupied() {
         // Bug: when agent-doc is at index 2 and index 0 is occupied by another window
         // (e.g., stash), move-window fails because index 0 is taken.
@@ -7752,6 +7774,7 @@ mod tests {
     /// repair_layout writes move-window or swap-window entries to /tmp/agent-doc-sync.log
     /// when it has to reposition the agent-doc window to index 0.
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_logs_move_window_action() {
         let iso = IsolatedTmux::new("sync-log-move-window");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -7999,6 +8022,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn safe_passive_sync_does_not_focus_controller_actor_when_sync_lock_is_contended() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -8328,6 +8352,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn stash_rescue_discovers_agent_doc_window_when_window_arg_is_none() {
         let iso = IsolatedTmux::new("sync-stash-discover-window");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -8409,6 +8434,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_defers_stash_rescue_to_reconciler_swap() {
         let iso = IsolatedTmux::new("sync-deferred-stash-rescue");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -8504,6 +8530,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn windowless_sync_targets_current_session_agent_doc_window() {
         let iso = IsolatedTmux::new("sync-windowless-target-agent-doc");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -8528,6 +8555,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn windowless_sync_prefers_live_project_session_pin_over_current_session() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd = ScopedCurrentDir::set(tmp.path());
@@ -8561,6 +8589,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn windowless_sync_falls_back_to_current_session_when_project_pin_dead() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd = ScopedCurrentDir::set(tmp.path());
@@ -8587,6 +8616,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn windowless_sync_prefers_shared_workspace_root_pin_for_mixed_roots() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -8643,6 +8673,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn explicit_non_agent_window_preserves_layout_when_session_lacks_agent_doc_window() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -8740,6 +8771,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn rescue_missing_window_uses_visible_file_registry_not_cwd_registry() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -8894,6 +8926,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn register_synced_files_updates_each_project_registry_by_path_key() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -8989,6 +9022,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn register_synced_files_prunes_cross_root_duplicate_pane_binding() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -9093,6 +9127,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn register_synced_files_skips_geometry_only_binding_during_fail_closed_recovery() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -9171,6 +9206,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn register_synced_files_keeps_authoritative_actor_projection() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -9225,6 +9261,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_router_sync_keeps_cross_root_columns_stable_when_focus_moves() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -9443,6 +9480,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn registered_pane_proves_live_owner_rejects_unowned_alive_pane() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd = ScopedCurrentDir::set(tmp.path());
@@ -9468,6 +9506,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn registered_pane_proves_live_owner_rejects_live_registry_rebind_successor() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd = ScopedCurrentDir::set(tmp.path());
@@ -9591,6 +9630,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_stashes_open_cycle_pane_during_reconcile_detach() {
         let iso = IsolatedTmux::new("sync-open-cycle-protect");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -9688,6 +9728,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn safe_passive_sync_preserves_existing_layout_for_vscode_mixed_root_split_replay() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -9814,6 +9855,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn safe_passive_sync_reuses_alive_registered_pane_before_full_live_owner_proof() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -9866,6 +9908,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn safe_passive_sync_attaches_requested_pane_and_stashes_open_cycle_extra() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -10198,6 +10241,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn safe_passive_blocked_layout_preserve_still_reselects_visible_focus_pane() {
         let root = tempfile::TempDir::new().unwrap();
         let subroot = tempfile::TempDir::new().unwrap();
@@ -10315,6 +10359,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn safe_passive_focus_only_editor_switch_preserves_sibling_pane() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -10416,6 +10461,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn safe_passive_focus_only_existing_sibling_focus_does_not_replace_active_pane() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -10504,6 +10550,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn safe_passive_focus_only_editor_switch_preserves_sibling_without_saved_layout() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();

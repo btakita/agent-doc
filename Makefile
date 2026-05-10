@@ -1,7 +1,8 @@
-.PHONY: build build-release release test sim-medium clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
+.PHONY: build build-release release test sim-medium tmux-ci clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
+TMUX_TEST_THREADS ?= 1
 CARGO_CLEAN_ENV = env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE
 
 # Build debug binary
@@ -41,6 +42,11 @@ test:
 # #[ignore], but make check runs it explicitly so CI exercises more schedules.
 sim-medium:
 	$(CARGO_CLEAN_ENV) cargo test closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget -- --ignored --test-threads="$(TEST_THREADS)"
+
+# Live tmux integration sweep. These tests are intentionally ignored in the
+# default development suite and run on CI where tmux is installed.
+tmux-ci:
+	$(CARGO_CLEAN_ENV) cargo test --all-targets -- --ignored --test-threads="$(TMUX_TEST_THREADS)"
 
 # Lint
 clippy:

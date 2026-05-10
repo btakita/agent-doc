@@ -6563,6 +6563,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn register_dispatch_target_rejects_cross_file_rebind_and_preserves_registry() {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -6870,6 +6871,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn lazy_claim_requires_explicit_pane_provenance() {
         let iso = IsolatedTmux::new("route-test-lazy-claim-explicit-only");
         let cwd = std::env::current_dir().unwrap();
@@ -6889,6 +6891,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wrong_session_pane_still_receives_send() {
         // Strategy 1 is session-agnostic after the fix: when a registered pane
         // is alive, send to it regardless of which tmux session it lives in.
@@ -7199,6 +7202,7 @@ done
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_detects_prompt() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-ready");
@@ -7228,6 +7232,7 @@ done
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_detects_claude_composer_hint_prompt() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-claude-composer-hint");
@@ -7261,6 +7266,7 @@ done
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_times_out_without_prompt() {
         let iso = IsolatedTmux::new("route-test-timeout");
         let session = "test";
@@ -7291,6 +7297,7 @@ done
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_codex_prompt() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-codex-ready");
@@ -7325,6 +7332,7 @@ done
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_rejects_codex_queue_message_footer() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-codex-queue-message");
@@ -7358,6 +7366,7 @@ done
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_rejects_codex_reverse_history_search() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-codex-reverse-search");
@@ -7419,6 +7428,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_rejects_codex_prompt_with_real_drafted_text() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-codex-drafted-prompt");
@@ -7641,6 +7651,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn send_keys_delivers_claude_command_with_enter() {
         let iso = IsolatedTmux::new("route-test-send");
         let session = "test";
@@ -7673,6 +7684,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn send_keys_delivers_codex_command_with_enter() {
         let iso = IsolatedTmux::new("route-test-send-codex");
         let session = "test";
@@ -7703,6 +7715,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn send_command_checked_reports_accepted_when_command_is_consumed() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -7736,6 +7749,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn send_command_checked_codex_does_not_append_follow_up_lines() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -7977,6 +7991,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
         use std::sync::{Arc, Mutex};
 
@@ -8182,6 +8197,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_keeps_live_child_reroute_optimistic_when_cycle_ack_is_missing() {
         use std::sync::{Arc, Mutex};
 
@@ -8255,6 +8271,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_retries_fresh_restart_after_live_codex_ack_timeout() {
         use std::sync::{
             Arc,
@@ -8404,6 +8421,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_records_optimistic_fresh_restart_retry_in_original_pane() {
         use std::sync::{
             Arc,
@@ -8561,6 +8579,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_restarts_fresh_before_dispatch_after_tracked_codex_clear() {
         use std::sync::{
             Arc, Mutex,
@@ -8701,6 +8720,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_refuses_busy_registered_pane_before_dispatch_when_prompt_drift_exists()
      {
         let dir = tempfile::tempdir().unwrap();
@@ -8761,6 +8781,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_fails_closed_on_busy_registered_pane() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -8823,6 +8844,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_submits_while_latest_run_is_still_starting() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -8904,6 +8926,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn dispatch_only_send_reopen_direct_pane_submit_avoids_extra_enter_retries() {
         use std::sync::{Arc, Mutex};
 
@@ -9083,6 +9106,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_fails_closed_on_reverse_i_search() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -9158,6 +9182,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn run_with_tmux_dispatch_only_ignores_startup_miss_on_alive_registered_pane() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -9224,6 +9249,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_retries_busy_registered_pane_once_after_interrupt_recovery() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -9316,6 +9342,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_retries_busy_registered_pane_once_after_ctrl_g_probe() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -9405,6 +9432,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_keeps_interrupt_timeout_busy_reroute_optimistic_for_alive_pane() {
         use std::sync::{
             Arc,
@@ -9504,6 +9532,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_restarts_fresh_for_busy_registered_pane_after_noop_fix() {
         use std::sync::{
             Arc,
@@ -9671,6 +9700,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs() {
         use std::sync::{
             Arc,
@@ -9806,6 +9836,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_retries_busy_registered_pane_once_after_scoped_fix() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -9896,6 +9927,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route() {
         use std::sync::{
             Arc, Mutex,
@@ -10082,6 +10114,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_focuses_busy_registered_pane_without_prompt_drift() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -10136,6 +10169,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_rejects_same_committed_cycle_mutation_for_prompt_drift() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -10218,6 +10252,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_accepts_registered_pane_trigger_once_new_cycle_starts() {
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
@@ -10306,6 +10341,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_accepts_content_edit_cycle_ack_without_extra_payload_lines() {
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
@@ -10394,6 +10430,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn alive_registered_pane_without_live_owner_deregisters_and_lazy_claims() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -10486,6 +10523,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn alive_registered_pane_fails_closed_when_legacy_live_owner_conflicts() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -10581,6 +10619,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_prefers_authoritative_actor_dispatch_target() {
         use std::sync::{Arc, Mutex};
 
@@ -10700,6 +10739,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_prefers_authoritative_actor_dispatch_target() {
         use std::sync::{Arc, Mutex};
 
@@ -10817,6 +10857,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_falls_back_to_registered_authoritative_actor_pane_when_supervisor_state_is_missing()
      {
         let dir = tempfile::tempdir().unwrap();
@@ -10895,6 +10936,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_does_not_restart_after_tracked_codex_clear() {
         use std::sync::{
             Arc, Mutex,
@@ -11028,6 +11070,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_fails_closed_when_live_submit_has_no_codex_hook_proof()
     {
         use std::sync::{
@@ -11142,6 +11185,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_recovers_waiting_input_actor_with_fresh_restart() {
         use std::sync::{
             Arc,
@@ -11246,6 +11290,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_fails_closed_for_blocked_or_closed_authoritative_actor() {
         use std::sync::{Arc, Mutex};
 
@@ -11362,6 +11407,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn load_authoritative_actor_dispatch_target_accepts_normalized_claude_harness_identity() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -11423,6 +11469,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatches_busy_authoritative_actor_when_prompt_target_pending() {
         use std::sync::{Arc, Mutex};
 
@@ -11525,6 +11572,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatches_starting_authoritative_actor_when_prompt_target_pending() {
         use std::sync::{Arc, Mutex};
 
@@ -11627,6 +11675,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_keeps_starting_authoritative_actor_on_direct_pane_submit()
      {
         use std::sync::{Arc, Mutex};
@@ -11730,6 +11779,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_submits_to_healthy_starting_actor_without_split_churn()
     {
         let dir = tempfile::tempdir().unwrap();
@@ -11862,6 +11912,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn auto_start_reuses_other_file_pane_only_as_split_anchor() {
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
@@ -11986,6 +12037,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_waits_longer_for_fresh_start_cycle_ack() {
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
@@ -12059,6 +12111,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_rebinds_fresh_start_after_ready_wait_registry_churn() {
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
@@ -12152,6 +12205,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_keeps_fresh_start_authoritative_despite_existing_owner_rebind() {
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
@@ -12265,6 +12319,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_ignores_handoff_back_to_active_startup_miss_pane() {
         let _tmux_guard = tmux_start_lock();
         let dir = tempfile::tempdir().unwrap();
@@ -12388,6 +12443,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_fresh_dispatch_target_ignores_explicitly_blocked_startup_miss_pane() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -12435,6 +12491,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path() {
         use std::sync::{Arc, Mutex};
 
@@ -12496,6 +12553,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn pane_has_prompt_detects_unicode() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-has-prompt");
@@ -12529,6 +12587,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn full_auto_start_flow() {
         let _tmux_guard = tmux_start_lock();
         let iso = IsolatedTmux::new("route-test-e2e");
@@ -12572,6 +12631,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn select_pane_switches_window() {
         let iso = IsolatedTmux::new("route-test-select");
         let session = "test";
@@ -12607,6 +12667,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn command_text_cleared_after_acceptance() {
         // Verifies that send_command's acceptance check works:
         // The command text should NOT be in the last 5 lines after acceptance.
@@ -12638,6 +12699,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn pane_session_detection() {
         // Verify we can detect which session a pane is in
         let iso = IsolatedTmux::new("route-test-session");
@@ -12660,6 +12722,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn pane_in_wrong_session_detected() {
         // Create panes in two different sessions, verify we can distinguish them
         let iso = IsolatedTmux::new("route-test-wrong-sess");
@@ -12708,6 +12771,7 @@ Body\n\
     // --- auto_start_in_session tests ---
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn auto_start_splits_in_existing_window() {
         // When a registered agent-doc pane exists in the target session,
         // auto_start_in_session should split-window in that pane's window
@@ -12739,6 +12803,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn auto_start_creates_new_window_when_no_registered_panes() {
         // When no registered agent-doc panes exist, auto_start_in_session
         // should create a new window via auto_start().
@@ -12763,6 +12828,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn find_registered_pane_filters_by_session() {
         // find_registered_pane_in_session should only return panes
         // that are alive and in the target tmux session.
@@ -12787,6 +12853,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn split_window_respects_working_directory() {
         let iso = IsolatedTmux::new("route-test-split-cwd");
         let session = "test";
@@ -12813,6 +12880,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn stash_pane_on_split_failure() {
         // When split_window fails, the fallback should auto_start then stash
         // the pane so it doesn't create a visible new window.
@@ -12851,6 +12919,7 @@ Body\n\
     // --- has_named_window tests ---
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn has_named_window_detects_agent_doc_window() {
         let iso = IsolatedTmux::new("route-test-named-win");
         let session = "test";
@@ -12875,6 +12944,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn has_named_window_false_for_nonexistent_session() {
         let iso = IsolatedTmux::new("route-test-named-win-no-sess");
         assert!(
@@ -12884,6 +12954,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn duplicate_pane_policy_error_includes_manual_tmux_commands() {
         let iso = IsolatedTmux::new("route-test-duplicate-policy");
         let session = "test";
@@ -12901,6 +12972,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn preserves_replaced_stash_pane_without_provenance() {
         let iso = IsolatedTmux::new("route-test-evict-stash");
         let session = "route-evict";
@@ -12948,6 +13020,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn eviction_skipped_when_agent_process_active() {
         let iso = IsolatedTmux::new("route-test-evict-busy");
         let session = "route-evict-busy";
@@ -13037,6 +13110,7 @@ Body\n\
     // --- tmux_session validation tests ---
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn route_warns_on_nonexistent_tmux_session() {
         // When frontmatter specifies a tmux_session that doesn't exist,
         // run_with_tmux should log a warning and NOT create that session.
@@ -13086,6 +13160,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn route_falls_back_to_existing_session() {
         // When frontmatter requests a nonexistent session, route should
         // fall back to an existing session and create panes there.
@@ -13137,6 +13212,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_target_session_ignores_blank_context_session() {
         let iso = IsolatedTmux::new("route-test-blank-context");
         let cwd = std::env::current_dir().unwrap();
@@ -13152,6 +13228,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_preferred_session_prefers_live_project_pin_over_current_session() {
         let dir = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -13175,6 +13252,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_target_session_prefers_nested_file_root_pin_over_outer_cwd() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -13214,6 +13292,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_target_session_prefers_shared_workspace_root_pin_for_mixed_roots() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -13270,6 +13349,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn blank_context_session_does_not_bypass_target_validation() {
         let iso = IsolatedTmux::new("route-test-blank-context-validate");
         let result =
@@ -13281,6 +13361,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn implicit_fallback_session_is_not_auto_start_target() {
         let iso = IsolatedTmux::new("route-test-no-implicit-fallback");
         let result =
@@ -13294,6 +13375,7 @@ Body\n\
     // --- Stash rescue tests ---
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn pane_in_stash_rescued_to_agent_doc() {
         // When a registered pane ends up in a stash window, route should
         // rescue it back to the agent-doc window without ejecting the
@@ -13354,6 +13436,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn join_pane_rescue_places_left_of_target_when_requested() {
         let iso = IsolatedTmux::new("route-test-join-left");
         let session = "test";
@@ -13394,6 +13477,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_after_claim_prefers_col_args_over_registry() {
         // Regression test: when editor provides col_args, sync_after_claim should
         // pass those to sync::run instead of auto-discovering from registry.
@@ -13437,6 +13521,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_after_claim_stays_on_injected_tmux_server() {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -13517,6 +13602,7 @@ Body\n\
     // --- split_before positional target tests ---
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn split_before_true_picks_leftmost_pane() {
         // Regression test for 3-pane layout bug (Fix 1):
         // When split_before=true (left-column file), the split target should be
@@ -13566,6 +13652,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn split_before_false_picks_rightmost_pane() {
         // Regression test for 3-pane layout bug (Fix 1):
         // When split_before=false (right-column file), the split target should be
@@ -13613,6 +13700,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn provision_pane_first_col_splits_left() {
         // Verify that provision_pane with a file in the first column
         // computes split_before=true via is_first_column and places the new
@@ -13681,6 +13769,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn provision_pane_second_col_splits_right() {
         // Verify that provision_pane with a file in the second column
         // computes split_before=false via is_first_column and places the new
@@ -13750,6 +13839,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_after_claim_handles_malformed_registry() {
         // When sessions.json is malformed, sync_after_claim should not panic.
         // It should return early (silently) rather than propagating the error.
@@ -13774,6 +13864,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_after_claim_with_empty_col_args_and_no_registry() {
         // When there's no registry file and no col_args, sync_after_claim
         // should return early without creating any panes.
@@ -13795,6 +13886,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn list_panes_ordered_returns_screen_position_after_rearrange() {
         // When panes are broken out and re-joined, creation order can diverge from
         // screen position. list_panes_ordered must return screen order (by pane_left).
@@ -13827,6 +13919,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn provision_pane_right_col_picks_rightmost_after_rearrange() {
         // Regression: provision_pane must use screen position, not creation order.
         // After rearranging panes so creation order != screen order,
@@ -13892,6 +13985,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn concurrent_provision_pane_serializes_same_session_auto_start() {
         use std::sync::{Arc, Barrier};
 
@@ -13970,6 +14064,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn failed_route_cleanup_preserves_live_registered_owner() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -13999,6 +14094,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn failed_route_cleanup_does_not_preserve_unregistered_pane() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -14018,6 +14114,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn failed_route_cleanup_reaps_startup_miss_owner_pane() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -14057,6 +14154,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn failed_route_cleanup_only_reaps_attempt_local_created_panes() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -14399,6 +14497,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn startup_miss_diagnostic_does_not_queue_shell_echo_in_pane() {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -14427,6 +14526,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_fails_closed_for_halted_supervisor_when_no_live_owner() {
         use std::sync::{
             Arc,
@@ -14522,6 +14622,7 @@ Body\n\
     }
 
     #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_fails_closed_after_repeated_recent_session_losses() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();

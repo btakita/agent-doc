@@ -36,14 +36,32 @@ Active backlog:
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - 7 more active item(s)
-<!-- agent:boundary:9e81c3a9 -->
+❯ Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex. Can we use a "digest", "Table of Contents" or other techniques?
+### Re: instruction surface optimization — gpt-5
+
+Yes. A digest is the right default; a Table of Contents is usually a net loss for this file because it adds tokens without changing the hot-path decision flow. I optimized the shared agent-doc instruction surface around a compact `Hot Path Digest`, kept rare detail in runbooks, and preserved the tested closeout/repair/pending invariants for Claude Code and Codex.
+
+Changed:
+- `src/agent-doc/SKILL.md`: shorter frontmatter, digest-style hot path, tighter auto-update/persist/runbook sections.
+- `src/agent-doc/src/skill.rs`: matching shorter rendered descriptions and auto-update lines for Claude, Codex, and generic/root installs.
+- `AGENTS.md`, `.codex/AGENTS.md`, `.claude/skills/agent-doc/SKILL.md`: manually synchronized generated surfaces without running `agent-doc skill install`, because the worktree already had unrelated dirty generated runbooks/config files.
+- `src/agent-doc/src/write.rs`: fixed a clippy `if_same_then_else` error uncovered by `make check` by merging identical `in_agent_block = false` branches.
+
+Size result for the shared source: `src/agent-doc/SKILL.md` went from 136 lines / 1,834 words to 125 lines / 1,617 words. The generated root/Codex/Claude surfaces each dropped 33 lines net across the three tracked files.
+
+Verification:
+- `cargo test bundled_skill -- --test-threads=2` passed.
+- `cargo test --test test_cli test_skill_md_contains_required_steps -- --test-threads=2` passed.
+- `cargo test --test test_cli test_skill_md_references_valid_commands -- --test-threads=2` passed.
+- `cargo test rendered_harness_content_stays_compact -- --test-threads=2` passed.
+- `make check` passed after the clippy cleanup.
+- `cargo run --quiet -- audit-docs` still fails on existing crate-doc staleness against the unrelated dirty `src/git.rs` work: `.claude/skills/agent-doc/SKILL.md`, `CLAUDE.md`, `README.md`, and `SPEC.md` are reported as older than `src/git.rs`. That is separate from the generated root/Codex/Claude surfaces updated here.
+<!-- agent:boundary:a4ab6c8d -->
 <!-- /agent:exchange -->
 ###
 
 <!--
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
----
-Please optimize the AGENTS.md + SKILL.md to reduce context usage yet maintain effectiveness for Claude Code + Codex
 ---
 "Press Enter to restart, or 'q' to exit."
 -->

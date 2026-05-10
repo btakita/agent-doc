@@ -92,7 +92,64 @@ Committed and pushed:
 
 - `src/tagpath` `main`: `1bcb017 test: add context-pack token savings fixture`
 - `src/tsift` `main`: `e53fa00 test: include context-pack in token savings`
-<!-- agent:boundary:215ed214 -->
+❯ I see
+```
+• tsift is usable here, though the index is stale. This looks like a direct command request, so I’m proceeding with the
+  requested agent-doc invocation.
+```
+
+❯ How can we auto update or prompt to update tsift?
+
+❯ spec-test-build-install-commit-push
+### Re: status auto-update / prompt flow — gpt-5
+
+Completed the `spec-test-build-install-commit-push` cycle.
+
+Implemented the answer as a concrete command plus refreshed agent instructions:
+
+- Added `tsift status --fix`. It applies safe local status fixes before reporting: refreshes stale or missing root indexes, refreshes workspace scoped indexes when the workspace status is stale, and refreshes stale/missing Code Navigation instructions through the existing `tsift init` path.
+- Updated the injected Code Navigation section to tell agents: run `tsift status` at session start; if it prints a `run:` recommendation for stale/missing tsift state, run `tsift status --fix` before relying on tsift results; if the harness cannot perform writes, ask the user to run the printed command instead.
+- Kept the existing Codex auto path documented: `tsift init --codex` installs the prompt-time auto-reindex hook.
+- Bumped tsift to `0.1.42` and aligned the tagpath dependency metadata with the local `tagpath` `0.6.2` submodule.
+- Updated the token-savings fixture regression to accept the current six-surface tagpath fixture contract: `search`, `explain`, `session-review`, `context-pack`, `normalize-query`, and `ontology-refs`.
+
+Verification passed:
+
+- `cargo test status_fix_refreshes_stale_index --test exit_code`
+- `cargo test status_cmd_fix_refreshes_stale_index`
+- `cargo test --test exit_code token_savings_accepts_tagpath_preview_fixture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- installed `tsift --version` -> `tsift 0.1.42`
+- installed `tsift status --help` shows `--fix`
+
+Committed and pushed `src/tsift` `main`: `2142f95 feat: add status fix refresh`.
+### Re: status auto-update / prompt flow — gpt-5
+
+Completed the `spec-test-build-install-commit-push` cycle.
+
+Implemented the answer as a concrete command plus refreshed agent instructions:
+
+- Added `tsift status --fix`. It applies safe local status fixes before reporting: refreshes stale or missing root indexes, refreshes workspace scoped indexes when the workspace status is stale, and refreshes stale/missing Code Navigation instructions through the existing `tsift init` path.
+- Updated the injected Code Navigation section to tell agents: run `tsift status` at session start; if it prints a `run:` recommendation for stale/missing tsift state, run `tsift status --fix` before relying on tsift results; if the harness cannot perform writes, ask the user to run the printed command instead.
+- Kept the existing Codex auto path documented: `tsift init --codex` installs the prompt-time auto-reindex hook.
+- Bumped tsift to `0.1.42` and aligned the tagpath dependency metadata with the local `tagpath` `0.6.2` submodule.
+- Updated the token-savings fixture regression to accept the current six-surface tagpath fixture contract: `search`, `explain`, `session-review`, `context-pack`, `normalize-query`, and `ontology-refs`.
+
+Verification passed:
+
+- `cargo test status_fix_refreshes_stale_index --test exit_code`
+- `cargo test status_cmd_fix_refreshes_stale_index`
+- `cargo test --test exit_code token_savings_accepts_tagpath_preview_fixture`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- installed `tsift --version` -> `tsift 0.1.42`
+- installed `tsift status --help` shows `--fix`
+
+Committed and pushed `src/tsift` `main`: `2142f95 feat: add status fix refresh`.
+<!-- agent:boundary:773d90b0 -->
 <!-- /agent:exchange -->
 ###
 

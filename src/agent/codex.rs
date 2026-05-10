@@ -916,17 +916,18 @@ impl Codex {
         required_ssh_match_terms: &[String],
     ) -> Result<ParsedCodexResponse> {
         let mut cmd = self.build_command(session_id, false, model);
-        let output = cmd
+        let mut child = cmd
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                if let Some(ref mut stdin) = child.stdin {
-                    Self::write_prompt_to_child(stdin, prompt)?;
-                }
-                child.wait_with_output()
-            })?;
+            .spawn()?;
+        {
+            if let Some(ref mut stdin) = child.stdin {
+                Self::write_prompt_to_child(stdin, prompt)?;
+            }
+            child.stdin.take();
+        }
+        let output = super::wait_with_output_timeout(child, super::run_agent_timeout())?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

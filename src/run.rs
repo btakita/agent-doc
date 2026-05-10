@@ -161,7 +161,7 @@ pub fn run(
 
     // Ensure the document has a session UUID (for tmux routing)
     let raw_content = std::fs::read_to_string(file)?;
-    let (content_original, _session_id) = frontmatter::ensure_session_for_file(&raw_content, file)?;
+    let (content_original, session_id) = frontmatter::ensure_session_for_file(&raw_content, file)?;
     if content_original != raw_content {
         std::fs::write(file, &content_original)?;
     }
@@ -220,12 +220,26 @@ pub fn run(
     start_run_cycle(file)?;
 
     eprintln!("Submitting to {}...", agent_name);
+    if let Some(diagnostic) =
+        recursive_codex_direct_invocation_diagnostic(file, &session_id, agent_name)
+    {
+        record_run_preflight_timeout(file, "recursive_direct_invocation_blocked", &diagnostic)?;
+        anyhow::bail!("{}", diagnostic);
+    }
 
     // Send to agent — use `resume` for agent conversation tracking
     let fork = fm.resume.is_none();
     let harness = agent_doc::model_tier::detect_harness();
     let model = model.or(fm.resolve_harness_model(&harness));
-    let response = backend.send(&prompt, fm.resume.as_deref(), fork, model)?;
+    let response = match backend.send(&prompt, fm.resume.as_deref(), fork, model) {
+        Ok(response) => response,
+        Err(err) if is_timeout_error(&err) => {
+            let diagnostic = run_dispatch_timeout_diagnostic(file, agent_name);
+            record_run_preflight_timeout(file, "direct_invocation_timeout", &diagnostic)?;
+            anyhow::bail!("{}\n\nsource: {}", diagnostic, err);
+        }
+        Err(err) => return Err(err),
+    };
 
     let response_text = match run_mode {
         RunMode::Append => write::strip_assistant_heading(&response.text),
@@ -280,6 +294,134 @@ fn start_run_cycle(file: &Path) -> Result<()> {
     let snapshot_content = snapshot::load(file)?;
     crate::cycle_state::start_preflight(file, snapshot_content.as_deref(), Some(&file_content))?;
     Ok(())
+}
+
+fn is_timeout_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::TimedOut)
+            || cause.to_string().contains("timed out")
+    })
+}
+
+fn record_run_preflight_timeout(file: &Path, event: &str, diagnostic: &str) -> Result<()> {
+    let compact = diagnostic.split_whitespace().collect::<Vec<_>>().join(" ");
+    let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
+    crate::cycle_state::mark_recoverable_preflight_timeout(file, &event)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "run_preflight_timeout file={} event={} diagnostic={}",
+            file.display(),
+            event.split_whitespace().next().unwrap_or(event.as_str()),
+            compact
+        ),
+    );
+    Ok(())
+}
+
+fn recursive_codex_direct_invocation_diagnostic(
+    file: &Path,
+    session_id: &str,
+    agent_name: &str,
+) -> Option<String> {
+    if agent_name != "codex" || agent_doc::model_tier::detect_harness() != "codex" {
+        return None;
+    }
+    let current_pane = crate::sessions::current_pane().ok()?;
+    let registry_match = crate::sessions::lookup_entry(session_id)
+        .ok()
+        .flatten()
+        .filter(|entry| entry.pane == current_pane);
+    let actor = actor_record_for_file(file).ok().flatten();
+    let actor_match = actor
+        .as_ref()
+        .is_some_and(|record| record.pane_id == current_pane);
+    if registry_match.is_none() && !actor_match {
+        return None;
+    }
+    let actor_detail = actor
+        .as_ref()
+        .map(|record| {
+            format!(
+                "actor_generation={} actor_state={} actor_pane={}",
+                record.generation,
+                record.state.as_str(),
+                record.pane_id
+            )
+        })
+        .unwrap_or_else(|| {
+            "actor_generation=<unknown> actor_state=<unknown> actor_pane=<unknown>".to_string()
+        });
+    Some(format!(
+        "recursive direct invocation would deadlock: `agent-doc {}` is running inside the Codex pane that already owns this document (current_pane={}, session_id={}, {}). The preflight cycle has been left recoverable; retry from outside the managed pane or restart the owner with `agent-doc start {}`.",
+        file.display(),
+        current_pane,
+        session_id,
+        actor_detail,
+        file.display()
+    ))
+}
+
+fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String {
+    let state = crate::cycle_state::load(file).ok().flatten();
+    let actor = actor_record_for_file(file).ok().flatten();
+    let current_pane = crate::sessions::current_pane().ok();
+    let (cycle_id, phase, last_event) = state
+        .as_ref()
+        .map(|state| {
+            (
+                state.cycle_id.as_str(),
+                cycle_phase_label(state.phase),
+                state.last_event.as_str(),
+            )
+        })
+        .unwrap_or(("<unknown>", "<unknown>", "<unknown>"));
+    let actor_detail = actor
+        .as_ref()
+        .map(|record| {
+            format!(
+                "actor_generation={} actor_state={} actor_pane={}",
+                record.generation,
+                record.state.as_str(),
+                record.pane_id
+            )
+        })
+        .unwrap_or_else(|| {
+            "actor_generation=<unknown> actor_state=<unknown> actor_pane=<unknown>".to_string()
+        });
+    format!(
+        "direct `agent-doc {}` invocation timed out after waiting {}s for {} to return after preflight. cycle_id={} phase={} last_event={} current_pane={} {}. The cycle is recoverable; inspect with `agent-doc session-check {}` or restart the managed owner with `agent-doc start {}`.",
+        file.display(),
+        crate::agent::run_agent_timeout().as_secs(),
+        agent_name,
+        cycle_id,
+        phase,
+        last_event,
+        current_pane.as_deref().unwrap_or("<unknown>"),
+        actor_detail,
+        file.display(),
+        file.display()
+    )
+}
+
+fn actor_record_for_file(file: &Path) -> Result<Option<crate::session_actor::ActorRecord>> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(project_root) = snapshot::find_project_root(&canonical) else {
+        return Ok(None);
+    };
+    let file_arg = canonical.to_string_lossy();
+    crate::session_actor::load_record_in(&project_root, &file_arg)
+}
+
+fn cycle_phase_label(phase: crate::cycle_state::CyclePhase) -> &'static str {
+    match phase {
+        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
+        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
+        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
+        crate::cycle_state::CyclePhase::Committed => "committed",
+    }
 }
 
 fn maybe_abort_after_write_applied_for_test() -> Result<()> {

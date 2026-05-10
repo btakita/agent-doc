@@ -85,6 +85,19 @@ fn write_mock_streaming_agent(root: &Path) -> PathBuf {
     script
 }
 
+fn write_sleeping_agent(root: &Path) -> PathBuf {
+    let script = root.join("mock-sleeping-agent.sh");
+    fs::write(&script, "#!/bin/sh\ncat >/dev/null\nsleep 30\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+    }
+    script
+}
+
 fn write_config(root: &Path, script: &Path) -> PathBuf {
     let config_root = root.join("config");
     let agent_doc_dir = config_root.join("agent-doc");
@@ -132,6 +145,16 @@ fn read_cycle_phase(root: &Path) -> String {
         .unwrap();
     let value: Value = serde_json::from_str(&fs::read_to_string(entry.path()).unwrap()).unwrap();
     value["phase"].as_str().unwrap().to_string()
+}
+
+fn read_cycle_state(root: &Path) -> Value {
+    let state_dir = root.join(".agent-doc/state/cycles");
+    let entry = fs::read_dir(&state_dir)
+        .unwrap()
+        .next()
+        .expect("expected cycle state file")
+        .unwrap();
+    serde_json::from_str(&fs::read_to_string(entry.path()).unwrap()).unwrap()
 }
 
 fn seed_snapshot(root: &Path, doc: &Path) {
@@ -217,6 +240,76 @@ fn bare_path_alias_uses_same_template_safe_path() {
     assert!(
         response_pos < exchange_end,
         "bare path should stay inside exchange"
+    );
+}
+
+#[test]
+fn run_times_out_agent_child_and_marks_recoverable_preflight() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let script = write_sleeping_agent(tmp.path());
+    let config_root = write_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "1")
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("timed out after waiting 1s"));
+
+    let state = read_cycle_state(tmp.path());
+    assert_eq!(state["phase"].as_str().unwrap(), "preflight_started");
+    assert!(
+        state["last_event"]
+            .as_str()
+            .unwrap()
+            .contains("direct_invocation_timeout")
+    );
+}
+
+#[test]
+fn codex_bare_run_inside_owning_pane_fails_before_nested_dispatch() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n",
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+    fs::write(
+        tmp.path().join(".agent-doc/sessions.json"),
+        format!(
+            "{{\n  \"session-recursive\": {{\n    \"pane\": \"%77\",\n    \"pid\": 123,\n    \"cwd\": \"{}\",\n    \"started\": \"2026-05-10T00:00:00Z\",\n    \"session_id\": \"session-recursive\",\n    \"file\": \"{}\",\n    \"window\": \"@7\",\n    \"supervisor_instance_id\": \"test-supervisor\"\n  }}\n}}\n",
+            tmp.path().display(),
+            doc.display()
+        ),
+    )
+    .unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("CODEX_SESSION", "codex-session")
+        .env("TMUX_PANE", "%77")
+        .arg(doc.to_str().unwrap())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "recursive direct invocation would deadlock",
+        ));
+
+    let state = read_cycle_state(tmp.path());
+    assert_eq!(state["phase"].as_str().unwrap(), "preflight_started");
+    assert!(
+        state["last_event"]
+            .as_str()
+            .unwrap()
+            .contains("recursive_direct_invocation_blocked")
     );
 }
 

@@ -181,18 +181,19 @@ impl Agent for Claude {
                 }
             }
         }
-        let output = cmd
+        let mut child = cmd
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                use std::io::Write;
-                if let Some(ref mut stdin) = child.stdin {
-                    stdin.write_all(prompt.as_bytes())?;
-                }
-                child.wait_with_output()
-            })?;
+            .spawn()?;
+        {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                stdin.write_all(prompt.as_bytes())?;
+            }
+            child.stdin.take();
+        }
+        let output = super::wait_with_output_timeout(child, super::run_agent_timeout())?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

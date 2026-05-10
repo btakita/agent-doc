@@ -1135,6 +1135,19 @@ fn mask_exchange_component_content(doc: &str) -> Option<String> {
 }
 
 fn open_cycle_message(state: &crate::cycle_state::CycleState) -> String {
+    if state.last_event.starts_with("direct_invocation_timeout")
+        || state
+            .last_event
+            .starts_with("recursive_direct_invocation_blocked")
+    {
+        return format!(
+            "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — direct invocation did not reach response capture. Retry from outside the managed pane, restart the owner with `agent-doc start {}`, or abandon the stale cycle only after confirming no response exists.",
+            state.cycle_id,
+            phase_name(state.phase),
+            state.last_event,
+            state.file
+        );
+    }
     let detail = match state.phase {
         crate::cycle_state::CyclePhase::PreflightStarted => {
             "cycle started but no write/commit followed"

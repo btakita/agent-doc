@@ -333,6 +333,18 @@ pub fn record_required_plan_reference_count(
     Ok(Some(state))
 }
 
+pub fn mark_recoverable_preflight_timeout(file: &Path, event: &str) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    state.phase = CyclePhase::PreflightStarted;
+    state.last_event = event.to_string();
+    state.updated_at = now_secs();
+    save(file, &state)?;
+    append_phase_event_to_session_log(file, &state);
+    Ok(Some(state))
+}
+
 pub fn mark_committed(
     file: &Path,
     event: &str,

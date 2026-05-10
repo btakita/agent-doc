@@ -29,7 +29,10 @@ pub mod streaming;
 
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::Path;
+use std::process::{Child, Output};
+use std::time::{Duration, Instant};
 
 use self::streaming::StreamingAgent;
 use crate::config::{AgentConfig, Config};
@@ -42,6 +45,8 @@ pub struct AgentResponse {
 }
 
 pub const CODEX_SANDBOX_NETWORK_DISABLED_ENV: &str = "CODEX_SANDBOX_NETWORK_DISABLED";
+pub const AGENT_DOC_RUN_AGENT_TIMEOUT_SECS_ENV: &str = "AGENT_DOC_RUN_AGENT_TIMEOUT_SECS";
+pub const DEFAULT_RUN_AGENT_TIMEOUT_SECS: u64 = 30 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodexNetworkPolicyStatus {
@@ -251,6 +256,64 @@ pub trait Agent {
         fork: bool,
         model: Option<&str>,
     ) -> Result<AgentResponse>;
+}
+
+pub(crate) fn run_agent_timeout() -> Duration {
+    let secs = std::env::var(AGENT_DOC_RUN_AGENT_TIMEOUT_SECS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_RUN_AGENT_TIMEOUT_SECS);
+    Duration::from_secs(secs.max(1))
+}
+
+pub(crate) fn wait_with_output_timeout(
+    mut child: Child,
+    timeout: Duration,
+) -> std::io::Result<Output> {
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let stdout_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(ref mut stream) = stdout {
+            stream.read_to_end(&mut buf)?;
+        }
+        Ok::<_, std::io::Error>(buf)
+    });
+    let stderr_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(ref mut stream) = stderr {
+            stream.read_to_end(&mut buf)?;
+        }
+        Ok::<_, std::io::Error>(buf)
+    });
+
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("agent child process timed out after {}s", timeout.as_secs()),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+
+    let stdout = stdout_handle
+        .join()
+        .map_err(|_| std::io::Error::other("stdout reader thread panicked"))??;
+    let stderr = stderr_handle
+        .join()
+        .map_err(|_| std::io::Error::other("stderr reader thread panicked"))??;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 /// Resolve an agent backend by name. `env` is applied to the spawned child process

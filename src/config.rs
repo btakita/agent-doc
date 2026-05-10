@@ -57,7 +57,7 @@ impl std::fmt::Display for ExecutionMode {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub default_agent: Option<String>,
@@ -94,7 +94,7 @@ pub struct Config {
     pub model: ModelConfig,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalConfig {
     /// Command template to launch a terminal.
     /// `{tmux_command}` is replaced with the tmux attach/create command.
@@ -102,7 +102,7 @@ pub struct TerminalConfig {
     pub command: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     pub command: String,
     #[serde(default)]

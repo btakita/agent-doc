@@ -805,15 +805,29 @@ fn codex_capability_proof_status(ctx: &SessionContext) -> String {
     ) {
         return "not_required".to_string();
     }
-    match crate::startup_miss::session_log_has_event_after_latest_start(
+    if let Err(err) = crate::startup_miss::session_log_has_event_after_latest_start(
         &ctx.canonical_file,
         &ctx.session_id,
         "codex_capability_proof status=proven",
     ) {
-        Ok(true) => "proven".to_string(),
-        Ok(false) => "missing".to_string(),
-        Err(err) => format!("unknown ({err})"),
+        return format!("unknown ({err})");
     }
+    for (prefix, label) in [
+        ("codex_capability_proof status=proven", "proven"),
+        ("codex_capability_proof status=failed", "failed"),
+        ("codex_capability_proof status=pending", "pending"),
+    ] {
+        match crate::startup_miss::session_log_has_event_after_latest_start(
+            &ctx.canonical_file,
+            &ctx.session_id,
+            prefix,
+        ) {
+            Ok(true) => return label.to_string(),
+            Ok(false) => {}
+            Err(err) => return format!("unknown ({err})"),
+        }
+    }
+    "missing".to_string()
 }
 
 fn collect_doctor_issues(ctx: &SessionContext) -> Vec<String> {

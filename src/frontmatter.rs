@@ -240,7 +240,7 @@ pub enum PendingCaptureGuardMode {
     Off,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// Document/routing UUID — permanent identifier for tmux pane routing.
     /// Serialized as `agent_doc_session` in YAML; reads legacy `session` via alias.

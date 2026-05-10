@@ -220,6 +220,26 @@ impl AutoTriggerOutcome {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum CapabilityProofGate {
+    NotRequired = 0,
+    Pending = 1,
+    Proven = 2,
+    Failed = 3,
+}
+
+impl CapabilityProofGate {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Pending,
+            2 => Self::Proven,
+            3 => Self::Failed,
+            _ => Self::NotRequired,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct AutoTriggerMonitor {
     started_at: Instant,
@@ -764,6 +784,10 @@ fn auto_trigger_inject_command(
     if stop.load(Ordering::Relaxed) {
         return AutoTriggerOutcome::Cancelled;
     }
+    if let Some(reason) = shared.capability_dispatch_blocker() {
+        eprintln!("[agent-doc] auto-trigger gated: {reason}");
+        return AutoTriggerOutcome::SendFailed;
+    }
     shared.transition_actor_state(
         crate::session_actor::ActorState::Busy,
         "dispatch",
@@ -903,6 +927,25 @@ fn spawn_auto_trigger_thread(
                     return;
                 }
                 if current_child_prompt_visible(&shared, &harness) {
+                    if shared.capability_proof_gate() == CapabilityProofGate::Pending {
+                        if monitor.note_no_prompt(Instant::now()) {
+                            shared
+                                .auto_trigger_outcome
+                                .store(AutoTriggerOutcome::Timeout as u8, Ordering::Relaxed);
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "auto_trigger_timeout harness={} reason=capability_proof_pending_after_30s",
+                                    harness.binary
+                                ),
+                            );
+                            eprintln!(
+                                "[agent-doc] auto-trigger: timed out waiting for managed Codex capability proof"
+                            );
+                            return;
+                        }
+                        continue;
+                    }
                     let trigger_cmd = harness.trigger_command(&file);
                     match auto_trigger_inject_command(&shared, &stop, &trigger_cmd) {
                         AutoTriggerOutcome::Sent => {
@@ -963,6 +1006,62 @@ fn spawn_auto_trigger_thread(
             }
         })
         .expect("spawn auto-trigger thread")
+}
+
+fn spawn_managed_codex_capability_proof_thread(
+    shared: Arc<SupervisorShared>,
+    command: String,
+    args: Vec<String>,
+    env: std::collections::HashMap<String, String>,
+    fm: frontmatter::Frontmatter,
+    global_config: config::Config,
+    mut session_log: Option<std::fs::File>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("codex-capability-proof".into())
+        .spawn(move || {
+            match crate::agent::codex::prove_managed_session_capabilities(
+                &command,
+                &args,
+                &env,
+                &fm,
+                &global_config,
+            ) {
+                Ok(Some(event)) => {
+                    eprintln!("[start] managed Codex capability proof: {}", event);
+                    shared.set_capability_proof_gate(CapabilityProofGate::Proven, None);
+                    log_event(&mut session_log, &event);
+                }
+                Ok(None) => {
+                    shared.set_capability_proof_gate(CapabilityProofGate::NotRequired, None);
+                    log_event(
+                        &mut session_log,
+                        "codex_capability_proof status=not_required",
+                    );
+                }
+                Err(err) => {
+                    let detail = err.to_string();
+                    shared.set_capability_proof_gate(
+                        CapabilityProofGate::Failed,
+                        Some(detail.clone()),
+                    );
+                    shared.transition_actor_state(
+                        crate::session_actor::ActorState::Blocked,
+                        "supervisor",
+                        "codex_capability_proof_failed",
+                    );
+                    log_event(
+                        &mut session_log,
+                        &format!("codex_capability_proof status=failed error={detail:?}"),
+                    );
+                    eprintln!(
+                        "[start] managed Codex capability proof failed; terminating unusable child session: {detail}"
+                    );
+                    shared.kill_child();
+                }
+            }
+        })
+        .expect("spawn codex capability proof thread")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1263,6 +1362,9 @@ struct SupervisorShared {
     /// Whether the current keepalive successor should ignore stale inherited
     /// Ctrl+D bytes until the child surfaces an idle prompt.
     suppress_stale_ctrl_d_until_prompt: AtomicBool,
+    /// Gate for managed Codex launches that require live network/SSH/write-root proof.
+    capability_proof_gate: AtomicU8,
+    capability_proof_error: Mutex<Option<String>>,
 }
 
 impl SupervisorShared {
@@ -1299,6 +1401,39 @@ impl SupervisorShared {
             auto_trigger_outcome: AtomicU8::new(AutoTriggerOutcome::NotNeeded as u8),
             prompt_visible_once: AtomicBool::new(false),
             suppress_stale_ctrl_d_until_prompt: AtomicBool::new(false),
+            capability_proof_gate: AtomicU8::new(CapabilityProofGate::NotRequired as u8),
+            capability_proof_error: Mutex::new(None),
+        }
+    }
+
+    fn capability_proof_gate(&self) -> CapabilityProofGate {
+        CapabilityProofGate::from_u8(self.capability_proof_gate.load(Ordering::Relaxed))
+    }
+
+    fn set_capability_proof_gate(&self, gate: CapabilityProofGate, error: Option<String>) {
+        *self.capability_proof_error.lock().unwrap() = error;
+        self.capability_proof_gate
+            .store(gate as u8, Ordering::Relaxed);
+    }
+
+    fn capability_dispatch_blocker(&self) -> Option<String> {
+        match self.capability_proof_gate() {
+            CapabilityProofGate::NotRequired | CapabilityProofGate::Proven => None,
+            CapabilityProofGate::Pending => Some(
+                "managed Codex capability proof is still pending; prompt dispatch is gated until network/SSH/write-root proof succeeds"
+                    .to_string(),
+            ),
+            CapabilityProofGate::Failed => {
+                let detail = self
+                    .capability_proof_error
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap_or_else(|| "unknown error".to_string());
+                Some(format!(
+                    "managed Codex capability proof failed; prompt dispatch is disabled: {detail}"
+                ))
+            }
         }
     }
 
@@ -1390,6 +1525,9 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
             }
         }
         IpcMethod::Inject { bytes } => {
+            if let Some(reason) = shared.capability_dispatch_blocker() {
+                return IpcResponse::err(reason);
+            }
             let injected = if let Some(pane_id) = shared.inject_pane.as_deref() {
                 dispatch_submit_text_to_pane(pane_id, &bytes).map_err(|e| e.to_string())
             } else {
@@ -1985,36 +2123,18 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
         if let Some(err) = status.mismatch_error() {
             anyhow::bail!(err);
         }
-        match crate::agent::codex::prove_managed_session_capabilities(
-            &harness.binary,
+    }
+    let codex_capability_proof_required = harness.binary == "codex"
+        && crate::agent::codex::managed_capability_contract_required(
             &base_args,
-            &resolved_env,
             &fm,
             &global_config,
-        ) {
-            Ok(Some(event)) => {
-                eprintln!("[start] managed Codex capability proof: {}", event);
-                log_event(&mut session_log, &event);
-            }
-            Ok(None) => {
-                log_event(
-                    &mut session_log,
-                    "codex_capability_proof status=not_required",
-                );
-            }
-            Err(err) => {
-                log_event(
-                    &mut session_log,
-                    &format!(
-                        "codex_capability_proof status=failed error={:?}",
-                        err.to_string()
-                    ),
-                );
-                return Err(err.context(
-                    "managed Codex capability proof failed before launching the child session",
-                ));
-            }
-        }
+        );
+    if harness.binary == "codex" && !codex_capability_proof_required {
+        log_event(
+            &mut session_log,
+            "codex_capability_proof status=not_required",
+        );
     }
 
     // Query initial terminal size
@@ -2062,6 +2182,21 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
         Some(crate::session_actor::ActorState::Starting),
         Some(pane_id.clone()),
     ));
+    let capability_proof_thread = if codex_capability_proof_required {
+        shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
+        log_event(&mut session_log, "codex_capability_proof status=pending");
+        Some(spawn_managed_codex_capability_proof_thread(
+            shared.clone(),
+            harness.binary.clone(),
+            base_args.clone(),
+            resolved_env.clone(),
+            fm.clone(),
+            global_config.clone(),
+            session_log.as_ref().and_then(|f| f.try_clone().ok()),
+        ))
+    } else {
+        None
+    };
 
     // Start IPC listener
     let shared_for_ipc = shared.clone();
@@ -2648,6 +2783,9 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     drop(raw_mode);
     route_owned_completion_stop.store(true, Ordering::Relaxed);
     if let Some(handle) = route_owned_completion_thread {
+        let _ = handle.join();
+    }
+    if let Some(handle) = capability_proof_thread {
         let _ = handle.join();
     }
 
@@ -3868,6 +4006,43 @@ mod tests {
         assert_eq!(
             written.lock().unwrap().as_slice(),
             b"agent-doc tasks/software/tsift.md\r"
+        );
+    }
+
+    #[test]
+    fn handle_ipc_inject_rejects_pending_capability_proof() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
+        let response = handle_ipc(
+            IpcMethod::Inject {
+                bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
+            },
+            &shared,
+        );
+
+        assert!(!response.ok);
+        assert!(
+            response
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("capability proof is still pending"),
+            "{response:?}"
+        );
+    }
+
+    #[test]
+    fn auto_trigger_inject_command_rejects_failed_capability_proof() {
+        let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
+        shared.set_capability_proof_gate(
+            CapabilityProofGate::Failed,
+            Some("network denied".to_string()),
+        );
+        let stop = AtomicBool::new(false);
+
+        assert_eq!(
+            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            AutoTriggerOutcome::SendFailed
         );
     }
 

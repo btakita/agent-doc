@@ -50,6 +50,15 @@ The adjacent `src/session-share/tasks/root.md` session is different: its Claude 
 
 I captured this as a bug because the current tooling makes "session still exists" too easy to confuse with "turn still running." Plan: `tasks/agent-doc/plan-incorrect-close-running-turn-status.md`.
 <!-- agent:boundary:00017961 -->
+Please complete:
+JB Plugin `Run Agent Doc` had an error after running `/clear` on root.md:
+```
+resync: stash pane %11 is registered in its own project root — skipping kill
+resync: stash pane %7 is registered in its own project root — skipping kill
+[route] target tmux session: 1
+Error: authoritative actor generation 22 for tasks/root.md owns pane %12 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
+```
+spec-test-build-install-commit-push
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,6 +96,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#routereap] #agent-doc-bug: route-owned pane reaped after successful finalize commit — completion thread in start.rs unconditionally kills the pane after detecting a committed cycle, even when the session document has an active backlog and ongoing exchange (multi-turn session). Should check session liveness signals before reaping. Plan: tasks/agent-doc/plan-route-owned-post-commit-pane-reap.md
 - [ ] [#incorrect-close-running-turn] #agent-doc-bug: incorrect close/supersede handling across adjacent managed code sessions makes it unclear whether a prior pane is alive-idle or still running; add live pane evidence to status/closeout/reap decisions and fail closed before clearing busy panes. Plan: tasks/agent-doc/plan-incorrect-close-running-turn-status.md
 - [ ] [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
 - [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md

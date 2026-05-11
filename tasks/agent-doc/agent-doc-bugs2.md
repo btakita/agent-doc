@@ -29,65 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-114438.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-122736.md`*
 
 Compacted content:
-- Archived 1 response topic(s): [#escrecov] OpenCode Escape interrupt recovery verified
+- Archived 2 response topic(s): session actor alive across agent restarts; #w3rb spec-test-build-install-commit-push
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ The session actor should remain alive across agent restarts (e.g. initiated by /clear in opencode). This should fix th JB plugin `Run Agent Doc` after `Clear Session Context` issue.
-❯ spec-test-commit-push
-### Re: session actor alive across agent restarts — glm-5
-
-Changes committed in `agent-doc` d47dbf0 and pushed to both submodule and parent repo:
-
-**1. OpenCode `CleanExitBehavior` → `RestartContinue`** (`src/harness.rs:100`)
-- OpenCode clean exits now auto-restart instead of prompting the user
-- Actor transitions `Busy` → auto-restart → `Starting` → `Ready` without entering `WaitingInput`
-- This matches the Codex behavior and ensures the JB plugin's "Run Agent Doc" works after "Clear Session Context"
-
-**2. OpenCode `/clear` tracking** (`src/session_actor_cmd.rs:281`)
-- `clear()` now records `/clear` as an external prompt for OpenCode too (not just Codex)
-- Route-level clear tracking is harness-agnostic: `tracked_harness_clear_requires_fresh_restart` matches `codex | opencode`
-
-**3. Generalized route functions** (`src/route.rs:760-824`)
-- `tracked_codex_clear_requires_fresh_restart` → `tracked_harness_clear_requires_fresh_restart`
-- `reapply_codex_launch_contract_after_clear` → `reapply_harness_launch_contract_after_clear`
-- Log messages use `harness.binary` instead of hardcoded "Codex"
-
-**4. Spec update** (`specs/08a-session-actor-contract.md:31-38`)
-- Documents that `/clear` in any harness preserves the actor lifecycle
-- Notes that clear tracking is harness-agnostic
-
-**5. Tests**
-- `tracked_harness_clear_requires_fresh_restart_only_for_exact_clear_prompt` — added OpenCode assertions
-- `clean_exit_resolution_auto_restarts_for_opencode` — new test
-- `opencode_defaults` — updated assertion: `CleanExitBehavior::RestartContinue`
-- All 23 OpenCode tests pass (1 ignored tmux integration)
-&lt;!-- /agent:exchange --&gt;
-❯ do [#w3rb]. spec-test-build-install-commit-push
-### Re: #w3rb spec-test-build-install-commit-push — glm-5
-
-Completed `#w3rb` with the following changes:
-
-**1. Plan file** (`tasks/agent-doc/plan-degraded-authoritative-skip-capability-proof.md`):
-Documents the dispatch-only degraded authoritative actor path and its intentional capability proof exemption.
-
-**2. 12 pure unit tests** (`src/agent-doc/src/route.rs`):
-- `dispatch_only_can_use_degraded_authoritative_actor` — 5 tests covering registered match, live owner match, both match, no match, none provided
-- `authoritative_actor_dispatch_guard_reason` — 6 tests covering healthy+state (no guard), Restartable, Halted, Unreachable, NoSocket, missing actor state
-- `authoritative_actor_dispatch_target_eligible` — 1 test covering healthy vs degraded vs no-state
-
-**3. Spec update** (`specs/08a-session-actor-contract.md`):
-Added documentation of the degraded authoritative actor dispatch path, capability proof exemption rationale, and ops-log entry expectations.
-
-**4. Build + install**: `cargo install --path .` completed. `make check` passes (1913 tests + integration suites).
-
-**5. Committed and pushed**:
-- Submodule: `2d2c6d5` on `20260422/codex-agent-backend`
-- Parent: `a1d08e9d6` on `main`
-
-&lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:25388cb0 -->
+<!-- agent:boundary:34720189 -->
 <!-- /agent:exchange -->
 ###
 <!--

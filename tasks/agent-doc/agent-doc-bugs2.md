@@ -7,7 +7,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
-  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix.
   '#commit-push': commit + push all uncommitted files
   '#follow-up-backlog': Any follow-up items to place in the backlog?
@@ -69,7 +69,25 @@ Root cause: the instruction surface (`harness-invocation.md`) did not explicitly
 
 All 2073 tests pass (including the new regression). Build + install verified. Pushed to main.
 &lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:21f8e31a -->
+❯ do [#noexchopencode2]. spec-test-build-install-commit-push
+### Re: #noexchopencode2 OpenCode CLI-only-output anti-pattern — glm-5.1
+
+Root cause: the OpenCode section of `runbooks/harness-invocation.md` described the correct finalize/write-back flow but did not name the specific failure mode of outputting a response to CLI without piping it through `agent-doc finalize`. The shared Hot Path Digest in `SKILL.md` also did not explicitly state that "response text visible in the console but absent from the session document" is a closeout violation. OpenCode has no hook backstop (unlike Codex's Stop handler), so instruction-surface gaps directly cause lost responses.
+
+**Changes:**
+
+| File | Change |
+|------|--------|
+| `runbooks/harness-invocation.md` | Added anti-pattern warning to OpenCode section: "Do **not** output the response to the CLI without piping it through `agent-doc finalize`" |
+| `SKILL.md` | Strengthened Hot Path Digest: "Response text visible in the console but absent from the session document is a closeout violation — the response does not exist until it crosses `finalize` or `write --commit`" |
+| `session_check.rs` | Added regression test `prompt_only_exchange_tail_catches_opencode_no_patchback()` — proves session-check catches an OpenCode prompt-only exchange tail with `OPENCODE` env var set |
+| `skill.rs` | Added test asserting OpenCode runbook section contains the CLI-only-output anti-pattern language |
+| `VERSIONS.md` | Added #noexchopencode2 entry |
+| `tasks/agent-doc/plan-opencode-no-exchange-patchback.md` | Root cause analysis and fix plan |
+
+All 2075 tests pass. Build + install verified. Pushed to main.
+&lt;!-- /agent:exchange --&gt;
+<!-- agent:boundary:96c39bc0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,6 +119,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rspcmt6] #agent-doc-bug: OpenCode agent-doc response patched into exchange but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the diff-summary response after "Run the post docker commands." was written into the exchange section but `tasks/monsterrodholders.md` remains dirty (uncommitted patchback lines). Additionally, the v1.32 surgical-revert code changes in `src/monsterrodholders-dev/` (mrh-performance.php + test script) were also left uncommitted despite the status saying "awaiting spec-test-commit-push." Same class as #rspcmt2-#rspcmt5. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode finalize-not-committing evidence.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -202,4 +221,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#w3rb] 2026-05-11 [#capproofdegraded] Dispatch-only degraded authoritative actor path now skips capability proof gate — verify in a live OpenCode session that Run Agent Doc works after Clear Session Context. Plan: tasks/agent-doc/plan-degraded-authoritative-skip-capability-proof.md
 - 2026-05-11 [#rspcmt4] 2026-05-11 OpenCode agent-doc turn response patchback not committed — boost-client/tasks/monsterrodholders.md v1.29 deploy response was patched into the exchange section but agent-doc finalize/closeout did not commit the document. User had to manually request commit. Same class as #rspcmt2, #rspcmt3. Reproduction: session a9421282, GLM-5.1 agent. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode-specific closeout evidence.
 - 2026-05-11 [#rspcmt5] 2026-05-11 Direct Codex chat `commit-push` closeout completed commits/pushes but wrote no response patchback into `src/session-share/tasks/root.md`; user had to request "write response to document" afterward. Same class as #rspcmt2-#rspcmt4, but this evidence is the normal chat/preset path rather than an agent-doc child-run path. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with a direct-chat closeout invariant and require session-check/write-back before final success reporting.
+- 2026-05-11 [#noexchopencode2] #agent-doc-bug: OpenCode agent response output to user but not written into session document `agent:exchange` block. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — sidebar revert assessment response appeared in CLI output but was never patched back into the exchange section. User had to manually request "Write the response into the document." Same class as #nopatchbackopencode, #rspcmt4, #rspcmt5. OpenCode integration may skip the finalize/patchback step that other harness backends run.
 <!-- /agent:done -->

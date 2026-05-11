@@ -29,29 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-100225.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-101917.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #dupeexchangeblock fix
+- Archived 1 response topic(s): stale actor transition generation mismatch
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ I saw an error in the opencode console. spec-test-build-install-commit-push
-```
-[session-actor] warning: failed to record ready transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: project controller command `mark_lifecycle` failed: stale actor transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 120 is no longer current (current generation 121)
-```
-Response already committed — repair write not needed
-### Re: stale actor transition generation mismatch — glm-5.1
-
-**Root cause:** `SessionActorRuntime.generation` is captured at supervisor start and never refreshed. When a concurrent operation (compact, restart, route, sync) bumps the actor generation, the supervisor's `Ready` transition is rejected by `transition_state_in` at `session_actor.rs:420-428` because the generation no longer matches — even though the supervisor's `session_id` and `pane_id` are still the legitimate owner.
-
-**Fix:** Modified `transition_state_in` in `session_actor.rs:420-438` to only reject on generation mismatch when `pane_id` also differs. When session_id and pane_id both match the current record, the generation bump was from a same-owner rebinding (compact/restart), and the transition proceeds using the current generation. Different-pane stale actors are still correctly rejected.
-
-**Changes:**
-- `src/agent-doc/src/session_actor.rs:420-438` — generation check now also requires pane mismatch to reject
-- `src/agent-doc/src/project_controller.rs:3863-3917` — new test `controller_lifecycle_allows_same_pane_stale_generation`
-- All 2581 tests pass; build + install completed.
-
-&lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:1e5fcda1 -->
+<!-- agent:boundary:8915d3b4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -173,4 +156,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#opencodesshconfig] OpenCode session cannot SSH to `required_ssh_targets` — `socket: Operation not permitted` occurs because opencode's sandbox blocks network syscalls. Workaround options: (1) copy a per-project `.opencode/config.json` that grants network/SSH permissions, (2) file an agent-doc bug (this item), (3) both. Agent-doc should either detect the sandbox restriction and fail closed before dispatch, or inject the required `.opencode/config.json` permissions automatically when `required_ssh_targets` is set in the session frontmatter.
 - 2026-05-11 [#marklifecyclefix] 2026-05-11 mark_lifecycle relative path resolution — fixed in c4f9d17: route promotion now uses bootstrap.project_root + canonical_document_id_in instead of transition_state_direct with controller-CWD-dependent canonicalize. Regression: controller_mark_lifecycle_resolves_relative_path_via_project_root.
 - 2026-05-11 [#dupeexchangeblock] #agent-doc-bug: opencode agent writes responses into a second `<!-- agent:exchange patch=append -->...<!-- /agent:exchange -->` block instead of appending to the existing exchange block. This produces an invalid document with two adjacent exchange sections. Reproduction: monsterrodholders.md session a9421282 — the "Production deploy" response was written into a new exchange element (lines 126-147) instead of being appended to the existing exchange (lines 39-125). Root cause: likely the patchback/closeout logic does not detect the existing open exchange block and creates a new one. Plan: tasks/agent-doc/plan-duplicate-exchange-block-patchback.md
+- 2026-05-11 [#jbcompactempty] #agent-doc-bug: JB Plugin Compact Exchange produced a defective compaction in boost-client/tasks/monsterrodholders.md (session a9421282). Two problems: (1) The compacted exchange block (lines 30-38) contains only a recursive archive pointer and a truncated prior summary (`Prior summary/context: ### Session Summary *Compacted. Content archived to ...`) with no substantive decisions, key facts, or open items preserved. The archive file itself (7b9f2a63...-20260511-101729.md) is a compaction of a prior compaction — 15 lines, no real content. (2) Compact Exchange did not merge the duplicate exchange blocks created by #dupeexchangeblock into a single block — the document still has two adjacent `agent:exchange` blocks (lines 30-38 and 39-146). Compact Exchange should detect and consolidate multiple exchange blocks into one, and the default summary must carry forward substantive context from the archive chain, not just a truncated pointer. Plan: tasks/agent-doc/plan-jb-compact-exchange-empty-summary.md
 <!-- /agent:done -->

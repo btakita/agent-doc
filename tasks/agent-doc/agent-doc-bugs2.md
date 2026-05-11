@@ -122,7 +122,7 @@ After installing into an already-running OpenCode session, restart the OpenCode 
 I ran `agent-doc commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`. It closed the stale `cycle-1778479190087` as already committed, but `session-check` then correctly reported this active Codex turn as a new unclosed closeout because the document still had later local prompt changes.
 
 I treated the `#agent-doc-bug` as covered by the existing plan at `tasks/agent-doc/plan-response-patchback-uncommitted.md` and added a fresh backlog item for this recurrence as `#rspcmt3`. I did not run the `monsterrodholders.md` spec/test/build/install/push work in this repair cycle; this closeout is limited to committing the session document through the agent-doc write path.
-<!-- agent:boundary:75acbb15 -->
+<!-- agent:boundary:3811f55e -->
 <!-- /agent:exchange -->
 ###
 
@@ -140,7 +140,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspcmt3] Re-open response patchback commit recovery for the current agent-doc-bugs2 turn: user-visible prompt/patchback changes remained dirty after  reported the prior response already committed, and  required a second closeout for the active Codex prompt. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
+- [ ] [#rspcmt3] Re-open response patchback commit recovery for the current agent-doc-bugs2 turn: user-visible prompt/patchback changes remained dirty after `agent-doc commit` reported the prior response already committed, and `session-check` required a second closeout for the active Codex prompt. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

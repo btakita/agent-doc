@@ -74,11 +74,7 @@ The `harness` parameter flows from `prove_managed_session_capabilities` (which a
 Added regression test `opencode_child_network_probe_classifies_sandbox_denial` verifying OpenCode sessions get "OpenCode" in error messages and not "Codex".
 
 Commit: `c7658ac` pushed to `20260422/codex-agent-backend`.
-<!-- agent:boundary:e0eeb6c9 -->
-<!-- /agent:exchange -->
-###
-<!--
-Error running agent-doc on root.md using claude. spec-test-build-install-commit-push
+❯ Error running agent-doc on root.md using claude. spec-test-build-install-commit-push
 ```
 resync: stash pane %273 is registered in its own project root — skipping kill
 resync: stash pane %284 is registered in its own project root — skipping kill
@@ -113,7 +109,20 @@ resync: stash pane %274 is registered in its own project root — skipping kill
 [route] target tmux session: 4
 Error: authoritative actor generation 15 for tasks/root.md owns pane %272 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
 ```
----
+
+### Re: mark_lifecycle relative path fix — glm-5.1
+
+Fixed and pushed in commit `c4f9d17`.
+
+**Root cause:** `handle_mark_lifecycle` delegated to `transition_state_direct(&file)` which called `file.canonicalize()` inside the controller daemon. When `route.rs` sent a relative path (e.g. `tasks/root.md`), the controller's CWD couldn't resolve it, producing "missing authoritative actor record". This left the actor stuck in `Starting`, blocking dispatch.
+
+**Fix:** Extracted `transition_state_in(base_dir, document_id, ...)` and made `handle_mark_lifecycle` use `bootstrap.project_root` + `canonical_document_id_in` for path resolution, matching the pattern used by `handle_actor_binding`, `handle_dispatch`, and `handle_supervisor_heartbeat`.
+
+**Regression test:** `controller_mark_lifecycle_resolves_relative_path_via_project_root`.
+<!-- agent:boundary:f7f3d318 -->
+<!-- /agent:exchange -->
+###
+<!--
 I saw an error in the opencode console. spec-test-build-install-commit-push
 ```
 [session-actor] warning: failed to record ready transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: project controller command `mark_lifecycle` failed: stale actor transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 120 is no longer current (current generation 121)

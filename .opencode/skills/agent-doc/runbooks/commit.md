@@ -2,7 +2,7 @@
 
 Every appended `agent-doc` response must be committed unless the user explicitly tells you otherwise.
 
-A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `agent-doc <FILE>` in Codex/direct-exec, or an equivalent direct entry in another harness) starts the binary-owned response cycle. It is not permission to patch the document manually and stop short of closeout.
+A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `agent-doc <FILE>` in Codex/OpenCode/direct-exec, or an equivalent direct entry in another harness) starts the binary-owned response cycle. It is not permission to patch the document manually and stop short of closeout.
 
 ## Default Paths
 
@@ -15,7 +15,7 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 - The default response-cycle command is `agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`.
 - `finalize` is the binary-owned happy path: it writes the response, runs commit, and fails closed unless the cycle reaches `committed`.
 - If the turn also includes ordinary repo `commit + push`, keep the active session document out of that manual git commit. Resolve the exact intended non-session path set first, run stage commands only for that set, stop immediately if any stage step fails, verify `git diff --cached --name-only` (or a stricter submodule-pointer inspection) still matches the intended set, then commit only that validated non-session set before `finalize` or `write --commit` creates the session-document closeout commit. Push only after the binary-owned closeout so the response commit is included.
-- Use `finalize` for the normal preflight → respond → persist flow across Claude Code, Codex, Cursor, and generic harnesses. Harness-specific command dispatch lives in `harness-invocation.md`.
+- Use `finalize` for the normal preflight → respond → persist flow across Claude Code, Codex, OpenCode, Cursor, and generic harnesses. Harness-specific command dispatch lives in `harness-invocation.md`.
 - For direct-exec harness paths such as Codex, run `agent-doc session-check <FILE>` immediately after the persistence command returns. A nonzero check means the cycle is still open, so do not report success.
 - Do **not** describe a normal harness-native `agent-doc` turn as successful while also saying the response is still uncommitted, unless the user explicitly requested that exception.
 - After `finalize` returns, do not continue with more long-running task work for that same turn. Only `session-check`, failure recovery, and final reporting should remain.

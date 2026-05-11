@@ -44,12 +44,7 @@ I did find current unfixed evidence worth re-queuing:
 - Safe-passive sync still misses its budget: recent samples show `safe_passive_total` at `1047-1282ms`, with `postlock_actor_focus`, `window_resolution`, and `controller_actor_lookup` over their sub-budgets. This is performance rather than closeout correctness, but the budget regression is still live.
 
 I added backlog items for those three. No tests were run; this was log/session-history triage only.
-<!-- agent:boundary:40bd71e5 -->
-<!-- /agent:exchange -->
-###
-
-<!--
-Why did 
+❯ Why did agent-doc have the session-check interrupt. I did not write into the document during the turn. #next-steps
 ```
 • Ran agent-doc session-check tasks/root.md
   └ [session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: ### Re: livekit agent
@@ -63,7 +58,29 @@ Why did
     Caused by:
         empty response — nothing to write
 ```
----
+### Re: session-check interrupt — gpt-5
+
+This was almost certainly agent-doc-owned drift, not a manual edit by you.
+
+What the guard saw was mechanical: `session-check` compared the last committed/snapshotted `tasks/root.md` state with the live file and found a newly visible assistant response heading, `### Re: livekit agent readiness - gpt-5`, plus other tracked repo changes under `build-party`. That is the pattern handled by `detect_bypassed_response_write`: if a response-looking heading appears in the document but the current cycle/snapshot/commit proof does not line up, it fails closed as “likely direct response patchback.” The wording is misleading here because “direct” means “outside the proven agent-doc write+commit boundary,” not “the user typed it.”
+
+The local evidence matches that interpretation:
+
+- `src/session-share/.agent-doc/captures/.../cycle-1778461291178.json` contains the captured response body for `### Re: livekit agent readiness - gpt-5`.
+- The session log shows the cycle did reach `response_captured`, `write_applied`, and later `commit_success`.
+- The ops log around `1778465278` and `1778465287` shows `commit_blocked_bypassed_patchback ... marker=### Re: livekit agent readiness - gpt-5`, which means the response heading was visible before the guard could prove the document was safely committed.
+- The submodule commits then show a two-step repair-ish sequence: `4da0ad8d` appended the response body without the heading, `d757e547` inserted the `### Re:` heading, and `dd8e619d` compacted that exchange into the archive.
+
+The `agent-doc write --commit tasks/root.md --force-disk < /dev/null` recovery failed for a separate, simpler reason: `write --commit` needs a response body to write or adopt, and stdin was empty. So it refused with `empty response — nothing to write`. That command did not prove the document was user-edited; it only proved that the suggested recovery command is insufficient when the visible response already exists but no response body is being supplied.
+
+Current state has moved on: running `agent-doc session-check src/session-share/tasks/root.md` now reports a different unresolved prompt target, `Review the production and development logs. Are there any unfixed errors? #next-steps`, not the `livekit agent readiness` patchback marker.
+
+I added `#partialpatchbackadopt` to track the real follow-up: make this recovery path distinguish agent-doc-owned partial patchbacks from true manual/direct patchbacks, and make empty-stdin repair guidance point to an adoption/repair path instead of a command that cannot work without a response body.
+<!-- agent:boundary:55ba0723 -->
+<!-- /agent:exchange -->
+###
+
+<!--
 minor (v0.34.0) release + publish. merge into main
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
@@ -77,6 +94,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#partialpatchbackadopt] [recommended] Fix session-check/write recovery for agent-doc-owned partial patchbacks: when a prior agent-doc/Codex write path leaves an assistant heading/body visible outside the committed snapshot, classify it as an interrupted/adoptable agent-doc write instead of only direct response patchback, and make empty-stdin recovery point to the correct repair/adoption path.
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.

@@ -1,9 +1,9 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: opencode
-claude_model: claude-opus-4-6
 agent_doc_format: template
 agent_doc_write: crdt
+agent: opencode
+claude_model: claude-opus-4-6
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
@@ -108,7 +108,17 @@ Added `[#garbledpane]` to backlog. This needs a plan to:
 #### Re: spec-test-build-install-commit-push — glm-5.1
 
 No code changes to spec/test/build — only the plan file `tasks/agent-doc/plan-route-starting-actor-race-after-restart.md` was created in the prior turn. Skipping preset.
-<!-- agent:boundary:9b77f405 -->
+❯ do [#garbledpane]. spec-test-build-install-commit-push
+### Re: do [#garbledpane] — glm-5.1
+
+Implemented help/usage screen detection for OpenCode harness. When the pane shows OpenCode's help output (>=3 lines starting with `opencode `), the system now:
+
+1. **Dispatch blocker** — `dispatch_blocker_reason` returns `"help/usage screen detected"`, preventing route from injecting into a non-functional pane
+2. **Auto-trigger fast-fail** — the auto-trigger thread detects the help screen immediately and returns `Cancelled` instead of waiting for the 30s timeout, so the restart loop can restart fresh sooner
+3. **Route blocking** — `wait_for_agent_ready_outcome` won't match any help-screen line as a ready prompt, and the blocker prevents injection
+
+Changes: `src/harness.rs` (+76 lines), `src/start.rs` (+53 lines), `src/session_check.rs` (clippy fix). 7 new unit tests. All 2088 tests pass. Built + installed + pushed.
+<!-- agent:boundary:adbff415 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -140,7 +150,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#garbledpane] OpenCode TUI crashes to help screen after >20s commit — pane shows garbled ANSI art from opencode --help output and auto-trigger fails. Related: #routeStartingRace, #startingdispatch. Plan: tasks/agent-doc/plan-opencode-garbled-console-after-long-commit.md
 - [ ] [#routestartingrace] Route fails on freshly started actor — 5s wait timeout too short for OpenCode harness boot. Plan: tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 <!-- /agent:backlog -->
 
@@ -246,4 +255,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#noexchopencode2] #agent-doc-bug: OpenCode agent response output to user but not written into session document `agent:exchange` block. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — sidebar revert assessment response appeared in CLI output but was never patched back into the exchange section. User had to manually request "Write the response into the document." Same class as #nopatchbackopencode, #rspcmt4, #rspcmt5. OpenCode integration may skip the finalize/patchback step that other harness backends run.
 - 2026-05-11 [#rspcmt6] #agent-doc-bug: OpenCode agent-doc response patched into exchange but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the diff-summary response after "Run the post docker commands." was written into the exchange section but `tasks/monsterrodholders.md` remains dirty (uncommitted patchback lines). Additionally, the v1.32 surgical-revert code changes in `src/monsterrodholders-dev/` (mrh-performance.php + test script) were also left uncommitted despite the status saying "awaiting spec-test-commit-push." Same class as #rspcmt2-#rspcmt5. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode finalize-not-committing evidence.
 - 2026-05-11 [#rootlatepatch] Late fallback patch can re-dirty an already committed session document: `src/session-share/tasks/root.md` had a valid committed closeout, then a delayed fallback patch reintroduced a stale duplicate response and corrupted the `#vt-semantic-hero-screenshot` heading into `#vt-semantic-hero-scree nshot`, causing `session-check` to report an uncommitted/direct patchback. Plan: tasks/agent-doc/plan-late-fallback-patch-redirties-committed-doc.md
+- 2026-05-11 [#garbledpane] OpenCode TUI crashes to help screen after >20s commit — pane shows garbled ANSI art from opencode --help output and auto-trigger fails. Related: #routeStartingRace, #startingdispatch. Plan: tasks/agent-doc/plan-opencode-garbled-console-after-long-commit.md
 <!-- /agent:done -->

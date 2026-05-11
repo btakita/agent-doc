@@ -215,11 +215,22 @@ impl HarnessConfig {
         self.dispatch_blocker_reason(output).is_some()
     }
 
+    pub fn is_help_screen_output(&self, output: &str) -> bool {
+        match self.binary.as_str() {
+            "opencode" => is_opencode_help_screen(output),
+            _ => false,
+        }
+    }
+
     /// Return a short reason when recent pane output shows that route should
     /// not inject a new trigger yet.
     pub fn dispatch_blocker_reason(&self, output: &str) -> Option<String> {
         if crate::prompt::parse_prompt(output).active {
             return Some("active permission prompt".to_string());
+        }
+
+        if self.is_help_screen_output(output) {
+            return Some("help/usage screen detected".to_string());
         }
 
         if self.binary != "codex" {
@@ -312,6 +323,18 @@ impl HarnessConfig {
     pub fn cmdline_is_agent(&self, cmdline: &str) -> bool {
         self.process_names.iter().any(|name| cmdline.contains(name))
     }
+}
+
+fn is_opencode_help_screen(output: &str) -> bool {
+    let stripped = crate::prompt::strip_ansi(output);
+    let subcommand_lines = stripped
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("opencode ") && trimmed.len() > 10
+        })
+        .count();
+    subcommand_lines >= 3
 }
 
 fn parse_sandbox_mode_config(value: &str) -> Option<String> {
@@ -1233,5 +1256,58 @@ Press Enter to restart, or 'q' to exit.
         assert!(claude.supports_enable_tool_search);
         assert!(!codex.supports_no_mcp);
         assert!(!codex.supports_enable_tool_search);
+    }
+
+    #[test]
+    fn opencode_help_screen_detected() {
+        let h = HarnessConfig::opencode();
+        let help_output = "\
+opencode [project]           start opencode tui                                          [default]
+opencode attach <url>        attach to a running opencode server
+opencode run [message..]     run opencode with a message
+opencode debug               debugging and troubleshooting tools
+opencode providers           manage AI providers and credentials                   [aliases: auth]
+";
+        assert!(h.is_help_screen_output(help_output));
+    }
+
+    #[test]
+    fn opencode_help_screen_with_ansi_detected() {
+        let h = HarnessConfig::opencode();
+        let help_output = "\
+\x1b[1mopencode\x1b[0m [project]           start opencode tui
+\x1b[1mopencode\x1b[0m run [message..]     run opencode with a message
+\x1b[1mopencode\x1b[0m debug               debugging and troubleshooting tools
+";
+        assert!(h.is_help_screen_output(help_output));
+    }
+
+    #[test]
+    fn opencode_help_screen_rejects_normal_output() {
+        let h = HarnessConfig::opencode();
+        assert!(!h.is_help_screen_output("opencode is running\n>"));
+        assert!(!h.is_help_screen_output("some output\nmore output\n>"));
+        assert!(!h.is_help_screen_output(""));
+    }
+
+    #[test]
+    fn opencode_help_screen_dispatch_blocker() {
+        let h = HarnessConfig::opencode();
+        let help_output = "\
+opencode [project]           start opencode tui
+opencode run [message..]     run opencode with a message
+opencode debug               debugging and troubleshooting tools
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(help_output),
+            Some("help/usage screen detected".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_help_screen_not_detected() {
+        let h = HarnessConfig::claude();
+        let help_output = "opencode [project]           start opencode tui\nopencode run\nopencode debug\n";
+        assert!(!h.is_help_screen_output(help_output));
     }
 }

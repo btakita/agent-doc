@@ -1281,7 +1281,7 @@ fn exchange_has_new_appended_content(snapshot: &str, current: &str) -> bool {
         }
     }
     let appended: String = current_lines[snapshot_lines.len()..].join("\n");
-    if appended.lines().any(|line| crate::diff::text_line_looks_like_prompt_target(line)) {
+    if appended.lines().any(crate::diff::text_line_looks_like_prompt_target) {
         return false;
     }
     true

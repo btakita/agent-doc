@@ -907,6 +907,15 @@ fn current_child_prompt_visible(
     harness.matches_prompt(stripped.trim())
 }
 
+fn is_help_screen_visible(
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+) -> bool {
+    let recent = shared.recent_output.lock().unwrap();
+    let output = String::from_utf8_lossy(&recent);
+    harness.is_help_screen_output(&output)
+}
+
 fn spawn_auto_trigger_thread(
     shared: Arc<SupervisorShared>,
     stop: Arc<AtomicBool>,
@@ -989,6 +998,22 @@ fn spawn_auto_trigger_thread(
                                 .store(outcome as u8, Ordering::Relaxed);
                         }
                     }
+                    return;
+                }
+                if is_help_screen_visible(&shared, &harness) {
+                    shared
+                        .auto_trigger_outcome
+                        .store(AutoTriggerOutcome::Cancelled as u8, Ordering::Relaxed);
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "auto_trigger_help_screen harness={} reason=help_usage_screen_detected",
+                            harness.binary
+                        ),
+                    );
+                    eprintln!(
+                        "[agent-doc] auto-trigger: help/usage screen detected, skipping trigger"
+                    );
                     return;
                 }
                 if monitor.note_no_prompt(Instant::now()) {
@@ -4358,6 +4383,34 @@ mod tests {
             "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
         );
         assert!(!current_child_prompt_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn is_help_screen_visible_detects_opencode_help() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(
+            &shared,
+            b"opencode [project]           start opencode tui\n",
+        );
+        record_recent_output(
+            &shared,
+            b"opencode run [message..]     run opencode with a message\n",
+        );
+        record_recent_output(
+            &shared,
+            b"opencode debug               debugging and troubleshooting tools\n",
+        );
+        assert!(is_help_screen_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn is_help_screen_visible_rejects_normal_opencode_output() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(&shared, b"some normal output\n");
+        record_recent_output(&shared, b">\n");
+        assert!(!is_help_screen_visible(&shared, &harness));
     }
 
     #[test]

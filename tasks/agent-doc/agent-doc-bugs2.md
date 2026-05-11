@@ -34,7 +34,37 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): [#escrecov] OpenCode Escape interrupt recovery verified
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:647d80f2 -->
+❯ The session actor should remain alive across agent restarts (e.g. initiated by /clear in opencode). This should fix th JB plugin `Run Agent Doc` after `Clear Session Context` issue.
+❯ spec-test-commit-push
+### Re: session actor alive across agent restarts — glm-5
+
+Changes committed in `agent-doc` d47dbf0 and pushed to both submodule and parent repo:
+
+**1. OpenCode `CleanExitBehavior` → `RestartContinue`** (`src/harness.rs:100`)
+- OpenCode clean exits now auto-restart instead of prompting the user
+- Actor transitions `Busy` → auto-restart → `Starting` → `Ready` without entering `WaitingInput`
+- This matches the Codex behavior and ensures the JB plugin's "Run Agent Doc" works after "Clear Session Context"
+
+**2. OpenCode `/clear` tracking** (`src/session_actor_cmd.rs:281`)
+- `clear()` now records `/clear` as an external prompt for OpenCode too (not just Codex)
+- Route-level clear tracking is harness-agnostic: `tracked_harness_clear_requires_fresh_restart` matches `codex | opencode`
+
+**3. Generalized route functions** (`src/route.rs:760-824`)
+- `tracked_codex_clear_requires_fresh_restart` → `tracked_harness_clear_requires_fresh_restart`
+- `reapply_codex_launch_contract_after_clear` → `reapply_harness_launch_contract_after_clear`
+- Log messages use `harness.binary` instead of hardcoded "Codex"
+
+**4. Spec update** (`specs/08a-session-actor-contract.md:31-38`)
+- Documents that `/clear` in any harness preserves the actor lifecycle
+- Notes that clear tracking is harness-agnostic
+
+**5. Tests**
+- `tracked_harness_clear_requires_fresh_restart_only_for_exact_clear_prompt` — added OpenCode assertions
+- `clean_exit_resolution_auto_restarts_for_opencode` — new test
+- `opencode_defaults` — updated assertion: `CleanExitBehavior::RestartContinue`
+- All 23 OpenCode tests pass (1 ignored tmux integration)
+&lt;!-- /agent:exchange --&gt;
+<!-- agent:boundary:a6d6b43b -->
 <!-- /agent:exchange -->
 ###
 <!--

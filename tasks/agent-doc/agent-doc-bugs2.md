@@ -50,7 +50,17 @@ So the answer depends on what you mean by "plugin":
 - **Skills** (instructions for the agent): `skill-name` via the tool, no slash
 - **Commands** (user-triggered prompts): `/command-name` with slash
 - **Plugins** (event hooks): no user invocation, auto-loaded at startup
-<!-- agent:boundary:4bc7c570 -->
+❯ If we `/agent-doc` commands for opencode, would this effectively be the same interface as using the `agent-doc` skill? 
+### Re: /agent-doc command vs agent-doc skill — glm-5.1
+
+Yes, functionally equivalent — but there's a nuance:
+
+The **skill** (`agent-doc <FILE>` as a plain message) already works in OpenCode. The skill's SKILL.md says: *"In OpenCode, invoke agent-doc by writing one of these as a normal message: `agent-doc <FILE>`"*. The agent recognizes the text pattern and loads the skill.
+
+A **`/agent-doc` command** in `.opencode/commands/agent-doc.md` would do the same thing — the TUI would autocomplete it, and the template would emit `agent-doc $ARGUMENTS` as the prompt. The only difference is UX: slash commands get TUI autocomplete, tab-completion from the `/` menu, and a description shown in the command picker. Skills rely on the agent recognizing the text pattern.
+
+So they'd produce the same result. A `/agent-doc` command would just be a convenience wrapper — a named command with autocomplete that triggers the same skill path. It wouldn't add new functionality, just better discoverability in the TUI.
+<!-- agent:boundary:031a2bec -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -77,11 +77,7 @@ Other possible supervisor health states for context:
 
 The degraded authoritative actor fallback (the fix in d0ae7ed) exists precisely for this case: the pane is alive and owned by the correct session, but the supervisor that normally gates capability proof is dead. Skipping the proof gate on the degraded path lets the dispatch succeed despite the unreachable supervisor.
 &lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:af24514e -->
-<!-- /agent:exchange -->
-###
-<!--
-This error occurred after using the JB plugin to call ` 
+❯ This error occurred after using the JB plugin to call `Clear Session Context` then `Run Agent Doc`. spec-test-build-install-commit-push
 ```
 resync: stash pane %290 is registered in its own project root — skipping kill
 resync: stash pane %271 is registered in its own project root — skipping kill
@@ -97,6 +93,24 @@ resync: stash pane %256 is registered in its own project root — skipping kill
 [sync] found alive agent-doc child (pid 3031142) in pane %268 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
 Error: registered pane %268 for tasks/agent-doc/agent-doc-bugs2.md is still not showing an idle opencode prompt after automatically applying `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once; refusing to inject a routed trigger into a busy session (pane=%268 pane_pid=3078566 pane_session=4 current_command=agent-doc)
 ```
+### Re: busy pane after Clear Session Context + Run Agent Doc — glm-5.1
+
+**Root cause:** `attempt_busy_existing_pane_interrupt_recovery` (route.rs:4976) skipped all non-Codex harnesses entirely. After "Clear Session Context" kills the supervisor but leaves the agent-doc child running in the OpenCode pane, the degraded authoritative actor path correctly skipped the capability proof gate (d0ae7ed fix) but then hit the busy-pane detection. The auto-fix (`agent-doc fix`) couldn't resolve a genuinely busy pane, and interrupt recovery was skipped for OpenCode, causing a hard "refusing to inject a routed trigger into a busy session" failure.
+
+**Fix:**
+- Extracted OpenCode interrupt recovery into `attempt_opencode_busy_interrupt_recovery` in `route.rs`.
+- OpenCode interrupt sequence: sends Escape twice (200ms + 100ms gaps), then waits for an idle `>` prompt using the same `wait_for_agent_ready_outcome` / `fresh_route_start_ack_timeout` budget as Codex.
+- `attempt_busy_existing_pane_interrupt_recovery` now dispatches to the OpenCode-specific path instead of returning `Skipped`.
+- Updated spec `specs/07-session-tmux-commands.md` line 49 to document the OpenCode interrupt recovery requirement.
+- Added regression test `resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt` with a mock that simulates OpenCode progress bars and recovers to `>` idle prompt on Escape input.
+
+**Files changed:**
+- `src/agent-doc/src/route.rs` — added `attempt_opencode_busy_interrupt_recovery`, modified `attempt_busy_existing_pane_interrupt_recovery` to dispatch to it
+- `src/agent-doc/specs/07-session-tmux-commands.md` — documented OpenCode interrupt recovery requirement
+<!-- agent:boundary:b20ead7c -->
+<!-- /agent:exchange -->
+###
+<!--
 ```
 3. Workaround: delegate SSH via the host — if OpenCode can't SSH directly, have agent-doc run the SSH deploy           step outside the managed pane (in the harness supervisor process), not inside the OpenCode child.
 ```
@@ -119,6 +133,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#escrecov] 2026-05-11 Dispatch-only OpenCode interrupt recovery sends Escape twice and waits for idle prompt before failing closed. Verify in a live OpenCode session that Run Agent Doc works after Clear Session Context when the pane is busy. Plan: verify fix in route.rs attempt_opencode_busy_interrupt_recovery + test resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt
 - [ ] [#w3rb] 2026-05-11 [#capproofdegraded] Dispatch-only degraded authoritative actor path now skips capability proof gate — verify in a live OpenCode session that Run Agent Doc works after Clear Session Context. Plan: tasks/agent-doc/plan-degraded-authoritative-skip-capability-proof.md
 <!-- /agent:backlog -->
 

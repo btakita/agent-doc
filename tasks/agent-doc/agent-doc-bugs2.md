@@ -62,10 +62,34 @@ A **`/agent-doc` command** in `.opencode/commands/agent-doc.md` would do the sam
 So they'd produce the same result. A `/agent-doc` command would just be a convenience wrapper — a named command with autocomplete that triggers the same skill path. It wouldn't add new functionality, just better discoverability in the TUI.
 Add the `/agent-doc` command and remove the "In OpenCode, invoke agent-doc by writing one of these as a normal message: `agent-doc <FILE>`" in SKILL.md. Update the plugins to use the `/agent-doc` command.
 spec-test-build-install-commit-push
-<!-- agent:boundary:5c475f44 -->
+### Re: /agent-doc command for OpenCode — glm-5.1
+
+Added `/agent-doc` as a native OpenCode command and updated all skill surfaces accordingly.
+
+**Changes:**
+
+1. **`src/agent-doc/src/skill.rs`** — Updated `OPENCODE_DESCRIPTION` to reference `/agent-doc <file> command`, replaced `OPENCODE_INVOCATION_SECTION` with slash-command style (matching Claude Code format), updated `GENERIC_INVOCATION_SECTION` to list OpenCode with `/agent-doc`, added `install_opencode_command_file()` that writes `.opencode/commands/agent-doc.md` during `skill install --harness opencode`, and wired it into `install_env_artifacts`.
+
+2. **`src/agent-doc/runbooks/harness-invocation.md`** — Updated OpenCode section to reference the installed `/agent-doc` command via `.opencode/commands/agent-doc.md`.
+
+3. **Tests** — Updated `opencode_content_uses_plain_text_invocation` → `opencode_content_uses_slash_command_invocation`, added `install_for_opencode_creates_command_file`, `install_for_opencode_command_file_idempotent`, `install_env_artifacts_creates_opencode_command`.
+
+4. **Installed locally** — `agent-doc skill install --harness opencode` now creates `.opencode/commands/agent-doc.md` with `agent-doc $ARGUMENTS` template.
+
+All 1893 tests pass. `make check` clean.
+<!-- agent:boundary:08ae43ca -->
 <!-- /agent:exchange -->
 ###
 <!--
+I saw an error in the opencode console. spec-test-build-install-commit-push
+```
+[session-actor] warning: failed to record ready transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: project controller command `mark_lifecycle` failed: stale actor transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 120 is no longer current (current generation 121)
+```
+---
+```
+3. Workaround: delegate SSH via the host — if OpenCode can't SSH directly, have agent-doc run the SSH deploy           step outside the managed pane (in the harness supervisor process), not inside the OpenCode child.
+```
+---
 `[#2fha] 2026-05-11 [#nopatchbackopencode] ...` backlog item should have had the id `[#nopatchbackopencode]`.
 ---
 minor (v0.34.0) release + publish. merge into main
@@ -81,6 +105,8 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#opencodesshproof] OpenCode harness has no SSH capability proof — session log shows `codex_capability_proof` entries for Codex generations but zero proof entries for OpenCode generations, so `required_ssh_targets` frontmatter is not enforced and the agent discovers `socket: Operation not permitted` mid-response instead of failing closed. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md
+- [ ] [#opencodesshconfig] OpenCode session cannot SSH to `required_ssh_targets` — `socket: Operation not permitted` occurs because opencode's sandbox blocks network syscalls. Workaround options: (1) copy a per-project `.opencode/config.json` that grants network/SSH permissions, (2) file an agent-doc bug (this item), (3) both. Agent-doc should either detect the sandbox restriction and fail closed before dispatch, or inject the required `.opencode/config.json` permissions automatically when `required_ssh_targets` is set in the session frontmatter.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

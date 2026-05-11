@@ -639,7 +639,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
         }
         if let Some(marker) = detect_active_session_post_commit_drift(file)? {
             return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the active Codex session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the Stop hook recover it from the final assistant message.",
+                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                 state.cycle_id,
                 phase_name(state.phase),
                 state.last_event,
@@ -700,7 +700,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             }
             if let Some(marker) = detect_active_session_post_commit_drift(file)? {
                 return Ok(SessionCheckStatus::Interrupted(format!(
-                    "[session-check] INTERRUPTED: the active Codex session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the Stop hook recover it from the final assistant message.",
+                    "[session-check] INTERRUPTED: the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                     marker
                 )));
             }
@@ -786,7 +786,7 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
             }
             if let Some(marker) = detect_active_session_post_commit_drift(file)? {
                 return Ok(SessionCheckStatus::Interrupted(format!(
-                    "[session-check] INTERRUPTED: last ops.log event is terminal, but the active Codex session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the Stop hook recover it from the final assistant message.",
+                    "[session-check] INTERRUPTED: last ops.log event is terminal, but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                     marker
                 )));
             }
@@ -2433,7 +2433,7 @@ Body\n\
 
         match inspect(&doc).unwrap() {
             SessionCheckStatus::Interrupted(message) => {
-                assert!(message.contains("active Codex session changed this document"));
+                assert!(message.contains("active harness session changed this document"));
                 assert!(message.contains("binary-owned write/commit path"));
                 assert!(message.contains("agent-doc"));
             }

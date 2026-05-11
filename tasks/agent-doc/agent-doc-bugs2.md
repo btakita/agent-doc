@@ -34,11 +34,53 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 4 response topic(s): garbled OpenCode console after long commit; spec-test-build-install-commit-push; do [#garbledpane]; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a157dea4 -->
+❯ The tmux session no longer has the agent-doc tmux window. There is only the stash tmux window. When I first started the session, there was another window that bumped the agent-doc tmux window to window 1. I then manually removed my custom tmux window 0. 
+❯ - Fix regression in agent-doc recovering tmux to the canonical state.
+❯ - Review logs to identify agent-doc
+
+❯ #next-steps
+
+### Re: tmux window missing — base-index auto-repair — glm-5.1
+
+#### Root cause
+
+Session 1 has only one window — `stash` (@4) with 5 panes. Pane %28 (agent-doc-bugs2.md actor, generation 143) is trapped inside the stash window. The agent-doc window is gone entirely.
+
+**Why repair didn't fire:** `check_layout()` in preflight detects "window index 0 missing in session '1' (base-index compliance)" but `maybe_auto_resync_on_drift()` only handles `"session drift:"` prefixed issues. `repair_layout()` — which has Phase 2 logic to rescue a registered pane from stash via `break-pane` — is never called during preflight. It only runs from the sync/doctor paths.
+
+**ops.log evidence:**
+- `route_authoritative_actor_starting_not_ready` at pane %28, generation 143, elapsed 16219ms (timeout 15000ms) — the route can't dispatch because the actor is stuck in `starting` state inside the stash window
+- The pane was registered at window @4 (stash), confirming the agent-doc window was lost when the user manually killed window 0
+
+#### Fix applied
+
+Added `maybe_auto_repair_base_index()` in `preflight.rs` (lines 496–558):
+- Detects "window index 0 missing" in layout issues
+- Uses a consecutive-detection counter (`.agent-doc/state/base-index-repair.count`) — tolerates one false positive before acting
+- On second consecutive detection, calls `sync::repair_layout()` which:
+  - Phase 2: breaks the registered pane out of stash into a new agent-doc window via `break-pane`
+  - Phase 3: normalizes window indices (agent-doc → 0, stash → 1+)
+- Resets the counter on successful repair
+
+**Files changed:**
+- `src/agent-doc/src/preflight.rs` — added `maybe_auto_repair_base_index()`, wired into preflight step 0c, added 2 tests
+
+**Verification:** `make check` passes (clippy + 1938 tests including 2 new ones). Installed locally.
+
+#### Remaining issue: starting actor race
+
+Pane %28 is stuck in `starting` state even after the window repair lands. This is the `#routestartingrace` bug — the 15s route timeout is too short for OpenCode harness boot. The auto-repair will fix the window layout on the next preflight, but the route may still fail until the starting actor transitions to `ready`.
+
+### Re: #next-steps — glm-5.1
+
+- Next preflight will trigger auto-repair (this is the second detection), so the agent-doc window should be restored
+- May need to manually run `agent-doc start tasks/agent-doc/agent-doc-bugs2.md` if the starting actor at pane %28 doesn't transition to ready
+- The `#routestartingrace` backlog item remains the longer-term fix for the 15s timeout
+&lt;!-- /agent:exchange --&gt;
+<!-- agent:boundary:6803ad11 -->
 <!-- /agent:exchange -->
 ###
 <!--
----
 JB Plugin `Run Agent Doc` had an error after running `/clear` on root.md:
 ```
 resync: stash pane %11 is registered in its own project root — skipping kill
@@ -46,6 +88,13 @@ resync: stash pane %7 is registered in its own project root — skipping kill
 [route] target tmux session: 1
 Error: authoritative actor generation 22 for tasks/root.md owns pane %12 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
 ```
+spec-test-build-install-commit-push
+---
+JB `Clear Session Context` had an error:
+```
+agent-doc command failed (exit 1): Error: project controller command `operator_command` failed: operator command `session_clear` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 141 is closed
+```
+spec-test-build-install-commit-push
 ---
 Why is agent-doc starting a child Codex run?
 ```

@@ -131,7 +131,11 @@ Changed the OpenCode `trigger_command_template` from `"agent-doc {file}"` to `"/
 - `src/harness.rs:1127` — Updated `harness_isolation_trigger_commands_both_route_file` test expectation
 
 All 1896 tests pass. Commit `3106a82` pushed to `20260422/codex-agent-backend`.
-<!-- agent:boundary:83e11ba0 -->
+❯ Is agent-doc installed as an opencode command on opencode?
+### Re: agent-doc as OpenCode command — glm-5.1
+
+Yes — agent-doc is installed as an OpenCode slash command. `.opencode/commands/agent-doc.md` registers `/agent-doc` with the body `agent-doc $ARGUMENTS`, so `/agent-doc <file>` in the OpenCode CLI invokes the agent-doc binary directly.
+<!-- agent:boundary:241781f3 -->
 <!-- /agent:exchange -->
 ###
 <!--

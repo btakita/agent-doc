@@ -98,6 +98,32 @@ fn write_sleeping_agent(root: &Path) -> PathBuf {
     script
 }
 
+fn write_marker_agent(root: &Path, response: &str) -> (PathBuf, PathBuf) {
+    let script = root.join("mock-marker-agent.sh");
+    let marker = root.join("mock-agent-called");
+    let payload = serde_json::json!({
+        "result": response,
+        "session_id": "sess-marker"
+    })
+    .to_string();
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nprintf called > '{}'\ncat >/dev/null\ncat <<'JSON'\n{payload}\nJSON\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+    }
+    (script, marker)
+}
+
 fn write_delayed_mock_agent(root: &Path, response: &str, delay_secs: u64) -> PathBuf {
     let script = root.join("mock-delayed-agent.sh");
     let payload = serde_json::json!({
@@ -296,6 +322,68 @@ fn run_times_out_agent_child_and_marks_recoverable_preflight() {
             .unwrap()
             .contains("direct_invocation_timeout")
     );
+}
+
+#[test]
+fn run_stops_before_child_dispatch_when_precommit_consumes_stale_repair_diff() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let stale_snapshot = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n",
+        "old body\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    fs::write(&doc, stale_snapshot).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+
+    let committed_repair = concat!(
+        "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior — gpt-5\n",
+        "old body\n",
+        "### Re: repaired — gpt-5\n",
+        "already committed body\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    fs::write(&doc, committed_repair).unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["add", "session.md"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["commit", "-m", "manual repair", "--no-verify"])
+        .status()
+        .unwrap();
+
+    let (script, marker) = write_marker_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: should not run — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+    );
+    let config_root = write_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no child-agent dispatch"))
+        .stderr(predicate::str::contains("agent-doc write --commit"));
+
+    assert!(
+        !marker.exists(),
+        "pre-commit repair consumed the diff; child agent must not be invoked"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(!content.contains("should not run"));
+    assert_eq!(read_cycle_phase(tmp.path()), "committed");
 }
 
 #[test]

@@ -221,7 +221,14 @@ pub fn run(
     // Pre-commit: commit user's changes before sending to agent
     // This lets the editor show agent additions as diff gutters
     if !no_git {
-        git::commit(file)?;
+        let did_commit = git::commit(file)?;
+        if !did_commit && diff::compute(file)?.is_none() {
+            anyhow::bail!(
+                "no child-agent dispatch: the pre-commit repair closed {} as already committed and no new assistant response body was supplied. If you need to recover a missed response patchback, pipe the response through `agent-doc write --commit {}`.",
+                file.display(),
+                file.display()
+            );
+        }
     }
     start_run_cycle(file)?;
 

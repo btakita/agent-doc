@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Direct `agent-doc run` now stops when pre-commit repair consumes the whole diff.** If the initial diff only reflected an already-committed missed patchback and the pre-commit repair brings the snapshot back to `HEAD`, `run` rechecks the diff and fails before child-agent dispatch with an `agent-doc write --commit <FILE>` recovery hint. Added an integration regression proving a configured child agent is not invoked. This closes `#emptyrsprepair` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Agent-owned partial patchbacks can be adopted from empty strict repair writes.** `agent-doc repair` now adopts already-visible responses from interrupted `response_captured` / `write_applied` cycles even when no pending response artifact remains, and strict `write --commit` with empty stdin runs that adoption path before failing as an empty response. This closes `#partialpatchbackadopt` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Blocked-stop repair now replays guard-prefixed patch payloads.** The shared replay guard now accepts known closeout guard comments such as `<!-- no-pending-capture -->` around otherwise valid patch responses, while still blocking transcript/full-document dumps. `agent-doc repair` now writes the sanitized replayable payload returned by the guard, so patch bodies extracted from leading progress commentary are actually used instead of only classified. Added replay guard, repair, and Codex Stop-hook regressions. This closes `#blockedstopextract` in `tasks/agent-doc/agent-doc-bugs2.md`.

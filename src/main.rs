@@ -409,9 +409,17 @@ enum Commands {
         #[arg(long)]
         force: bool,
         /// Internal route-owned pane mode: exit and reap after the first
-        /// binary-owned document cycle commits.
+        /// binary-owned document cycle commits when the document has no
+        /// continued-interaction signals.
         #[arg(long = "route-owned", hide = true)]
         route_owned: bool,
+        /// Internal route-owned pane reap policy.
+        #[arg(
+            long = "route-owned-reap-policy",
+            hide = true,
+            default_value_t = start::RouteOwnedReapPolicy::Auto
+        )]
+        route_owned_reap_policy: start::RouteOwnedReapPolicy,
     },
     /// Route /agent-doc command to the correct tmux pane
     Route {
@@ -1446,7 +1454,11 @@ fn main() -> anyhow::Result<()> {
             file,
             force,
             route_owned,
-        } => start::run(&file, force, route_owned),
+            route_owned_reap_policy,
+        } => match route_owned_reap_policy {
+            start::RouteOwnedReapPolicy::Auto => start::run(&file, force, route_owned),
+            policy => start::run_with_reap_policy(&file, force, route_owned, policy),
+        },
         Commands::Route {
             file,
             dispatch_only,

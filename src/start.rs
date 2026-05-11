@@ -27,9 +27,10 @@
 //!   other subcommands (`route`, `focus`, etc.) can locate the pane.
 //! - Runs the configured harness binary as a blocking child process inside a persistent restart loop
 //!   so a normal tmux pane never dies on its own.
-//! - When `--route-owned` is set by `route` auto-start, watches for the first
-//!   new binary-owned document cycle to reach `committed`, stops the child, and
-//!   reaps the tmux pane. Failed or interrupted cycles stay visible for debugging.
+//! - When `--route-owned` is set by `route` auto-start, watches for new
+//!   binary-owned document cycles to reach `committed`. It reaps only one-shot
+//!   panes; multi-turn documents with live backlog, queue, dirty edits, or an
+//!   unresolved exchange-tail prompt stay alive for continued interaction.
 //! - On non-zero exit (context exhaustion, crash, etc.): auto-restarts after a
 //!   2-second delay using `--continue` to resume the previous conversation.
 //! - On clean exit (code 0): honors the active harness policy.
@@ -127,6 +128,39 @@ use crate::supervisor::{
     state::{CrashPolicy, RestartAction, SupervisorState},
 };
 use crate::{config, frontmatter, sessions, snapshot};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum RouteOwnedReapPolicy {
+    Auto,
+    ReapAfterCommit,
+    KeepAlive,
+}
+
+impl RouteOwnedReapPolicy {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::ReapAfterCommit => "reap_after_commit",
+            Self::KeepAlive => "keep_alive",
+        }
+    }
+}
+
+impl std::fmt::Display for RouteOwnedReapPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Auto => "auto",
+            Self::ReapAfterCommit => "reap-after-commit",
+            Self::KeepAlive => "keep-alive",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RouteOwnedReapDecision {
+    reap: bool,
+    reason: String,
+}
 
 /// Open (or create) the session log file at `.agent-doc/logs/<session-uuid>.log`.
 /// Returns a writable file handle in append mode, or None if the directory can't be created.
@@ -522,10 +556,125 @@ fn route_owned_cycle_completed_after_start(
         && current.phase == crate::cycle_state::CyclePhase::Committed
 }
 
+fn route_owned_file_dirty_after_commit(
+    content: &str,
+    state: &crate::cycle_state::CycleState,
+) -> bool {
+    state
+        .file_hash
+        .as_ref()
+        .is_some_and(|hash| crate::ops_log::content_hash(content) != *hash)
+}
+
+fn route_owned_backlog_has_live_items(body: &str) -> bool {
+    let (_, items, _) = crate::pending::parse_items(body);
+    items
+        .iter()
+        .any(|item| item.state != crate::pending::PendingState::Done)
+}
+
+fn route_owned_queue_has_prompts(body: &str) -> bool {
+    match crate::queue::parse(body) {
+        Ok(entries) => !crate::queue::prompts(&entries).is_empty(),
+        Err(_) => !body.trim().is_empty(),
+    }
+}
+
+fn route_owned_exchange_tail_has_unresolved_prompt(body: &str) -> bool {
+    let mut tail_start = 0usize;
+    let mut line_start = 0usize;
+    for line in body.split_inclusive('\n') {
+        if route_owned_line_is_response_heading(line.trim()) {
+            tail_start = line_start + line.len();
+        }
+        line_start += line.len();
+    }
+    if line_start < body.len() && route_owned_line_is_response_heading(body[line_start..].trim()) {
+        tail_start = body.len();
+    }
+
+    body[tail_start..]
+        .lines()
+        .any(crate::diff::text_line_looks_like_prompt_target)
+}
+
+fn route_owned_line_is_response_heading(line: &str) -> bool {
+    line == "## Assistant"
+        || line.starts_with("### Re:")
+        || line.starts_with("#### Re:")
+        || line.starts_with("##### Re:")
+}
+
+fn route_owned_liveness_reason(
+    file: &Path,
+    state: &crate::cycle_state::CycleState,
+) -> Option<String> {
+    let content = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(err) => return Some(format!("read_failed:{err}")),
+    };
+    if route_owned_file_dirty_after_commit(&content, state) {
+        return Some("document_dirty_after_commit".to_string());
+    }
+
+    let components = match crate::component::parse(&content) {
+        Ok(components) => components,
+        Err(err) => return Some(format!("component_parse_failed:{err}")),
+    };
+
+    for component in &components {
+        let body = component.content(&content);
+        if crate::component::is_backlog_component(&component.name)
+            && route_owned_backlog_has_live_items(body)
+        {
+            return Some("backlog_non_empty".to_string());
+        }
+        if component.name == "queue" && route_owned_queue_has_prompts(body) {
+            return Some("queue_non_empty".to_string());
+        }
+        if component.name == "exchange" && route_owned_exchange_tail_has_unresolved_prompt(body) {
+            return Some("exchange_tail_unresolved_prompt".to_string());
+        }
+    }
+
+    None
+}
+
+fn route_owned_reap_decision(
+    file: &Path,
+    state: &crate::cycle_state::CycleState,
+    policy: RouteOwnedReapPolicy,
+) -> RouteOwnedReapDecision {
+    match policy {
+        RouteOwnedReapPolicy::KeepAlive => RouteOwnedReapDecision {
+            reap: false,
+            reason: "explicit_keep_alive".to_string(),
+        },
+        RouteOwnedReapPolicy::ReapAfterCommit => RouteOwnedReapDecision {
+            reap: true,
+            reason: "explicit_reap_after_commit".to_string(),
+        },
+        RouteOwnedReapPolicy::Auto => {
+            if let Some(reason) = route_owned_liveness_reason(file, state) {
+                RouteOwnedReapDecision {
+                    reap: false,
+                    reason,
+                }
+            } else {
+                RouteOwnedReapDecision {
+                    reap: true,
+                    reason: "no_liveness_signals".to_string(),
+                }
+            }
+        }
+    }
+}
+
 fn spawn_route_owned_completion_thread(
     shared: Arc<SupervisorShared>,
     file: PathBuf,
-    baseline: Option<crate::cycle_state::CycleState>,
+    mut baseline: Option<crate::cycle_state::CycleState>,
+    reap_policy: RouteOwnedReapPolicy,
     completed: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     mut session_log: Option<std::fs::File>,
@@ -537,17 +686,24 @@ fn spawn_route_owned_completion_thread(
                 if let Ok(Some(state)) = crate::cycle_state::load(&file)
                     && route_owned_cycle_completed_after_start(&state, baseline.as_ref())
                 {
-                    completed.store(true, Ordering::Relaxed);
-                    log_event(
-                        &mut session_log,
-                        &format!(
-                            "route_owned_cycle_committed cycle={} event={}",
-                            state.cycle_id, state.last_event
-                        ),
+                    let decision = route_owned_reap_decision(&file, &state, reap_policy);
+                    let event = format!(
+                        "route_owned_reap_decision policy={} decision={} reason={} cycle={} event={}",
+                        reap_policy.as_str(),
+                        if decision.reap { "reap" } else { "keep_alive" },
+                        decision.reason,
+                        state.cycle_id,
+                        state.last_event
                     );
-                    shared.stop_requested.store(true, Ordering::Relaxed);
-                    shared.kill_child();
-                    return;
+                    log_event(&mut session_log, &event);
+                    crate::ops_log::log_op(&file, &event);
+                    if decision.reap {
+                        completed.store(true, Ordering::Relaxed);
+                        shared.stop_requested.store(true, Ordering::Relaxed);
+                        shared.kill_child();
+                        return;
+                    }
+                    baseline = Some(state);
                 }
                 if !sleep_with_stop(&stop, ROUTE_OWNED_COMPLETION_POLL_INTERVAL) {
                     return;
@@ -1861,6 +2017,15 @@ fn spawn_writer_thread(
 }
 
 pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
+    run_with_reap_policy(file, force, route_owned, RouteOwnedReapPolicy::Auto)
+}
+
+pub(crate) fn run_with_reap_policy(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    route_owned_reap_policy: RouteOwnedReapPolicy,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -2292,6 +2457,7 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
             shared.clone(),
             canonical.clone(),
             route_owned_cycle_baseline,
+            route_owned_reap_policy,
             route_owned_completion.clone(),
             route_owned_completion_stop.clone(),
             session_log.as_ref().and_then(|f| f.try_clone().ok()),
@@ -3731,6 +3897,137 @@ mod tests {
             !route_owned_cycle_completed_after_start(&current, Some(&baseline)),
             "route-owned panes should stay alive for debugging until the new cycle commits"
         );
+    }
+
+    fn committed_state_for_doc(path: &Path, content: &str) -> crate::cycle_state::CycleState {
+        let mut state = test_cycle("cycle-2", crate::cycle_state::CyclePhase::Committed, 20);
+        state.file = path.display().to_string();
+        state.file_hash = Some(crate::ops_log::content_hash(content));
+        state
+    }
+
+    #[test]
+    fn route_owned_reap_policy_auto_keeps_live_backlog_alive() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let content = "\
+<!-- agent:exchange -->
+### Re: prior — gpt-5
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+- [ ] [#next] Continue the session
+<!-- /agent:backlog -->
+";
+        std::fs::write(&file, content).unwrap();
+        let state = committed_state_for_doc(&file, content);
+
+        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+
+        assert!(!decision.reap);
+        assert_eq!(decision.reason, "backlog_non_empty");
+    }
+
+    #[test]
+    fn route_owned_reap_policy_auto_keeps_queue_alive() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let content = "\
+<!-- agent:queue -->
+- do #next
+<!-- /agent:queue -->
+";
+        std::fs::write(&file, content).unwrap();
+        let state = committed_state_for_doc(&file, content);
+
+        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+
+        assert!(!decision.reap);
+        assert_eq!(decision.reason, "queue_non_empty");
+    }
+
+    #[test]
+    fn route_owned_reap_policy_auto_keeps_dirty_doc_alive() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let committed =
+            "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
+        let edited = format!("{committed}\nnew prompt?\n");
+        std::fs::write(&file, edited).unwrap();
+        let state = committed_state_for_doc(&file, committed);
+
+        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+
+        assert!(!decision.reap);
+        assert_eq!(decision.reason, "document_dirty_after_commit");
+    }
+
+    #[test]
+    fn route_owned_reap_policy_auto_reaps_without_liveness_signals() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let content = "\
+<!-- agent:exchange -->
+### Re: done — gpt-5
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+";
+        std::fs::write(&file, content).unwrap();
+        let state = committed_state_for_doc(&file, content);
+
+        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+
+        assert!(decision.reap);
+        assert_eq!(decision.reason, "no_liveness_signals");
+    }
+
+    #[test]
+    fn route_owned_explicit_reap_overrides_live_backlog() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let content = "<!-- agent:backlog -->\n- [ ] [#next] Continue\n<!-- /agent:backlog -->\n";
+        std::fs::write(&file, content).unwrap();
+        let state = committed_state_for_doc(&file, content);
+
+        let decision =
+            route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::ReapAfterCommit);
+
+        assert!(decision.reap);
+        assert_eq!(decision.reason, "explicit_reap_after_commit");
+    }
+
+    #[test]
+    fn route_owned_exchange_tail_prompt_is_live() {
+        let body = "\
+### Re: done — gpt-5
+Done.
+
+do #next
+";
+
+        assert!(route_owned_exchange_tail_has_unresolved_prompt(body));
+    }
+
+    #[test]
+    fn route_owned_exchange_tail_ignores_prompt_text_before_latest_response() {
+        let body = "\
+### Re: earlier — gpt-5
+Do #old after this.
+
+### Re: latest — gpt-5
+Done.
+";
+
+        assert!(!route_owned_exchange_tail_has_unresolved_prompt(body));
     }
 
     #[test]

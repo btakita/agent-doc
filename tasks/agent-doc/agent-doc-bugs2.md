@@ -57,12 +57,11 @@ Commits created before this session closeout:
 - `313f5ca42` in the parent repo: `fix: refresh opencode agent-doc instructions`
 
 Per the session commit ordering rule, I will push after this `agent-doc finalize` closeout commit lands so the response commit is included.
-<!-- agent:boundary:68b143c8 -->
+<!-- agent:boundary:89aa1bf8 -->
 <!-- /agent:exchange -->
 ###
 <!--
 `[#2fha] 2026-05-11 [#nopatchbackopencode] ...` backlog item should have had the id `[#nopatchbackopencode]`.
-spec-
 ---
 minor (v0.34.0) release + publish. merge into main
 ---

@@ -38,12 +38,33 @@ Operational task document for agent-loop workspace management.
 Compacted content:
 - Archived 11 response topic(s): optimizing /context, plugins on demand; context audit; token optimization strategies; 8 more
 - Prior summary/context: Completed releases: corky v0.26.3 (7-platform GitHub Release, fixed CI through 5 iterations: OpenSSL, host libssl-dev...
+❯ My logitech webcam is not connecting to Zoom after the machine rebooted. Please troubleshoot.
+### Re: spec created & items transferred — opus-4-6
+
+Done. Created the spec in `tasks/tsift.md` with:
+
+- **Spec: AST-Aware Code RAG** section — covers architecture (tsift + tsift-graph crate), per-submodule isolation tiers, storage layout, new subcommands, output contract, and development phases
+- **8 new pending items** added to tsift.md covering the full implementation path:
+  - `#ast1`–`#ast4`: tree-sitter integration + SQLite symbols + search wiring
+  - `#grp1`–`#grp2`: tsift-graph crate + callers/callees subcommands
+  - `#iso1`: per-submodule config + isolation
+  - `#bamc`: graphify evaluation (transferred from here)
+
+The existing tsift pending items (release workflow, audit subcommands) are preserved alongside the new ones.
+
+Marked `#bamc` done here — it now lives in `tasks/tsift.md`.
+<!-- agent:boundary:6ff88172 -->
 <!-- /agent:exchange -->
 
-<!-- agent:pending patch=replace -->
+<!-- agent:pending -->
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`
-- [x] [#aaj9] Transfer snapshot GC feature to agent-doc-feat.md
-- [x] [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
 <!-- /agent:pending -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-05-11 [#aaj9] Transfer snapshot GC feature to agent-doc-feat.md
+- 2026-05-11 [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
+<!-- /agent:done -->

@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **OpenCode direct-exec session-check guard.** The OpenCode harness runbook now requires `agent-doc session-check <FILE>` immediately after `finalize` and after manual `write --commit`, matching the existing Codex fail-closed contract. `runbooks/commit.md` and `README.md` now name both Codex and OpenCode for the direct-exec post-write guard. `session_check.rs` error messages no longer reference "the active Codex session" or "the Stop hook" exclusively — they use harness-agnostic language. This closes `#rspcmt4` in `tasks/agent-doc/agent-doc-bugs2.md` and extends `tasks/agent-doc/plan-response-patchback-uncommitted.md` with OpenCode-specific closeout evidence.
+
 - **Closeout and starting-actor diagnostics now name the next command.** `agent-doc commit <FILE>` no longer lets the "already committed" no-op message sound like a full closeout when later user follow-up prompts remain; it now says to rerun `agent-doc <FILE>` or use `agent-doc write --commit <FILE>` for a missing response. Route's `starting` authoritative-actor failure now says to wait and rerun, and names `agent-doc start <FILE>` for stuck-owner recovery. This closes `#rspcmt3` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **OpenCode harness support.** `agent: opencode` now resolves to an OpenCode managed pane with `agent-doc <file>` trigger routing, `opencode_model` / `opencode_args` frontmatter and config aliases, and a minimal non-streaming `agent-doc run --agent opencode` backend that invokes `opencode run`. This supports OpenCode model IDs such as `zai/glm-5` via the same `--model` injection path.

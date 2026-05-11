@@ -1549,6 +1549,32 @@ mod tests {
     }
 
     #[test]
+    fn harness_invocation_runbook_opencode_section_requires_session_check() {
+        let (_, content) = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "harness-invocation.md")
+            .expect("harness-invocation.md not found");
+
+        let opencode_start = content
+            .find("## OpenCode")
+            .expect("## OpenCode section not found");
+        let next_section = content[opencode_start + 1..]
+            .find("\n## ")
+            .map(|i| opencode_start + 1 + i)
+            .unwrap_or(content.len());
+        let opencode_section = &content[opencode_start..next_section];
+
+        assert!(
+            opencode_section.contains("agent-doc session-check"),
+            "OpenCode section must require session-check after finalize: {opencode_section}"
+        );
+        assert!(
+            opencode_section.contains("Fail closed"),
+            "OpenCode section must include fail-closed guard: {opencode_section}"
+        );
+    }
+
+    #[test]
     fn commit_runbook_content() {
         let (_, content) = BUNDLED_RUNBOOKS
             .iter()

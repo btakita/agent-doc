@@ -395,7 +395,7 @@ fn codex_child_network_probe_prompt() -> String {
     )
 }
 
-fn classify_child_network_probe_failure(detail: &str) -> &'static str {
+fn classify_child_network_probe_failure(detail: &str, harness: &str) -> String {
     let lower = detail.to_ascii_lowercase();
     if lower.contains("could not resolve")
         || lower.contains("temporary failure in name resolution")
@@ -403,7 +403,7 @@ fn classify_child_network_probe_failure(detail: &str) -> &'static str {
         || lower.contains("nodename nor servname provided")
         || lower.contains("getaddrinfo")
     {
-        "DNS resolution failed inside the Codex child"
+        format!("DNS resolution failed inside the {harness} child")
     } else if lower.contains("operation not permitted")
         || lower.contains("network is unreachable")
         || lower.contains("permission denied")
@@ -411,13 +411,13 @@ fn classify_child_network_probe_failure(detail: &str) -> &'static str {
         || lower.contains("sandbox")
         || lower.contains("network disabled")
     {
-        "Codex sandbox/network capability denied outbound access"
+        format!("{harness} sandbox/network capability denied outbound access")
     } else if lower.contains("connection refused") {
-        "remote network service refused the Codex child connection"
+        format!("remote network service refused the {harness} child connection")
     } else if lower.contains("timed out") || lower.contains("timeout") {
-        "Codex child network probe timed out"
+        format!("{harness} child network probe timed out")
     } else {
-        "Codex child network probe failed"
+        format!("{harness} child network probe failed")
     }
 }
 
@@ -425,21 +425,22 @@ fn wait_with_timeout(
     mut child: std::process::Child,
     timeout: Duration,
     probe_name: &str,
+    harness: &str,
 ) -> Result<std::process::Output> {
     let started = Instant::now();
     loop {
         if child.try_wait()?.is_some() {
             return child
                 .wait_with_output()
-                .map_err(|e| anyhow::anyhow!("failed to collect Codex child probe output: {e}"));
+                .map_err(|e| anyhow::anyhow!("failed to collect {harness} child probe output: {e}"));
         }
         if started.elapsed() >= timeout {
             let _ = child.kill();
             let output = child.wait_with_output().map_err(|e| {
-                anyhow::anyhow!("failed to collect timed-out Codex child probe output: {e}")
+                anyhow::anyhow!("failed to collect timed-out {harness} child probe output: {e}")
             })?;
             anyhow::bail!(
-                "Codex child {probe_name} probe timed out after {}s; stderr={}",
+                "{harness} child {probe_name} probe timed out after {}s; stderr={}",
                 timeout.as_secs(),
                 String::from_utf8_lossy(&output.stderr).trim()
             );
@@ -448,7 +449,7 @@ fn wait_with_timeout(
     }
 }
 
-fn validate_codex_child_network_probe_output(stdout: &str, stderr: &str) -> Result<()> {
+fn validate_codex_child_network_probe_output(stdout: &str, stderr: &str, harness: &str) -> Result<()> {
     let mut saw_command_execution = false;
     let mut failure_detail: Option<String> = None;
 
@@ -490,15 +491,15 @@ fn validate_codex_child_network_probe_output(stdout: &str, stderr: &str) -> Resu
 
     let detail = failure_detail.unwrap_or_else(|| {
         if saw_command_execution {
-            "Codex command execution did not emit the network probe success marker".to_string()
+            format!("{harness} command execution did not emit the network probe success marker")
         } else {
             format!(
-                "Codex child did not run a command_execution event; stderr={}",
+                "{harness} child did not run a command_execution event; stderr={}",
                 stderr.trim()
             )
         }
     });
-    let classification = classify_child_network_probe_failure(&detail);
+    let classification = classify_child_network_probe_failure(&detail, harness);
     anyhow::bail!("{classification}: {detail}");
 }
 
@@ -506,6 +507,7 @@ fn prove_codex_child_network_access(
     command: &str,
     launch_args: &[String],
     env: &std::collections::HashMap<String, String>,
+    harness: &str,
 ) -> Result<()> {
     let probe_args = codex_exec_args_for_probe(launch_args);
     let codex =
@@ -516,18 +518,18 @@ fn prove_codex_child_network_access(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| anyhow::anyhow!("failed to start Codex child network probe: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("failed to start {harness} child network probe: {e}"))?;
     if let Some(stdin) = child.stdin.as_mut() {
         Codex::write_prompt_to_child(stdin, &codex_child_network_probe_prompt())?;
     }
     child.stdin.take();
 
-    let output = wait_with_timeout(child, CODEX_CHILD_NETWORK_PROBE_TIMEOUT, "network")?;
+    let output = wait_with_timeout(child, CODEX_CHILD_NETWORK_PROBE_TIMEOUT, "network", harness)?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
-        let classification = classify_child_network_probe_failure(&detail);
+        let classification = classify_child_network_probe_failure(&detail, harness);
         anyhow::bail!(
-            "{classification}: Codex child probe command exited nonzero: {}",
+            "{classification}: {harness} child probe command exited nonzero: {}",
             detail.trim()
         );
     }
@@ -535,6 +537,7 @@ fn prove_codex_child_network_access(
     validate_codex_child_network_probe_output(
         &String::from_utf8_lossy(&output.stdout),
         &String::from_utf8_lossy(&output.stderr),
+        harness,
     )
 }
 
@@ -567,7 +570,7 @@ fn codex_child_writable_roots_probe_prompt(roots: &[PathBuf]) -> String {
     )
 }
 
-fn classify_child_writable_root_probe_failure(detail: &str) -> &'static str {
+fn classify_child_writable_root_probe_failure(detail: &str, harness: &str) -> String {
     let lower = detail.to_ascii_lowercase();
     if lower.contains("read-only file system")
         || lower.contains("operation not permitted")
@@ -575,17 +578,17 @@ fn classify_child_writable_root_probe_failure(detail: &str) -> &'static str {
         || lower.contains("eperm")
         || lower.contains("sandbox")
     {
-        "Codex sandbox/write capability denied git metadata access"
+        format!("{harness} sandbox/write capability denied git metadata access")
     } else if lower.contains("index.lock") || lower.contains("file exists") {
-        "Codex child could not create required git metadata lock"
+        format!("{harness} child could not create required git metadata lock")
     } else if lower.contains("not a directory") || lower.contains("no such file or directory") {
-        "Codex writable-root probe target is missing"
+        format!("{harness} writable-root probe target is missing")
     } else {
-        "Codex child writable-root probe failed"
+        format!("{harness} child writable-root probe failed")
     }
 }
 
-fn validate_codex_child_writable_root_probe_output(stdout: &str, stderr: &str) -> Result<()> {
+fn validate_codex_child_writable_root_probe_output(stdout: &str, stderr: &str, harness: &str) -> Result<()> {
     let mut saw_command_execution = false;
     let mut failure_detail: Option<String> = None;
 
@@ -627,16 +630,15 @@ fn validate_codex_child_writable_root_probe_output(stdout: &str, stderr: &str) -
 
     let detail = failure_detail.unwrap_or_else(|| {
         if saw_command_execution {
-            "Codex command execution did not emit the writable-root probe success marker"
-                .to_string()
+            format!("{harness} command execution did not emit the writable-root probe success marker")
         } else {
             format!(
-                "Codex child did not run a command_execution event; stderr={}",
+                "{harness} child did not run a command_execution event; stderr={}",
                 stderr.trim()
             )
         }
     });
-    let classification = classify_child_writable_root_probe_failure(&detail);
+    let classification = classify_child_writable_root_probe_failure(&detail, harness);
     anyhow::bail!("{classification}: {detail}");
 }
 
@@ -645,6 +647,7 @@ fn prove_codex_child_writable_roots(
     launch_args: &[String],
     env: &std::collections::HashMap<String, String>,
     roots: &[PathBuf],
+    harness: &str,
 ) -> Result<()> {
     if roots.is_empty() {
         return Ok(());
@@ -658,18 +661,18 @@ fn prove_codex_child_writable_roots(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| anyhow::anyhow!("failed to start Codex child writable-root probe: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("failed to start {harness} child writable-root probe: {e}"))?;
     if let Some(stdin) = child.stdin.as_mut() {
         Codex::write_prompt_to_child(stdin, &codex_child_writable_roots_probe_prompt(roots))?;
     }
     child.stdin.take();
 
-    let output = wait_with_timeout(child, CODEX_CHILD_NETWORK_PROBE_TIMEOUT, "writable-root")?;
+    let output = wait_with_timeout(child, CODEX_CHILD_NETWORK_PROBE_TIMEOUT, "writable-root", harness)?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
-        let classification = classify_child_writable_root_probe_failure(&detail);
+        let classification = classify_child_writable_root_probe_failure(&detail, harness);
         anyhow::bail!(
-            "{classification}: Codex child writable-root probe command exited nonzero: {}",
+            "{classification}: {harness} child writable-root probe command exited nonzero: {}",
             detail.trim()
         );
     }
@@ -677,6 +680,7 @@ fn prove_codex_child_writable_roots(
     validate_codex_child_writable_root_probe_output(
         &String::from_utf8_lossy(&output.stdout),
         &String::from_utf8_lossy(&output.stderr),
+        harness,
     )
 }
 
@@ -793,7 +797,7 @@ pub(crate) fn prove_managed_session_capabilities(
         timings.network_host_dns = Some(phase_start.elapsed());
 
         let phase_start = Instant::now();
-        prove_codex_child_network_access(command, args, env)?;
+        prove_codex_child_network_access(command, args, env, harness)?;
         timings.network_child = Some(phase_start.elapsed());
     }
 
@@ -816,7 +820,7 @@ pub(crate) fn prove_managed_session_capabilities(
         timings.writable_launcher = Some(phase_start.elapsed());
     }
     let phase_start = Instant::now();
-    prove_codex_child_writable_roots(command, args, env, &writable_roots)?;
+    prove_codex_child_writable_roots(command, args, env, &writable_roots, harness)?;
     if !writable_roots.is_empty() {
         timings.writable_child = Some(phase_start.elapsed());
     }
@@ -2262,7 +2266,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
     fn codex_child_writable_probe_classifies_read_only_gitdir_lock() {
         let stdout = "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"sh -lc probe\",\"aggregated_output\":\"sh: cannot create /repo/.git/modules/sub/index.lock: Read-only file system\\n\",\"exit_code\":1}}\n";
 
-        let err = validate_codex_child_writable_root_probe_output(stdout, "").unwrap_err();
+        let err = validate_codex_child_writable_root_probe_output(stdout, "", "Codex").unwrap_err();
         assert!(
             err.to_string()
                 .contains("Codex sandbox/write capability denied git metadata access"),
@@ -2299,18 +2303,34 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             CODEX_CHILD_NETWORK_PROBE_MARKER
         );
 
-        validate_codex_child_network_probe_output(&stdout, "").unwrap();
+        validate_codex_child_network_probe_output(&stdout, "", "codex").unwrap();
     }
 
     #[test]
     fn codex_child_network_probe_classifies_sandbox_denial() {
         let stdout = "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"sh -lc probe\",\"aggregated_output\":\"socket: Operation not permitted\\n\",\"exit_code\":1}}\n";
 
-        let err = validate_codex_child_network_probe_output(stdout, "").unwrap_err();
+        let err = validate_codex_child_network_probe_output(stdout, "", "Codex").unwrap_err();
         assert!(
             err.to_string()
                 .contains("Codex sandbox/network capability denied outbound access"),
             "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn opencode_child_network_probe_classifies_sandbox_denial() {
+        let stdout = "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"sh -lc probe\",\"aggregated_output\":\"socket: Operation not permitted\\n\",\"exit_code\":1}}\n";
+
+        let err = validate_codex_child_network_probe_output(stdout, "", "OpenCode").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("OpenCode sandbox/network capability denied outbound access"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            !err.to_string().contains("Codex"),
+            "should not contain Codex: {err:#}"
         );
     }
 
@@ -2331,6 +2351,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &script,
             &["-s".to_string(), "danger-full-access".to_string()],
             &env,
+            "codex",
         )
         .unwrap();
     }

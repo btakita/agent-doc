@@ -34,7 +34,34 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): bugchainorder + boundary commits
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3e5f66a5 -->
+❯ Please add support for the opencode agent. My intention is to run the GLM-5 model using opencode.
+❯ #next-steps
+### Re: opencode agent support — gpt-5
+
+Implemented OpenCode support in `src/agent-doc`.
+
+What changed:
+- `agent: opencode` now resolves to an OpenCode managed harness with `opencode` as the binary, `agent-doc {file}` as the routed trigger, OpenCode prompt/process detection, and `--continue` restart behavior.
+- Added `opencode_model` and `opencode_args` frontmatter/config fields. `agent_args` still wins first, then OpenCode-specific args, then global fallbacks.
+- Added a minimal non-streaming backend for `agent-doc run --agent opencode` that invokes `opencode run`, supports `--model`, `--session`, and `--continue --fork`, and strips `OPENCODE_CLIENT` from the child environment.
+- Updated README/SPEC/spec shards/config docs/security notes/version notes for the new harness surface.
+
+For GLM-5, configure a session document like:
+
+```yaml
+---
+agent: opencode
+opencode_model: zai/glm-5
+opencode_args: "--dangerously-skip-permissions"
+---
+```
+
+The OpenCode docs confirm that the TUI and `run` command both accept `--model`/`-m` in `provider/model` form, and `opencode models --refresh` can verify the exact current model ID before use: https://opencode.ai/docs/cli/ and https://opencode.ai/docs/models/.
+
+Verification passed:
+- `cargo test opencode`
+- `make check`
+<!-- agent:boundary:a7091a28 -->
 <!-- /agent:exchange -->
 ###
 

@@ -1554,6 +1554,7 @@ fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
 
     let mut in_fence: Option<&'static str> = None;
     let mut prompt_preview: Option<String> = None;
+    let mut in_assistant_response = false;
     for line in exchange.content(&body).lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("```") {
@@ -1577,6 +1578,11 @@ fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
         }
         if is_exchange_response_heading(trimmed) {
             prompt_preview = None;
+            in_assistant_response = true;
+            continue;
+        }
+        if trimmed.starts_with("<!-- agent:boundary:") || trimmed == "## User" {
+            in_assistant_response = false;
             continue;
         }
         if trimmed.is_empty()
@@ -1587,6 +1593,9 @@ fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
             continue;
         }
         if crate::diff::text_line_looks_like_prompt_target(trimmed) {
+            if in_assistant_response && !trimmed.starts_with('❯') {
+                continue;
+            }
             prompt_preview.get_or_insert_with(|| {
                 trimmed
                     .trim_start_matches('❯')
@@ -1893,7 +1902,7 @@ Body\n\
             "<!-- agent:exchange patch=append -->\n",
             "### Re: older — gpt-5\n\n",
             "Completed.\n\n",
-            "do [#vt-agent-deploy]. spec-test-news-commit-push\n",
+            "❯ do [#vt-agent-deploy]. spec-test-news-commit-push\n",
             "<!-- agent:boundary:tail -->\n",
             "<!-- /agent:exchange -->\n",
         );
@@ -1923,6 +1932,22 @@ Body\n\
             "do [#vt-agent-deploy]. spec-test-news-commit-push\n",
             "### Re: vt agent deploy — gpt-5\n\n",
             "Deployed and verified.\n",
+            "<!-- agent:boundary:tail -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(prompt_only_exchange_tail(current), None);
+    }
+
+    #[test]
+    fn prompt_only_exchange_tail_ignores_assistant_closeout_status_after_response_heading() {
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: starting dispatch — gpt-5\n\n",
+            "Implemented the route/startup guard and updated the regression coverage.\n\n",
+            "The push is still running after closeout and should not require a repair patchback.\n",
             "<!-- agent:boundary:tail -->\n",
             "<!-- /agent:exchange -->\n",
         );

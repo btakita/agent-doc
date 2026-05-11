@@ -25,7 +25,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 
 - Rewrites exchange or another component into a compacted summary/archive-pointer state.
 - After writing the archive markdown, compact best-effort upserts that archive into `.agent-doc/archive-index.db`; indexing failure warns but must not roll back archive creation.
-- For exchange compaction without an explicit message, the default summary must preserve live backlog/queue/icebox context.
+- For exchange compaction without an explicit message, the default summary must include an archive pointer plus a digest of the compacted exchange content. It must not duplicate live `agent:backlog`, `agent:queue`, or `agent:icebox` component content into `agent:exchange`.
 - `--commit` proves only that the compacted document state itself crossed the commit boundary; it does not also persist any later human explanation.
 
 ## patch

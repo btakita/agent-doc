@@ -58,7 +58,7 @@ Verification completed:
 ### Re: closeout repair — gpt-5
 
 Closeout repair: the preceding push note is status text from this same completed turn, not a user prompt. The implementation, verification, local install, and commits remain as recorded above.
-<!-- agent:boundary:6fbfa48e -->
+<!-- agent:boundary:03626319 -->
 <!-- /agent:exchange -->
 ###
 
@@ -79,6 +79,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#assistanttailprompt] #agent-doc-bug: session-check can misclassify assistant-owned closeout/status prose at the end of a template exchange response as an unresolved prompt-only tail, forcing a second 'Closeout repair:' patchback after a successful response commit. Plan: tasks/agent-doc/plan-session-check-assistant-tail-misclassified.md
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
 <!-- /agent:backlog -->

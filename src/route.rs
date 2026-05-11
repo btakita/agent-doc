@@ -2608,11 +2608,12 @@ fn route_via_authoritative_actor(
             return Ok(ack_pane.unwrap_or(dispatch_pane));
         }
         anyhow::bail!(
-            "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {}",
+            "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {}. {}",
             actor.record.generation,
             file.display(),
             dispatch_pane,
-            reason
+            reason,
+            authoritative_actor_dispatch_recovery_hint(actor_state, file)
         );
     }
 
@@ -4336,6 +4337,35 @@ fn authoritative_actor_dispatch_blocker_reason(
         }
         crate::session_actor::ActorState::Closed => Some("the authoritative actor is closed"),
         crate::session_actor::ActorState::Blocked => Some("the authoritative actor is blocked"),
+    }
+}
+
+fn authoritative_actor_dispatch_recovery_hint(
+    state: crate::session_actor::ActorState,
+    file: &Path,
+) -> String {
+    match state {
+        crate::session_actor::ActorState::Starting => format!(
+            "Wait for the pane to reach an idle prompt, then rerun `agent-doc {}`. If the pane stays stuck, restart the owner with `agent-doc start {}`.",
+            file.display(),
+            file.display()
+        ),
+        crate::session_actor::ActorState::Busy => {
+            "Wait for the active turn to finish before rerouting this document.".to_string()
+        }
+        crate::session_actor::ActorState::WaitingInput => format!(
+            "Answer the supervisor prompt in the pane, or restart the owner with `agent-doc start {}`.",
+            file.display()
+        ),
+        crate::session_actor::ActorState::Closed => format!(
+            "Start a new owner with `agent-doc start {}` before rerouting.",
+            file.display()
+        ),
+        crate::session_actor::ActorState::Blocked => format!(
+            "Inspect the pane diagnostics, then restart the owner with `agent-doc start {}`.",
+            file.display()
+        ),
+        crate::session_actor::ActorState::Ready => String::new(),
     }
 }
 
@@ -6655,6 +6685,23 @@ mod tests {
                 crate::session_actor::ActorState::Starting
             ),
             "starting actors must become ready before route submits a reopen"
+        );
+    }
+
+    #[test]
+    fn authoritative_actor_starting_hint_names_reroute_and_restart() {
+        let file = std::path::Path::new("/tmp/session.md");
+        let hint = authoritative_actor_dispatch_recovery_hint(
+            crate::session_actor::ActorState::Starting,
+            file,
+        );
+        assert!(
+            hint.contains("rerun `agent-doc /tmp/session.md`"),
+            "starting actor hint should tell the user how to retry: {hint}"
+        );
+        assert!(
+            hint.contains("agent-doc start /tmp/session.md"),
+            "starting actor hint should name the owner restart recovery: {hint}"
         );
     }
 

@@ -1704,7 +1704,9 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         if let Some(kind) = post_commit_local_drift {
             if kind == PostCommitLocalDriftKind::UserFollowUp {
                 eprintln!(
-                    "[commit] prior response is already committed in HEAD for {} — no new assistant response body was supplied, so commit will not synthesize a second assistant patchback; leaving later local user follow-up edits uncommitted",
+                    "[commit] prior response is already committed in HEAD for {} — no new assistant response body was supplied, so commit will not synthesize a second assistant patchback; leaving later local user follow-up edits uncommitted. This is not a full closeout for the follow-up prompt; run `agent-doc {}` to answer it or pipe the missing response through `agent-doc write --commit {}`.",
+                    file.display(),
+                    file.display(),
                     file.display()
                 );
                 crate::ops_log::log_op(

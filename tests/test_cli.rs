@@ -343,6 +343,9 @@ fn test_commit_explains_prior_patchback_without_new_response_body() {
         ))
         .stderr(predicate::str::contains(
             "will not synthesize a second assistant patchback",
+        ))
+        .stderr(predicate::str::contains(
+            "This is not a full closeout for the follow-up prompt",
         ));
 }
 

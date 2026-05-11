@@ -78,8 +78,9 @@ Identify your harness from your environment:
 - **Invocation:** User types `/agent-doc <FILE>` which triggers the installed OpenCode command. The command template emits `agent-doc <FILE>` as the prompt, which the agent recognizes and loads the skill.
 - **Entry semantics:** once that message is accepted, the turn is inside the binary-owned response cycle. Do **not** downgrade it into a manual document-editing task or report a useful-but-uncommitted success state.
 - **Slash commands:** The `/agent-doc` command is an OpenCode custom command installed by `agent-doc skill install --harness opencode` into `.opencode/commands/agent-doc.md`. If preflight returns `slash_commands`, skip them (OpenCode handles them natively). If `builtin_commands`, write a document note.
-- **Write-back:** Execute `agent-doc finalize` directly for the normal response cycle.
-- **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file; use `agent-doc write --commit <FILE>` once the prompt already exists.
+- **Write-back:** Execute `agent-doc finalize` directly for the normal response cycle, then immediately run `agent-doc session-check <FILE>`.
+- **Fail closed:** If `agent-doc session-check <FILE>` exits nonzero after write-back, the cycle is still open or the document still has prompt-bearing user edits with no newer cycle start. Do **not** report success or stop; continue recovery instead.
+- **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file; use `agent-doc write --commit <FILE>` once the prompt already exists. After `agent-doc write --commit <FILE>`, run the same `agent-doc session-check <FILE>` guard before ending the turn. That repair write-back should also be the last substantial action of the turn.
 
 ## Cursor / Generic
 

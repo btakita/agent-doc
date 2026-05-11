@@ -194,3 +194,66 @@ response to document", the turn is not complete until either:
   `agent-doc finalize` or `agent-doc write --commit`.
 - Ensure the recovery command is explicit and idempotent when the side-effect
   commits are already pushed but the session document lacks the response.
+
+## OpenCode Response Patched But Not Committed (#rspcmt6)
+
+### Reproduction
+
+- **Document:** `boost-client/tasks/monsterrodholders.md` v1.32 deploy
+- **Session:** a9421282, GLM-5.1 agent
+- **Harness:** OpenCode
+- **Symptom:** The diff-summary response after "Run the post docker commands." was
+  written into the exchange section but `tasks/monsterrodholders.md` remains dirty
+  (uncommitted patchback lines). Additionally, the v1.32 surgical-revert code changes
+  in `src/monsterrodholders-dev/` (mrh-performance.php + test script) were also left
+  uncommitted despite the status saying "awaiting spec-test-commit-push."
+- **Same class as:** #rspcmt2, #rspcmt3, #rspcmt4, #rspcmt5
+
+### Root Cause Analysis
+
+Unlike #rspcmt4 (no session-check) and #noexchopencode2 (no patchback at all), in
+#rspcmt6 the response WAS successfully patched into the exchange section. The failure
+was that finalize/closeout never committed the document.
+
+The existing guards could not catch this state:
+
+1. **`prompt_only_exchange_tail` returns `None`** — the response IS in the exchange,
+   so the tail has an assistant heading, not a prompt-only block.
+
+2. **`detect_active_session_post_commit_drift` returns `None`** — it calls
+   `crate::codex_hook::load_active_session_for_current_file()` which requires
+   `CODEX_THREAD_ID` or `CODEX_SESSION_ID`. OpenCode sets neither, so it always
+   returns `None` for non-Codex sessions. The drift goes undetected.
+
+3. **`detect_unstarted_prompt_bearing_diff` may not fire** — the new exchange content
+   looks like a legitimate assistant response, not a prompt-bearing user edit.
+
+4. **`detect_bypassed_response_write` may not fire** — the response was patched into
+   the exchange through a prior cycle's binary-owned path or direct edit.
+
+The net effect: a committed cycle state + dirty working tree with exchange content
+changes + no Codex session tracking = silent pass through all drift guards.
+
+### Fix
+
+Added `detect_uncommitted_exchange_drift()` in `session_check.rs` — a
+harness-agnostic guard that compares the current working tree content against the
+committed snapshot when the cycle state is `committed`. If the exchange component
+has changed (not just status or other non-exchange components), it fails closed
+regardless of harness.
+
+This guard runs as a fallback after `detect_active_session_post_commit_drift` in all
+three committed-cycle branches of `inspect_core`:
+
+1. Cycle state exists and is committed (line ~640)
+2. No ops.log event (line ~712)
+3. Terminal ops.log event (line ~806)
+
+### Regression Coverage
+
+- `uncommitted_exchange_drift_detected_without_codex_session` — proves the new guard
+  fires when a committed cycle has exchange content drift and no Codex session is
+  active (the exact #rspcmt6 reproduction).
+- `uncommitted_exchange_drift_ignored_when_only_status_changed` — proves the guard
+  does NOT fire when only the status component changed (non-exchange drift is benign
+  for this invariant).

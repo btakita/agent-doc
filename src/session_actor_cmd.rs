@@ -278,7 +278,7 @@ pub fn clear(file: &Path) -> Result<()> {
             ),
         );
     }
-    if ctx.harness == "codex" {
+    if matches!(ctx.harness.as_str(), "codex" | "opencode") {
         crate::codex_hook::record_external_prompt_for_file(
             &ctx.canonical_file,
             &ctx.session_id,

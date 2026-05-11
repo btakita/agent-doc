@@ -29,7 +29,13 @@ Authoritative fields:
 - A new generation is created whenever normal-path control explicitly starts a
   new document session owner or rebinds authority to another pane.
 - Harness child restarts inside the same owning supervisor do not create a new
-  ownership generation by themselves.
+  ownership generation by themselves. This includes restarts initiated by
+  `/clear` in any harness (Codex, OpenCode): the supervisor auto-restarts the
+  child and the actor transitions through `Starting` → `Ready` without ever
+  entering `WaitingInput` or `Closed`. Route-level clear tracking
+  (`codex_hook::record_external_prompt_for_file`) is harness-agnostic so that
+  managed and dispatch-only routes can restart fresh after a tracked `/clear`
+  for both Codex and OpenCode.
 - Same-generation lifecycle updates such as prompt readiness, dispatch-busy,
   waiting-for-input, blocked, and closed must preserve the authoritative
   generation while still updating `state` and `last_transition`.

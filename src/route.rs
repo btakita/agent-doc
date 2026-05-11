@@ -757,14 +757,15 @@ fn restart_via_supervisor(file: &Path, session_id: &str) -> bool {
     restart_via_supervisor_with_mode(file, session_id, "continue")
 }
 
-fn tracked_codex_clear_requires_fresh_restart(
+fn tracked_harness_clear_requires_fresh_restart(
     harness: &HarnessConfig,
     latest_prompt: Option<&str>,
 ) -> bool {
-    harness.binary == "codex" && latest_prompt.is_some_and(crate::codex_hook::prompt_requests_clear)
+    matches!(harness.binary.as_str(), "codex" | "opencode")
+        && latest_prompt.is_some_and(crate::codex_hook::prompt_requests_clear)
 }
 
-fn reapply_codex_launch_contract_after_clear(
+fn reapply_harness_launch_contract_after_clear(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
@@ -775,7 +776,7 @@ fn reapply_codex_launch_contract_after_clear(
 ) -> Result<String> {
     let latest_prompt = crate::codex_hook::load_latest_prompt_for_file(file)?;
     if !respect_tracked_clear_restart
-        || !tracked_codex_clear_requires_fresh_restart(harness, latest_prompt.as_deref())
+        || !tracked_harness_clear_requires_fresh_restart(harness, latest_prompt.as_deref())
     {
         return Ok(pane.to_string());
     }
@@ -783,20 +784,22 @@ fn reapply_codex_launch_contract_after_clear(
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_codex_clear_restart_fresh file={} pane={} harness={} latest_prompt=/clear",
+            "route_harness_clear_restart_fresh file={} pane={} harness={} latest_prompt=/clear",
             file.display(),
             pane,
             harness.binary
         ),
     );
     eprintln!(
-        "[route] latest tracked Codex prompt for {} was `/clear` — restarting the live session fresh before reroute so sandbox, writable roots, and network policy are reapplied",
+        "[route] latest tracked {} prompt for {} was `/clear` — restarting the live session fresh before reroute so sandbox, writable roots, and network policy are reapplied",
+        harness.binary,
         file.display()
     );
 
     if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
         anyhow::bail!(
-            "latest tracked Codex prompt for {} was `/clear`, but route could not restart the live session fresh to reapply the original launch policy. Run `agent-doc start {}` manually to recover",
+            "latest tracked {} prompt for {} was `/clear`, but route could not restart the live session fresh to reapply the original launch policy. Run `agent-doc start {}` manually to recover",
+            harness.binary,
             file.display(),
             file.display()
         );
@@ -812,7 +815,8 @@ fn reapply_codex_launch_contract_after_clear(
         harness,
     ) {
         anyhow::bail!(
-            "latest tracked Codex prompt for {} was `/clear`, and the fresh recovery session in pane {} never became ready. Run `agent-doc start {}` manually to recover",
+            "latest tracked {} prompt for {} was `/clear`, and the fresh recovery session in pane {} never became ready. Run `agent-doc start {}` manually to recover",
+            harness.binary,
             file.display(),
             dispatch_pane,
             file.display()
@@ -1027,7 +1031,7 @@ fn reapply_codex_launch_contract_before_reuse(
     respect_tracked_clear_restart: bool,
     enforce_capability_proof: bool,
 ) -> Result<String> {
-    let dispatch_pane = reapply_codex_launch_contract_after_clear(
+    let dispatch_pane = reapply_harness_launch_contract_after_clear(
         tmux,
         file,
         pane,
@@ -2185,7 +2189,7 @@ fn load_authoritative_actor_binding(
     enforce_capability_proof: bool,
 ) -> Result<Option<AuthoritativeActorDispatchTarget>> {
     if respect_tracked_clear_restart
-        && tracked_codex_clear_requires_fresh_restart(
+        && tracked_harness_clear_requires_fresh_restart(
             harness,
             crate::codex_hook::load_latest_prompt_for_file(file)?.as_deref(),
         )
@@ -8845,22 +8849,34 @@ Body\n\
     }
 
     #[test]
-    fn tracked_codex_clear_requires_fresh_restart_only_for_exact_clear_prompt() {
-        assert!(tracked_codex_clear_requires_fresh_restart(
+    fn tracked_harness_clear_requires_fresh_restart_only_for_exact_clear_prompt() {
+        assert!(tracked_harness_clear_requires_fresh_restart(
             &HarnessConfig::codex(),
             Some("/clear")
         ));
-        assert!(tracked_codex_clear_requires_fresh_restart(
+        assert!(tracked_harness_clear_requires_fresh_restart(
             &HarnessConfig::codex(),
             Some("  /clear  ")
         ));
-        assert!(!tracked_codex_clear_requires_fresh_restart(
+        assert!(!tracked_harness_clear_requires_fresh_restart(
             &HarnessConfig::codex(),
             Some("agent-doc tasks/bugs.md")
         ));
-        assert!(!tracked_codex_clear_requires_fresh_restart(
+        assert!(!tracked_harness_clear_requires_fresh_restart(
             &HarnessConfig::claude(),
             Some("/clear")
+        ));
+        assert!(tracked_harness_clear_requires_fresh_restart(
+            &HarnessConfig::opencode(),
+            Some("/clear")
+        ));
+        assert!(tracked_harness_clear_requires_fresh_restart(
+            &HarnessConfig::opencode(),
+            Some("  /clear  ")
+        ));
+        assert!(!tracked_harness_clear_requires_fresh_restart(
+            &HarnessConfig::opencode(),
+            Some("agent-doc tasks/bugs.md")
         ));
     }
 

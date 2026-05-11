@@ -97,7 +97,7 @@ impl HarnessConfig {
         Self {
             binary: "opencode".into(),
             restart_behavior: RestartBehavior::Append(vec!["--continue".into()]),
-            clean_exit_behavior: CleanExitBehavior::PromptUser,
+            clean_exit_behavior: CleanExitBehavior::RestartContinue,
             prompt_patterns: vec![">".into(), "›".into()],
             trigger_command_template: "/agent-doc {file}".into(),
             env_remove: vec!["OPENCODE_CLIENT".into()],
@@ -540,7 +540,7 @@ mod tests {
             h.restart_behavior,
             RestartBehavior::Append(vec!["--continue".into()])
         );
-        assert_eq!(h.clean_exit_behavior, CleanExitBehavior::PromptUser);
+        assert_eq!(h.clean_exit_behavior, CleanExitBehavior::RestartContinue);
         assert!(h.env_remove.contains(&"OPENCODE_CLIENT".to_string()));
         assert_eq!(h.tmux_session_fallback, "opencode");
         assert!(h.process_names.contains(&"opencode".to_string()));

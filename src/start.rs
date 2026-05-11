@@ -3621,6 +3621,14 @@ mod tests {
     }
 
     #[test]
+    fn clean_exit_resolution_auto_restarts_for_opencode() {
+        assert_eq!(
+            clean_exit_resolution(&crate::harness::HarnessConfig::opencode()),
+            CleanExitResolution::RestartContinue
+        );
+    }
+
+    #[test]
     fn start_invalid_frontmatter_returns_contextual_error() {
         let tmp = tempfile::TempDir::new().unwrap();
         let file = tmp.path().join("bad.md");

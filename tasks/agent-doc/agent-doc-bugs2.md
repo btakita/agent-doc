@@ -2,7 +2,6 @@
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent: opencode
 claude_model: claude-opus-4-6
-opencode_model: GLM-5.1
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
@@ -35,10 +34,51 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 3 response topic(s): OpenCode plugin invocation; /agent-doc command vs agent-doc skill; /agent-doc command for OpenCode
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:6a152744 -->
+❯ do [#opencodesshproof]. spec-test-build-install-commit-push
+### Re: OpenCode SSH capability proof — glm-5.1
+
+Implemented harness-agnostic capability proof so OpenCode sessions with `required_ssh_targets` run SSH probes before dispatch, matching existing Codex behavior.
+
+**Changes (4 files):**
+
+- `src/agent/codex.rs` — `prove_managed_session_capabilities()` now accepts a `harness: &str` parameter; log events use `{harness}_capability_proof` prefix instead of hardcoded `codex_capability_proof`
+- `src/start.rs` — Removed `harness.binary == "codex"` guard around capability proof thread spawning; proof runs for any harness with SSH targets; thread name and actor transition use harness-specific labels
+- `src/route.rs` — Renamed `CodexManagedCapabilityProofStatus` → `ManagedCapabilityProofStatus`, `codex_managed_capability_proof_status()` → `managed_capability_proof_status()`, `wait_for_codex_managed_capability_proof()` → `wait_for_managed_capability_proof()`; all bail messages and ops_log events use `harness.binary` instead of hardcoded "Codex"; added `managed_capability_proof_status_opencode_tracks_pending_and_failed` test
+- `src/session_actor_cmd.rs` — `codex_capability_proof_status()` → `capability_proof_status()`; status display uses `ctx.harness` prefix; guard expanded from `"codex"` to `"codex" | "opencode"`
+
+**Regression safety:** Codex sessions emit `codex_capability_proof` events exactly as before. OpenCode sessions with `required_ssh_targets` now emit `opencode_capability_proof` events. The route layer checks proof status using the correct harness-specific prefix.
+
+Commit: `4feb4c9` pushed to `20260422/codex-agent-backend`.
+<!-- agent:boundary:6ca03340 -->
 <!-- /agent:exchange -->
 ###
 <!--
+Error running agent-doc on root.md using claude. spec-test-build-install-commit-push
+```
+resync: stash pane %273 is registered in its own project root — skipping kill
+resync: stash pane %284 is registered in its own project root — skipping kill
+resync: stash pane %274 is registered in its own project root — skipping kill
+resync: stash pane %269 is registered in its own project root — skipping kill
+resync: stash pane %275 is registered in its own project root — skipping kill
+resync: stash pane %285 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
+Error: authoritative actor generation 14 for tasks/root.md owns pane %272 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
+```
+---
 I saw an error in the opencode console. spec-test-build-install-commit-push
 ```
 [session-actor] warning: failed to record ready transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: project controller command `mark_lifecycle` failed: stale actor transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 120 is no longer current (current generation 121)
@@ -63,7 +103,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#opencodesshproof] OpenCode harness has no SSH capability proof — session log shows `codex_capability_proof` entries for Codex generations but zero proof entries for OpenCode generations, so `required_ssh_targets` frontmatter is not enforced and the agent discovers `socket: Operation not permitted` mid-response instead of failing closed. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md
 - [ ] [#opencodesshconfig] OpenCode session cannot SSH to `required_ssh_targets` — `socket: Operation not permitted` occurs because opencode's sandbox blocks network syscalls. Workaround options: (1) copy a per-project `.opencode/config.json` that grants network/SSH permissions, (2) file an agent-doc bug (this item), (3) both. Agent-doc should either detect the sandbox restriction and fail closed before dispatch, or inject the required `.opencode/config.json` permissions automatically when `required_ssh_targets` is set in the session frontmatter.
 <!-- /agent:backlog -->
 
@@ -156,4 +195,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
 - 2026-05-11 [#rspcmt3] Re-open response patchback commit recovery for the current agent-doc-bugs2 turn: user-visible prompt/patchback changes remained dirty after `agent-doc commit` reported the prior response already committed, and `session-check` required a second closeout for the active Codex prompt. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 - 2026-05-11 [#2fha] 2026-05-11 [#nopatchbackopencode] OpenCode agent-doc turn completed but response was not patched back into the session document — the user had to manually request patchback for the monsterrodholders.md production-sync response. Patchback should fire automatically after the agent writes a response, regardless of agent backend (Claude Code / Codex / OpenCode). Plan: investigate whether OpenCode integration skips the finalize/patchback step that Claude Code and Codex run.
+- 2026-05-11 [#opencodesshproof] OpenCode harness has no SSH capability proof — session log shows `codex_capability_proof` entries for Codex generations but zero proof entries for OpenCode generations, so `required_ssh_targets` frontmatter is not enforced and the agent discovers `socket: Operation not permitted` mid-response instead of failing closed. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md
 <!-- /agent:done -->

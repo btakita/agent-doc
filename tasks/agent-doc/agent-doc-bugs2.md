@@ -30,11 +30,29 @@ Recorded Codex capability proof verification.
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-020618.md`*
-<!-- agent:boundary:8534ce1b -->
+❯ Look through the session history for any unfixed agent-doc bugs. #next-steps
+### Re: unfixed agent-doc bugs — gpt-5
+
+I checked the compacted session history, the current document backlog/done lists, recent `src/agent-doc` commits, `.agent-doc/session-actors.json`, `.agent-doc/repair-blocked`, `.agent-doc/codex-hooks/blocked-stop`, and the latest `ops.log` tail.
+
+The previous four standing findings were mostly closed by the archived work: `#sidecarfallbackstill` was implemented in `5fc0701`, `#autogcstart` in `83e2f72`, `#blockedstopextract` in `368004f`, and `#capproofverify` was recorded as verified. I did not see newer blocked-stop payloads after the replay fix, and the sidecar prefix fallback stopped appearing after the immediate post-fix window ending at `1778461481`.
+
+I did find current unfixed evidence worth re-queuing:
+
+- Stale actor cleanup is still incomplete: `.agent-doc/session-actors.json` still has `agent-doc-bugs.md` and `agent-doc-bugs4.md` in `state: "starting"` after the normal-path cleanup fix. `interior-design.md` was closed by `sync_closed_stale_starting_actor`, so the cleanup path exists but is not sweeping all stale records.
+- Routing can still inject into a `starting` actor: `ops.log` has `route_dispatch_only_starting_actor_direct_pane_submit` for `agent-doc-bugs2.md` generation 118, followed by `interrupted_cycle_detected ... phase=PreflightStarted`. That is the same family as the earlier startup/preflight hang bugs, but with fresh post-fix evidence.
+- Safe-passive sync still misses its budget: recent samples show `safe_passive_total` at `1047-1282ms`, with `postlock_actor_focus`, `window_resolution`, and `controller_actor_lookup` over their sub-budgets. This is performance rather than closeout correctness, but the budget regression is still live.
+
+I added backlog items for those three. No tests were run; this was log/session-history triage only.
+<!-- agent:boundary:6b45ea23 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+```
+
+```
+---
 minor (v0.34.0) release + publish. merge into main
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md

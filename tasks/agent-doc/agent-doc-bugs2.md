@@ -29,81 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-122736.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-143706.md`*
 
 Compacted content:
-- Archived 2 response topic(s): session actor alive across agent restarts; #w3rb spec-test-build-install-commit-push
+- Archived 4 response topic(s): #rspcmt4 OpenCode session-check guard; #rspcmt5 direct-chat preset write-back invariant; #noexchopencode2 OpenCode CLI-only-output anti-pattern; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#rspcmt4]. spec-test-build-install-commit-push
-### Re: #rspcmt4 OpenCode session-check guard — glm-5.1
-
-Root cause: the OpenCode section of `runbooks/harness-invocation.md` did not require `agent-doc session-check <FILE>` after finalize, unlike the Codex section. No Stop hook or active session tracking exists for OpenCode, so if finalize didn't commit, there was no recovery mechanism.
-
-**Changes:**
-
-| File | Change |
-|------|--------|
-| `runbooks/harness-invocation.md` | Added session-check + fail-closed guard to OpenCode section |
-| `runbooks/commit.md` | Updated "Codex" → "Codex and OpenCode" for direct-exec session-check |
-| `README.md` | Renamed "Codex post-write guard" → "Direct-exec post-write guard" |
-| `session_check.rs` | Error messages now harness-agnostic ("active harness session", "let the hook recover") |
-| `codex_hook.rs` | Updated test assertions to match new harness-agnostic wording |
-| `skill.rs` | Added regression test for OpenCode runbook session-check requirement |
-| `session_check.rs` tests | Added test verifying drift messages are harness-agnostic |
-| `VERSIONS.md` | Added #rspcmt4 entry |
-| `plan-response-patchback-uncommitted.md` | Extended with OpenCode-specific evidence and root cause analysis |
-
-All 2071 tests pass. Build + install verified.
-❯ do [#rspcmt5]. spec-test-build-install-commit-push
-### Re: #rspcmt5 direct-chat preset write-back invariant — glm-5.1
-
-Root cause: the instruction surface (`harness-invocation.md`) did not explicitly require write-back when a session-document preset (e.g. `#commit-push`) triggers repo work through a direct Codex chat turn. The agent completed the commit/push in chat but never entered the binary-owned write/commit path for the session document. The Codex Stop hook cannot auto-close a plain-text response that lacks `<!-- patch:exchange -->` blocks, so the response stayed in chat only.
-
-**Changes:**
-
-| File | Change |
-|------|--------|
-| `session_check.rs` | Added regression test `prompt_only_exchange_tail_catches_direct_chat_preset_no_patchback` — proves session-check detects a prompt-only exchange tail when a direct-chat preset completes repo work but writes no response patchback |
-| `runbooks/harness-invocation.md` | Added explicit direct-chat preset write-back paragraph in Directive Semantics — mandates `agent-doc write --commit <FILE>` + `session-check` before reporting success |
-| `VERSIONS.md` | Added #rspcmt5 entry |
-
-All 2073 tests pass (including the new regression). Build + install verified. Pushed to main.
-&lt;!-- /agent:exchange --&gt;
-❯ do [#noexchopencode2]. spec-test-build-install-commit-push
-### Re: #noexchopencode2 OpenCode CLI-only-output anti-pattern — glm-5.1
-
-Root cause: the OpenCode section of `runbooks/harness-invocation.md` described the correct finalize/write-back flow but did not name the specific failure mode of outputting a response to CLI without piping it through `agent-doc finalize`. The shared Hot Path Digest in `SKILL.md` also did not explicitly state that "response text visible in the console but absent from the session document" is a closeout violation. OpenCode has no hook backstop (unlike Codex's Stop handler), so instruction-surface gaps directly cause lost responses.
-
-**Changes:**
-
-| File | Change |
-|------|--------|
-| `runbooks/harness-invocation.md` | Added anti-pattern warning to OpenCode section: "Do **not** output the response to the CLI without piping it through `agent-doc finalize`" |
-| `SKILL.md` | Strengthened Hot Path Digest: "Response text visible in the console but absent from the session document is a closeout violation — the response does not exist until it crosses `finalize` or `write --commit`" |
-| `session_check.rs` | Added regression test `prompt_only_exchange_tail_catches_opencode_no_patchback()` — proves session-check catches an OpenCode prompt-only exchange tail with `OPENCODE` env var set |
-| `skill.rs` | Added test asserting OpenCode runbook section contains the CLI-only-output anti-pattern language |
-| `VERSIONS.md` | Added #noexchopencode2 entry |
-| `tasks/agent-doc/plan-opencode-no-exchange-patchback.md` | Root cause analysis and fix plan |
-
-All 2075 tests pass. Build + install verified. Pushed to main.
-&lt;!-- /agent:exchange --&gt;
-❯ do [#rspcmt6]. spec-test-build-install-commit-push
-### Re: #rspcmt6 harness-agnostic uncommitted exchange drift detection — glm-5.1
-
-Root cause: `detect_active_session_post_commit_drift()` in `session_check.rs` required Codex session tracking (`CODEX_THREAD_ID` / `CODEX_SESSION_ID`) and silently returned `None` for all non-Codex harnesses. When the response IS in the exchange (so `prompt_only_exchange_tail` doesn't fire), no existing guard could detect that the working tree had uncommitted exchange content drift.
-
-**Changes:**
-
-| File | Change |
-|------|--------|
-| `session_check.rs` | Added `detect_uncommitted_exchange_drift()` — harness-agnostic guard that detects new appended exchange content beyond the committed snapshot without requiring any session tracking. Runs as fallback after `detect_active_session_post_commit_drift` in all three committed-cycle branches of `inspect_core`. Also added `exchange_has_new_appended_content()` and `extract_normalized_exchange_body()` helpers. |
-| `session_check.rs` tests | Added `uncommitted_exchange_drift_detected_without_codex_session` (proves guard fires for table-row drift without Codex session) and `uncommitted_exchange_drift_ignored_when_only_status_changed` (proves guard does NOT fire for status-only drift). |
-| `VERSIONS.md` | Added #rspcmt6 entry |
-| `plan-response-patchback-uncommitted.md` | Extended with #rspcmt6 reproduction, root cause analysis, and regression coverage |
-
-All 1919 tests pass. Build + install verified. Pushed to main.
-&lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:e756f7e5 -->
+<!-- agent:boundary:602143c6 -->
 <!-- /agent:exchange -->
 ###
 <!--

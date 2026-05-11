@@ -936,6 +936,7 @@ pub(crate) fn complete_required_closeout(file: &Path) -> Result<bool> {
         ensure_cycle_committed(file)?;
     }
     crate::session_check::enforce_clean_closeout(file)?;
+    cleanup_fallback_patch_files(file);
     Ok(did_commit)
 }
 
@@ -4222,6 +4223,26 @@ pub fn run_stream(
             // but we want to leave a NEW patch file in place for the plugin
             // to pick up later. Re-write it with the SAME patch_id so the
             // plugin can deduplicate if the original IPC delivery was late.
+            // Guard: if the cycle was already committed (e.g., a concurrent
+            // closeout succeeded), skip the re-write to prevent re-dirtying.
+            if let Some(ref committed_id) = cycle_already_committed(file) {
+                eprintln!(
+                    "[write] run_stream IPC timeout: cycle {} already committed — skipping fallback patch re-write",
+                    committed_id
+                );
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "run_stream_ipc_timeout_skip_fallback file={} cycle_id={} reason=already_committed",
+                        file.display(),
+                        committed_id
+                    ),
+                );
+                cleanup_fallback_patch_files(file);
+                drop(doc_lock);
+                repair::clear_pending(file)?;
+                return Ok(());
+            }
             let hash = snapshot::doc_hash(file)?;
             let patch_file = patches_dir.join(format!("{}.json", hash));
 
@@ -4731,6 +4752,24 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     // Clean up the unconsumed patch file
     let _ = std::fs::remove_file(&patch_file);
 
+    // Guard: if the cycle was already committed by a concurrent closeout,
+    // skip the fallback disk write to prevent re-dirtying the document.
+    if let Some(ref committed_id) = cycle_already_committed(file) {
+        eprintln!(
+            "[write] run_ipc timeout fallback: cycle {} already committed — skipping disk write",
+            committed_id
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "run_ipc_timeout_fallback_skip file={} cycle_id={} reason=already_committed",
+                file.display(),
+                committed_id
+            ),
+        );
+        return Ok(());
+    }
+
     // Fall back to stream write logic
     let base = baseline.unwrap_or(&content_at_start);
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &content_at_start);
@@ -5136,6 +5175,55 @@ pub struct IpcResult {
     pub patch_id: String,
 }
 
+/// Remove leftover fallback patch files for a document after closeout commits.
+/// Prevents late file-watcher or plugin recovery from re-applying a stale patch
+/// to an already-committed document.
+pub(crate) fn cleanup_fallback_patch_files(file: &Path) {
+    let Ok(canonical) = file.canonicalize() else {
+        return;
+    };
+    let project_root = resolve_ipc_project_root(&canonical);
+    let patches_dir = project_root.join(".agent-doc/patches");
+    if !patches_dir.exists() {
+        return;
+    }
+    let Ok(hash) = snapshot::doc_hash(file) else {
+        return;
+    };
+    let patch_file = patches_dir.join(format!("{hash}.json"));
+    if patch_file.exists() {
+        if let Ok(stale_content) = std::fs::read_to_string(&patch_file)
+            && let Ok(stale_json) =
+                serde_json::from_str::<serde_json::Value>(&stale_content)
+            && let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str())
+        {
+            write_claimed_patch_sentinel(&project_root, patch_id);
+        }
+        match std::fs::remove_file(&patch_file) {
+            Ok(()) => eprintln!(
+                "[write] cleaned up fallback patch file after closeout: {}",
+                patch_file.display()
+            ),
+            Err(e) => eprintln!(
+                "[write] WARNING: failed to clean up fallback patch file after closeout: {e}"
+            ),
+        }
+    }
+}
+
+/// Check if the current cycle for `file` is already in Committed phase.
+/// Returns `Some(cycle_id)` if committed, `None` if no cycle or cycle is open.
+fn cycle_already_committed(file: &Path) -> Option<String> {
+    match crate::cycle_state::load(file) {
+        Ok(Some(state))
+            if state.phase == crate::cycle_state::CyclePhase::Committed =>
+        {
+            Some(state.cycle_id)
+        }
+        _ => None,
+    }
+}
+
 fn write_claimed_patch_sentinel(project_root: &Path, patch_id: &str) {
     let claimed_dir = project_root.join(".agent-doc/claimed-patches");
     match std::fs::create_dir_all(&claimed_dir) {
@@ -5180,6 +5268,31 @@ pub fn try_ipc(
     let hash = snapshot::doc_hash(file)?;
     let project_root = resolve_ipc_project_root(&canonical);
 
+    // Guard: if the cycle is already committed, reject the patch to prevent
+    // a late fallback from re-dirtying the document.
+    if let Some(ref cycle_id) = cycle_already_committed(file) {
+        eprintln!(
+            "[write] rejecting late fallback patch: cycle {} already committed for {}",
+            cycle_id,
+            file.display()
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "late_fallback_patch_rejected file={} cycle_id={} reason=already_committed",
+                file.display(),
+                cycle_id
+            ),
+        );
+        cleanup_fallback_patch_files(file);
+        return Ok(IpcResult {
+            success: true,
+            patch_id: reuse_patch_id
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        });
+    }
+
     // Single patch_id for all IPC paths (socket, file, caller's fallback).
     // Reusing the same ID allows the plugin to deduplicate when both socket
     // and file delivery fire for the same logical write.
@@ -5213,6 +5326,9 @@ pub fn try_ipc(
             "reposition_boundary": true,
         });
         socket_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
+        if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {
+            socket_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
+        }
         if let Some(yaml) = frontmatter_yaml {
             socket_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
         }
@@ -5431,6 +5547,9 @@ pub fn try_ipc(
         "reposition_boundary": true,
     });
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
+    if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {
+        ipc_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
+    }
 
     if let Some(yaml) = frontmatter_yaml {
         ipc_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
@@ -11635,5 +11754,102 @@ mod pending_patch_normalization_tests {
 
         super::enforce_no_destructive_todo_patch(&content, &patches)
             .expect("same-size todo rewrite should remain allowed");
+    }
+}
+
+#[cfg(test)]
+mod late_fallback_patch_guard_tests {
+    use super::{cleanup_fallback_patch_files, cycle_already_committed};
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn doc_in_agent_doc_project(tmp: &TempDir, content: &str) -> std::path::PathBuf {
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("state").join("cycles")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        fs::write(&doc, content).unwrap();
+        doc
+    }
+
+    #[test]
+    fn cycle_already_committed_returns_none_when_no_state() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("nonexistent.md");
+        assert!(cycle_already_committed(&doc).is_none());
+    }
+
+    #[test]
+    fn cycle_already_committed_returns_some_for_committed_cycle() {
+        let tmp = TempDir::new().unwrap();
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
+        let doc = doc_in_agent_doc_project(&tmp, content);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "test",
+            Some(content),
+            Some(content),
+            "fake-sha",
+            None,
+        )
+        .unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content))
+            .unwrap();
+        crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
+
+        let result = cycle_already_committed(&doc);
+        assert!(result.is_some(), "should return Some for committed cycle");
+    }
+
+    #[test]
+    fn cycle_already_committed_returns_none_for_open_cycle() {
+        let tmp = TempDir::new().unwrap();
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
+        let doc = doc_in_agent_doc_project(&tmp, content);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        assert!(cycle_already_committed(&doc).is_none());
+    }
+
+    #[test]
+    fn cleanup_fallback_patch_files_removes_patch_and_writes_sentinel() {
+        let tmp = TempDir::new().unwrap();
+        let doc = doc_in_agent_doc_project(
+            &tmp,
+            "---\nagent_doc_session: test\n---\n\n## Exchange\n",
+        );
+        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let patch_path = tmp
+            .path()
+            .join(".agent-doc/patches")
+            .join(format!("{hash}.json"));
+        let patch_content = serde_json::json!({
+            "patch_id": "test-patch-123",
+            "type": "patch",
+        });
+        fs::write(&patch_path, serde_json::to_string_pretty(&patch_content).unwrap()).unwrap();
+        assert!(patch_path.exists());
+
+        cleanup_fallback_patch_files(&doc);
+
+        assert!(!patch_path.exists(), "fallback patch file should be removed");
+        let sentinel = tmp
+            .path()
+            .join(".agent-doc/claimed-patches")
+            .join("test-patch-123");
+        assert!(sentinel.exists(), "claimed sentinel should be written");
+    }
+
+    #[test]
+    fn cleanup_fallback_patch_files_noop_when_no_patch() {
+        let tmp = TempDir::new().unwrap();
+        let doc = doc_in_agent_doc_project(
+            &tmp,
+            "---\nagent_doc_session: test\n---\n\n## Exchange\n",
+        );
+        cleanup_fallback_patch_files(&doc);
     }
 }

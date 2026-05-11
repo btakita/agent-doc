@@ -64,7 +64,30 @@ Changes committed in `agent-doc` d47dbf0 and pushed to both submodule and parent
 - `opencode_defaults` — updated assertion: `CleanExitBehavior::RestartContinue`
 - All 23 OpenCode tests pass (1 ignored tmux integration)
 &lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:a6d6b43b -->
+❯ do [#w3rb]. spec-test-build-install-commit-push
+### Re: #w3rb spec-test-build-install-commit-push — glm-5
+
+Completed `#w3rb` with the following changes:
+
+**1. Plan file** (`tasks/agent-doc/plan-degraded-authoritative-skip-capability-proof.md`):
+Documents the dispatch-only degraded authoritative actor path and its intentional capability proof exemption.
+
+**2. 12 pure unit tests** (`src/agent-doc/src/route.rs`):
+- `dispatch_only_can_use_degraded_authoritative_actor` — 5 tests covering registered match, live owner match, both match, no match, none provided
+- `authoritative_actor_dispatch_guard_reason` — 6 tests covering healthy+state (no guard), Restartable, Halted, Unreachable, NoSocket, missing actor state
+- `authoritative_actor_dispatch_target_eligible` — 1 test covering healthy vs degraded vs no-state
+
+**3. Spec update** (`specs/08a-session-actor-contract.md`):
+Added documentation of the degraded authoritative actor dispatch path, capability proof exemption rationale, and ops-log entry expectations.
+
+**4. Build + install**: `cargo install --path .` completed. `make check` passes (1913 tests + integration suites).
+
+**5. Committed and pushed**:
+- Submodule: `2d2c6d5` on `20260422/codex-agent-backend`
+- Parent: `a1d08e9d6` on `main`
+
+&lt;!-- /agent:exchange --&gt;
+<!-- agent:boundary:25388cb0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,7 +113,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#w3rb] 2026-05-11 [#capproofdegraded] Dispatch-only degraded authoritative actor path now skips capability proof gate — verify in a live OpenCode session that Run Agent Doc works after Clear Session Context. Plan: tasks/agent-doc/plan-degraded-authoritative-skip-capability-proof.md
+- [ ] [#rspcmt4] 2026-05-11 OpenCode agent-doc turn response patchback not committed — boost-client/tasks/monsterrodholders.md v1.29 deploy response was patched into the exchange section but agent-doc finalize/closeout did not commit the document. User had to manually request commit. Same class as #rspcmt2, #rspcmt3. Reproduction: session a9421282, GLM-5.1 agent. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode-specific closeout evidence.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -189,4 +212,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#jbcompactempty] #agent-doc-bug: JB Plugin Compact Exchange produced a defective compaction in boost-client/tasks/monsterrodholders.md (session a9421282). Two problems: (1) The compacted exchange block (lines 30-38) contains only a recursive archive pointer and a truncated prior summary (`Prior summary/context: ### Session Summary *Compacted. Content archived to ...`) with no substantive decisions, key facts, or open items preserved. The archive file itself (7b9f2a63...-20260511-101729.md) is a compaction of a prior compaction — 15 lines, no real content. (2) Compact Exchange did not merge the duplicate exchange blocks created by #dupeexchangeblock into a single block — the document still has two adjacent `agent:exchange` blocks (lines 30-38 and 39-146). Compact Exchange should detect and consolidate multiple exchange blocks into one, and the default summary must carry forward substantive context from the archive chain, not just a truncated pointer. Plan: tasks/agent-doc/plan-jb-compact-exchange-empty-summary.md
 - 2026-05-11 [#stalegenfix] 2026-05-11 Fix stale actor transition generation mismatch: when session_id and pane_id both match, allow same-owner transitions despite generation bump from compact/restart/route. Committed in session_actor.rs transition_state_in. Regression: controller_lifecycle_allows_same_pane_stale_generation.
 - 2026-05-11 [#escrecov] 2026-05-11 Dispatch-only OpenCode interrupt recovery sends Escape twice and waits for idle prompt before failing closed. Verify in a live OpenCode session that Run Agent Doc works after Clear Session Context when the pane is busy. Plan: verify fix in route.rs attempt_opencode_busy_interrupt_recovery + test resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt
+- 2026-05-11 [#w3rb] 2026-05-11 [#capproofdegraded] Dispatch-only degraded authoritative actor path now skips capability proof gate — verify in a live OpenCode session that Run Agent Doc works after Clear Session Context. Plan: tasks/agent-doc/plan-degraded-authoritative-skip-capability-proof.md
 <!-- /agent:done -->

@@ -34,7 +34,27 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 5 response topic(s): OpenCode SSH capability proof; OpenCode capability proof error messages use harness name; mark_lifecycle relative path fix; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:bf4b76be -->
+❯ do [#dupeexchangeblock]. spec-test-build-install-commit-push
+### Re: #dupeexchangeblock fix — gpt-5
+
+**Root cause:** `sanitize_patches` only sanitized patch block content, not unmatched response text. When an agent response contained `&lt;!-- agent:exchange --&gt;...&lt;!-- /agent:exchange --&gt;` markers outside of `<!-- patch:exchange -->` blocks, the unmatched text retained those raw markers. When appended to the existing exchange component, these markers created duplicate exchange blocks.
+
+Additionally, `normalize_template_structure_or_fail` did not call `repair_duplicate_exchange_opener` as defense-in-depth, so any duplicate exchange blocks introduced by CRDT/git merge could survive.
+
+**Fix (two layers):**
+
+1. **Layer 1 — sanitize unmatched text:** Added `sanitize_unmatched()` that applies `sanitize_component_tags` to unmatched response text. Updated all 5 call sites (`run_template`, `run_stream`, `canonicalize_response_for_capture`, `apply_stream_from_string`, `apply_template_from_string`) to sanitize both patches and unmatched text. `src/agent-doc/src/write.rs:6091-6094`
+
+2. **Layer 2 — defense-in-depth repair:** Added `repair_duplicate_exchange_opener` call to `normalize_template_structure_or_fail` so any duplicate exchange blocks that survive the patch/merge phase are merged before the write. `src/agent-doc/src/write.rs:3423-3430`
+
+**Tests:** Two new regression tests:
+- `sanitize_unmatched_escapes_exchange_markers_in_response` — verifies unmatched text with exchange markers gets escaped
+- `apply_patches_sanitize_unmatched_prevents_duplicate_exchange_block` — end-to-end test showing sanitized unmatched text cannot create a second exchange block
+
+**Plan:** `tasks/agent-doc/plan-duplicate-exchange-block-patchback.md`
+
+**Verification:** `make check` — all tests pass. `cargo install --path .` — installed locally.
+<!-- agent:boundary:0f3418cd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,7 +85,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#dupeexchangeblock] #agent-doc-bug: opencode agent writes responses into a second `<!-- agent:exchange patch=append -->...<!-- /agent:exchange -->` block instead of appending to the existing exchange block. This produces an invalid document with two adjacent exchange sections. Reproduction: monsterrodholders.md session a9421282 — the "Production deploy" response was written into a new exchange element (lines 126-147) instead of being appended to the existing exchange (lines 39-125). Root cause: likely the patchback/closeout logic does not detect the existing open exchange block and creates a new one. Plan: tasks/agent-doc/plan-duplicate-exchange-block-patchback.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -160,4 +179,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#opencodesshproof] OpenCode harness has no SSH capability proof — session log shows `codex_capability_proof` entries for Codex generations but zero proof entries for OpenCode generations, so `required_ssh_targets` frontmatter is not enforced and the agent discovers `socket: Operation not permitted` mid-response instead of failing closed. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md
 - 2026-05-11 [#opencodesshconfig] OpenCode session cannot SSH to `required_ssh_targets` — `socket: Operation not permitted` occurs because opencode's sandbox blocks network syscalls. Workaround options: (1) copy a per-project `.opencode/config.json` that grants network/SSH permissions, (2) file an agent-doc bug (this item), (3) both. Agent-doc should either detect the sandbox restriction and fail closed before dispatch, or inject the required `.opencode/config.json` permissions automatically when `required_ssh_targets` is set in the session frontmatter.
 - 2026-05-11 [#marklifecyclefix] 2026-05-11 mark_lifecycle relative path resolution — fixed in c4f9d17: route promotion now uses bootstrap.project_root + canonical_document_id_in instead of transition_state_direct with controller-CWD-dependent canonicalize. Regression: controller_mark_lifecycle_resolves_relative_path_via_project_root.
+- 2026-05-11 [#dupeexchangeblock] #agent-doc-bug: opencode agent writes responses into a second `<!-- agent:exchange patch=append -->...<!-- /agent:exchange -->` block instead of appending to the existing exchange block. This produces an invalid document with two adjacent exchange sections. Reproduction: monsterrodholders.md session a9421282 — the "Production deploy" response was written into a new exchange element (lines 126-147) instead of being appended to the existing exchange (lines 39-125). Root cause: likely the patchback/closeout logic does not detect the existing open exchange block and creates a new one. Plan: tasks/agent-doc/plan-duplicate-exchange-block-patchback.md
 <!-- /agent:done -->

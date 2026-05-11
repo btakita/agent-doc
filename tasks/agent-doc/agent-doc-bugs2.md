@@ -39,7 +39,19 @@ Compacted content:
 [session-actor] warning: failed to record ready transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: project controller command `mark_lifecycle` failed: stale actor transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 120 is no longer current (current generation 121)
 ```
 Response already committed — repair write not needed
-<!-- agent:boundary:fdcc398e -->
+### Re: stale actor transition generation mismatch — glm-5.1
+
+**Root cause:** `SessionActorRuntime.generation` is captured at supervisor start and never refreshed. When a concurrent operation (compact, restart, route, sync) bumps the actor generation, the supervisor's `Ready` transition is rejected by `transition_state_in` at `session_actor.rs:420-428` because the generation no longer matches — even though the supervisor's `session_id` and `pane_id` are still the legitimate owner.
+
+**Fix:** Modified `transition_state_in` in `session_actor.rs:420-438` to only reject on generation mismatch when `pane_id` also differs. When session_id and pane_id both match the current record, the generation bump was from a same-owner rebinding (compact/restart), and the transition proceeds using the current generation. Different-pane stale actors are still correctly rejected.
+
+**Changes:**
+- `src/agent-doc/src/session_actor.rs:420-438` — generation check now also requires pane mismatch to reject
+- `src/agent-doc/src/project_controller.rs:3863-3917` — new test `controller_lifecycle_allows_same_pane_stale_generation`
+- All 2581 tests pass; build + install completed.
+
+&lt;!-- /agent:exchange --&gt;
+<!-- agent:boundary:1e5fcda1 -->
 <!-- /agent:exchange -->
 ###
 <!--

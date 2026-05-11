@@ -29,36 +29,13 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-035235.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-040418.md`*
 
 Active backlog:
-- [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
-- 1 more active item(s)
-❯ do [#startgcleak]. spec-test-build-install-commit-push
-### Re: stale starting actor cleanup — gpt-5
-
-Implemented `#startgcleak` in `src/agent-doc`.
-
-The cleanup gap was that `close_stale_starting_actors_for_caller` treated any live recorded supervisor PID as proof forever, even when the supervisor lease heartbeat was many hours old. I changed the proof rule so one-hour-old `starting` actors are kept only when the recorded supervisor PID is alive and the lease heartbeat is still fresh; a live but non-heartbeating `agent-doc start --route-owned` process is now treated as stuck startup state and closed by normal maintenance.
-
-Updated specs/docs/changelog in `CLAUDE.md`, `README.md`, `SPEC.md`, `VERSIONS.md`, `specs/07-core-commands.md`, and `specs/08a-session-actor-contract.md`. Added a regression for the live-PID/stale-heartbeat case in `src/project_controller.rs`.
-
-Verification:
-- `cargo test stale_starting_actor`
-- `make check`
-- `make install`
-- `agent-doc gc --dry-run` showed the two stale actors as closable with the installed binary
-- `agent-doc sync --no-autostart --focus /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` closed both stale `starting` records through the normal sync path
-- `jq` and SQLite checks now show no remaining `state=starting` actor records
-
-Committed and pushed:
-- `src/agent-doc` branch `20260422/codex-agent-backend`: `68ee689 fix: expire stuck starting actors`
-- parent `agent-loop` `main`: `b73a1c3a8 chore: update agent-doc submodule`
-
-Existing unrelated parent worktree changes remain untouched.
-<!-- agent:boundary:19b44d85 -->
+- [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
+<!-- agent:boundary:eeb5bda5 -->
 <!-- /agent:exchange -->
 ###
 

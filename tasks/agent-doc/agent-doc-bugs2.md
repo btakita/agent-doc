@@ -119,7 +119,19 @@ Fixed and pushed in commit `c4f9d17`.
 **Fix:** Extracted `transition_state_in(base_dir, document_id, ...)` and made `handle_mark_lifecycle` use `bootstrap.project_root` + `canonical_document_id_in` for path resolution, matching the pattern used by `handle_actor_binding`, `handle_dispatch`, and `handle_supervisor_heartbeat`.
 
 **Regression test:** `controller_mark_lifecycle_resolves_relative_path_via_project_root`.
-<!-- agent:boundary:f7f3d318 -->
+❯ `Run Agent Doc` with opencode should send `/agent-doc <path>` to the opencode cli.
+❯ spec-test-build-install-commit-push
+### Re: OpenCode trigger command uses /agent-doc slash command — glm-5.1
+
+Changed the OpenCode `trigger_command_template` from `"agent-doc {file}"` to `"/agent-doc {file}"` in `harness.rs:102`, matching Claude Code's slash-command convention. Since OpenCode supports slash commands (installed via `agent-doc skill install --harness opencode`), the routed trigger now sends `/agent-doc <path>` to the opencode CLI instead of the bare `agent-doc <path>`.
+
+**Changes (1 file, 3 locations):**
+- `src/harness.rs:102` — `trigger_command_template: "/agent-doc {file}"` for opencode harness
+- `src/harness.rs:706` — Updated `trigger_command_substitution_opencode` test expectation
+- `src/harness.rs:1127` — Updated `harness_isolation_trigger_commands_both_route_file` test expectation
+
+All 1896 tests pass. Commit `3106a82` pushed to `20260422/codex-agent-backend`.
+<!-- agent:boundary:83e11ba0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -150,6 +162,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#dupeexchangeblock] #agent-doc-bug: opencode agent writes responses into a second `<!-- agent:exchange patch=append -->...<!-- /agent:exchange -->` block instead of appending to the existing exchange block. This produces an invalid document with two adjacent exchange sections. Reproduction: monsterrodholders.md session a9421282 — the "Production deploy" response was written into a new exchange element (lines 126-147) instead of being appended to the existing exchange (lines 39-125). Root cause: likely the patchback/closeout logic does not detect the existing open exchange block and creates a new one. Plan: tasks/agent-doc/plan-duplicate-exchange-block-patchback.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

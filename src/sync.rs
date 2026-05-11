@@ -2793,6 +2793,25 @@ fn run_with_options(
 
     // Check for new build and clear stale caches
     check_build_stamp();
+    if let Ok(cwd) = std::env::current_dir()
+        && let Some(project_root) = crate::snapshot::find_project_root(&cwd)
+    {
+        match crate::project_controller::close_stale_starting_actors_for_caller(
+            &project_root,
+            std::time::Duration::from_secs(3600),
+            false,
+            "sync",
+        ) {
+            Ok((closed, kept)) if closed > 0 => {
+                eprintln!(
+                    "[sync] actors: {} stale starting closed, {} still active",
+                    closed, kept
+                );
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("[sync] actor gc warning: {}", e),
+        }
+    }
 
     // Column memory: for columns with non-agent files, substitute the last known
     // agent doc so the reconciler preserves the pane from the previous layout.

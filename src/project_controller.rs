@@ -1117,10 +1117,11 @@ fn supervisor_lease_is_fresh_or_alive(
     fresh_heartbeat || live_process
 }
 
-pub fn close_stale_starting_actors(
+pub fn close_stale_starting_actors_for_caller(
     project_root: &Path,
     stale_after: Duration,
     dry_run: bool,
+    caller: &str,
 ) -> Result<(usize, usize)> {
     let now = timestamp_secs();
     let store = load_actor_store(project_root)?;
@@ -1149,8 +1150,13 @@ pub fn close_stale_starting_actors(
 
         if dry_run {
             eprintln!(
-                "[gc] would close stale starting actor: {} session={} pane={} generation={} age_secs={}",
-                record.document_id, record.session_id, record.pane_id, record.generation, age
+                "[{}] would close stale starting actor: {} session={} pane={} generation={} age_secs={}",
+                caller,
+                record.document_id,
+                record.session_id,
+                record.pane_id,
+                record.generation,
+                age
             );
             closed += 1;
             continue;
@@ -1159,7 +1165,7 @@ pub fn close_stale_starting_actors(
         let mut next = record.clone();
         next.state = crate::session_actor::ActorState::Closed;
         next.last_transition = crate::session_actor::ActorLastTransition {
-            caller: "gc".to_string(),
+            caller: caller.to_string(),
             reason: "stale_starting_actor".to_string(),
             timestamp: now,
             prior_generation: record.generation,
@@ -1169,14 +1175,27 @@ pub fn close_stale_starting_actors(
         crate::ops_log::log_op(
             Path::new(&record.document_id),
             &format!(
-                "gc_closed_stale_starting_actor file={} session={} pane={} generation={} age_secs={}",
-                record.document_id, record.session_id, record.pane_id, record.generation, age
+                "{}_closed_stale_starting_actor file={} session={} pane={} generation={} age_secs={}",
+                caller,
+                record.document_id,
+                record.session_id,
+                record.pane_id,
+                record.generation,
+                age
             ),
         );
         closed += 1;
     }
 
     Ok((closed, kept))
+}
+
+pub fn close_stale_starting_actors(
+    project_root: &Path,
+    stale_after: Duration,
+    dry_run: bool,
+) -> Result<(usize, usize)> {
+    close_stale_starting_actors_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
 fn emit_actor_projection(project_root: &Path) -> Result<()> {
@@ -3679,6 +3698,52 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(updated.state, crate::session_actor::ActorState::Starting);
+    }
+
+    #[test]
+    fn normal_path_actor_cleanup_records_calling_surface() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/preflight-stale-starting.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-preflight-stale\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let record = crate::session_actor::record_session_start_direct(
+            &doc,
+            "session-preflight-stale",
+            "%51",
+            "@1",
+            1,
+        )
+        .unwrap();
+        let old = timestamp_secs() - 7200;
+        Connection::open(state_db_path(dir.path()))
+            .unwrap()
+            .execute(
+                "UPDATE actor_transitions SET timestamp = ?1 WHERE new_generation = 1",
+                params![sqlite_i64(old, "old timestamp").unwrap()],
+            )
+            .unwrap();
+
+        let (closed, kept) = close_stale_starting_actors_for_caller(
+            dir.path(),
+            Duration::from_secs(3600),
+            false,
+            "preflight",
+        )
+        .unwrap();
+        assert_eq!(closed, 1);
+        assert_eq!(kept, 0);
+
+        let updated = load_actor_record(dir.path(), &record.document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.state, crate::session_actor::ActorState::Closed);
+        assert_eq!(updated.last_transition.caller, "preflight");
+        assert_eq!(updated.last_transition.reason, "stale_starting_actor");
     }
 
     #[test]

@@ -839,6 +839,22 @@ pub fn run(file: &Path) -> Result<()> {
     {
         let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
         if let Some(root) = snapshot::find_project_root(&canonical) {
+            match crate::project_controller::close_stale_starting_actors_for_caller(
+                &root,
+                std::time::Duration::from_secs(3600),
+                false,
+                "preflight",
+            ) {
+                Ok((closed, kept)) if closed > 0 => {
+                    eprintln!(
+                        "[preflight] actors: {} stale starting closed, {} still active",
+                        closed, kept
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("[preflight] actor gc warning: {}", e),
+            }
+
             let stamp = root.join(".agent-doc/gc.stamp");
             let needs_gc = match std::fs::metadata(&stamp) {
                 Ok(meta) => meta
@@ -2702,6 +2718,47 @@ mod tests {
         // diff::compute should detect changes → no_changes = false.
         let diff_result = diff::compute(&doc).unwrap();
         assert!(diff_result.is_some(), "diff should detect new content");
+    }
+
+    #[test]
+    fn preflight_closes_stale_starting_actors_even_when_daily_gc_stamp_is_fresh() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+        std::fs::write(dir.path().join(".agent-doc/gc.stamp"), "").unwrap();
+
+        let stale_doc = dir.path().join("tasks/stale-starting.md");
+        std::fs::create_dir_all(stale_doc.parent().unwrap()).unwrap();
+        std::fs::write(&stale_doc, "body").unwrap();
+        let stale_record = crate::session_actor::ActorRecord {
+            document_id: stale_doc.to_string_lossy().to_string(),
+            session_id: "session-stale-starting".to_string(),
+            generation: 1,
+            pane_id: "%71".to_string(),
+            window_id: "@7".to_string(),
+            harness: "codex".to_string(),
+            state: crate::session_actor::ActorState::Starting,
+            last_transition: crate::session_actor::ActorLastTransition {
+                caller: "start".to_string(),
+                reason: "session_start".to_string(),
+                timestamp: 1,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        };
+        crate::project_controller::store_actor_record(dir.path(), Some(0), &stale_record).unwrap();
+
+        run(&doc).unwrap();
+
+        let updated =
+            crate::project_controller::load_actor_record(dir.path(), &stale_record.document_id)
+                .unwrap()
+                .unwrap();
+        assert_eq!(updated.state, crate::session_actor::ActorState::Closed);
+        assert_eq!(updated.last_transition.caller, "preflight");
+        assert_eq!(updated.last_transition.reason, "stale_starting_actor");
     }
 
     #[test]

@@ -140,7 +140,7 @@ Later phases may refine caller values without changing the field names.
   blocked/closed actor states, stale projections, and recent failed operator
   attempts are durable controller diagnostics that editor plugins can display
   without scraping tmux state.
-- `agent-doc gc` may close a stale `starting` actor after one hour only when
+- `agent-doc gc`, plus normal `preflight`, `start`, and `sync` maintenance, may close a stale `starting` actor after one hour only when
   there is no fresh supervisor heartbeat and no live supervisor PID for the same
   document generation. The controller remains authoritative for that transition
   and `session-actors.json` is re-emitted as a projection, not edited directly.

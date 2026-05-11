@@ -1845,6 +1845,25 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
 
     let (fm, _body) = frontmatter::parse_for_file(&updated_content, file)?;
     let global_config = config::load().unwrap_or_default();
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let project_root = snapshot::find_project_root(&canonical).unwrap_or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
+    });
+    match crate::project_controller::close_stale_starting_actors_for_caller(
+        &project_root,
+        std::time::Duration::from_secs(3600),
+        false,
+        "start",
+    ) {
+        Ok((closed, kept)) if closed > 0 => eprintln!(
+            "[start] actors: {} stale starting closed, {} still active",
+            closed, kept
+        ),
+        Ok(_) => {}
+        Err(e) => eprintln!("[start] actor gc warning: {}", e),
+    }
 
     // Resolve harness config from frontmatter agent > config default_agent > claude
     let harness = crate::harness::HarnessConfig::from_context(&fm, &global_config);
@@ -1965,12 +1984,6 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     eprintln!("Registered session {} → pane {}", &session_id[..8], pane_id);
 
     // Open session log
-    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = snapshot::find_project_root(&canonical).unwrap_or_else(|| {
-        std::env::current_dir()
-            .ok()
-            .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
-    });
     let mut session_log = open_session_log(&canonical, &session_id);
     let start_generation = if prior_entry
         .as_ref()

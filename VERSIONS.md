@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Stale `starting` actor cleanup now runs on normal paths, not just daily GC.** `preflight`, `start`, and `sync` now run the lightweight controller actor cleanup every cycle, closing one-hour-old `starting` records when no fresh supervisor heartbeat or live supervisor PID proves that generation is still booting. The full orphan-file GC remains on the `.agent-doc/gc.stamp` daily cadence. Added regressions for preflight with a fresh GC stamp and caller-specific actor transitions. This closes `#autogcstart` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Editor IPC prefix repair now repositions before normalization.** JetBrains and VS Code patch application now move the exchange boundary before applying `normalize_prefix_lines`, so prompts typed after the previous boundary marker are inside the user region seen by the ack-content sidecar. This should keep clean closeouts from repeatedly logging `sidecar_normalization_fallback reason=prefix_divergence`. Added editor regressions and updated the plugin IPC spec. This closes `#sidecarfallbackstill` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Tracked-work completion now uses `--done`.** `write` and `finalize` now expose `--done <id>` as the public flag for marking either `agent:backlog` or `agent:icebox` work complete. The old `--pending-done` spelling and the transitional `--backlog-done` spelling are accepted as deprecated aliases with warnings, while `plan` and recovery hints now emit `--done`. This closes the CLI rename request in `tasks/agent-doc/agent-doc-bugs2.md`.

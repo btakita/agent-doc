@@ -34,6 +34,7 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 5 response topic(s): opencode agent support; opencode start still opened Claude; install agent-doc on OpenCode; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+do [#nopatchbackopencode]. spec-test-build-install-commit-push
 <!-- agent:boundary:c3701ce7 -->
 <!-- /agent:exchange -->
 ###

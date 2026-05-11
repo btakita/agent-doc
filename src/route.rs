@@ -58,8 +58,11 @@
 //!   submit boundary as `session clear`.
 //! - **Dispatch-only editor reroutes** still bypass the managed acceptance/cycle-ack loop on
 //!   purpose, and for existing managed sessions they now send the same bare reopen through direct
-//!   live-pane submit instead of a one-shot supervisor IPC inject. They fail closed up front when
-//!   the pane is visibly stuck in an interactive shell blocker such as `reverse-i-search`.
+//!   live-pane submit instead of a one-shot supervisor IPC inject. After a tracked Codex/OpenCode
+//!   `/clear`, a still-starting authoritative actor uses this same direct submit path so editor
+//!   `Run Agent Doc` does not fail closed while the harness is redrawing. They fail closed up
+//!   front when the pane is visibly stuck in an interactive shell blocker such as
+//!   `reverse-i-search`.
 //! - **`await_idle(file, debounce)`**: Polls file mtime every 100ms until `debounce` has
 //!   elapsed since last modification, or until `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
@@ -763,6 +766,13 @@ fn tracked_harness_clear_requires_fresh_restart(
 ) -> bool {
     matches!(harness.binary.as_str(), "codex" | "opencode")
         && latest_prompt.is_some_and(crate::codex_hook::prompt_requests_clear)
+}
+
+fn dispatch_only_starting_actor_can_use_clear_submit_path(
+    harness: &HarnessConfig,
+    latest_prompt: Option<&str>,
+) -> bool {
+    tracked_harness_clear_requires_fresh_restart(harness, latest_prompt)
 }
 
 fn reapply_harness_launch_contract_after_clear(
@@ -2578,6 +2588,51 @@ fn route_via_authoritative_actor(
                 "dispatch_only_reopen",
                 &format!(
                     "submit=direct_pane actor_state={} harness={}",
+                    actor_state.as_str(),
+                    harness.binary
+                ),
+            )?;
+            return dispatch_only_send_reopen(
+                tmux,
+                file,
+                session_id,
+                &dispatch_pane,
+                file_path,
+                harness,
+                DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            );
+        }
+        if dispatch_only
+            && actor_state == crate::session_actor::ActorState::Starting
+            && dispatch_only_starting_actor_can_use_clear_submit_path(
+                harness,
+                crate::codex_hook::load_latest_prompt_for_file(file)?.as_deref(),
+            )
+        {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_starting_actor_after_clear_direct_pane_submit file={} pane={} harness={} generation={}",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    actor.record.generation
+                ),
+            );
+            eprintln!(
+                "[route] authoritative actor generation {} for {} is still starting after `/clear` on pane {} — sending the dispatch-only reopen through the same direct pane submit path",
+                actor.record.generation,
+                file.display(),
+                dispatch_pane
+            );
+            let _authorization = authorize_controller_dispatch(
+                file,
+                session_id,
+                file_path,
+                &actor,
+                "dispatch_only_reopen",
+                &format!(
+                    "submit=direct_pane actor_state={} harness={} latest_prompt=/clear",
                     actor_state.as_str(),
                     harness.binary
                 ),
@@ -8903,6 +8958,26 @@ Body\n\
     }
 
     #[test]
+    fn dispatch_only_starting_actor_clear_submit_path_matches_clear_tracking() {
+        assert!(dispatch_only_starting_actor_can_use_clear_submit_path(
+            &HarnessConfig::codex(),
+            Some("/clear")
+        ));
+        assert!(dispatch_only_starting_actor_can_use_clear_submit_path(
+            &HarnessConfig::opencode(),
+            Some("  /clear  ")
+        ));
+        assert!(!dispatch_only_starting_actor_can_use_clear_submit_path(
+            &HarnessConfig::claude(),
+            Some("/clear")
+        ));
+        assert!(!dispatch_only_starting_actor_can_use_clear_submit_path(
+            &HarnessConfig::codex(),
+            Some("agent-doc tasks/bugs.md")
+        ));
+    }
+
+    #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_records_optimistic_fresh_restart_retry_in_original_pane() {
         use std::sync::{
@@ -12354,6 +12429,133 @@ Body\n\
         assert!(
             !actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
             "dispatch-only authoritative reroute must not submit through the live pane path while still starting: {actor_after}"
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn route_dispatch_only_submits_to_starting_authoritative_actor_after_tracked_clear() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/codex-hooks/sessions")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-authoritative-starting-clear");
+        let session = "codex";
+        let cwd = test_cwd();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &stale_pane,
+            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "STALE:%s\n" "$CMD"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec /bin/sh -c 'printf "BOOTING\n"; while IFS= read -r CMD; do printf "ACTOR:%s\n" "$CMD"; done'"#,
+        );
+        let _ = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            "BOOTING",
+            std::time::Duration::from_secs(3),
+        );
+
+        let doc = dir
+            .path()
+            .join("dispatch-only-authoritative-starting-clear.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-dispatch-only-authoritative-starting-clear";
+        sessions::register(session_id, &stale_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.path()
+                .join(".agent-doc/codex-hooks/sessions/clear.json"),
+            serde_json::json!({
+                "session_id": "codex-clear-session",
+                "doc_path": file_path,
+                "last_turn_id": "turn-clear",
+                "last_prompt": "/clear",
+                "updated_at": 42u64
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "starting",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let resolved = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("dispatch-only reroute after /clear should reuse direct pane submit even while actor is starting");
+        assert_eq!(resolved, actor_pane);
+        assert!(
+            injects.lock().unwrap().is_empty(),
+            "dispatch-only reroute after /clear should not queue through supervisor IPC"
+        );
+
+        let actor_after = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            &HarnessConfig::codex().trigger_command(&file_path),
+            std::time::Duration::from_secs(3),
+        );
+        assert!(
+            actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
+            "dispatch-only reroute after /clear should submit the reopen to the starting actor pane: {actor_after}"
+        );
+        let stale_after = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
+        assert!(
+            !stale_after.contains("STALE:agent-doc "),
+            "dispatch-only reroute should avoid stale registered panes after /clear: {stale_after}"
         );
 
         ipc.stop();

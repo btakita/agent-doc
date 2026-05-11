@@ -118,11 +118,21 @@ Implemented help/usage screen detection for OpenCode harness. When the pane show
 3. **Route blocking** — `wait_for_agent_ready_outcome` won't match any help-screen line as a ready prompt, and the blocker prevents injection
 
 Changes: `src/harness.rs` (+76 lines), `src/start.rs` (+53 lines), `src/session_check.rs` (clippy fix). 7 new unit tests. All 2088 tests pass. Built + installed + pushed.
-do [#routestartingrace]. spec-test-build-install-commit-push
-<!-- agent:boundary:1f011e5e -->
+❯ do [#routestartingrace]. spec-test-build-install-commit-push
+❯ After I run 1 agent-doc turn using opencode, the ui becomes unpromptable.
+❯ spec-test-build-install-commit-push
+### Re: OpenCode unpromptable after 1 agent-doc turn — glm-5.1
+
+**Root cause**: The global config `~/.config/agent-doc/config.toml` has `codex_network_access = "enabled"`, which triggers the Codex-specific capability proof for ALL harnesses including OpenCode. The proof spawns `opencode exec --json` to test network/writable-root access, which fails. On failure, the actor transitions to `Blocked`, the child process is killed (`shared.kill_child()`), and the supervisor enters a restart loop: restart → capability proof fails → kill → restart. The user never gets an interactive prompt.
+
+**Evidence from ops.log**: Generations 129, 131, 133, 135, 137, 139, 141 all show `state=blocked reason=opencode_capability_proof_failed`, confirming the restart loop.
+
+**Fix** (`1813045`): `managed_capability_contract_required` now accepts a `harness` parameter and returns `false` for non-Codex harnesses. The Codex sandbox probes (DNS, child network, writable roots) are specific to Codex's sandbox model and don't apply to OpenCode's runtime. Updated `start.rs` call site and added OpenCode-specific assertions in the existing test. All 2142+ tests pass. Built + installed + pushed.
+<!-- agent:boundary:686d5abf -->
 <!-- /agent:exchange -->
 ###
 <!--
+---
 JB Plugin `Run Agent Doc` had an error after running `/clear` on root.md:
 ```
 resync: stash pane %11 is registered in its own project root — skipping kill

@@ -44,7 +44,7 @@ const CLAUDE_DESCRIPTION: &str = "Interactive markdown session. TRIGGER: user in
 
 const CODEX_DESCRIPTION: &str = "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc.";
 
-const OPENCODE_DESCRIPTION: &str = "Interactive markdown session for OpenCode. TRIGGER: user writes agent-doc <file> as a normal OpenCode message. Requires a markdown session document, installed CLI, and write+commit every cycle.";
+const OPENCODE_DESCRIPTION: &str = "Interactive markdown session for OpenCode. TRIGGER: user invokes /agent-doc <file> command. Requires a markdown session document, installed CLI, and write+commit every cycle.";
 
 const GENERIC_DESCRIPTION: &str = "Interactive markdown session. TRIGGER: user invokes the harness-native agent-doc entrypoint. Requires a markdown session document, installed CLI, and write+commit every cycle.";
 
@@ -82,18 +82,16 @@ Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim
 
 const OPENCODE_INVOCATION_SECTION: &str = r#"## Invocation
 
-In OpenCode, invoke agent-doc by writing one of these as a normal message:
-
 ```
-agent-doc <FILE>
-agent-doc claim <FILE>
-agent-doc compact <FILE>
-agent-doc compact exchange <FILE>
+/agent-doc <FILE>
+/agent-doc claim <FILE>
+/agent-doc compact <FILE>
+/agent-doc compact exchange <FILE>
 ```
 
 Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
-Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.
+**Note:** Slash commands (`/agent-doc`) are installed as an OpenCode command via `agent-doc skill install --harness opencode`. Other harnesses receive the document path directly.
 "#;
 
 const GENERIC_INVOCATION_SECTION: &str = r#"## Invocation
@@ -102,7 +100,7 @@ Use the harness-native `agent-doc` entrypoint for the environment you are in:
 
 - Claude Code: `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, `/agent-doc compact exchange <FILE>`
 - Codex: `agent-doc <FILE>`, `agent-doc claim <FILE>`, `agent-doc compact <FILE>`, `agent-doc compact exchange <FILE>`
-- OpenCode: `agent-doc <FILE>`, `agent-doc claim <FILE>`, `agent-doc compact <FILE>`, `agent-doc compact exchange <FILE>`
+- OpenCode: `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, `/agent-doc compact exchange <FILE>`
 
 Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
@@ -445,6 +443,9 @@ fn install_env_artifacts(env: agent_kit::detect::Environment, root: Option<&Path
     if matches!(env, agent_kit::detect::Environment::Codex) {
         install_codex_hook_artifacts(root)?;
     }
+    if matches!(env, agent_kit::detect::Environment::OpenCode) {
+        install_opencode_command_file(root)?;
+    }
     Ok(())
 }
 
@@ -462,6 +463,31 @@ fn install_codex_hook_artifacts(root: Option<&Path>) -> Result<()> {
     std::fs::create_dir_all(&codex_dir)?;
     merge_codex_hooks_json(&codex_dir.join("hooks.json"))?;
     merge_codex_config(&codex_dir.join("config.toml"))?;
+    Ok(())
+}
+
+const OPENCODE_COMMAND_CONTENT: &str = "\
+---
+description: \"Interactive document session with agent-doc\"
+---
+
+agent-doc $ARGUMENTS
+";
+
+fn install_opencode_command_file(root: Option<&Path>) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let commands_dir = base.join(".opencode/commands");
+    std::fs::create_dir_all(&commands_dir)?;
+    let path = commands_dir.join("agent-doc.md");
+    let needs_write = !path.exists()
+        || std::fs::read_to_string(&path)
+            .map(|existing| existing != OPENCODE_COMMAND_CONTENT)
+            .unwrap_or(true);
+    if needs_write {
+        std::fs::write(&path, OPENCODE_COMMAND_CONTENT)
+            .with_context(|| format!("write {}", path.display()))?;
+    }
     Ok(())
 }
 
@@ -952,7 +978,7 @@ mod tests {
         assert!(content.contains("stale instruction drift"));
         assert!(content.contains("continue this turn"));
         assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
-        assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
+        assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
     }
 
     #[test]
@@ -967,15 +993,13 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
 
         assert!(content.contains("Interactive markdown session for OpenCode"));
-        assert!(content.contains("In OpenCode, invoke agent-doc"));
-        assert!(content.contains("agent-doc <FILE>"));
+        assert!(content.contains("/agent-doc <FILE>"));
         assert!(content.contains("agent-doc skill install --harness opencode"));
         assert!(content.contains("installed OpenCode skill"));
         assert!(content.contains("agent-doc finalize <FILE>"));
         assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
         assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
-        assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
-        assert!(!content.contains("Do **not** type `/agent-doc`"));
+        assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
     }
 
     #[test]
@@ -1317,16 +1341,15 @@ mod tests {
         assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
         assert!(content.contains("Imperative edits are executable directives"));
         assert!(content.contains("Do not require the same instruction to be repeated in chat"));
-        assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
+        assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
     }
 
     #[test]
-    fn opencode_content_uses_plain_text_invocation() {
+    fn opencode_content_uses_slash_command_invocation() {
         let content = super::content_for_env(Environment::OpenCode);
 
         assert!(content.contains("Interactive markdown session for OpenCode"));
-        assert!(content.contains("In OpenCode, invoke agent-doc"));
-        assert!(content.contains("agent-doc <FILE>"));
+        assert!(content.contains("/agent-doc <FILE>"));
         assert!(content.contains("agent-doc skill install --harness opencode"));
         assert!(content.contains("installed OpenCode skill"));
         assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
@@ -1335,8 +1358,47 @@ mod tests {
         assert!(content.contains("MCP auth / OAuth steps are sub-steps"));
         assert!(content.contains("Imperative edits are executable directives"));
         assert!(content.contains("Do not require the same instruction to be repeated in chat"));
-        assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
+        assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
         assert!(!content.contains("Codex CLI will reject it"));
+        assert!(!content.contains("In OpenCode, invoke agent-doc by writing"));
+    }
+
+    #[test]
+    fn install_for_opencode_creates_command_file() {
+        let dir = tempfile::tempdir().unwrap();
+
+        super::install_opencode_command_file(Some(dir.path())).unwrap();
+
+        let path = dir.path().join(".opencode/commands/agent-doc.md");
+        assert!(path.exists(), "command file should exist at {path:?}");
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("agent-doc $ARGUMENTS"));
+        assert!(content.contains("description:"));
+    }
+
+    #[test]
+    fn install_for_opencode_command_file_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+
+        super::install_opencode_command_file(Some(dir.path())).unwrap();
+        let first = std::fs::read_to_string(dir.path().join(".opencode/commands/agent-doc.md"))
+            .unwrap();
+
+        super::install_opencode_command_file(Some(dir.path())).unwrap();
+        let second = std::fs::read_to_string(dir.path().join(".opencode/commands/agent-doc.md"))
+            .unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn install_env_artifacts_creates_opencode_command() {
+        let dir = tempfile::tempdir().unwrap();
+
+        super::install_env_artifacts(Environment::OpenCode, Some(dir.path())).unwrap();
+
+        assert!(dir.path().join(".opencode/commands/agent-doc.md").exists());
     }
 
     #[test]
@@ -1359,7 +1421,7 @@ mod tests {
 
         assert!(content.contains("Claude Code: `/agent-doc <FILE>`"));
         assert!(content.contains("Codex: `agent-doc <FILE>`"));
-        assert!(content.contains("OpenCode: `agent-doc <FILE>`"));
+        assert!(content.contains("OpenCode: `/agent-doc <FILE>`"));
         assert!(content.contains("agent-doc skill install --harness claude --reload compact"));
         assert!(content.contains("agent-doc skill install --harness codex --reload restart"));
         assert!(content.contains("agent-doc skill install --harness opencode"));

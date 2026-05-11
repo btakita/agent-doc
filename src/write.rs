@@ -2181,7 +2181,7 @@ pub(crate) fn canonicalize_response_for_capture(file: &Path, response: &str) -> 
         return Ok(response.to_string());
     }
 
-    let Ok((mut patches, unmatched)) = template::parse_patches(response) else {
+    let Ok((mut patches, mut unmatched)) = template::parse_patches(response) else {
         return Ok(response.to_string());
     };
     if !patches
@@ -2192,6 +2192,7 @@ pub(crate) fn canonicalize_response_for_capture(file: &Path, response: &str) -> 
     }
 
     sanitize_patches(&mut patches);
+    sanitize_unmatched(&mut unmatched);
     let normalized =
         normalize_backlog_patch_response(file, &current_content, patches, unmatched, false)?;
     Ok(normalized
@@ -3418,8 +3419,20 @@ fn dedupe_consecutive_response_blocks(content: &str, file: &Path) -> String {
 
 pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
     let lifted = lift_pending_from_exchange_safe(content, file);
+    // Defense-in-depth: merge any duplicate exchange openers that may have
+    // survived the patch application phase (e.g., via CRDT/git merge).
+    let deduped_openers = {
+        let mut result = lifted;
+        while let Some(merged) = crate::template::repair_duplicate_exchange_opener(&result)? {
+            eprintln!(
+                "[write] normalize_template_structure: merged duplicate exchange opener"
+            );
+            result = merged;
+        }
+        result
+    };
     let normalized = dedupe_consecutive_response_blocks(
-        &crate::component::strip_backlog_patch_attr(&lifted),
+        &crate::component::strip_backlog_patch_attr(&deduped_openers),
         file,
     );
     match crate::template::guard_no_conversation_tail_outside_exchange(&normalized) {
@@ -3805,11 +3818,13 @@ pub fn run_template(
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
     // Parse patch blocks from response
-    let (mut patches, unmatched) =
+    let (mut patches, mut unmatched) =
         template::parse_patches(&response).context("failed to parse patch blocks from response")?;
 
-    // Sanitize component tags in patch content to prevent parser corruption
+    // Sanitize component tags in patch content and unmatched text to prevent
+    // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
     sanitize_patches(&mut patches);
+    sanitize_unmatched(&mut unmatched);
 
     let normalized = normalize_backlog_patch_response(
         file,
@@ -3994,11 +4009,13 @@ pub fn run_stream(
     check_future_work_signals(&response, flags.has_pending_add);
 
     // Parse patch blocks from response
-    let (mut patches, unmatched) =
+    let (mut patches, mut unmatched) =
         template::parse_patches(&response).context("failed to parse patch blocks from response")?;
 
-    // Sanitize component tags in patch content to prevent parser corruption
+    // Sanitize component tags in patch content and unmatched text to prevent
+    // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
     sanitize_patches(&mut patches);
+    sanitize_unmatched(&mut unmatched);
 
     let normalized = normalize_backlog_patch_response(
         file,
@@ -4594,11 +4611,13 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
 
     // Save response to pending store (survives context compaction)
     // Parse patch blocks from response
-    let (mut patches, unmatched) =
+    let (mut patches, mut unmatched) =
         template::parse_patches(&response).context("failed to parse patch blocks from response")?;
 
-    // Sanitize component tags in patch content to prevent parser corruption
+    // Sanitize component tags in patch content and unmatched text to prevent
+    // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
     sanitize_patches(&mut patches);
+    sanitize_unmatched(&mut unmatched);
 
     let normalized = normalize_backlog_patch_response(
         file,
@@ -4804,11 +4823,13 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
-    let (mut patches, unmatched) =
+    let (mut patches, mut unmatched) =
         template::parse_patches(response).context("failed to parse patch blocks from response")?;
 
-    // Sanitize component tags in patch content to prevent parser corruption
+    // Sanitize component tags in patch content and unmatched text to prevent
+    // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
     sanitize_patches(&mut patches);
+    sanitize_unmatched(&mut unmatched);
 
     let normalized = normalize_backlog_patch_response(file, &content, patches, unmatched, false)?;
     let patches = normalized.patches;
@@ -6081,6 +6102,13 @@ pub(crate) fn sanitize_patches(patches: &mut [template::PatchBlock]) {
     }
 }
 
+/// Sanitize unmatched (non-patch) response text so agent-generated
+/// `<!-- agent:NAME -->` markers cannot create duplicate component blocks
+/// when appended to the exchange component.
+pub(crate) fn sanitize_unmatched(unmatched: &mut String) {
+    *unmatched = sanitize_component_tags(unmatched);
+}
+
 /// Strip leading `## Assistant` and trailing `## User` headings from response text.
 ///
 /// The `agent-doc write` command adds its own `## Assistant\n\n` prefix and
@@ -7009,6 +7037,55 @@ mod tests {
         let input = "Caf\u{00E9} \u{2019}quotes\u{2019} \u{2014} \u{2026} \u{1F600}";
         let result = sanitize_component_tags(input);
         assert_eq!(result, input, "all unicode must survive sanitization");
+    }
+
+    #[test]
+    fn sanitize_unmatched_escapes_exchange_markers_in_response() {
+        let mut unmatched = "### Re: deploy\n\nDone.\n\n<!-- agent:exchange -->\nExtra\n<!-- /agent:exchange -->\n".to_string();
+        sanitize_unmatched(&mut unmatched);
+        assert!(
+            !unmatched.contains("<!-- agent:exchange -->"),
+            "agent exchange markers must be escaped in unmatched text, got: {unmatched}"
+        );
+        assert!(
+            unmatched.contains("&lt;!-- agent:exchange --&gt;"),
+            "escaped markers expected, got: {unmatched}"
+        );
+    }
+
+    #[test]
+    fn apply_patches_sanitize_unmatched_prevents_duplicate_exchange_block() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let file = dir.path().join("test.md");
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Existing answer.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, doc).unwrap();
+
+        let unmatched = "### Re: deploy — gpt-5\n\nDeployed.\n\n<!-- agent:exchange -->\nLeaked content\n<!-- /agent:exchange -->\n";
+        let mut sanitized_unmatched = unmatched.to_string();
+        sanitize_unmatched(&mut sanitized_unmatched);
+
+        let result = crate::template::apply_patches(doc, &[], &sanitized_unmatched, &file).unwrap();
+
+        let exchange_opens = result.matches("<!-- agent:exchange").count();
+        assert_eq!(
+            exchange_opens, 1,
+            "must have exactly one exchange opener, got {exchange_opens}:\n{result}"
+        );
+        assert!(
+            !result.contains("<!-- agent:exchange -->\nLeaked content"),
+            "leaked exchange markers must be escaped, not create a second block"
+        );
+        assert!(
+            result.contains("&lt;!-- agent:exchange --&gt;"),
+            "escaped markers should appear in result"
+        );
     }
 
     #[test]

@@ -36,11 +36,51 @@ Active backlog:
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - 1 more active item(s)
-<!-- agent:boundary:781f3652 -->
+❯ do [#partialpatchbackadopt]. spec-test-build-install-commit-push
+### Re: #partialpatchbackadopt — gpt-5
+
+Implemented the partial patchback adoption fix.
+
+Changed `agent-doc repair` so an already-visible response from an interrupted `response_captured` / `write_applied` cycle is treated as agent-doc-owned and adoptable instead of only as a direct patchback bypass. Strict `write --commit` with empty stdin now runs that recovery path first, so the visible response can be adopted into the snapshot and committed through the normal closeout boundary.
+
+Updated the closeout spec and unreleased notes, and added regressions for both direct repair adoption and empty-stdin strict `write --commit` recovery.
+
+Verification:
+- `cargo test repair_adopts_visible_response_for_open_agent_doc_write_cycle`
+- `cargo test recover_closes_write_applied_cycle_when_head_already_has_exchange_patchback`
+- `cargo test write_commit_empty_stdin_adopts_visible_agent_owned_partial_patchback --test finalize_integration`
+- `make check`
+- `make build`
+- `make install`
+
+Commits:
+- `e472eb1` in `src/agent-doc`: `fix: adopt partial response patchbacks`
+- `3c36b8958` in parent repo: `agent-doc: adopt partial response patchbacks`
+
+Pushed `src/agent-doc` branch `20260422/codex-agent-backend`; parent `main` push follows this session closeout.
+<!-- agent:boundary:d1ad1c86 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+Content that I added into the html comment below agent:exchange in this doc was deleted by agent-doc.
+spec-test-build-install-commit-push
+---
+Why did agent-doc have the session-check interrupt. I did not write into the document during the turn. 
+```
+• Ran agent-doc session-check tasks/root.md
+  └ [session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: ### Re: livekit agent
+    readiness - gpt-5; tracked side-effect edits: build-party Use `agent-doc write --commit tasks/root.md` once the
+    visible response body is final, then re-run `agent-doc session-check tasks/root.md`.
+
+• Ran agent-doc write --commit tasks/root.md --force-disk < /dev/null
+  └ [commit] file is in submodule /home/brian/work/btakita/agent-loop/src/session-share — running git ops there
+    Error: refusing to treat tasks/root.md as already committed: found likely direct response patchback without
+    … +2 lines (ctrl + t to view transcript)
+    Caused by:
+        empty response — nothing to write
+```
+---
 minor (v0.34.0) release + publish. merge into main
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
@@ -54,7 +94,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#partialpatchbackadopt] [recommended] Fix session-check/write recovery for agent-doc-owned partial patchbacks: when a prior agent-doc/Codex write path leaves an assistant heading/body visible outside the committed snapshot, classify it as an interrupted/adoptable agent-doc write instead of only direct response patchback, and make empty-stdin recovery point to the correct repair/adoption path.
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
@@ -136,4 +175,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#blockedstopextract] Fix blocked-stop repair for transcript-wrapped patch responses: current codex-hooks/blocked-stop and repair-blocked payloads contain valid patch blocks but are rejected for extra transcript content, so extract the patch or fail with a precise recoverable instruction.
 - 2026-05-10 [#capproofverify] [recommended] Verify async Codex capability proof on a fresh managed restart: last logged network_child proof cost was about 10.1s, and there is no post-275e82b live proof sample yet showing pane render is decoupled from proof latency.
 - 2026-05-10 [#projecthostscope] Prevent cross-project host/SSH target leakage in agent-doc managed Codex sessions: route/tool context should not let globally approved commands or unrelated SSH profiles make an agent infer that an unrelated client host, such as monsterrodholders-server, is the production host for a different project; require project-local docs/frontmatter/runbook evidence or an explicit user directive before using a named remote host in answers or checks.
+- 2026-05-10 [#partialpatchbackadopt] [recommended] Fix session-check/write recovery for agent-doc-owned partial patchbacks: when a prior agent-doc/Codex write path leaves an assistant heading/body visible outside the committed snapshot, classify it as an interrupted/adoptable agent-doc write instead of only direct response patchback, and make empty-stdin recovery point to the correct repair/adoption path.
 <!-- /agent:done -->

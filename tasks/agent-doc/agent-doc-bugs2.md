@@ -29,85 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-104003.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-113308.md`*
 
 Compacted content:
-- Archived 1 response topic(s): stale generation fix test + spec + build
+- Archived 3 response topic(s): dispatch-only capability proof gate blocks degraded authoritative actor reopen; why the supervisor is unreachable; busy pane after Clear Session Context + Run Agent Doc
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ `Run Agent Doc` on this file after running `Clear Session Context` raises an error:
-```
-resync: stash pane %271 is registered in its own project root — skipping kill
-resync: stash pane %281 is registered in its own project root — skipping kill
-resync: stash pane %272 is registered in its own project root — skipping kill
-resync: stash pane %290 is registered in its own project root — skipping kill
-resync: stash pane %256 is registered in its own project root — skipping kill
-[route] target tmux session: 4
-[route] dispatch-only opencode reroute for tasks/agent-doc/agent-doc-bugs2.md is using authoritative pane %268 without supervisor state because supervisor health is unreachable
-Error: dispatch-only opencode reopen for tasks/agent-doc/agent-doc-bugs2.md on pane %268 is disabled because managed capability proof failed
-```
-❯ spec-test-build-install-commit-push
-### Re: dispatch-only capability proof gate blocks degraded authoritative actor reopen — gpt-5
-
-**Root cause:** `dispatch_only_reopen_existing_pane` unconditionally gates on `wait_for_managed_capability_proof` for all callers, including the degraded authoritative actor fallback (supervisor unreachable). After "Clear Session Context" kills the supervisor, the session log retains a stale `opencode_capability_proof status=failed` entry. The degraded path correctly decides to reuse the pane but then hits the proof gate and bails with `managed capability proof failed`.
-
-**Spec alignment:** `specs/07-session-tmux-commands.md` line 44 states dispatch-only reroutes **must keep sending** even with missing/failed proof. Line 49 states the degraded fallback **may still submit directly** when the pane matches the registered/live owner binding. The code was violating both requirements.
-
-**Fix (d0ae7ed):**
-- Added `skip_capability_proof: bool` parameter to `dispatch_only_reopen_existing_pane` in `src/route.rs`.
-- Degraded authoritative actor path (supervisor unreachable) passes `true`, logging `route_dispatch_only_skip_capability_proof` with reason=degraded_supervisor_unreachable instead of bailing.
-- All other call sites (busy retry, registered pane alive, registry scan) pass `false`, preserving the existing proof gate.
-- Updated spec `specs/07-session-tmux-commands.md` line 49 to clarify the degraded fallback must skip the proof gate.
-- Added regression test `skip_capability_proof_bypasses_failed_proof_status`.
-❯ Why is the supervisor unreachable?
-### Re: why the supervisor is unreachable — gpt-5
-
-The supervisor becomes unreachable when `query_supervisor_runtime` (`route.rs:678`) fails its IPC health check. The function sends a `State` command to the supervisor's Unix domain socket (path resolved via `supervisor_socket_path` → `.agent-doc/controller.sock`). When the IPC call returns `Err` or a non-ok response, health is set to `SupervisorHealth::Unreachable` (`route.rs:726-729`).
-
-In the "Clear Session Context" scenario from your error log, `agent-doc clear` kills the supervisor process. After that:
-
-1. The socket file may still exist on disk (not yet cleaned up), so the code reaches the `send_command` IPC path rather than the earlier `NoSocket` branch.
-2. The killed supervisor can't respond — the IPC call gets a connection refused or timeout.
-3. The match arm at line 726 maps that failure to `SupervisorHealth::Unreachable`.
-
-Other possible supervisor health states for context:
-- **`NoSocket`** — socket file doesn't exist at all (line 685-690)
-- **`Halted`** — supervisor responded but state is `"halted"` (line 711)
-- **`Restartable`** — supervisor responded but is not running/healthy (line 713)
-- **`Healthy`** — running + state is `"healthy"` (line 708-709)
-
-The degraded authoritative actor fallback (the fix in d0ae7ed) exists precisely for this case: the pane is alive and owned by the correct session, but the supervisor that normally gates capability proof is dead. Skipping the proof gate on the degraded path lets the dispatch succeed despite the unreachable supervisor.
-&lt;!-- /agent:exchange --&gt;
-❯ This error occurred after using the JB plugin to call `Clear Session Context` then `Run Agent Doc`. spec-test-build-install-commit-push
-```
-resync: stash pane %290 is registered in its own project root — skipping kill
-resync: stash pane %271 is registered in its own project root — skipping kill
-resync: stash pane %281 is registered in its own project root — skipping kill
-resync: stash pane %269 is registered in its own project root — skipping kill
-resync: stash pane %256 is registered in its own project root — skipping kill
-[route] target tmux session: 4
-[route] dispatch-only opencode reroute for tasks/agent-doc/agent-doc-bugs2.md is using authoritative pane %268 without supervisor state because supervisor health is unreachable
-[route] Still waiting for opencode (5s)... last line:   ~/work/btakita/agent-loop:main                            
-[route] Still waiting for opencode (10s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
-[route] Still waiting for opencode (15s)... last line:    ⬝⬝■■■■■■  esc interrupt                                  
-[route] registered pane %268 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md is busy with pending document drift — applying scoped `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once before failing closed
-[sync] found alive agent-doc child (pid 3031142) in pane %268 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-Error: registered pane %268 for tasks/agent-doc/agent-doc-bugs2.md is still not showing an idle opencode prompt after automatically applying `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once; refusing to inject a routed trigger into a busy session (pane=%268 pane_pid=3078566 pane_session=4 current_command=agent-doc)
-```
-### Re: busy pane after Clear Session Context + Run Agent Doc — glm-5.1
-
-**Root cause:** `attempt_busy_existing_pane_interrupt_recovery` (route.rs:4976) skipped all non-Codex harnesses entirely. After "Clear Session Context" kills the supervisor but leaves the agent-doc child running in the OpenCode pane, the degraded authoritative actor path correctly skipped the capability proof gate (d0ae7ed fix) but then hit the busy-pane detection. The auto-fix (`agent-doc fix`) couldn't resolve a genuinely busy pane, and interrupt recovery was skipped for OpenCode, causing a hard "refusing to inject a routed trigger into a busy session" failure.
-
-**Fix:**
-- Extracted OpenCode interrupt recovery into `attempt_opencode_busy_interrupt_recovery` in `route.rs`.
-- OpenCode interrupt sequence: sends Escape twice (200ms + 100ms gaps), then waits for an idle `>` prompt using the same `wait_for_agent_ready_outcome` / `fresh_route_start_ack_timeout` budget as Codex.
-- `attempt_busy_existing_pane_interrupt_recovery` now dispatches to the OpenCode-specific path instead of returning `Skipped`.
-- Updated spec `specs/07-session-tmux-commands.md` line 49 to document the OpenCode interrupt recovery requirement.
-- Added regression test `resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt` with a mock that simulates OpenCode progress bars and recovers to `>` idle prompt on Escape input.
-
-**Files changed:**
-- `src/agent-doc/src/route.rs` — added `attempt_opencode_busy_interrupt_recovery`, modified `attempt_busy_existing_pane_interrupt_recovery` to dispatch to it
-- `src/agent-doc/specs/07-session-tmux-commands.md` — documented OpenCode interrupt recovery requirement
-<!-- agent:boundary:b20ead7c -->
+<!-- agent:boundary:9465f7aa -->
 <!-- /agent:exchange -->
 ###
 <!--

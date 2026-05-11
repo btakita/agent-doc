@@ -95,7 +95,20 @@ So the likely chain is: the previous agent needed to review “production logs,�
 I did not edit `src/session-share/tasks/root.md` in this cycle because it currently has a separate unresolved prompt (`do [#vt-vercel-log-access]...`) and this turn is in the agent-doc bugs document. The specific bad session-share follow-up is `#vt-prod-worker-host`: it should not assert that `monsterrodholders-server` is the expected host. It should be rewritten as “confirm the intended BuildParty worker host” unless there is project-local evidence naming a real host.
 
 I added `#projecthostscope` here to track the agent-doc-side fix: managed sessions should not let globally approved SSH targets or unrelated project history become implicit production-host evidence for another project. Top backlog item is now `#projecthostscope`.
-<!-- agent:boundary:d0166829 -->
+❯ do [#projecthostscope]. spec-test-build-install-commit-push
+### Re: project host scope — gpt-5
+
+Implemented `#projecthostscope`.
+
+The fix adds a project-scoped remote-host guard to the installed agent-doc skill instructions and to generated prompt context. Managed Codex sessions and non-interactive/stream/orchestrated prompts now explicitly treat globally approved SSH commands, ambient SSH config, and unrelated project history as non-evidence for the active document's remote host. A named remote host is only valid when the current user prompt, session document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbooks identify it; otherwise the agent must ask or record follow-up work.
+
+Updated specs and tests cover the new rule. Verification passed: `cargo fmt`, `make check`, `make build`, and `make install`.
+
+Committed and pushed:
+
+- `src/agent-doc`: `9bc3903` (`fix: scope codex remote host evidence`) to `20260422/codex-agent-backend`
+- parent repo: `d0028a3d9` (`agent-doc: scope codex remote host evidence`) to `main`
+<!-- agent:boundary:d19b0b57 -->
 <!-- /agent:exchange -->
 ###
 
@@ -113,7 +126,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#projecthostscope] Prevent cross-project host/SSH target leakage in agent-doc managed Codex sessions: route/tool context should not let globally approved commands or unrelated SSH profiles make an agent infer that an unrelated client host, such as monsterrodholders-server, is the production host for a different project; require project-local docs/frontmatter/runbook evidence or an explicit user directive before using a named remote host in answers or checks.
 - [ ] [#partialpatchbackadopt] [recommended] Fix session-check/write recovery for agent-doc-owned partial patchbacks: when a prior agent-doc/Codex write path leaves an assistant heading/body visible outside the committed snapshot, classify it as an interrupted/adoptable agent-doc write instead of only direct response patchback, and make empty-stdin recovery point to the correct repair/adoption path.
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
@@ -195,4 +207,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#autogcstart] Ensure stale starting actor cleanup runs in the normal preflight/start/sync path: session-actors.json still has old starting projections for agent-doc-bugs.md, agent-doc-bugs4.md, and interior-design after 6147f99, so auto-gc or route-time reconciliation is still incomplete.
 - 2026-05-10 [#blockedstopextract] Fix blocked-stop repair for transcript-wrapped patch responses: current codex-hooks/blocked-stop and repair-blocked payloads contain valid patch blocks but are rejected for extra transcript content, so extract the patch or fail with a precise recoverable instruction.
 - 2026-05-10 [#capproofverify] [recommended] Verify async Codex capability proof on a fresh managed restart: last logged network_child proof cost was about 10.1s, and there is no post-275e82b live proof sample yet showing pane render is decoupled from proof latency.
+- 2026-05-10 [#projecthostscope] Prevent cross-project host/SSH target leakage in agent-doc managed Codex sessions: route/tool context should not let globally approved commands or unrelated SSH profiles make an agent infer that an unrelated client host, such as monsterrodholders-server, is the production host for a different project; require project-local docs/frontmatter/runbook evidence or an explicit user directive before using a named remote host in answers or checks.
 <!-- /agent:done -->

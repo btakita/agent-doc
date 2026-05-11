@@ -29,62 +29,14 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-025708.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-030342.md`*
 
 Active backlog:
+- [ ] [#emptyrsprepair] Fix empty-response missed-patchback repair: already-committed/no-body recovery must stop before child-agent dispatch and point to write --commit. Plan: tasks/agent-doc/plan-empty-response-repair-write.md
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
-- [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
-❯ Why did agent-doc have the session-check interrupt. I did not write into the document during the turn.
-```
-• Ran agent-doc session-check tasks/root.md
-  └ [session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: ### Re: livekit agent
-    readiness - gpt-5; tracked side-effect edits: build-party Use `agent-doc write --commit tasks/root.md` once the
-    visible response body is final, then re-run `agent-doc session-check tasks/root.md`.
-
-• Ran agent-doc write --commit tasks/root.md --force-disk < /dev/null
-  └ [commit] file is in submodule /home/brian/work/btakita/agent-loop/src/session-share — running git ops there
-    Error: refusing to treat tasks/root.md as already committed: found likely direct response patchback without
-    … +2 lines (ctrl + t to view transcript)
-    Caused by:
-        empty response — nothing to write
-```
-### Re: session-check interrupt root cause — gpt-5
-
-You did not have to manually write into the document for that interrupt to happen.
-
-That session-check message is based on document shape and closeout provenance, not on proof that a human edited the file. The detector compares the last clean agent-doc snapshot against the live/HEAD document. If it sees a new assistant response heading like `### Re:` or `## Assistant` without a matching binary-owned cycle/capture/write/commit trail, it classifies the state as `found likely direct response patchback without agent-doc cycle`.
-
-The local evidence points to an agent-doc/recovery path gap:
-
-- `src/session-share/.agent-doc/logs/ops.log` shows `commit_blocked_bypassed_patchback file=tasks/root.md basis=head marker=### Re: livekit agent readiness - gpt-5` at `1778465278` and again at `1778465287`.
-- Immediately around that, the log shows `zero_patches_warning`, which means the write input or patch parse was malformed/empty enough that the normal template patch path did not see a real response patch.
-- The later `agent-doc write --commit tasks/root.md --force-disk < /dev/null` failed because empty stdin is not a repair payload. The strict closeout path can recover an empty response only when `repair` finds an adoptable agent-doc response state; in this case it did not, so the write command correctly bailed with `empty response — nothing to write`.
-
-So the practical diagnosis is: a response headed `### Re: livekit agent readiness - gpt-5` became visible/committed relative to one closeout boundary, but the snapshot/cycle state available to `session-check` did not prove that it was produced by the normal `finalize` / `write --commit` path. The wording says "direct response patchback" because that is the unsafe document shape. It does not prove you personally edited the markdown.
-
-The `tracked side-effect edits: build-party` note is also just a clue: session-check saw non-session tracked repo changes alongside the suspicious response drift, so it reported them as likely side effects of the same unfinished work turn.
-
-I added a follow-up backlog item because this is still the `#partialpatchbackadopt` family: agent-doc should distinguish an agent-doc-owned partial/zero-patch write from a truly manual patchback and give an adoption path that works even when the immediate recovery attempt has empty stdin.
-❯ do [#partialpatchbackadopt2]. spec-test-build-install-commit-push
-### Re: partialpatchbackadopt2 — gpt-5
-
-`#partialpatchbackadopt2` is already covered by the current `src/agent-doc` codebase and published branch state.
-
-I verified the implementation rather than adding a duplicate patch: `src/agent-doc` is clean, `20260422/codex-agent-backend` has no outgoing commits, and `git push origin 20260422/codex-agent-backend` returned `Everything up-to-date`. The relevant checked-in work is the existing partial-patchback adoption path: strict empty-stdin `write --commit` runs repair first, repair can adopt an already-visible response from an agent-doc-owned `response_captured` / `write_applied` cycle, and the closeout spec documents that behavior.
-
-Verification completed:
-
-- `cargo test -p agent-doc write_commit_empty_stdin_adopts_visible_agent_owned_partial_patchback`
-- `cargo test -p agent-doc repair_adopts_visible_response_for_open_agent_doc_write_cycle`
-- `cargo build -p agent-doc`
-- `cargo install --path . --locked`
-- `cargo test -p agent-doc`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- `git -C src/agent-doc push origin 20260422/codex-agent-backend` -> `Everything up-to-date`
-
-No source commit was created in this cycle because there were no `src/agent-doc` source/spec/test changes to commit; the requested fix is already present and pushed. I marked `#partialpatchbackadopt2` done.
-<!-- agent:boundary:36cd1db9 -->
+- 1 more active item(s)
+<!-- agent:boundary:f0ed3395 -->
 <!-- /agent:exchange -->
 ###
 

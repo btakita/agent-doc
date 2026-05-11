@@ -34,15 +34,15 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): #dupeexchangeblock fix
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e0d45f91 -->
-<!-- /agent:exchange -->
-###
-<!--
-I saw an error in the opencode console. spec-test-build-install-commit-push
+❯ I saw an error in the opencode console. spec-test-build-install-commit-push
 ```
 [session-actor] warning: failed to record ready transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: project controller command `mark_lifecycle` failed: stale actor transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 120 is no longer current (current generation 121)
 ```
----
+Response already committed — repair write not needed
+<!-- agent:boundary:fdcc398e -->
+<!-- /agent:exchange -->
+###
+<!--
 ```
 3. Workaround: delegate SSH via the host — if OpenCode can't SSH directly, have agent-doc run the SSH deploy           step outside the managed pane (in the harness supervisor process), not inside the OpenCode child.
 ```
@@ -65,6 +65,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#stalegenfix] 2026-05-11 Fix stale actor transition generation mismatch: when session_id and pane_id both match, allow same-owner transitions despite generation bump from compact/restart/route. Committed in session_actor.rs transition_state_in. Regression: controller_lifecycle_allows_same_pane_stale_generation.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

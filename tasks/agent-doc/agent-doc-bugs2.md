@@ -61,7 +61,29 @@ The OpenCode docs confirm that the TUI and `run` command both accept `--model`/`
 Verification passed:
 - `cargo test opencode`
 - `make check`
-<!-- agent:boundary:a7091a28 -->
+❯ monsterrodholders.md has `agent: opencode` but `agent-doc start` opens claude.
+❯ spec-test-build-install-commit-push
+### Re: opencode start still opened Claude — gpt-5
+
+The `monsterrodholders.md` frontmatter was correct: it has `agent: opencode`. The failure was that the installed `/home/brian/.cargo/bin/agent-doc` still predated the OpenCode harness patch, so `agent-doc start` was running the old fallback behavior and resolving unknown agents to Claude.
+
+Completed this cycle:
+- Built the local `src/agent-doc` tree with `cargo build`.
+- Installed it locally with `cargo install --path .`, replacing `/home/brian/.cargo/bin/agent-doc`.
+- Verified the installed binary accepts the OpenCode backend with `agent-doc run --agent opencode --dry-run --no-git <temp-session>`.
+- Reused the already-added specs/tests/docs for `opencode_model`, `opencode_args`, managed harness routing, and the `opencode run` backend.
+- Committed and pushed the `src/agent-doc` submodule change: `4a2107c feat: add opencode harness support`.
+- Committed the parent repo submodule pointer: `897a0358b chore: update agent-doc submodule`.
+
+Verification:
+- `cargo test opencode`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- installed-binary dry run with `--agent opencode`
+
+The parent `main` push happens after this session closeout commit so the response commit is included with the submodule pointer update.
+<!-- agent:boundary:879f539c -->
 <!-- /agent:exchange -->
 ###
 

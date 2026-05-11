@@ -34,7 +34,31 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): stale generation fix test + spec + build
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a30faffd -->
+❯ `Run Agent Doc` on this file after running `Clear Session Context` raises an error:
+```
+resync: stash pane %271 is registered in its own project root — skipping kill
+resync: stash pane %281 is registered in its own project root — skipping kill
+resync: stash pane %272 is registered in its own project root — skipping kill
+resync: stash pane %290 is registered in its own project root — skipping kill
+resync: stash pane %256 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+[route] dispatch-only opencode reroute for tasks/agent-doc/agent-doc-bugs2.md is using authoritative pane %268 without supervisor state because supervisor health is unreachable
+Error: dispatch-only opencode reopen for tasks/agent-doc/agent-doc-bugs2.md on pane %268 is disabled because managed capability proof failed
+```
+❯ spec-test-build-install-commit-push
+### Re: dispatch-only capability proof gate blocks degraded authoritative actor reopen — gpt-5
+
+**Root cause:** `dispatch_only_reopen_existing_pane` unconditionally gates on `wait_for_managed_capability_proof` for all callers, including the degraded authoritative actor fallback (supervisor unreachable). After "Clear Session Context" kills the supervisor, the session log retains a stale `opencode_capability_proof status=failed` entry. The degraded path correctly decides to reuse the pane but then hits the proof gate and bails with `managed capability proof failed`.
+
+**Spec alignment:** `specs/07-session-tmux-commands.md` line 44 states dispatch-only reroutes **must keep sending** even with missing/failed proof. Line 49 states the degraded fallback **may still submit directly** when the pane matches the registered/live owner binding. The code was violating both requirements.
+
+**Fix (d0ae7ed):**
+- Added `skip_capability_proof: bool` parameter to `dispatch_only_reopen_existing_pane` in `src/route.rs`.
+- Degraded authoritative actor path (supervisor unreachable) passes `true`, logging `route_dispatch_only_skip_capability_proof` with reason=degraded_supervisor_unreachable instead of bailing.
+- All other call sites (busy retry, registered pane alive, registry scan) pass `false`, preserving the existing proof gate.
+- Updated spec `specs/07-session-tmux-commands.md` line 49 to clarify the degraded fallback must skip the proof gate.
+- Added regression test `skip_capability_proof_bypasses_failed_proof_status`.
+<!-- agent:boundary:2bf2ded6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,6 +84,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#w3rb] 2026-05-11 [#capproofdegraded] Dispatch-only degraded authoritative actor path now skips capability proof gate — verify in a live OpenCode session that Run Agent Doc works after Clear Session Context. Plan: tasks/agent-doc/plan-degraded-authoritative-skip-capability-proof.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

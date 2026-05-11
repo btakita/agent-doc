@@ -74,7 +74,7 @@ The `harness` parameter flows from `prove_managed_session_capabilities` (which a
 Added regression test `opencode_child_network_probe_classifies_sandbox_denial` verifying OpenCode sessions get "OpenCode" in error messages and not "Codex".
 
 Commit: `c7658ac` pushed to `20260422/codex-agent-backend`.
-<!-- agent:boundary:ccf3fc60 -->
+<!-- agent:boundary:e0eeb6c9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -234,4 +234,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#2fha] 2026-05-11 [#nopatchbackopencode] OpenCode agent-doc turn completed but response was not patched back into the session document — the user had to manually request patchback for the monsterrodholders.md production-sync response. Patchback should fire automatically after the agent writes a response, regardless of agent backend (Claude Code / Codex / OpenCode). Plan: investigate whether OpenCode integration skips the finalize/patchback step that Claude Code and Codex run.
 - 2026-05-11 [#opencodesshproof] OpenCode harness has no SSH capability proof — session log shows `codex_capability_proof` entries for Codex generations but zero proof entries for OpenCode generations, so `required_ssh_targets` frontmatter is not enforced and the agent discovers `socket: Operation not permitted` mid-response instead of failing closed. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md
 - 2026-05-11 [#opencodesshconfig] OpenCode session cannot SSH to `required_ssh_targets` — `socket: Operation not permitted` occurs because opencode's sandbox blocks network syscalls. Workaround options: (1) copy a per-project `.opencode/config.json` that grants network/SSH permissions, (2) file an agent-doc bug (this item), (3) both. Agent-doc should either detect the sandbox restriction and fail closed before dispatch, or inject the required `.opencode/config.json` permissions automatically when `required_ssh_targets` is set in the session frontmatter.
+- 2026-05-11 [#marklifecyclefix] 2026-05-11 mark_lifecycle relative path resolution — fixed in c4f9d17: route promotion now uses bootstrap.project_root + canonical_document_id_in instead of transition_state_direct with controller-CWD-dependent canonicalize. Regression: controller_mark_lifecycle_resolves_relative_path_via_project_root.
 <!-- /agent:done -->

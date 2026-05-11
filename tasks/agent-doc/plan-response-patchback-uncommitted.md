@@ -151,3 +151,46 @@ OpenCode-specific harness runbook section did not implement this requirement.
 
 - **No OpenCode hook tests** — The codebase has extensive Codex hook tests but
   no equivalent for OpenCode lifecycle events.
+
+## Direct Codex Chat Evidence (#rspcmt5)
+
+### Reproduction
+
+- **Document:** `src/session-share/tasks/root.md`
+- **Harness:** Codex, normal chat turn rather than an `agent-doc <FILE>` child run
+- **Prompt:** `commit-push`
+- **Symptom:** The requested commit/push work completed and was reported in chat,
+  but no response patchback was written to the session document. The user had to
+  explicitly request: "The response patchback was not written to the document.
+  #agent-doc-bug. write response to document. commit-push".
+- **Same class as:** #rspcmt2, #rspcmt3, #rspcmt4
+
+### Root Cause Hypothesis
+
+The direct-chat preset path can complete repository commit/push work without
+entering the binary-owned session-document write-back boundary. Existing
+closeout guards focus on `agent-doc finalize`, `agent-doc write --commit`, and
+harness child-agent runs; they do not force an ordinary chat response that
+operates on a session document's preset to be mirrored into that document before
+success is reported.
+
+### Required Invariant
+
+When a user prompt is a session-document preset or explicitly asks to "write
+response to document", the turn is not complete until either:
+
+1. the response is written with `agent-doc write --commit <FILE>` and
+   `agent-doc session-check <FILE>` passes, or
+2. the assistant explicitly reports that the user requested chat-only output and
+   no document patchback was attempted.
+
+### Regression Coverage
+
+- Add a direct-chat/preset closeout test or harness simulation where a
+  `commit-push` style prompt performs side-effect commits, then assert final
+  success is blocked unless `agent-doc write --commit` records the response in
+  the session document.
+- Ensure the guard does not double-write when the turn already used
+  `agent-doc finalize` or `agent-doc write --commit`.
+- Ensure the recovery command is explicit and idempotent when the side-effect
+  commits are already pushed but the session document lacks the response.

@@ -62,6 +62,7 @@ minor (v0.34.0) release + publish. merge into main
 
 <!-- agent:backlog -->
 - [ ] [#rspcmt4] 2026-05-11 OpenCode agent-doc turn response patchback not committed — boost-client/tasks/monsterrodholders.md v1.29 deploy response was patched into the exchange section but agent-doc finalize/closeout did not commit the document. User had to manually request commit. Same class as #rspcmt2, #rspcmt3. Reproduction: session a9421282, GLM-5.1 agent. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode-specific closeout evidence.
+- [ ] [#rspcmt5] 2026-05-11 Direct Codex chat `commit-push` closeout completed commits/pushes but wrote no response patchback into `src/session-share/tasks/root.md`; user had to request "write response to document" afterward. Same class as #rspcmt2-#rspcmt4, but this evidence is the normal chat/preset path rather than an agent-doc child-run path. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with a direct-chat closeout invariant and require session-check/write-back before final success reporting.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

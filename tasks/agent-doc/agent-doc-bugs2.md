@@ -54,10 +54,31 @@ Root cause: the OpenCode section of `runbooks/harness-invocation.md` did not req
 | `plan-response-patchback-uncommitted.md` | Extended with OpenCode-specific evidence and root cause analysis |
 
 All 2071 tests pass. Build + install verified.
-<!-- agent:boundary:29c56401 -->
+❯ do [#rspcmt5]. spec-test-build-install-commit-push
+### Re: #rspcmt5 direct-chat preset write-back invariant — glm-5.1
+
+Root cause: the instruction surface (`harness-invocation.md`) did not explicitly require write-back when a session-document preset (e.g. `#commit-push`) triggers repo work through a direct Codex chat turn. The agent completed the commit/push in chat but never entered the binary-owned write/commit path for the session document. The Codex Stop hook cannot auto-close a plain-text response that lacks `<!-- patch:exchange -->` blocks, so the response stayed in chat only.
+
+**Changes:**
+
+| File | Change |
+|------|--------|
+| `session_check.rs` | Added regression test `prompt_only_exchange_tail_catches_direct_chat_preset_no_patchback` — proves session-check detects a prompt-only exchange tail when a direct-chat preset completes repo work but writes no response patchback |
+| `runbooks/harness-invocation.md` | Added explicit direct-chat preset write-back paragraph in Directive Semantics — mandates `agent-doc write --commit <FILE>` + `session-check` before reporting success |
+| `VERSIONS.md` | Added #rspcmt5 entry |
+
+All 2073 tests pass (including the new regression). Build + install verified. Pushed to main.
+&lt;!-- /agent:exchange --&gt;
+<!-- agent:boundary:21f8e31a -->
 <!-- /agent:exchange -->
 ###
 <!--
+Why is agent-doc starting a child Codex run?
+```
+• agent-doc started a child Codex run. Its preflight noticed the previous patchback was already committed, then
+  submitted the new follow-up prompt for execution.
+```
+---
 ```
 3. Workaround: delegate SSH via the host — if OpenCode can't SSH directly, have agent-doc run the SSH deploy           step outside the managed pane (in the harness supervisor process), not inside the OpenCode child.
 ```
@@ -80,7 +101,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspcmt5] 2026-05-11 Direct Codex chat `commit-push` closeout completed commits/pushes but wrote no response patchback into `src/session-share/tasks/root.md`; user had to request "write response to document" afterward. Same class as #rspcmt2-#rspcmt4, but this evidence is the normal chat/preset path rather than an agent-doc child-run path. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with a direct-chat closeout invariant and require session-check/write-back before final success reporting.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -181,4 +201,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#escrecov] 2026-05-11 Dispatch-only OpenCode interrupt recovery sends Escape twice and waits for idle prompt before failing closed. Verify in a live OpenCode session that Run Agent Doc works after Clear Session Context when the pane is busy. Plan: verify fix in route.rs attempt_opencode_busy_interrupt_recovery + test resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt
 - 2026-05-11 [#w3rb] 2026-05-11 [#capproofdegraded] Dispatch-only degraded authoritative actor path now skips capability proof gate — verify in a live OpenCode session that Run Agent Doc works after Clear Session Context. Plan: tasks/agent-doc/plan-degraded-authoritative-skip-capability-proof.md
 - 2026-05-11 [#rspcmt4] 2026-05-11 OpenCode agent-doc turn response patchback not committed — boost-client/tasks/monsterrodholders.md v1.29 deploy response was patched into the exchange section but agent-doc finalize/closeout did not commit the document. User had to manually request commit. Same class as #rspcmt2, #rspcmt3. Reproduction: session a9421282, GLM-5.1 agent. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode-specific closeout evidence.
+- 2026-05-11 [#rspcmt5] 2026-05-11 Direct Codex chat `commit-push` closeout completed commits/pushes but wrote no response patchback into `src/session-share/tasks/root.md`; user had to request "write response to document" afterward. Same class as #rspcmt2-#rspcmt4, but this evidence is the normal chat/preset path rather than an agent-doc child-run path. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with a direct-chat closeout invariant and require session-check/write-back before final success reporting.
 <!-- /agent:done -->

@@ -2000,6 +2000,49 @@ Body\n\
     }
 
     #[test]
+    fn prompt_only_exchange_tail_catches_opencode_no_patchback() {
+        let _env = EnvGuard::set("OPENCODE", "1");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: sidebar revert assessment — glm-5\n\n",
+            "Sidebar revert is safe.\n\n",
+            "❯ do [#noexchopencode2]. spec-test-build-install-commit-push\n",
+            "<!-- agent:boundary:tail -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        crate::snapshot::save(&doc, current).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(current), Some(current))
+            .unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("prompt-only closeout tail"),
+                    "should mention prompt-only closeout tail: {message}"
+                );
+                assert!(
+                    message.contains("#noexchopencode2"),
+                    "should reference the prompt: {message}"
+                );
+                assert!(
+                    message.contains("agent-doc finalize")
+                        || message.contains("agent-doc write --commit"),
+                    "should name the recovery command: {message}"
+                );
+            }
+            other => panic!(
+                "expected prompt-only closeout interruption for OpenCode no-patchback, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
     fn prompt_only_exchange_tail_ignores_answered_tail_prompt() {
         let current = concat!(
             "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",

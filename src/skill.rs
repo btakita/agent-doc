@@ -1572,6 +1572,10 @@ mod tests {
             opencode_section.contains("Fail closed"),
             "OpenCode section must include fail-closed guard: {opencode_section}"
         );
+        assert!(
+            opencode_section.contains("response text visible in the console but absent"),
+            "OpenCode section must name the CLI-only-output anti-pattern: {opencode_section}"
+        );
     }
 
     #[test]

@@ -135,6 +135,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rootlatepatch] Late fallback patch can re-dirty an already committed session document: `src/session-share/tasks/root.md` had a valid committed closeout, then a delayed fallback patch reintroduced a stale duplicate response and corrupted the `#vt-semantic-hero-screenshot` heading into `#vt-semantic-hero-scree nshot`, causing `session-check` to report an uncommitted/direct patchback. Plan: tasks/agent-doc/plan-late-fallback-patch-redirties-committed-doc.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

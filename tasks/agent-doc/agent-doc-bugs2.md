@@ -34,8 +34,27 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): session actor alive across agent restarts; #w3rb spec-test-build-install-commit-push
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:34720189 -->
-do [#rspcmt4]. spec-test-build-install-commit-push
+❯ do [#rspcmt4]. spec-test-build-install-commit-push
+### Re: #rspcmt4 OpenCode session-check guard — glm-5.1
+
+Root cause: the OpenCode section of `runbooks/harness-invocation.md` did not require `agent-doc session-check <FILE>` after finalize, unlike the Codex section. No Stop hook or active session tracking exists for OpenCode, so if finalize didn't commit, there was no recovery mechanism.
+
+**Changes:**
+
+| File | Change |
+|------|--------|
+| `runbooks/harness-invocation.md` | Added session-check + fail-closed guard to OpenCode section |
+| `runbooks/commit.md` | Updated "Codex" → "Codex and OpenCode" for direct-exec session-check |
+| `README.md` | Renamed "Codex post-write guard" → "Direct-exec post-write guard" |
+| `session_check.rs` | Error messages now harness-agnostic ("active harness session", "let the hook recover") |
+| `codex_hook.rs` | Updated test assertions to match new harness-agnostic wording |
+| `skill.rs` | Added regression test for OpenCode runbook session-check requirement |
+| `session_check.rs` tests | Added test verifying drift messages are harness-agnostic |
+| `VERSIONS.md` | Added #rspcmt4 entry |
+| `plan-response-patchback-uncommitted.md` | Extended with OpenCode-specific evidence and root cause analysis |
+
+All 2071 tests pass. Build + install verified.
+<!-- agent:boundary:29c56401 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,7 +80,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspcmt4] 2026-05-11 OpenCode agent-doc turn response patchback not committed — boost-client/tasks/monsterrodholders.md v1.29 deploy response was patched into the exchange section but agent-doc finalize/closeout did not commit the document. User had to manually request commit. Same class as #rspcmt2, #rspcmt3. Reproduction: session a9421282, GLM-5.1 agent. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode-specific closeout evidence.
 - [ ] [#rspcmt5] 2026-05-11 Direct Codex chat `commit-push` closeout completed commits/pushes but wrote no response patchback into `src/session-share/tasks/root.md`; user had to request "write response to document" afterward. Same class as #rspcmt2-#rspcmt4, but this evidence is the normal chat/preset path rather than an agent-doc child-run path. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with a direct-chat closeout invariant and require session-check/write-back before final success reporting.
 <!-- /agent:backlog -->
 
@@ -162,4 +180,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#stalegenfix] 2026-05-11 Fix stale actor transition generation mismatch: when session_id and pane_id both match, allow same-owner transitions despite generation bump from compact/restart/route. Committed in session_actor.rs transition_state_in. Regression: controller_lifecycle_allows_same_pane_stale_generation.
 - 2026-05-11 [#escrecov] 2026-05-11 Dispatch-only OpenCode interrupt recovery sends Escape twice and waits for idle prompt before failing closed. Verify in a live OpenCode session that Run Agent Doc works after Clear Session Context when the pane is busy. Plan: verify fix in route.rs attempt_opencode_busy_interrupt_recovery + test resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt
 - 2026-05-11 [#w3rb] 2026-05-11 [#capproofdegraded] Dispatch-only degraded authoritative actor path now skips capability proof gate — verify in a live OpenCode session that Run Agent Doc works after Clear Session Context. Plan: tasks/agent-doc/plan-degraded-authoritative-skip-capability-proof.md
+- 2026-05-11 [#rspcmt4] 2026-05-11 OpenCode agent-doc turn response patchback not committed — boost-client/tasks/monsterrodholders.md v1.29 deploy response was patched into the exchange section but agent-doc finalize/closeout did not commit the document. User had to manually request commit. Same class as #rspcmt2, #rspcmt3. Reproduction: session a9421282, GLM-5.1 agent. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode-specific closeout evidence.
 <!-- /agent:done -->

@@ -4973,10 +4973,15 @@ fn attempt_busy_existing_pane_interrupt_recovery(
     harness: &HarnessConfig,
     blocker_reason: Option<&str>,
 ) -> Result<BusyPaneInterruptRecoveryOutcome> {
-    if harness.binary != "codex" {
+    if blocker_reason == Some("active permission prompt") {
         return Ok(BusyPaneInterruptRecoveryOutcome::Skipped);
     }
-    if blocker_reason == Some("active permission prompt") {
+
+    if harness.binary == "opencode" {
+        return attempt_opencode_busy_interrupt_recovery(tmux, file, pane, harness, blocker_reason);
+    }
+
+    if harness.binary != "codex" {
         return Ok(BusyPaneInterruptRecoveryOutcome::Skipped);
     }
 
@@ -5025,6 +5030,61 @@ fn attempt_busy_existing_pane_interrupt_recovery(
         file,
         &format!(
             "route_busy_existing_pane_interrupt_finished file={} pane={} harness={} recovered={} outcome={} stage=escape_ctrl_c",
+            file.display(),
+            pane,
+            harness.binary,
+            recovered,
+            match ready {
+                AgentReadyWaitOutcome::Ready => "ready",
+                AgentReadyWaitOutcome::Blocked { .. } => "blocked",
+                AgentReadyWaitOutcome::TimedOut => "timed_out",
+            }
+        ),
+    );
+    Ok(match ready {
+        AgentReadyWaitOutcome::Ready => BusyPaneInterruptRecoveryOutcome::Recovered,
+        AgentReadyWaitOutcome::Blocked { reason } => {
+            BusyPaneInterruptRecoveryOutcome::Blocked { reason }
+        }
+        AgentReadyWaitOutcome::TimedOut => BusyPaneInterruptRecoveryOutcome::TimedOut,
+    })
+}
+
+fn attempt_opencode_busy_interrupt_recovery(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    blocker_reason: Option<&str>,
+) -> Result<BusyPaneInterruptRecoveryOutcome> {
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_busy_existing_pane_opencode_interrupt_started file={} pane={} harness={} blocker={}",
+            file.display(),
+            pane,
+            harness.binary,
+            blocker_reason.unwrap_or("timeout")
+        ),
+    );
+    eprintln!(
+        "[route] live {} pane {} for {} is still busy after the scoped recovery path — sending Escape to interrupt before the final reroute attempt",
+        harness.binary,
+        pane,
+        file.display()
+    );
+
+    let _ = tmux.send_keys_raw(pane, "Escape");
+    std::thread::sleep(Duration::from_millis(200));
+    let _ = tmux.send_keys_raw(pane, "Escape");
+    std::thread::sleep(Duration::from_millis(100));
+
+    let ready = wait_for_agent_ready_outcome(tmux, pane, fresh_route_start_ack_timeout(), harness);
+    let recovered = ready.is_ready();
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_busy_existing_pane_opencode_interrupt_finished file={} pane={} harness={} recovered={} outcome={}",
             file.display(),
             pane,
             harness.binary,
@@ -7396,6 +7456,37 @@ mod tests {
         std::fs::write(
             &script,
             "#!/bin/sh\ntrap '' INT\nprintf 'Working...\\n'\nwhile IFS= read -r CMD; do\n  printf 'EARLY:%s\\n' \"$CMD\"\ndone\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
+    fn write_mock_busy_opencode_recovers_on_escape(base: &Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let script = bin_dir.join("agent-doc-busy-opencode");
+        std::fs::write(
+            &script,
+            r#"#!/bin/bash
+trap '' INT
+cleanup() { stty sane 2>/dev/null || true; }
+trap cleanup EXIT
+stty -echo -icanon min 1 time 0
+printf '⬝⬝■■■■■■  esc interrupt\n'
+while IFS= read -r -n1 ch; do
+  stty sane
+  printf '> \n'
+  while IFS= read -r CMD; do
+    printf 'GOT:%s\n' "$CMD"
+  done
+  exit 0
+done
+"#,
         )
         .unwrap();
         let mut perms = std::fs::metadata(&script).unwrap().permissions();
@@ -9780,6 +9871,92 @@ Body\n\
         assert!(
             after.contains("GOT:agent-doc "),
             "route should dispatch the reopen after the ctrl-g interrupt recovery probe: {after}"
+        );
+        ipc.stop();
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-opencode-busy-escape-retry");
+        let session = "opencode";
+        let cwd = test_cwd();
+        let pane = iso.auto_start(session, &cwd).unwrap();
+
+        let doc = dir.path().join("route-opencode-busy-escape-retry.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        let busy_agent = write_mock_busy_opencode_recovers_on_escape(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!("exec {} {}", busy_agent.display(), doc.display()),
+        );
+        let content =
+            wait_for_pane_contains(&iso, &pane, "esc interrupt", std::time::Duration::from_secs(5));
+        assert!(
+            content.contains("esc interrupt"),
+            "busy OpenCode mock should be active in pane: {content}"
+        );
+
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-opencode-busy-escape-retry";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        let ipc_tmux = iso.clone();
+        let pane_for_ipc = pane.clone();
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::Inject { bytes } => {
+                let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Restart { .. } | IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let doc_for_thread = doc.clone();
+        let current_for_thread = current.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1300));
+            crate::cycle_state::start_preflight(&doc_for_thread, None, Some(&current_for_thread))
+                .unwrap();
+        });
+
+        let reused = resolve_or_create_pane_with_auto_fix_retry(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::opencode(),
+            &mut Vec::new(),
+            false,
+            true,
+            true,
+        )
+        .expect("route should retry after Escape interrupt recovers a busy OpenCode pane");
+        assert_eq!(reused, pane);
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "GOT:agent-doc ",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            after.contains("GOT:agent-doc "),
+            "route should dispatch the reopen after the Escape interrupt recovery: {after}"
         );
         ipc.stop();
     }

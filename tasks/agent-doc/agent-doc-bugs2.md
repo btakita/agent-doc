@@ -95,7 +95,31 @@ Verification/build/install:
 Commits pushed:
 - `src/agent-doc`: `83e2f72 fix: run stale actor cleanup on normal paths`
 - parent repo: `94a2f347a agent-doc: update stale actor cleanup`
-<!-- agent:boundary:2aeee76f -->
+❯ do [#blockedstopextract]. spec-test-build-install-commit-push
+### Re: #blockedstopextract — gpt-5
+
+Implemented the blocked-stop replay fix.
+
+Root cause: the replay guard treated a valid template patch preceded by `` as unmatched transcript content, and `agent-doc repair` only checked the guard result for blocking; it did not write the sanitized replayable payload when the guard extracted one from leading commentary.
+
+Changes made:
+- `replay_guard` now permits known replay guard comments around otherwise valid patch responses while still blocking transcript/full-document dumps.
+- `repair` now writes the sanitized replayable payload returned by the guard.
+- Added regressions for replay classification, direct repair replay, and Codex Stop-hook auto-close.
+- Updated `README.md`, `SPEC.md`, `specs/07-closeout-commands.md`, and `VERSIONS.md`.
+
+Verification/build/install:
+- `cargo test -p agent-doc classify_patch_payload_with_leading_guard_marker_as_replayable -- --nocapture`
+- `cargo test -p agent-doc recover_replays_guard_prefixed_template_patch -- --nocapture`
+- `cargo test -p agent-doc stop_auto_closes_guard_prefixed_patch_payload -- --nocapture`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits prepared:
+- `src/agent-doc`: `368004f fix: replay guard-prefixed blocked-stop patches`
+- parent repo: `89999a27f agent-doc: update blocked-stop replay guard`
+<!-- agent:boundary:54feb694 -->
 <!-- /agent:exchange -->
 ###
 
@@ -113,7 +137,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#blockedstopextract] Fix blocked-stop repair for transcript-wrapped patch responses: current codex-hooks/blocked-stop and repair-blocked payloads contain valid patch blocks but are rejected for extra transcript content, so extract the patch or fail with a precise recoverable instruction.
 - [ ] [#capproofverify] [recommended] Verify async Codex capability proof on a fresh managed restart: last logged network_child proof cost was about 10.1s, and there is no post-275e82b live proof sample yet showing pane render is decoupled from proof latency.
 <!-- /agent:backlog -->
 
@@ -190,4 +213,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#next-steps] Triage the current activity/session-log findings: sidecar prefix-divergence fallback still fires, stale starting actors remain in session-actors, blocked-stop repair payloads exist for transcript-wrapped patch responses, and Codex child network proof still adds about 10s on restart.
 - 2026-05-10 [#sidecarfallbackstill] Fix recurring sidecar prefix-divergence fallback after the latest prefix-body and duplicate-closeout fixes: ops.log still shows sidecar_normalization_fallback reason=prefix_divergence on clean agent-doc-bugs2 closeouts, so tighten snapshot/ack normalization until fallback is exceptional again.
 - 2026-05-10 [#autogcstart] Ensure stale starting actor cleanup runs in the normal preflight/start/sync path: session-actors.json still has old starting projections for agent-doc-bugs.md, agent-doc-bugs4.md, and interior-design after 6147f99, so auto-gc or route-time reconciliation is still incomplete.
+- 2026-05-10 [#blockedstopextract] Fix blocked-stop repair for transcript-wrapped patch responses: current codex-hooks/blocked-stop and repair-blocked payloads contain valid patch blocks but are rejected for extra transcript content, so extract the patch or fail with a precise recoverable instruction.
 <!-- /agent:done -->

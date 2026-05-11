@@ -1349,7 +1349,7 @@ agent-doc {}\n",
 
         match crate::session_check::inspect(&doc).unwrap() {
             crate::session_check::SessionCheckStatus::Interrupted(message) => {
-                assert!(message.contains("active Codex session changed this document"));
+                assert!(message.contains("active harness session changed this document"));
             }
             other => panic!("expected interrupted session-check status, got {other:?}"),
         }
@@ -1468,7 +1468,7 @@ agent-doc {}\n",
 
         match crate::session_check::inspect(&doc).unwrap() {
             crate::session_check::SessionCheckStatus::Interrupted(message) => {
-                assert!(message.contains("active Codex session changed this document"));
+                assert!(message.contains("active harness session changed this document"));
             }
             other => panic!("expected interrupted session-check status, got {other:?}"),
         }

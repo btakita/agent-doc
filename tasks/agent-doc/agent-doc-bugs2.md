@@ -71,7 +71,31 @@ Verification/build/install:
 Commits pushed:
 - `src/agent-doc`: `5fc0701 fix: normalize editor prefixes after boundary reposition`
 - parent repo: `da75c3938 agent-doc: update prefix normalization fix`
-<!-- agent:boundary:853e579f -->
+❯ do [#autogcstart]. spec-test-build-install-commit-push
+### Re: #autogcstart — gpt-5
+
+Implemented and pushed the stale `starting` actor cleanup fix.
+
+Root cause: stale-starting actor cleanup existed, but it only ran as part of full `agent-doc gc`, and preflight only runs that full GC once per day via `.agent-doc/gc.stamp`. A fresh stamp could therefore leave old `starting` projections visible to normal preflight/start/sync work.
+
+Changes made:
+- Split stale-starting actor closure into a caller-aware controller helper while preserving `agent-doc gc` behavior.
+- Added lightweight stale `starting` actor cleanup to every normal `preflight`, `start`, and `sync` cycle.
+- Kept full orphan-file/diagnostic GC on the existing daily stamp cadence.
+- Added regressions proving preflight closes stale actors even when `gc.stamp` is fresh, and that normal-path cleanup records the calling surface in actor transitions.
+- Updated `README.md`, `SPEC.md`, `VERSIONS.md`, and the core/session-actor specs.
+
+Verification/build/install:
+- `cargo test -p agent-doc preflight_closes_stale_starting_actors_even_when_daily_gc_stamp_is_fresh -- --nocapture`
+- `cargo test -p agent-doc normal_path_actor_cleanup_records_calling_surface -- --nocapture`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits pushed:
+- `src/agent-doc`: `83e2f72 fix: run stale actor cleanup on normal paths`
+- parent repo: `94a2f347a agent-doc: update stale actor cleanup`
+<!-- agent:boundary:2aeee76f -->
 <!-- /agent:exchange -->
 ###
 
@@ -89,7 +113,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#autogcstart] Ensure stale starting actor cleanup runs in the normal preflight/start/sync path: session-actors.json still has old starting projections for agent-doc-bugs.md, agent-doc-bugs4.md, and interior-design after 6147f99, so auto-gc or route-time reconciliation is still incomplete.
 - [ ] [#blockedstopextract] Fix blocked-stop repair for transcript-wrapped patch responses: current codex-hooks/blocked-stop and repair-blocked payloads contain valid patch blocks but are rejected for extra transcript content, so extract the patch or fail with a precise recoverable instruction.
 - [ ] [#capproofverify] [recommended] Verify async Codex capability proof on a fresh managed restart: last logged network_child proof cost was about 10.1s, and there is no post-275e82b live proof sample yet showing pane render is decoupled from proof latency.
 <!-- /agent:backlog -->
@@ -166,4 +189,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#rootpatchmiss] Direct Codex agent-doc turn completed commits/pushes but did not write the final response into `src/session-share/tasks/root.md`; extend `tasks/agent-doc/plan-response-missing-after-manual-closeout.md` with the May 10 `#vt-agent-deploy` reproduction and fail closed on prompt-only exchange closeout.
 - 2026-05-10 [#next-steps] Triage the current activity/session-log findings: sidecar prefix-divergence fallback still fires, stale starting actors remain in session-actors, blocked-stop repair payloads exist for transcript-wrapped patch responses, and Codex child network proof still adds about 10s on restart.
 - 2026-05-10 [#sidecarfallbackstill] Fix recurring sidecar prefix-divergence fallback after the latest prefix-body and duplicate-closeout fixes: ops.log still shows sidecar_normalization_fallback reason=prefix_divergence on clean agent-doc-bugs2 closeouts, so tighten snapshot/ack normalization until fallback is exceptional again.
+- 2026-05-10 [#autogcstart] Ensure stale starting actor cleanup runs in the normal preflight/start/sync path: session-actors.json still has old starting projections for agent-doc-bugs.md, agent-doc-bugs4.md, and interior-design after 6147f99, so auto-gc or route-time reconciliation is still incomplete.
 <!-- /agent:done -->

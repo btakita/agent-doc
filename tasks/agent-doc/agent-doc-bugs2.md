@@ -122,7 +122,40 @@ After installing into an already-running OpenCode session, restart the OpenCode 
 I ran `agent-doc commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`. It closed the stale `cycle-1778479190087` as already committed, but `session-check` then correctly reported this active Codex turn as a new unclosed closeout because the document still had later local prompt changes.
 
 I treated the `#agent-doc-bug` as covered by the existing plan at `tasks/agent-doc/plan-response-patchback-uncommitted.md` and added a fresh backlog item for this recurrence as `#rspcmt3`. I did not run the `monsterrodholders.md` spec/test/build/install/push work in this repair cycle; this closeout is limited to committing the session document through the agent-doc write path.
-<!-- agent:boundary:3811f55e -->
+❯ do [#rspcmt3]. spec-test-build-install-commit-push
+---
+❯ `Run Agent Doc` on this file resulted in an error. #next-steps
+```
+resync: stash pane %256 is registered in its own project root — skipping kill
+resync: stash pane %272 is registered in its own project root — skipping kill
+resync: stash pane %281 is registered in its own project root — skipping kill
+resync: stash pane %271 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+Error: authoritative actor generation 119 for tasks/agent-doc/agent-doc-bugs2.md owns pane %268 but route will not inject a new trigger because the authoritative actor is still starting
+```
+### Re: #rspcmt3 closeout diagnostics — gpt-5
+
+Implemented and installed the local `agent-doc` fix for this recurrence.
+
+What changed:
+- `agent-doc commit <FILE>` no longer lets the already-committed/no-op path sound like a full closeout when later user follow-up prompts remain. It now says the follow-up prompt still needs `agent-doc <FILE>`, or `agent-doc write --commit <FILE>` if the missing response body already exists.
+- Route's `starting` authoritative-actor refusal now includes concrete next steps: wait for the pane to reach an idle prompt and rerun `agent-doc <FILE>`; if it stays stuck, recover with `agent-doc start <FILE>`.
+- Updated `SPEC.md`, `specs/07-closeout-commands.md`, `specs/08-session-routing.md`, and `VERSIONS.md` for the new contract.
+
+Verification passed:
+- `cargo test authoritative_actor_starting_hint_names_reroute_and_restart`
+- `cargo test test_commit_explains_prior_patchback_without_new_response_body`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version`
+
+Commits:
+- `src/agent-doc`: `4247819 fix: clarify closeout recovery diagnostics` pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `13e60fa96 chore: update agent-doc submodule` created locally; parent push happens after this session closeout so the response commit is included.
+
+No additional backlog item was needed: the reported `Run Agent Doc` error now has explicit next-step diagnostics in the route failure itself.
+<!-- agent:boundary:a683b3c4 -->
 <!-- /agent:exchange -->
 ###
 
@@ -140,7 +173,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspcmt3] Re-open response patchback commit recovery for the current agent-doc-bugs2 turn: user-visible prompt/patchback changes remained dirty after `agent-doc commit` reported the prior response already committed, and `session-check` required a second closeout for the active Codex prompt. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -230,4 +262,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#wvpf] [recommended] Fix Codex hook tests so parallel make check cannot race on shared /tmp/.agent-doc/codex-hooks session cleanup; the default make check run failed once when stop_auto_closes_patch_payload_with_safe_leading_commentary tried to remove an already-missing session file, while the isolated test and serial make check passed.
 - 2026-05-11 [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - 2026-05-11 [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
+- 2026-05-11 [#rspcmt3] Re-open response patchback commit recovery for the current agent-doc-bugs2 turn: user-visible prompt/patchback changes remained dirty after `agent-doc commit` reported the prior response already committed, and `session-check` required a second closeout for the active Codex prompt. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 <!-- /agent:done -->

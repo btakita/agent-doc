@@ -35,14 +35,13 @@ Compacted content:
 - Archived 1 response topic(s): #dupeexchangeblock fix
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 <!-- agent:boundary:f5df8905 -->
-<!-- /agent:exchange -->
-###
-<!--
 I saw an error in the opencode console. spec-test-build-install-commit-push
 ```
 [session-actor] warning: failed to record ready transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: project controller command `mark_lifecycle` failed: stale actor transition for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 120 is no longer current (current generation 121)
 ```
----
+<!-- /agent:exchange -->
+###
+<!--
 ```
 3. Workaround: delegate SSH via the host — if OpenCode can't SSH directly, have agent-doc run the SSH deploy           step outside the managed pane (in the harness supervisor process), not inside the OpenCode child.
 ```

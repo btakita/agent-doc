@@ -1,11 +1,12 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+agent: opencode
 claude_model: claude-opus-4-6
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
+opencode_model: GLM-5.1
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix.
@@ -29,35 +30,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-062815.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-064634.md`*
 
 Compacted content:
-- Archived 5 response topic(s): opencode agent support; opencode start still opened Claude; install agent-doc on OpenCode; 2 more
+- Archived 1 response topic(s): #nopatchbackopencode
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#nopatchbackopencode]. spec-test-build-install-commit-push
-### Re: #nopatchbackopencode — gpt-5
-Completed #2fha / #nopatchbackopencode.
-
-Implemented the OpenCode instruction-surface fix so installed OpenCode agent-doc skills no longer inherit Claude slash-command wording and still carry the same mandatory `finalize` / `write --commit` closeout contract.
-
-Changes made:
-- Added OpenCode-specific rendered skill content in `src/agent-doc/src/skill.rs`: description, plain `agent-doc <FILE>` invocation block, auto-update guidance, audit coverage, and regression tests.
-- Updated source specs/runbooks/docs to name OpenCode alongside Claude/Codex for binary-owned entrypoints, missed-patchback repair, and direct-exec `session-check` requirements.
-- Refreshed generated harness instruction surfaces with `agent-doc skill install --all`, including `.opencode/skills/agent-doc/SKILL.md` and its runbooks.
-
-Verification:
-- `cargo test -p agent-doc skill::tests::`
-- `make check` after the final edits
-- `cargo run --quiet -- audit-docs`
-- `make install`
-- `agent-doc skill install --all`
-
-Commits created before this session closeout:
-- `f2186ea` in `src/agent-doc`: `fix: install opencode closeout instructions`
-- `313f5ca42` in the parent repo: `fix: refresh opencode agent-doc instructions`
-
-Per the session commit ordering rule, I will push after this `agent-doc finalize` closeout commit lands so the response commit is included.
-<!-- agent:boundary:89aa1bf8 -->
+<!-- agent:boundary:ae66ec27 -->
 <!-- /agent:exchange -->
 ###
 <!--

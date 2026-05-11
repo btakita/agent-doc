@@ -124,6 +124,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

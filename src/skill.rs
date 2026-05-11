@@ -1242,6 +1242,9 @@ mod tests {
         assert!(content.contains(".codex/config.toml"));
         assert!(content.contains("fail-closed backstop"));
         assert!(content.contains("MCP auth / OAuth steps are sub-steps"));
+        assert!(content.contains("Project-scoped remote hosts"));
+        assert!(content.contains("globally approved SSH commands"));
+        assert!(content.contains("project-local `.agent-doc/config.toml`"));
         assert!(content.contains("### Re: topic — gpt-5"));
         assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
         assert!(content.contains("Imperative edits are executable directives"));

@@ -1,4 +1,4 @@
-use crate::{component, diff, pending, session_accretion};
+use crate::{component, diff, frontmatter, pending, session_accretion};
 use std::path::Path;
 
 const BACKLOG_HEAD_LIMIT: usize = 3;
@@ -18,15 +18,16 @@ pub(crate) fn build_document_section(
     report: Option<&session_accretion::SessionAccretionReport>,
 ) -> String {
     let prompt_targets = extract_prompt_targets(diff_text);
+    let remote_host_scope = render_remote_host_scope(file, doc);
     let Some(report) = report else {
-        return full_document_section(doc);
+        return full_document_section(doc, &remote_host_scope);
     };
     if prompt_targets.is_empty() || report.is_healthy() {
-        return full_document_section(doc);
+        return full_document_section(doc, &remote_host_scope);
     }
 
     let Ok(components) = component::parse(doc) else {
-        return full_document_section(doc);
+        return full_document_section(doc, &remote_host_scope);
     };
 
     let session_summary = extract_session_summary(&components, doc)
@@ -45,6 +46,7 @@ pub(crate) fn build_document_section(
 
     let mut rendered = format!(
         "The session is showing {}-level context accretion, so the on-disk document stays full length while this prompt uses a bounded recent-context pack instead. If older history becomes necessary, ask for more previous turns instead of assuming hidden context.\n\n\
+         {}\
          <response_context level=\"{}\">\n\
          <prompt_targets oldest_first=\"true\">\n{}\n\
          </prompt_targets>\n\n\
@@ -60,6 +62,7 @@ pub(crate) fn build_document_section(
          </available_components>\n\
          </response_context>\n\n",
         level_name(report.level),
+        remote_host_scope,
         level_name(report.level),
         render_prompt_targets(&prompt_targets),
         session_summary.trim_end(),
@@ -78,10 +81,33 @@ pub(crate) fn build_document_section(
     rendered
 }
 
-fn full_document_section(doc: &str) -> String {
+fn full_document_section(doc: &str, remote_host_scope: &str) -> String {
     format!(
-        "The full document is now:\n\n<document>\n{}\n</document>\n\n",
-        doc
+        "{}The full document is now:\n\n<document>\n{}\n</document>\n\n",
+        remote_host_scope, doc
+    )
+}
+
+fn render_remote_host_scope(file: &Path, doc: &str) -> String {
+    let declared_targets = frontmatter::parse_for_file(doc, file)
+        .or_else(|_| frontmatter::parse(doc))
+        .ok()
+        .map(|(fm, _)| fm.required_ssh_targets)
+        .unwrap_or_default();
+    let declared = if declared_targets.is_empty() {
+        "No required SSH targets are declared for this document.".to_string()
+    } else {
+        format!(
+            "Declared required SSH targets for this document: {}.",
+            declared_targets.join(", ")
+        )
+    };
+
+    format!(
+        "<remote_host_scope>\n\
+         {declared}\n\
+         Globally approved SSH commands, ambient SSH config, and unrelated project history are not evidence that a named remote host belongs to this document's project. Use a named remote host only when the current user prompt, this session document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbooks explicitly identify it; otherwise ask or record a follow-up to confirm the intended host.\n\
+         </remote_host_scope>\n\n",
     )
 }
 
@@ -371,6 +397,9 @@ mod tests {
         );
         assert!(section.contains("The full document is now:"));
         assert!(section.contains("<document>\ndoc body\n</document>"));
+        assert!(section.contains("<remote_host_scope>"));
+        assert!(section.contains("No required SSH targets are declared"));
+        assert!(section.contains("Globally approved SSH commands"));
     }
 
     #[test]
@@ -412,6 +441,24 @@ mod tests {
         assert!(section.contains("Older response body."));
         assert!(section.contains("ask for more previous turns"));
         assert!(section.contains("available_components"));
+        assert!(section.contains("<remote_host_scope>"));
+        assert!(section.contains("ambient SSH config"));
+    }
+
+    #[test]
+    fn build_document_section_lists_declared_required_ssh_targets() {
+        let doc = "---\nrequired_ssh_targets:\n  - buildparty-worker\n---\nBody\n";
+        let section = build_document_section(
+            Path::new("session.md"),
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n+❯ Hello\n",
+            doc,
+            Some(&session_accretion::SessionAccretionReport::default()),
+        );
+
+        assert!(
+            section.contains("Declared required SSH targets for this document: buildparty-worker.")
+        );
+        assert!(section.contains("unrelated project history"));
     }
 
     #[test]

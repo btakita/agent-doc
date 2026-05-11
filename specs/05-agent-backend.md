@@ -37,6 +37,8 @@ A turn is not complete until each `prompt_target` item is answered or explicitly
 
 That section must preserve the diff encounter order across mixed kinds. If a `content_edit` or artifact appears before a later prompt in the changed tail, the prompt payload must keep that ordering instead of moving all `prompt_target` items to the front.
 
+Prompt context must keep remote host evidence project-scoped. Globally approved SSH commands, ambient SSH config, and unrelated project history are not evidence that a named remote host belongs to the current document's project. A prompt may identify a named remote host only when the current user prompt, document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbook explicitly names it; otherwise the agent should ask or record a follow-up to confirm the intended host.
+
 ## Streaming Checkpoints
 
 - Streaming agent paths save the first non-empty partial response immediately, then save changed partial output at most once every 30 seconds.

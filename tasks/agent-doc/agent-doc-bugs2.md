@@ -34,19 +34,25 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 5 response topic(s): tmux window missing; #next-steps; do [#idprefix]; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ab8742ea -->
-<!-- /agent:exchange -->
-###
-<!--
-JB Plugin `Run Agent Doc` had an error after running `/clear` on root.md:
+❯ JB Plugin `Run Agent Doc` had an error after running `/clear` on root.md:
 ```
 resync: stash pane %11 is registered in its own project root — skipping kill
 resync: stash pane %7 is registered in its own project root — skipping kill
 [route] target tmux session: 1
 Error: authoritative actor generation 22 for tasks/root.md owns pane %12 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
 ```
-spec-test-build-install-commit-push
----
+❯ spec-test-build-install-commit-push
+### Re: prior session running state — gpt-5.5
+
+Short answer: the second previous session by live start order, `src/boost-client/tasks/monsterrodholders.md`, does **not** appear to still be running a turn. Its OpenCode/agent-doc process and tmux pane are still alive, but pane `%39` is sitting at the OpenCode prompt after reporting the deploy/cache-purge turn complete.
+
+The adjacent `src/session-share/tasks/root.md` session is different: its Claude process is still alive, and pane `%35` still shows an in-progress turn with child exploration work visible. So if you meant `root.md`, yes, that one appears to still be mid-turn; if you meant the older MonsterRodHolders session, no, it is alive but idle.
+
+I captured this as a bug because the current tooling makes "session still exists" too easy to confuse with "turn still running." Plan: `tasks/agent-doc/plan-incorrect-close-running-turn-status.md`.
+<!-- agent:boundary:00017961 -->
+<!-- /agent:exchange -->
+###
+<!--
 JB `Clear Session Context` had an error:
 ```
 agent-doc command failed (exit 1): Error: project controller command `operator_command` failed: operator command `session_clear` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 141 is closed
@@ -81,6 +87,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#incorrect-close-running-turn] #agent-doc-bug: incorrect close/supersede handling across adjacent managed code sessions makes it unclear whether a prior pane is alive-idle or still running; add live pane evidence to status/closeout/reap decisions and fail closed before clearing busy panes. Plan: tasks/agent-doc/plan-incorrect-close-running-turn-status.md
 - [ ] [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
 - [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.

@@ -34,7 +34,19 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): stale actor transition generation mismatch
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:8915d3b4 -->
+❯ do [#stalegenfix]. spec-test-build-install-commit-push
+### Re: stale generation fix test + spec + build — glm-5.1
+
+The fix was already committed in `cc5a214`. This turn strengthened the regression test, resolved a clippy lint, and documented the rule in SPEC.md.
+
+**Changes:**
+- `src/agent-doc/src/project_controller.rs:3877-3879` — replaced `project_binding_in` (which doesn't bump generation for same pane) with `record_session_start_direct(gen=2)` so the test actually exercises the stale-generation transition path
+- `src/agent-doc/src/session_actor.rs:420-432` — collapsed nested if into a single guard for clippy (`collapsible_if`)
+- `SPEC.md:87` — documented the same-owner same-pane generation bypass rule
+- All 2582 tests pass; build + install completed; pushed `fea74ab` to `20260422/codex-agent-backend`
+
+&lt;!-- /agent:exchange --&gt;
+<!-- agent:boundary:c16cfe0b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,7 +72,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#stalegenfix] 2026-05-11 Fix stale actor transition generation mismatch: when session_id and pane_id both match, allow same-owner transitions despite generation bump from compact/restart/route. Committed in session_actor.rs transition_state_in. Regression: controller_lifecycle_allows_same_pane_stale_generation.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -157,4 +168,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#marklifecyclefix] 2026-05-11 mark_lifecycle relative path resolution — fixed in c4f9d17: route promotion now uses bootstrap.project_root + canonical_document_id_in instead of transition_state_direct with controller-CWD-dependent canonicalize. Regression: controller_mark_lifecycle_resolves_relative_path_via_project_root.
 - 2026-05-11 [#dupeexchangeblock] #agent-doc-bug: opencode agent writes responses into a second `<!-- agent:exchange patch=append -->...<!-- /agent:exchange -->` block instead of appending to the existing exchange block. This produces an invalid document with two adjacent exchange sections. Reproduction: monsterrodholders.md session a9421282 — the "Production deploy" response was written into a new exchange element (lines 126-147) instead of being appended to the existing exchange (lines 39-125). Root cause: likely the patchback/closeout logic does not detect the existing open exchange block and creates a new one. Plan: tasks/agent-doc/plan-duplicate-exchange-block-patchback.md
 - 2026-05-11 [#jbcompactempty] #agent-doc-bug: JB Plugin Compact Exchange produced a defective compaction in boost-client/tasks/monsterrodholders.md (session a9421282). Two problems: (1) The compacted exchange block (lines 30-38) contains only a recursive archive pointer and a truncated prior summary (`Prior summary/context: ### Session Summary *Compacted. Content archived to ...`) with no substantive decisions, key facts, or open items preserved. The archive file itself (7b9f2a63...-20260511-101729.md) is a compaction of a prior compaction — 15 lines, no real content. (2) Compact Exchange did not merge the duplicate exchange blocks created by #dupeexchangeblock into a single block — the document still has two adjacent `agent:exchange` blocks (lines 30-38 and 39-146). Compact Exchange should detect and consolidate multiple exchange blocks into one, and the default summary must carry forward substantive context from the archive chain, not just a truncated pointer. Plan: tasks/agent-doc/plan-jb-compact-exchange-empty-summary.md
+- 2026-05-11 [#stalegenfix] 2026-05-11 Fix stale actor transition generation mismatch: when session_id and pane_id both match, allow same-owner transitions despite generation bump from compact/restart/route. Committed in session_actor.rs transition_state_in. Regression: controller_lifecycle_allows_same_pane_stale_generation.
 <!-- /agent:done -->

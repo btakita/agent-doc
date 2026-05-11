@@ -29,45 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-143706.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-150108.md`*
 
 Compacted content:
-- Archived 4 response topic(s): #rspcmt4 OpenCode session-check guard; #rspcmt5 direct-chat preset write-back invariant; #noexchopencode2 OpenCode CLI-only-output anti-pattern; 1 more
+- Archived 1 response topic(s): #rootlatepatch late fallback patch guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#rootlatepatch]. spec-test-build-install-commit-push
-### Re: #rootlatepatch late fallback patch guard — glm-5.1
-
-Implemented the fix for late fallback patches re-dirtying committed session documents. The core issue was that after a successful closeout, delayed IPC/file fallback patches could still modify the working tree with stale content.
-
-**Changes in `src/write.rs`:**
-
-1. **`cycle_already_committed(file)`** — new guard function that returns `Some(cycle_id)` if the document's cycle state is already `Committed`. Used as a pre-write check before any fallback patch application.
-
-2. **`cleanup_fallback_patch_files(file)`** — new cleanup function that removes leftover `.agent-doc/patches/<hash>.json` files after successful closeout and writes a claimed-patch sentinel so the plugin skips the stale patch if it arrives later.
-
-3. **Guard in `try_ipc()`** — at entry, checks if the cycle is already committed. If so, logs the rejection with cycle_id and document path, cleans up fallback files, and returns success (the patch was already applied).
-
-4. **Guard in `run_stream` IPC timeout fallback** — before re-writing a patch file for late plugin pickup, checks the committed guard and skips if already committed.
-
-5. **Guard in `run_ipc` file-based IPC timeout fallback** — before falling back to CRDT disk write, checks the committed guard and skips.
-
-6. **Post-closeout cleanup in `complete_required_closeout()`** — after `enforce_clean_closeout()` passes, calls `cleanup_fallback_patch_files()` to remove any leftover patch files.
-
-7. **`cycle_id` in IPC payloads** — both socket and file-based IPC payloads now include the current `cycle_id` so the editor plugin can also reject stale patches.
-
-**Spec updates:**
-- `SPEC.md` — added late fallback rejection rule
-- `specs/07-closeout-commands.md` — added late fallback patch rejection to write section
-
-**Tests (5 new):**
-- `cycle_already_committed_returns_none_when_no_state`
-- `cycle_already_committed_returns_some_for_committed_cycle`
-- `cycle_already_committed_returns_none_for_open_cycle`
-- `cleanup_fallback_patch_files_removes_patch_and_writes_sentinel`
-- `cleanup_fallback_patch_files_noop_when_no_patch`
-
-All tests pass. Built and installed locally. Committed and pushed.
-<!-- agent:boundary:51300a94 -->
+<!-- agent:boundary:9754bdf4 -->
 <!-- /agent:exchange -->
 ###
 <!--

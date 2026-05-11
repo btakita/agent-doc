@@ -316,6 +316,29 @@ pub(crate) const EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR: &str =
     "empty preflight_started cycle has no response capture";
 pub(crate) const STALE_EMPTY_PREFLIGHT_TTL_SECS: u64 = 60;
 
+fn agent_owned_visible_response_is_adoptable(
+    file: &Path,
+    state: Option<&crate::cycle_state::CycleState>,
+) -> bool {
+    matches!(
+        state.map(|state| state.phase),
+        Some(
+            crate::cycle_state::CyclePhase::ResponseCaptured
+                | crate::cycle_state::CyclePhase::WriteApplied
+        ) | None
+    ) || crate::codex_hook::load_active_session_for_current_file(file)
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+fn head_already_matches_current_doc(file: &Path, doc_content: &str) -> Result<bool> {
+    Ok(crate::git::show_head(file)?.as_deref().is_some_and(|head| {
+        crate::git::normalize_transient_agent_doc_markers(head)
+            == crate::git::normalize_transient_agent_doc_markers(doc_content)
+    }))
+}
+
 fn normalized_content_hash(content: &str) -> String {
     crate::ops_log::content_hash(&crate::git::normalize_transient_agent_doc_markers(content))
 }
@@ -1104,8 +1127,9 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     let visible_response_recovery = if !pending_path.exists()
         && capture.is_none()
         && historical_capture.is_none()
-        && cycle_state.is_none()
+        && agent_owned_visible_response_is_adoptable(file, cycle_state.as_ref())
         && crate::git::is_in_git_repo(file)
+        && !head_already_matches_current_doc(file, &doc_content)?
     {
         visible_response_patch_from_document(file, &doc_content)?
     } else {
@@ -1172,7 +1196,7 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
             .as_deref()
             .map(|snapshot_doc| !response_already_applied(snapshot_doc, &response))
             .unwrap_or(true);
-        if state_is_open && snapshot_missing_response {
+        if (state_is_open || visible_response_recovery.is_some()) && snapshot_missing_response {
             snapshot::save(file, &repaired_doc)?;
             crate::ops_log::log_op(
                 file,
@@ -2666,6 +2690,56 @@ mod tests {
         assert!(
             snap.contains("Recovered from the visible exchange tail."),
             "snapshot should advance to the visible response:\n{snap}"
+        );
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);
+    }
+
+    #[test]
+    fn repair_adopts_visible_response_for_open_agent_doc_write_cycle() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let base = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please recover the partial patchback\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        init_git_repo(root, &doc);
+        crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+
+        let current = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please recover the partial patchback\n",
+            "### Re: partial patchback — gpt-5\n\n",
+            "Recovered from an agent-doc-owned visible response.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n"
+        );
+        std::fs::write(&doc, current).unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "write_template", Some(base), Some(current))
+            .unwrap();
+        snapshot::save(&doc, base).unwrap();
+
+        let outcome = repair(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::AlreadyApplied);
+
+        let head = crate::git::show_head(&doc).unwrap().unwrap();
+        assert!(
+            head.contains("Recovered from an agent-doc-owned visible response."),
+            "HEAD should contain the adopted partial patchback:\n{head}"
+        );
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("Recovered from an agent-doc-owned visible response."),
+            "snapshot should advance to the adopted response:\n{snap}"
         );
         let state = crate::cycle_state::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, crate::cycle_state::CyclePhase::Committed);

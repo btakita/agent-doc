@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Agent-owned partial patchbacks can be adopted from empty strict repair writes.** `agent-doc repair` now adopts already-visible responses from interrupted `response_captured` / `write_applied` cycles even when no pending response artifact remains, and strict `write --commit` with empty stdin runs that adoption path before failing as an empty response. This closes `#partialpatchbackadopt` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Blocked-stop repair now replays guard-prefixed patch payloads.** The shared replay guard now accepts known closeout guard comments such as `<!-- no-pending-capture -->` around otherwise valid patch responses, while still blocking transcript/full-document dumps. `agent-doc repair` now writes the sanitized replayable payload returned by the guard, so patch bodies extracted from leading progress commentary are actually used instead of only classified. Added replay guard, repair, and Codex Stop-hook regressions. This closes `#blockedstopextract` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Stale `starting` actor cleanup now runs on normal paths, not just daily GC.** `preflight`, `start`, and `sync` now run the lightweight controller actor cleanup every cycle, closing one-hour-old `starting` records when no fresh supervisor heartbeat or live supervisor PID proves that generation is still booting. The full orphan-file GC remains on the `.agent-doc/gc.stamp` daily cadence. Added regressions for preflight with a fresh GC stamp and caller-specific actor transitions. This closes `#autogcstart` in `tasks/agent-doc/agent-doc-bugs2.md`.

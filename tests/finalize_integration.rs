@@ -88,6 +88,15 @@ fn head_blob(root: &Path) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+fn only_snapshot_file(root: &Path) -> PathBuf {
+    let entries = fs::read_dir(root.join(".agent-doc/snapshots"))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(entries.len(), 1, "expected exactly one snapshot file");
+    entries[0].path()
+}
+
 fn enable_strict_pending_capture(doc: &Path) {
     let current = fs::read_to_string(doc).unwrap();
     let updated = current.replace(
@@ -239,6 +248,44 @@ fn bare_write_stream_on_session_doc_fails_closed_after_write_applied() {
         .args(["commit", doc.to_str().unwrap()])
         .assert()
         .success();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn write_commit_empty_stdin_adopts_visible_agent_owned_partial_patchback() {
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+    let original = fs::read_to_string(&doc).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", doc.to_str().unwrap(), "--stream"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure();
+
+    let snapshot = only_snapshot_file(tmp.path());
+    fs::write(&snapshot, original).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin("")
+        .assert()
+        .success();
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("### Re: repair — gpt-5"),
+        "empty strict write should adopt the visible partial patchback:\n{head}"
+    );
 
     agent_doc()
         .current_dir(tmp.path())

@@ -954,6 +954,21 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
     Ok(())
 }
 
+fn recover_empty_response_for_strict_closeout(file: &Path, flags: &WriteFlags) -> Result<bool> {
+    if !flags.strict_closeout {
+        return Ok(false);
+    }
+    let outcome = repair::run(file)?;
+    if outcome.repaired() {
+        eprintln!(
+            "[write] empty response stdin; recovered existing agent-doc response state with {:?}",
+            outcome
+        );
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 pub(crate) fn unresolved_backlog_capture_targets(
     file: &Path,
     state: &crate::cycle_state::CycleState,
@@ -3643,6 +3658,9 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         .context("failed to read response from stdin")?;
 
     if response.trim().is_empty() {
+        if recover_empty_response_for_strict_closeout(file, &flags)? {
+            return Ok(());
+        }
         anyhow::bail!("empty response — nothing to write");
     }
 
@@ -3775,6 +3793,9 @@ pub fn run_template(
         .context("failed to read response from stdin")?;
 
     if response.trim().is_empty() {
+        if recover_empty_response_for_strict_closeout(file, &flags)? {
+            return Ok(());
+        }
         anyhow::bail!("empty response — nothing to write");
     }
 
@@ -3958,6 +3979,9 @@ pub fn run_stream(
         .context("failed to read response from stdin")?;
 
     if response.trim().is_empty() {
+        if recover_empty_response_for_strict_closeout(file, &flags)? {
+            return Ok(());
+        }
         anyhow::bail!("empty response — nothing to write");
     }
 
@@ -4558,6 +4582,9 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         .context("failed to read response from stdin")?;
 
     if response.trim().is_empty() {
+        if recover_empty_response_for_strict_closeout(file, &flags)? {
+            return Ok(());
+        }
         anyhow::bail!("empty response — nothing to write");
     }
 

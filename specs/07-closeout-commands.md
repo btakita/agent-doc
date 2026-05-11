@@ -45,6 +45,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Compatibility normalization may rewrite one legacy list-shaped backlog/pending patch through the granular pending primitives before capture, but unsupported shapes still fail closed before `response_captured`.
 - Destructive `patch:todo` replacements are blocked when they would shrink an existing checklist surface.
 - Session-document `write --commit` shares `finalize`'s strict closeout contract.
+- Strict `write --commit` with empty stdin may recover instead of failing when the document already contains an agent-doc-owned visible response from an interrupted `response_captured` / `write_applied` cycle. That recovery adopts the visible response into the snapshot and continues through the normal commit/session-check boundary.
 - Bare session-document `write` is not a terminal success path: if it preserves a response and leaves the cycle open at `response_captured` / `write_applied`, the command must fail closed with recovery intact instead of returning success and waiting for a later `agent-doc commit`.
 
 ### Write-path invariants
@@ -81,6 +82,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 `agent-doc repair <FILE>`
 
 - Repairs open `response_captured` / `write_applied` cycles, deduplicates already-applied responses, and can adopt a visible response already present in the live document when the snapshot still lags behind.
+- Visible response adoption is not limited to no-cycle manual repair. If an open agent-doc cycle proves the interrupted write path already owned the response, repair adopts that response rather than reporting it only as a direct patchback bypass.
 - The same repair path also handles stale `preflight_started` cycles when the hashes or safe historical `HEAD` proof make that deterministic, and it may auto-close an otherwise-empty `preflight_started` cycle after the bounded stale timeout only when the live document has no unresolved prompt-bearing drift. If a `preflight_started` cycle has no response capture and the live document contains a prompt target such as `do #id`, repair/preflight must fail closed with retry/restart guidance instead of marking the empty cycle committed.
 - Historical capture replay is narrow: it requires either an active capture artifact or a matching orphan prompt target in the live exchange.
 - Transcript-shaped or full-document-dump captured payloads must fail closed and be parked under `.agent-doc/repair-blocked/`. Patch payloads may carry only known replay guard comments such as `<!-- no-pending-capture -->` outside patch blocks, and plain progress commentary before the first patch may be stripped so the valid patch body can replay.

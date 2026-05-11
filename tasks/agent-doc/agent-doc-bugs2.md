@@ -30,7 +30,22 @@ Implemented Codex capability proof timing diagnostics.
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-005003.md`*
-<!-- agent:boundary:f38f837c -->
+❯ Evaluate sessions logs against already done work and git history. Please evaluate any standing bugs with agent-doc as #next-steps.
+### Re: session-log triage against git history — gpt-5
+
+I checked the current session captures, `ops.log`, the runtime projections, blocked-stop payloads, and recent `src/agent-doc` history.
+
+Already covered by git history: prompt-only closeout guard `8252c60`, duplicate response closeouts `2bf50c5`, stale route diagnostics `c21ef89`, async Codex capability proof `275e82b`, cross-document pending adds `74b620f`, pending-add order `abae439`, stale diagnostics cleanup `6147f99`, and direct backlog reap archiving `3c9d4a0`.
+
+Standing findings:
+
+- Sidecar prefix-divergence fallback is still live. `ops.log` still has `sidecar_normalization_fallback ... reason=prefix_divergence` during the latest closed `agent-doc-bugs2` cycles, including `1778442645` and `1778443236`, after the prefix-body and duplicate-closeout fixes.
+- Stale starting actor cleanup is not fully operational in the normal path. Current `.agent-doc/session-actors.json` still has `state: "starting"` rows for `agent-doc-bugs.md`, `agent-doc-bugs4.md`, and `interior-design.md`, even though `6147f99` added stale diagnostics cleanup.
+- Blocked-stop repair still has a parser/recovery gap. The current `.agent-doc/codex-hooks/blocked-stop` and `.agent-doc/repair-blocked` payload for `1778389034` contains a valid patch block but was rejected because there was extra transcript content around it.
+- Codex capability proof latency is not proven fixed from the live logs yet. Git has the async proof implementation, but the latest measured child network proof I found was still about `10108ms`; I did not find a post-`275e82b` fresh-restart sample proving pane render is decoupled from that cost.
+
+I added backlog items for those next steps in priority order. No tests were run because this cycle was log and git-history triage only.
+<!-- agent:boundary:b7c97a63 -->
 <!-- /agent:exchange -->
 ###
 
@@ -48,6 +63,10 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sidecarfallbackstill] Fix recurring sidecar prefix-divergence fallback after the latest prefix-body and duplicate-closeout fixes: ops.log still shows sidecar_normalization_fallback reason=prefix_divergence on clean agent-doc-bugs2 closeouts, so tighten snapshot/ack normalization until fallback is exceptional again.
+- [ ] [#autogcstart] Ensure stale starting actor cleanup runs in the normal preflight/start/sync path: session-actors.json still has old starting projections for agent-doc-bugs.md, agent-doc-bugs4.md, and interior-design after 6147f99, so auto-gc or route-time reconciliation is still incomplete.
+- [ ] [#blockedstopextract] Fix blocked-stop repair for transcript-wrapped patch responses: current codex-hooks/blocked-stop and repair-blocked payloads contain valid patch blocks but are rejected for extra transcript content, so extract the patch or fail with a precise recoverable instruction.
+- [ ] [#capproofverify] [recommended] Verify async Codex capability proof on a fresh managed restart: last logged network_child proof cost was about 10.1s, and there is no post-275e82b live proof sample yet showing pane render is decoupled from proof latency.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

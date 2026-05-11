@@ -29,36 +29,13 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-023008.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-024215.md`*
 
 Active backlog:
-- [ ] [#partialpatchbackadopt] [recommended] Fix session-check/write recovery for agent-doc-owned partial patchbacks: when a prior agent-doc/Codex write path leaves an assistant heading/body visible outside the committed snapshot, classify it as an interrupted/adoptable agent-doc write instead of only direct response patchback, and make empty-stdin recovery point to the correct repair/adoption path.
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
-- 1 more active item(s)
-❯ do [#partialpatchbackadopt]. spec-test-build-install-commit-push
-### Re: #partialpatchbackadopt — gpt-5
-
-Implemented the partial patchback adoption fix.
-
-Changed `agent-doc repair` so an already-visible response from an interrupted `response_captured` / `write_applied` cycle is treated as agent-doc-owned and adoptable instead of only as a direct patchback bypass. Strict `write --commit` with empty stdin now runs that recovery path first, so the visible response can be adopted into the snapshot and committed through the normal closeout boundary.
-
-Updated the closeout spec and unreleased notes, and added regressions for both direct repair adoption and empty-stdin strict `write --commit` recovery.
-
-Verification:
-- `cargo test repair_adopts_visible_response_for_open_agent_doc_write_cycle`
-- `cargo test recover_closes_write_applied_cycle_when_head_already_has_exchange_patchback`
-- `cargo test write_commit_empty_stdin_adopts_visible_agent_owned_partial_patchback --test finalize_integration`
-- `make check`
-- `make build`
-- `make install`
-
-Commits:
-- `e472eb1` in `src/agent-doc`: `fix: adopt partial response patchbacks`
-- `3c36b8958` in parent repo: `agent-doc: adopt partial response patchbacks`
-
-Pushed `src/agent-doc` branch `20260422/codex-agent-backend`; parent `main` push follows this session closeout.
-<!-- agent:boundary:d1ad1c86 -->
+- [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
+<!-- agent:boundary:ce78b74b -->
 <!-- /agent:exchange -->
 ###
 

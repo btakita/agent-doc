@@ -34,7 +34,7 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 5 response topic(s): opencode agent support; opencode start still opened Claude; install agent-doc on OpenCode; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c28ca886 -->
+<!-- agent:boundary:c3701ce7 -->
 <!-- /agent:exchange -->
 ###
 
@@ -52,6 +52,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#2fha] 2026-05-11 [#nopatchbackopencode] OpenCode agent-doc turn completed but response was not patched back into the session document — the user had to manually request patchback for the monsterrodholders.md production-sync response. Patchback should fire automatically after the agent writes a response, regardless of agent backend (Claude Code / Codex / OpenCode). Plan: investigate whether OpenCode integration skips the finalize/patchback step that Claude Code and Codex run.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

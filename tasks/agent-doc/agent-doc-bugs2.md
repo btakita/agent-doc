@@ -119,9 +119,18 @@ Implemented help/usage screen detection for OpenCode harness. When the pane show
 
 Changes: `src/harness.rs` (+76 lines), `src/start.rs` (+53 lines), `src/session_check.rs` (clippy fix). 7 new unit tests. All 2088 tests pass. Built + installed + pushed.
 <!-- agent:boundary:adbff415 -->
+do [#routestartingrace]. spec-test-build-install-commit-push
 <!-- /agent:exchange -->
 ###
 <!--
+JB Plugin `Run Agent Doc` had an error after running `/clear` on root.md:
+```
+resync: stash pane %11 is registered in its own project root — skipping kill
+resync: stash pane %7 is registered in its own project root — skipping kill
+[route] target tmux session: 1
+Error: authoritative actor generation 22 for tasks/root.md owns pane %12 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
+```
+---
 Why is agent-doc starting a child Codex run?
 ```
 • agent-doc started a child Codex run. Its preflight noticed the previous patchback was already committed, then

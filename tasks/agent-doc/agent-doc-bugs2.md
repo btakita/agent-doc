@@ -30,54 +30,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-064634.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-073249.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #nopatchbackopencode
+- Archived 3 response topic(s): OpenCode plugin invocation; /agent-doc command vs agent-doc skill; /agent-doc command for OpenCode
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ For opencode, is the canonical invocation of plugins `/plugin-name` or `plugin-name`?
-### Re: OpenCode plugin invocation — glm-5.1
-
-OpenCode has **three distinct concepts** that use different invocation patterns:
-
-1. **Skills** — invoked via the `skill` tool by the agent, not by slash commands: `skill({ name: "skill-name" })`. Skills are discovered from `SKILL.md` files in `.opencode/skills/`, `.claude/skills/`, or `~/.claude/skills/`. The agent sees available skills in its tool description and loads them on demand. Users don't invoke skills directly.
-
-2. **Commands** — invoked with a leading slash in the TUI: `/command-name`. Custom commands are defined in `.opencode/commands/` as markdown files. The slash is canonical for commands.
-
-3. **Plugins** — not invoked by users at all. Plugins are JavaScript/TypeScript modules placed in `.opencode/plugins/` or installed via npm in config. They hook into events automatically at startup. There's no `/plugin-name` invocation pattern for plugins.
-
-So the answer depends on what you mean by "plugin":
-- **Skills** (instructions for the agent): `skill-name` via the tool, no slash
-- **Commands** (user-triggered prompts): `/command-name` with slash
-- **Plugins** (event hooks): no user invocation, auto-loaded at startup
-❯ If we `/agent-doc` commands for opencode, would this effectively be the same interface as using the `agent-doc` skill? 
-### Re: /agent-doc command vs agent-doc skill — glm-5.1
-
-Yes, functionally equivalent — but there's a nuance:
-
-The **skill** (`agent-doc <FILE>` as a plain message) already works in OpenCode. The skill's SKILL.md says: *"In OpenCode, invoke agent-doc by writing one of these as a normal message: `agent-doc <FILE>`"*. The agent recognizes the text pattern and loads the skill.
-
-A **`/agent-doc` command** in `.opencode/commands/agent-doc.md` would do the same thing — the TUI would autocomplete it, and the template would emit `agent-doc $ARGUMENTS` as the prompt. The only difference is UX: slash commands get TUI autocomplete, tab-completion from the `/` menu, and a description shown in the command picker. Skills rely on the agent recognizing the text pattern.
-
-So they'd produce the same result. A `/agent-doc` command would just be a convenience wrapper — a named command with autocomplete that triggers the same skill path. It wouldn't add new functionality, just better discoverability in the TUI.
-Add the `/agent-doc` command and remove the "In OpenCode, invoke agent-doc by writing one of these as a normal message: `agent-doc <FILE>`" in SKILL.md. Update the plugins to use the `/agent-doc` command.
-spec-test-build-install-commit-push
-### Re: /agent-doc command for OpenCode — glm-5.1
-
-Added `/agent-doc` as a native OpenCode command and updated all skill surfaces accordingly.
-
-**Changes:**
-
-1. **`src/agent-doc/src/skill.rs`** — Updated `OPENCODE_DESCRIPTION` to reference `/agent-doc <file> command`, replaced `OPENCODE_INVOCATION_SECTION` with slash-command style (matching Claude Code format), updated `GENERIC_INVOCATION_SECTION` to list OpenCode with `/agent-doc`, added `install_opencode_command_file()` that writes `.opencode/commands/agent-doc.md` during `skill install --harness opencode`, and wired it into `install_env_artifacts`.
-
-2. **`src/agent-doc/runbooks/harness-invocation.md`** — Updated OpenCode section to reference the installed `/agent-doc` command via `.opencode/commands/agent-doc.md`.
-
-3. **Tests** — Updated `opencode_content_uses_plain_text_invocation` → `opencode_content_uses_slash_command_invocation`, added `install_for_opencode_creates_command_file`, `install_for_opencode_command_file_idempotent`, `install_env_artifacts_creates_opencode_command`.
-
-4. **Installed locally** — `agent-doc skill install --harness opencode` now creates `.opencode/commands/agent-doc.md` with `agent-doc $ARGUMENTS` template.
-
-All 1893 tests pass. `make check` clean.
-<!-- agent:boundary:08ae43ca -->
+<!-- agent:boundary:6a152744 -->
 <!-- /agent:exchange -->
 ###
 <!--

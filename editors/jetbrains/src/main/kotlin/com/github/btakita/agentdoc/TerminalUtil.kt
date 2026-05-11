@@ -17,6 +17,8 @@ import java.util.concurrent.TimeUnit
 
 object TerminalUtil {
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
+    internal const val STARTING_ACTOR_ROUTE_MAX_ATTEMPTS = 4
+    private val STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
 
     internal interface InFlightRouteHandle {
         fun isAlive(): Boolean
@@ -35,6 +37,45 @@ object TerminalUtil {
             process.destroy()
             if (!process.waitFor(200, TimeUnit.MILLISECONDS)) {
                 process.destroyForcibly()
+            }
+        }
+
+        override fun wasCanceled(): Boolean = canceled
+    }
+
+    internal class RetryingRouteHandle : InFlightRouteHandle {
+        @Volatile
+        private var activeProcess: Process? = null
+        @Volatile
+        private var canceled = false
+        @Volatile
+        private var completed = false
+
+        fun bind(process: Process) {
+            if (canceled) {
+                process.destroy()
+                if (!process.waitFor(200, TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly()
+                }
+                return
+            }
+            activeProcess = process
+        }
+
+        fun markCompleted() {
+            completed = true
+            activeProcess = null
+        }
+
+        override fun isAlive(): Boolean = !completed && !canceled
+
+        override fun cancelForReplacement() {
+            canceled = true
+            activeProcess?.let { process ->
+                process.destroy()
+                if (!process.waitFor(200, TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly()
+                }
             }
         }
 
@@ -153,11 +194,7 @@ object TerminalUtil {
             // Pass focused file
             LOG.warn("[route] executing: ${cmd.joinToString(" ")}")
 
-            val process = ProcessBuilder(cmd)
-                .directory(java.io.File(cwd))
-                .redirectErrorStream(true)
-                .start()
-            val handle = ProcessRouteHandle(process)
+            val handle = RetryingRouteHandle()
             val replaced = inFlightRouteRegistry.replace(routeKey, handle)
             if (replaced) {
                 LOG.warn("[route] canceled stale in-flight route before rerunning: $relativePath")
@@ -166,26 +203,53 @@ object TerminalUtil {
             val startedAt = System.currentTimeMillis()
             Thread {
                 try {
-                    val output = process.inputStream.bufferedReader().readText()
-                    val exitCode = process.waitFor()
-                    val elapsed = formatElapsedMillis(System.currentTimeMillis() - startedAt)
-                    if (handle.wasCanceled()) {
-                        LOG.warn("[route] superseded route exited after replacement for $relativePath")
-                    } else if (exitCode != 0) {
-                        LOG.warn("[route] FAILED (exit $exitCode): $output")
-                        notifyPersistentRouteFailure(
-                            project = project,
-                            cwd = cwd,
-                            relativePath = relativePath,
-                            exitCode = exitCode,
-                            elapsed = elapsed,
-                            routeOutput = output,
-                        )
-                    } else {
-                        LOG.warn("[route] SUCCESS: $output")
-                        clearPersistedRouteFailureOutput(cwd, relativePath)
+                    var attempt = 1
+                    while (!handle.wasCanceled() && attempt <= STARTING_ACTOR_ROUTE_MAX_ATTEMPTS) {
+                        val process = ProcessBuilder(cmd)
+                            .directory(java.io.File(cwd))
+                            .redirectErrorStream(true)
+                            .start()
+                        handle.bind(process)
+                        val output = process.inputStream.bufferedReader().readText()
+                        val exitCode = process.waitFor()
+                        val elapsed = formatElapsedMillis(System.currentTimeMillis() - startedAt)
+                        if (handle.wasCanceled()) {
+                            LOG.warn("[route] superseded route exited after replacement for $relativePath")
+                            break
+                        } else if (
+                            exitCode != 0 &&
+                            isStartingActorRouteFailure(output) &&
+                            attempt < STARTING_ACTOR_ROUTE_MAX_ATTEMPTS
+                        ) {
+                            val delayMillis = startingActorRouteRetryDelayMillis(attempt)
+                            LOG.warn(
+                                "[route] actor still starting for $relativePath; retrying attempt ${attempt + 1}/$STARTING_ACTOR_ROUTE_MAX_ATTEMPTS after ${delayMillis}ms"
+                            )
+                            if (!sleepBeforeRetry(handle, delayMillis)) {
+                                LOG.warn("[route] superseded starting-actor retry for $relativePath")
+                                break
+                            }
+                            attempt += 1
+                            continue
+                        } else if (exitCode != 0) {
+                            LOG.warn("[route] FAILED (exit $exitCode): $output")
+                            notifyPersistentRouteFailure(
+                                project = project,
+                                cwd = cwd,
+                                relativePath = relativePath,
+                                exitCode = exitCode,
+                                elapsed = elapsed,
+                                routeOutput = output,
+                            )
+                            break
+                        } else {
+                            LOG.warn("[route] SUCCESS: $output")
+                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            break
+                        }
                     }
                 } finally {
+                    handle.markCompleted()
                     inFlightRouteRegistry.clearIfCurrent(routeKey, handle)
                     onComplete?.invoke()
                 }
@@ -470,6 +534,30 @@ object TerminalUtil {
 
     internal fun sessionStatusSuccessMessage(relativePath: String, output: String): String =
         output.ifBlank { "Loaded session status for $relativePath" }
+
+    internal fun isStartingActorRouteFailure(output: String): Boolean {
+        return output.contains("authoritative actor generation") &&
+            output.contains("route will not inject a new trigger") &&
+            output.contains("the authoritative actor is still starting")
+    }
+
+    internal fun startingActorRouteRetryDelayMillis(completedAttempts: Int): Long {
+        val index = (completedAttempts - 1).coerceIn(0, STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS.lastIndex)
+        return STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS[index]
+    }
+
+    private fun sleepBeforeRetry(handle: InFlightRouteHandle, delayMillis: Long): Boolean {
+        var remaining = delayMillis
+        while (remaining > 0) {
+            if (handle.wasCanceled()) {
+                return false
+            }
+            val chunk = minOf(remaining, 100L)
+            Thread.sleep(chunk)
+            remaining -= chunk
+        }
+        return !handle.wasCanceled()
+    }
 
     fun showHint(project: Project, message: String) {
         ApplicationManager.getApplication().invokeLater {

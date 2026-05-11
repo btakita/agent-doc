@@ -138,6 +138,26 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `starting actor route failures are retryable`() {
+        val output = """
+            [route] target tmux session: 1
+            Error: authoritative actor generation 22 for tasks/root.md owns pane %12 but route will not inject a new trigger because the authoritative actor is still starting.
+        """.trimIndent()
+
+        assertTrue(TerminalUtil.isStartingActorRouteFailure(output))
+        assertFalse(TerminalUtil.isStartingActorRouteFailure("[agent-doc] proof-timeout: accepted but unproven"))
+    }
+
+    @Test
+    fun `starting actor retry backoff uses bounded attempt delays`() {
+        assertEquals(4, TerminalUtil.STARTING_ACTOR_ROUTE_MAX_ATTEMPTS)
+        assertEquals(2_000L, TerminalUtil.startingActorRouteRetryDelayMillis(1))
+        assertEquals(4_000L, TerminalUtil.startingActorRouteRetryDelayMillis(2))
+        assertEquals(8_000L, TerminalUtil.startingActorRouteRetryDelayMillis(3))
+        assertEquals(8_000L, TerminalUtil.startingActorRouteRetryDelayMillis(4))
+    }
+
+    @Test
     fun `session status success keeps exact cli output`() {
         val output = "generation=4\nstate=waiting_input\npane=%12"
 

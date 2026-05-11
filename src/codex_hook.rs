@@ -504,21 +504,36 @@ fn project_root_for(path: &Path) -> Option<PathBuf> {
 
 fn project_roots_for(path: &Path) -> Vec<PathBuf> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let mut roots = Vec::new();
+    let Some(nearest_root) = crate::snapshot::find_project_root(&canonical) else {
+        return Vec::new();
+    };
+    let mut roots = vec![nearest_root.clone()];
+    let Some(git_root) = find_git_root(&canonical) else {
+        return roots;
+    };
+    if !nearest_root.starts_with(&git_root) {
+        return roots;
+    }
+    if git_root.join(".agent-doc").is_dir() {
+        push_unique_root(&mut roots, git_root);
+    }
+    roots
+}
+
+fn find_git_root(path: &Path) -> Option<PathBuf> {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let mut current = if canonical.is_file() {
         canonical.parent()
     } else {
         Some(canonical.as_path())
     };
-
     while let Some(path) = current {
-        if path.join(".agent-doc").is_dir() {
-            push_unique_root(&mut roots, path.to_path_buf());
+        if path.join(".git").exists() {
+            return Some(path.to_path_buf());
         }
         current = path.parent();
     }
-
-    roots
+    None
 }
 
 fn tracking_roots(cwd: &Path, doc_path: Option<&Path>) -> Vec<PathBuf> {
@@ -700,8 +715,10 @@ fn save_state(root: &Path, state: &SessionState) -> Result<()> {
 
 fn clear_state(root: &Path, session_id: &str) -> Result<()> {
     let path = state_path(root, session_id);
-    if path.exists() {
-        std::fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err).with_context(|| format!("remove {}", path.display())),
     }
     Ok(())
 }
@@ -820,6 +837,37 @@ mod tests {
         assert_eq!(PathBuf::from(state.doc_path), doc);
         assert_eq!(state.last_turn_id, "turn-1");
         assert_eq!(state.last_prompt, format!("agent-doc {}", doc.display()));
+    }
+
+    #[test]
+    fn user_prompt_submit_does_not_track_ambient_ancestor_root() {
+        let ambient = tempfile::tempdir().unwrap();
+        fs::create_dir_all(ambient.path().join(".agent-doc")).unwrap();
+        let project = ambient.path().join("project");
+        fs::create_dir_all(project.join(".agent-doc/snapshots")).unwrap();
+        let doc = project.join("task.md");
+        let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: project.display().to_string(),
+            prompt: format!("agent-doc {}", doc.display()),
+        })
+        .unwrap();
+
+        let project_state = load_state(&project, "codex-session").unwrap();
+        let ambient_state = load_state(ambient.path(), "codex-session").unwrap();
+        assert!(
+            project_state.is_some(),
+            "nearest project root should receive Codex hook state"
+        );
+        assert!(
+            ambient_state.is_none(),
+            "ambient ancestor .agent-doc roots must not receive shared hook state"
+        );
     }
 
     #[test]

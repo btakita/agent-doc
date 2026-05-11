@@ -83,7 +83,34 @@ Verification:
 - installed-binary dry run with `--agent opencode`
 
 The parent `main` push happens after this session closeout commit so the response commit is included with the submodule pointer update.
-<!-- agent:boundary:879f539c -->
+❯ How do I install agent-doc on opencode?
+### Re: install agent-doc on OpenCode — gpt-5
+
+From the project root:
+
+```bash
+agent-doc skill install --harness opencode
+```
+
+That installs the OpenCode-facing skill/instruction files under `.opencode/skills/agent-doc/` and its bundled runbooks under `.opencode/skills/agent-doc/runbooks/`.
+
+If the binary itself is not installed or you just built local changes, install it first from this repo:
+
+```bash
+cd /home/brian/work/btakita/agent-loop/src/agent-doc
+cargo install --path .
+cd /home/brian/work/btakita/agent-loop
+agent-doc skill install --harness opencode
+```
+
+For every supported harness at once, use:
+
+```bash
+agent-doc skill install --all
+```
+
+After installing into an already-running OpenCode session, restart the OpenCode session so it reloads the new `.opencode` skill files.
+<!-- agent:boundary:af47208e -->
 <!-- /agent:exchange -->
 ###
 

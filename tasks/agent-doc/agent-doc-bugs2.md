@@ -36,7 +36,31 @@ Active backlog:
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - 1 more active item(s)
-<!-- agent:boundary:f0ed3395 -->
+❯ do [#emptyrsprepair]. spec-test-build-install-commit-push
+### Re: empty response repair dispatch — gpt-5
+
+Implemented `#emptyrsprepair`.
+
+`agent-doc run` now rechecks the diff after its pre-commit repair step. If that repair proves the original diff was only an already-committed missed patchback and no prompt-bearing work remains, `run` fails before child-agent dispatch and points the operator to `agent-doc write --commit <FILE>`.
+
+Updated coverage and docs:
+
+- Added `run_stops_before_child_dispatch_when_precommit_consumes_stale_repair_diff` to prove the configured child agent is not invoked.
+- Updated `SPEC.md`, `specs/07-core-commands.md`, `README.md`, `CLAUDE.md`, `SKILL.md`, and `VERSIONS.md`.
+- Refreshed generated managed instruction mirrors.
+
+Verification:
+
+- `cargo test --manifest-path src/agent-doc/Cargo.toml run_stops_before_child_dispatch_when_precommit_consumes_stale_repair_diff -- --nocapture`
+- `make check` in `src/agent-doc` (rerun after final docs/skill edits)
+- `make install` in `src/agent-doc` (rerun after final docs/skill edits)
+- `cargo run --quiet --manifest-path src/agent-doc/Cargo.toml -- audit-docs`
+
+Commits / push:
+
+- `src/agent-doc`: `d759d4b fix: stop empty repair run dispatch`, pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `255e426f0 chore: refresh agent-doc repair instructions`, pushed to `origin/main`
+<!-- agent:boundary:23624aca -->
 <!-- /agent:exchange -->
 ###
 
@@ -54,7 +78,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#emptyrsprepair] Fix empty-response missed-patchback repair: already-committed/no-body recovery must stop before child-agent dispatch and point to write --commit. Plan: tasks/agent-doc/plan-empty-response-repair-write.md
+- [ ] [#pbdupchurn] Stop duplicate response patchback two-commit cleanup churn: duplicate blocks must be rejected or deduped before the closeout commit, and successful closeout must not require follow-up dedupe/snapshot/parent-pointer repair. Plan: tasks/agent-doc/plan-duplicate-patchback-dedupe-churn.md
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
@@ -138,4 +162,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#projecthostscope] Prevent cross-project host/SSH target leakage in agent-doc managed Codex sessions: route/tool context should not let globally approved commands or unrelated SSH profiles make an agent infer that an unrelated client host, such as monsterrodholders-server, is the production host for a different project; require project-local docs/frontmatter/runbook evidence or an explicit user directive before using a named remote host in answers or checks.
 - 2026-05-10 [#partialpatchbackadopt] [recommended] Fix session-check/write recovery for agent-doc-owned partial patchbacks: when a prior agent-doc/Codex write path leaves an assistant heading/body visible outside the committed snapshot, classify it as an interrupted/adoptable agent-doc write instead of only direct response patchback, and make empty-stdin recovery point to the correct repair/adoption path.
 - 2026-05-10 [#partialpatchbackadopt2] [recommended] Re-open session-check/write recovery for current src/session-share/tasks/root.md evidence: commit blocked on visible '### Re: livekit agent readiness - gpt-5' after zero-patch/IPC write state, then empty-stdin write --commit could not adopt the agent-doc-owned visible response and only reported direct response patchback.
+- 2026-05-10 [#emptyrsprepair] Fix empty-response missed-patchback repair: already-committed/no-body recovery must stop before child-agent dispatch and point to write --commit. Plan: tasks/agent-doc/plan-empty-response-repair-write.md
 <!-- /agent:done -->

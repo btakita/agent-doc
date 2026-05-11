@@ -34,13 +34,44 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): syncbudgetstill
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:4769ede6 -->
+❯ do [#bugchainorder]. spec-test-build-install-commit-push
+❯ ---
+❯ The agent:boundary should not create a git commit to prevent a noisy git history. Please assess logs for unnecessary git commits and remove from the process. #next-steps
+### Re: bugchainorder + boundary commits — gpt-5
+
+Implemented `#bugchainorder` in `src/agent-doc` and closed it as done.
+
+What changed:
+- `prompt_contract` now extracts ordered `#agent-doc-bug` issue units from prompt-bearing changes, including declaration chains separated by `---` and top-level numbered/bulleted issue lists.
+- `plan` now emits one expected add mutation per ordered issue unit for explicit backlog targets, and logs declaration order plus final insertion order for multi-item batches.
+- The standalone `agent-doc boundary` command no longer updates the saved snapshot. It still writes the transient marker and signals the editor, but marker-only setup can no longer become the snapshot basis for a later boundary-only git commit.
+- Updated `SPEC.md`, `VERSIONS.md`, `specs/pending-system.md`, and `specs/07-core-commands.md` for the declaration-order and boundary no-commit contracts.
+
+Log/history assessment for the boundary note:
+- Current code did not call `git commit` directly from `agent-doc boundary`, but it did save the marker-updated document into the snapshot. That allowed the next preflight/commit boundary to see a snapshot ahead of `HEAD` and create noisy marker-only commits.
+- The local history includes boundary-churn evidence such as parent commit `910d2ba80` (`Update session-share submodule pointer (boundary reposition commits)`) and prior agent-doc boundary cleanup commits. The fix removes the stale snapshot handoff that made standalone boundary setup commit-eligible.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml ordered_issue_units -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml plan_preserves_agent_doc_bug_declaration_order_for_target_adds -- --nocapture`
+- `cargo test --manifest-path src/agent-doc/Cargo.toml run_does_not_advance_snapshot_with_marker_only_churn -- --nocapture`
+- `make check`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release`
+- `cargo install --path src/agent-doc --force`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml --release --lib`
+- `agent-doc lib-install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Published:
+- `src/agent-doc` `6b4cb92` (`fix: preserve agent-doc bug declaration order`) pushed to `origin/20260422/codex-agent-backend`.
+- parent `agent-loop` `593d82590` (`chore: update agent-doc submodule`) pushed to `origin/main`.
+
+No new follow-up backlog item came out of this fix.
+<!-- agent:boundary:957ec973 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-The agent:boundary should not create a git commit to prevent a noisy git history. Please assess logs for unnecessary git commits and remove from the process. #next-steps
----
 minor (v0.34.0) release + publish. merge into main
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
@@ -54,7 +85,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -143,4 +173,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#assistanttailprompt] #agent-doc-bug: session-check can misclassify assistant-owned closeout/status prose at the end of a template exchange response as an unresolved prompt-only tail, forcing a second 'Closeout repair:' patchback after a successful response commit. Plan: tasks/agent-doc/plan-session-check-assistant-tail-misclassified.md
 - 2026-05-11 [#wvpf] [recommended] Fix Codex hook tests so parallel make check cannot race on shared /tmp/.agent-doc/codex-hooks session cleanup; the default make check run failed once when stop_auto_closes_patch_payload_with_safe_leading_commentary tried to remove an already-missing session file, while the isolated test and serial make check passed.
 - 2026-05-11 [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
+- 2026-05-11 [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
 <!-- /agent:done -->

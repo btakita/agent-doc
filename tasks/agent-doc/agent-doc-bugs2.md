@@ -35,14 +35,37 @@ Active backlog:
 - [ ] [#assistanttailprompt] #agent-doc-bug: session-check can misclassify assistant-owned closeout/status prose at the end of a template exchange response as an unresolved prompt-only tail, forcing a second 'Closeout repair:' patchback after a successful response commit. Plan: tasks/agent-doc/plan-session-check-assistant-tail-misclassified.md
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
-<!-- agent:boundary:14c74278 -->
+❯ do [#assistanttailprompt]. spec-test-build-install-commit-push
+❯ ---
+❯ In compact exchange command, remove inclusion of `Active backlog:` section, which duplicates content in agent:backlog. Instead, render a summary digest of the compacted content.
+❯ #next-steps
+### Re: #assistanttailprompt and compact exchange summary — gpt-5
+
+Implemented and pushed.
+
+- `src/agent-doc/src/session_check.rs` now preserves assistant-response ownership after `### Re:` headings until a real user prompt marker or structural boundary, so assistant closeout/status prose is not misread as an unresolved prompt-only tail.
+- `src/agent-doc/src/compact.rs` now builds default exchange compaction summaries from the archived exchange content itself, and no longer duplicates `agent:backlog`, `agent:queue`, or `agent:icebox` content into `agent:exchange`.
+- `src/agent-doc/specs/07-closeout-commands.md` documents the new compact-summary contract.
+
+Verification:
+- `cargo test prompt_only_exchange_tail -- --test-threads=2`
+- `cargo test exchange_compact_default_summary_includes_archived_content_digest -- --test-threads=2`
+- `make check` exposed an existing parallel cleanup race in `codex_hook::tests::stop_auto_closes_patch_payload_with_safe_leading_commentary`
+- `cargo test codex_hook::tests::stop_auto_closes_patch_payload_with_safe_leading_commentary -- --test-threads=1`
+- `make check TEST_THREADS=1`
+- `cargo clippy -- -D warnings`
+- `make install`
+
+Pushed commits:
+- `src/agent-doc`: `efc193d` (`fix: tighten exchange closeout classification`)
+- parent `agent-loop`: `7e6060621` (`chore: update agent-doc submodule`)
+
+I added one recommended follow-up backlog item for the parallel Codex hook test cleanup race. No additional implementation follow-up is needed for the requested fixes.
+<!-- agent:boundary:35d80b03 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
-In compact exchange command, remove inclusion of `Active backlog:` section, which duplicates content in agent:backlog. Instead, render a summary digest of the compacted content.
-#next-steps
----
 minor (v0.34.0) release + publish. merge into main
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
@@ -56,7 +79,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#assistanttailprompt] #agent-doc-bug: session-check can misclassify assistant-owned closeout/status prose at the end of a template exchange response as an unresolved prompt-only tail, forcing a second 'Closeout repair:' patchback after a successful response commit. Plan: tasks/agent-doc/plan-session-check-assistant-tail-misclassified.md
+- [ ] [#wvpf] [recommended] Fix Codex hook tests so parallel make check cannot race on shared /tmp/.agent-doc/codex-hooks session cleanup; the default make check run failed once when stop_auto_closes_patch_payload_with_safe_leading_commentary tried to remove an already-missing session file, while the isolated test and serial make check passed.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
 <!-- /agent:backlog -->
@@ -144,4 +167,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#bugtargetroot] `#agent-doc-bug` target resolves to nested session-share backlog instead of parent agent-loop backlog when session docs live under `src/session-share`; resolve preset backlog targets against the intended project root and fail closed on ambiguous mirrored task trees. Plan: tasks/agent-doc/plan-agent-doc-bug-target-resolution.md
 - 2026-05-11 [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - 2026-05-11 [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
+- 2026-05-11 [#assistanttailprompt] #agent-doc-bug: session-check can misclassify assistant-owned closeout/status prose at the end of a template exchange response as an unresolved prompt-only tail, forcing a second 'Closeout repair:' patchback after a successful response commit. Plan: tasks/agent-doc/plan-session-check-assistant-tail-misclassified.md
 <!-- /agent:done -->

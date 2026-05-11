@@ -119,8 +119,11 @@ Later phases may refine caller values without changing the field names.
   into an actor-owned pane, route records a controller `dispatch` attempt for
   the current session id, pane id, generation, and command kind. Stale
   session/pane/generation requests fail closed before pane input is submitted,
-  while accepted dispatches record the stage (`ready`, `starting_queue`,
-  `busy_queue`, or `waiting_input_recovery`) in `dispatch_attempts`.
+  while accepted dispatches record the stage (`ready`, `busy_queue`, or
+  `waiting_input_recovery`) in `dispatch_attempts`. A `starting` actor is not a
+  dispatch stage: route must wait for it to report `ready`, then fail closed if
+  it remains `starting` instead of sending tmux or supervisor input into the
+  startup window.
 - The phase-5 sync/focus path also consumes that authoritative actor binding
   through the controller when the actor pane is still alive: sync
   rescues/reconciles layout around the actor-owned pane and focus selects it

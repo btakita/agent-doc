@@ -2368,6 +2368,52 @@ fn dispatch_only_can_use_degraded_authoritative_actor(
     registered == Some(pane) || live_owner == Some(pane)
 }
 
+fn wait_for_authoritative_actor_ready(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+    initial: &AuthoritativeActorDispatchTarget,
+) -> Result<Option<AuthoritativeActorDispatchTarget>> {
+    let deadline = Instant::now() + dispatch_only_starting_pane_recovery_timeout();
+    let poll = Duration::from_millis(100);
+    let mut last_state = initial.actor_state();
+    let mut last_generation = initial.record.generation;
+    let mut last_pane = initial.record.pane_id.clone();
+
+    while Instant::now() < deadline {
+        if let Some(refreshed) = load_authoritative_actor_binding(
+            tmux, file, session_id, file_path, harness, false, false,
+        )? {
+            let refreshed_state = refreshed.actor_state();
+            last_state = refreshed_state;
+            last_generation = refreshed.record.generation;
+            last_pane = refreshed.record.pane_id.clone();
+            if refreshed_state == crate::session_actor::ActorState::Ready
+                && authoritative_actor_dispatch_target_eligible(&refreshed)
+            {
+                return Ok(Some(refreshed));
+            }
+        }
+        std::thread::sleep(poll);
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "route_authoritative_actor_starting_not_ready file={} pane={} harness={} generation={} actor_state={} timeout_ms={}",
+            file.display(),
+            last_pane,
+            harness.binary,
+            last_generation,
+            last_state.as_str(),
+            dispatch_only_starting_pane_recovery_timeout().as_millis()
+        ),
+    );
+    Ok(None)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn route_via_authoritative_actor(
     tmux: &Tmux,
@@ -2385,50 +2431,32 @@ fn route_via_authoritative_actor(
     let mut actor = actor;
     let mut dispatch_pane = actor.record.pane_id.clone();
     let mut actor_state = actor.actor_state();
-    if dispatch_only && actor_state == crate::session_actor::ActorState::Starting {
-        match load_authoritative_actor_binding(
-            tmux, file, session_id, file_path, harness, false, false,
-        ) {
-            Ok(Some(refreshed)) => {
-                let refreshed_state = refreshed.actor_state();
-                if refreshed.record.generation != actor.record.generation
-                    || refreshed.record.pane_id != actor.record.pane_id
-                    || refreshed_state != actor_state
-                {
-                    crate::ops_log::log_op(
-                        file,
-                        &format!(
-                            "route_dispatch_only_starting_actor_refreshed file={} old_pane={} new_pane={} harness={} old_generation={} new_generation={} old_state={} new_state={}",
-                            file.display(),
-                            actor.record.pane_id,
-                            refreshed.record.pane_id,
-                            harness.binary,
-                            actor.record.generation,
-                            refreshed.record.generation,
-                            actor_state.as_str(),
-                            refreshed_state.as_str()
-                        ),
-                    );
-                    actor = refreshed;
-                    dispatch_pane = actor.record.pane_id.clone();
-                    actor_state = actor.actor_state();
-                }
-            }
-            Ok(None) => {}
-            Err(err) => {
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "route_dispatch_only_starting_actor_refresh_failed file={} pane={} harness={} generation={} err={}",
-                        file.display(),
-                        actor.record.pane_id,
-                        harness.binary,
-                        actor.record.generation,
-                        err
-                    ),
-                );
-            }
+    if actor_state == crate::session_actor::ActorState::Starting
+        && let Some(refreshed) =
+            wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
+    {
+        if refreshed.record.generation != actor.record.generation
+            || refreshed.record.pane_id != actor.record.pane_id
+            || refreshed.actor_state() != actor_state
+        {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_authoritative_actor_starting_refreshed_ready file={} old_pane={} new_pane={} harness={} old_generation={} new_generation={} old_state={} new_state={}",
+                    file.display(),
+                    actor.record.pane_id,
+                    refreshed.record.pane_id,
+                    harness.binary,
+                    actor.record.generation,
+                    refreshed.record.generation,
+                    actor_state.as_str(),
+                    refreshed.actor_state().as_str()
+                ),
+            );
         }
+        actor = refreshed;
+        dispatch_pane = actor.record.pane_id.clone();
+        actor_state = actor.actor_state();
     }
 
     if lookup_dispatch_registration(file_path, session_id)?.as_deref()
@@ -2460,46 +2488,6 @@ fn route_via_authoritative_actor(
             eprintln!(
                 "[route] warning: failed to focus pane {}: {}",
                 dispatch_pane, e
-            );
-        }
-        if dispatch_only && actor_state == crate::session_actor::ActorState::Starting {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "route_dispatch_only_starting_actor_direct_pane_submit file={} pane={} harness={} generation={} actor_state={}",
-                    file.display(),
-                    dispatch_pane,
-                    harness.binary,
-                    actor.record.generation,
-                    actor_state.as_str()
-                ),
-            );
-            eprintln!(
-                "[route] authoritative actor generation {} for {} still reports starting on pane {} — keeping dispatch-only reroutes on the live pane submit path",
-                actor.record.generation,
-                file.display(),
-                dispatch_pane
-            );
-            let _authorization = authorize_controller_dispatch(
-                file,
-                session_id,
-                file_path,
-                &actor,
-                "dispatch_only_reopen",
-                &format!(
-                    "submit=direct_pane actor_state={} harness={}",
-                    actor_state.as_str(),
-                    harness.binary
-                ),
-            )?;
-            return dispatch_only_send_reopen(
-                tmux,
-                file,
-                session_id,
-                &dispatch_pane,
-                file_path,
-                harness,
-                DispatchOnlyReopenDelivery::DirectPaneSubmit,
             );
         }
         if prompt_bearing_marker.is_none() {
@@ -4354,10 +4342,7 @@ fn authoritative_actor_dispatch_blocker_reason(
 fn authoritative_actor_dispatch_can_queue_optimistically(
     state: crate::session_actor::ActorState,
 ) -> bool {
-    matches!(
-        state,
-        crate::session_actor::ActorState::Starting | crate::session_actor::ActorState::Busy
-    )
+    state == crate::session_actor::ActorState::Busy
 }
 
 fn authoritative_actor_dispatch_waiting_input_recoverable(
@@ -6655,6 +6640,22 @@ mod tests {
 
     fn test_cwd() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    #[test]
+    fn authoritative_actor_optimistic_queue_excludes_starting_state() {
+        assert!(
+            authoritative_actor_dispatch_can_queue_optimistically(
+                crate::session_actor::ActorState::Busy
+            ),
+            "busy actors may still accept a supervisor-owned queued reopen"
+        );
+        assert!(
+            !authoritative_actor_dispatch_can_queue_optimistically(
+                crate::session_actor::ActorState::Starting
+            ),
+            "starting actors must become ready before route submits a reopen"
+        );
     }
 
     fn test_registry_entry(
@@ -11540,6 +11541,7 @@ Body\n\
         use std::sync::{Arc, Mutex};
 
         for (actor_state, reason) in [
+            ("starting", "the authoritative actor is still starting"),
             ("blocked", "the authoritative actor is blocked"),
             ("closed", "the authoritative actor is closed"),
         ] {
@@ -11818,7 +11820,7 @@ Body\n\
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_or_create_pane_dispatches_starting_authoritative_actor_when_prompt_target_pending() {
+    fn route_waits_for_starting_authoritative_actor_ready_before_dispatch() {
         use std::sync::{Arc, Mutex};
 
         let dir = tempfile::tempdir().unwrap();
@@ -11857,7 +11859,14 @@ Body\n\
 
         let injects = Arc::new(Mutex::new(Vec::<String>::new()));
         let injects_for_ipc = injects.clone();
+        let ready_at = Instant::now() + Duration::from_millis(150);
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State if Instant::now() >= ready_at => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "ready",
+                "restart_count": 0
+            })),
             IpcMethod::State => IpcResponse::ok(serde_json::json!({
                 "running": true,
                 "state": "healthy",
@@ -11905,7 +11914,7 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect("route should optimistically queue a starting authoritative actor");
+        .expect("route should wait for a starting authoritative actor to report ready before dispatching");
         assert_eq!(resolved, actor_pane);
 
         let trigger =
@@ -11921,8 +11930,7 @@ Body\n\
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_or_create_pane_dispatch_only_keeps_starting_authoritative_actor_on_direct_pane_submit()
-     {
+    fn route_dispatch_only_fails_closed_for_starting_authoritative_actor_without_ready_state() {
         use std::sync::{Arc, Mutex};
 
         let dir = tempfile::tempdir().unwrap();
@@ -11942,9 +11950,14 @@ Body\n\
         send_keys_with_retry(
             &iso,
             &actor_pane,
-            r#"exec /bin/sh -c 'printf "> \n"; read CMD; printf "ACTOR:%s\n" "$CMD"; cat'"#,
+            r#"exec /bin/sh -c 'printf "BOOTING\n"; cat'"#,
         );
-        let _ = wait_for_pane_contains(&iso, &actor_pane, "> ", std::time::Duration::from_secs(3));
+        let _ = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            "BOOTING",
+            std::time::Duration::from_secs(3),
+        );
 
         let doc = dir
             .path()
@@ -11991,7 +12004,7 @@ Body\n\
         })
         .unwrap();
 
-        let resolved = resolve_or_create_pane_dispatch_only(
+        let err = resolve_or_create_pane_dispatch_only(
             &iso,
             &doc,
             None,
@@ -12002,22 +12015,23 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect("dispatch-only reroute should stay on the live authoritative pane even while actor state is starting");
-        assert_eq!(resolved, actor_pane);
+        .expect_err(
+            "dispatch-only reroute must fail closed while the authoritative actor remains starting",
+        );
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("the authoritative actor is still starting"),
+            "starting actor failure should explain the state gate: {message}"
+        );
         assert!(
             injects.lock().unwrap().is_empty(),
-            "dispatch-only authoritative reroute should not queue through supervisor IPC when the live pane is already ready"
+            "dispatch-only authoritative reroute must not queue through supervisor IPC while the actor is starting"
         );
 
-        let actor_after = wait_for_pane_contains(
-            &iso,
-            &actor_pane,
-            &HarnessConfig::codex().trigger_command(&file_path),
-            std::time::Duration::from_secs(3),
-        );
+        let actor_after = sessions::capture_pane(&iso, &actor_pane).unwrap_or_default();
         assert!(
-            actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
-            "dispatch-only authoritative reroute should submit through the live pane path: {actor_after}"
+            !actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
+            "dispatch-only authoritative reroute must not submit through the live pane path while still starting: {actor_after}"
         );
 
         ipc.stop();

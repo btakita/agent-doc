@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Implemented Codex capability proof timing diagnostics.
+Recorded Codex capability proof verification.
 <!-- /agent:status -->
 
 ## Exchange
@@ -119,7 +119,13 @@ Verification/build/install:
 Commits prepared:
 - `src/agent-doc`: `368004f fix: replay guard-prefixed blocked-stop patches`
 - parent repo: `89999a27f agent-doc: update blocked-stop replay guard`
-<!-- agent:boundary:54feb694 -->
+❯ I verified [#capproofverify] by restarting the Supervisor with Codex on monsterrodholders.md
+### Re: #capproofverify — gpt-5
+
+Recorded the fresh managed Codex restart verification for `#capproofverify`. That closes the async capability-proof verification follow-up: the proof had been split from pane startup, and your Supervisor restart on `monsterrodholders.md` gives the session a live post-fix sample.
+
+No repo code changed in this cycle; this was a verification-record and backlog-closeout pass.
+<!-- agent:boundary:54925de1 -->
 <!-- /agent:exchange -->
 ###
 
@@ -137,7 +143,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#capproofverify] [recommended] Verify async Codex capability proof on a fresh managed restart: last logged network_child proof cost was about 10.1s, and there is no post-275e82b live proof sample yet showing pane render is decoupled from proof latency.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -214,4 +219,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#sidecarfallbackstill] Fix recurring sidecar prefix-divergence fallback after the latest prefix-body and duplicate-closeout fixes: ops.log still shows sidecar_normalization_fallback reason=prefix_divergence on clean agent-doc-bugs2 closeouts, so tighten snapshot/ack normalization until fallback is exceptional again.
 - 2026-05-10 [#autogcstart] Ensure stale starting actor cleanup runs in the normal preflight/start/sync path: session-actors.json still has old starting projections for agent-doc-bugs.md, agent-doc-bugs4.md, and interior-design after 6147f99, so auto-gc or route-time reconciliation is still incomplete.
 - 2026-05-10 [#blockedstopextract] Fix blocked-stop repair for transcript-wrapped patch responses: current codex-hooks/blocked-stop and repair-blocked payloads contain valid patch blocks but are rejected for extra transcript content, so extract the patch or fail with a precise recoverable instruction.
+- 2026-05-10 [#capproofverify] [recommended] Verify async Codex capability proof on a fresh managed restart: last logged network_child proof cost was about 10.1s, and there is no post-275e82b live proof sample yet showing pane render is decoupled from proof latency.
 <!-- /agent:done -->

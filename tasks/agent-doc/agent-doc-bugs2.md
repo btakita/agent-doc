@@ -36,7 +36,27 @@ Active backlog:
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - 1 more active item(s)
-<!-- agent:boundary:2400a50a -->
+❯ do [#pbdupchurn]. spec-test-build-install-commit-push
+### Re: #pbdupchurn — gpt-5
+
+Implemented the duplicate patchback closeout guard.
+
+Changes:
+- IPC sidecar success now dedupes adjacent duplicate `### Re:` response blocks before saving the snapshot, and repairs disk/editor state from that same deduped content when needed.
+- The commit path now dedupes the exact snapshot blob inside the commit lock before staging, and repairs matching working-tree duplicates before the first closeout commit.
+- Updated the closeout spec and added a regression proving duplicate snapshots are deduped before staging, producing one closeout commit instead of a follow-up cleanup commit.
+
+Verification:
+- `cargo test commit_dedupes_duplicate_response_snapshot_before_staging`
+- `cargo test normalize_final_template_content_removes_adjacent_duplicate_response_blocks`
+- `make check`
+- `make build`
+- `make install`
+
+Commits:
+- `85da5cd` in `src/agent-doc`: `fix: dedupe response patchbacks before commit`
+- `5d0dc4a58` in parent repo: `chore: update agent-doc submodule`
+<!-- agent:boundary:5f2dcd25 -->
 <!-- /agent:exchange -->
 ###
 
@@ -54,7 +74,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pbdupchurn] Stop duplicate response patchback two-commit cleanup churn: duplicate blocks must be rejected or deduped before the closeout commit, and successful closeout must not require follow-up dedupe/snapshot/parent-pointer repair. Plan: tasks/agent-doc/plan-duplicate-patchback-dedupe-churn.md
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
@@ -139,4 +158,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#partialpatchbackadopt] [recommended] Fix session-check/write recovery for agent-doc-owned partial patchbacks: when a prior agent-doc/Codex write path leaves an assistant heading/body visible outside the committed snapshot, classify it as an interrupted/adoptable agent-doc write instead of only direct response patchback, and make empty-stdin recovery point to the correct repair/adoption path.
 - 2026-05-10 [#partialpatchbackadopt2] [recommended] Re-open session-check/write recovery for current src/session-share/tasks/root.md evidence: commit blocked on visible '### Re: livekit agent readiness - gpt-5' after zero-patch/IPC write state, then empty-stdin write --commit could not adopt the agent-doc-owned visible response and only reported direct response patchback.
 - 2026-05-10 [#emptyrsprepair] Fix empty-response missed-patchback repair: already-committed/no-body recovery must stop before child-agent dispatch and point to write --commit. Plan: tasks/agent-doc/plan-empty-response-repair-write.md
+- 2026-05-10 [#pbdupchurn] Stop duplicate response patchback two-commit cleanup churn: duplicate blocks must be rejected or deduped before the closeout commit, and successful closeout must not require follow-up dedupe/snapshot/parent-pointer repair. Plan: tasks/agent-doc/plan-duplicate-patchback-dedupe-churn.md
 <!-- /agent:done -->

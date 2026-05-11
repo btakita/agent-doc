@@ -699,6 +699,50 @@ pub(crate) fn ensure_no_new_leading_custom_id_prefix(
     }
 }
 
+fn extract_inline_tag_id(text: &str) -> Option<(String, String)> {
+    let mut search_from = 0;
+    while search_from < text.len() {
+        let remaining = &text[search_from..];
+        let pos = match remaining.find("[#") {
+            Some(p) => p,
+            None => break,
+        };
+        let abs_pos = search_from + pos;
+        let after_open = match text.get(abs_pos + 2..) {
+            Some(s) => s,
+            None => {
+                search_from = abs_pos + 2;
+                continue;
+            }
+        };
+        let close = match after_open.find(']') {
+            Some(c) => c,
+            None => {
+                search_from = abs_pos + 2;
+                continue;
+            }
+        };
+        let raw_id = &after_open[..close];
+        if !raw_id.is_empty() && is_valid_pending_id(raw_id) {
+            let tag_end = abs_pos + 2 + close + 1;
+            let before = text[..abs_pos].trim_end();
+            let after = text[tag_end..].trim_start();
+            let new_text = if before.is_empty() {
+                after.to_string()
+            } else if after.is_empty() {
+                before.to_string()
+            } else {
+                format!("{} {}", before, after)
+            };
+            if !new_text.is_empty() {
+                return Some((raw_id.to_lowercase(), new_text));
+            }
+        }
+        search_from = abs_pos + 2;
+    }
+    None
+}
+
 fn custom_id_error(raw_id: &str) -> anyhow::Error {
     anyhow!(
         "pending add: invalid custom id `{}` — ids must be non-empty ASCII alphanumeric strings (hyphen allowed)",
@@ -1506,7 +1550,7 @@ pub fn detect_reorder(snapshot_body: &str, current_body: &str) -> Option<Vec<Str
 /// Returns `(new_body, assigned_id)`.
 pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(String, String)> {
     let (custom_id, text) = parse_custom_id_prefix(text)?;
-    let text = text.trim();
+    let mut text = text.trim().to_string();
     if text.is_empty() {
         bail!("pending add: text must be non-empty");
     }
@@ -1519,6 +1563,15 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
             "pending add: text must not start with a state marker ([ ], [/], [x]); use --pending-add-gated for gated items"
         );
     }
+
+    let mut inline_custom_id = None;
+    if custom_id.is_none()
+        && let Some((tag_id, cleaned)) = extract_inline_tag_id(&text)
+    {
+        inline_custom_id = Some(tag_id);
+        text = cleaned;
+    }
+
     let mut layout = PendingLayout::parse(body);
     let items = layout.items();
 
@@ -1538,8 +1591,13 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
             bail!("pending add: custom id already exists: {}", custom_id);
         }
         custom_id
+    } else if let Some(inline_id) = inline_custom_id {
+        if taken.contains(&inline_id) {
+            bail!("pending add: inline tag id already exists: {}", inline_id);
+        }
+        inline_id
     } else {
-        assign_unique_hash(text, doc_id, &taken)
+        assign_unique_hash(&text, doc_id, &taken)
     };
     taken.insert(id.clone());
 
@@ -1552,7 +1610,7 @@ pub fn op_add(body: &str, text: &str, doc_id: &str, gated: bool) -> Result<(Stri
             PendingState::Open
         },
         gate_type: None,
-        text: text.to_string(),
+        text,
         continuation: String::new(),
     });
     Ok((layout.render(), id))
@@ -2517,6 +2575,101 @@ mod tests {
         let (body2, id2) = op_add(&body, "task two", DOC_ID, false).unwrap();
         assert_ne!(id1, id2);
         assert!(body2.contains(&format!("[#{}]", id2)));
+    }
+
+    #[test]
+    fn op_add_extracts_inline_tag_as_id() {
+        let (new_body, id) = op_add(
+            "",
+            "2026-05-11 [#nopatchbackopencode] OpenCode agent-doc turn completed",
+            DOC_ID,
+            false,
+        )
+        .unwrap();
+        assert_eq!(id, "nopatchbackopencode");
+        assert!(
+            new_body.contains("- [ ] [#nopatchbackopencode] 2026-05-11 OpenCode agent-doc turn completed"),
+            "got: {}",
+            new_body
+        );
+    }
+
+    #[test]
+    fn op_add_inline_tag_strips_from_text() {
+        let (new_body, id) = op_add("", "fix [#mybug] the thing", DOC_ID, false).unwrap();
+        assert_eq!(id, "mybug");
+        assert!(
+            new_body.contains("- [ ] [#mybug] fix the thing"),
+            "got: {}",
+            new_body
+        );
+    }
+
+    #[test]
+    fn op_add_inline_tag_at_end() {
+        let (new_body, id) = op_add("", "deploy the thing [#deploy1]", DOC_ID, false).unwrap();
+        assert_eq!(id, "deploy1");
+        assert!(
+            new_body.contains("- [ ] [#deploy1] deploy the thing"),
+            "got: {}",
+            new_body
+        );
+    }
+
+    #[test]
+    fn op_add_inline_tag_dedup_uses_cleaned_text() {
+        let (body, _) = op_add("", "fix [#mybug] the thing", DOC_ID, false).unwrap();
+        let err = op_add(&body, "fix [#mybug] the thing", DOC_ID, false).unwrap_err();
+        assert!(
+            format!("{}", err).contains("duplicate"),
+            "expected duplicate error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn op_add_inline_tag_rejects_existing_id() {
+        let body = "- [ ] [#mybug] existing task\n";
+        let err = op_add(body, "fix [#mybug] new task", DOC_ID, false).unwrap_err();
+        assert!(
+            format!("{}", err).contains("inline tag id already exists"),
+            "expected inline tag id already exists, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn op_add_inline_tag_ignores_invalid_tag() {
+        let (new_body, id) = op_add(
+            "",
+            "see [#not-a-valid tag] because spaces",
+            DOC_ID,
+            false,
+        )
+        .unwrap();
+        assert_ne!(id, "not-a-valid");
+        assert!(
+            new_body.contains("see [#not-a-valid tag] because spaces"),
+            "got: {}",
+            new_body
+        );
+    }
+
+    #[test]
+    fn op_add_leading_prefix_takes_precedence_over_inline() {
+        let (new_body, id) = op_add(
+            "",
+            "[#myid] text with [#other] inline",
+            DOC_ID,
+            false,
+        )
+        .unwrap();
+        assert_eq!(id, "myid");
+        assert!(
+            new_body.contains("- [ ] [#myid] text with [#other] inline"),
+            "got: {}",
+            new_body
+        );
     }
 
     #[test]

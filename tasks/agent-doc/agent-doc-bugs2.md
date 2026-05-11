@@ -36,11 +36,36 @@ Active backlog:
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - 1 more active item(s)
-<!-- agent:boundary:81cc6cca -->
+❯ do [#startgcleak]. spec-test-build-install-commit-push
+### Re: stale starting actor cleanup — gpt-5
+
+Implemented `#startgcleak` in `src/agent-doc`.
+
+The cleanup gap was that `close_stale_starting_actors_for_caller` treated any live recorded supervisor PID as proof forever, even when the supervisor lease heartbeat was many hours old. I changed the proof rule so one-hour-old `starting` actors are kept only when the recorded supervisor PID is alive and the lease heartbeat is still fresh; a live but non-heartbeating `agent-doc start --route-owned` process is now treated as stuck startup state and closed by normal maintenance.
+
+Updated specs/docs/changelog in `CLAUDE.md`, `README.md`, `SPEC.md`, `VERSIONS.md`, `specs/07-core-commands.md`, and `specs/08a-session-actor-contract.md`. Added a regression for the live-PID/stale-heartbeat case in `src/project_controller.rs`.
+
+Verification:
+- `cargo test stale_starting_actor`
+- `make check`
+- `make install`
+- `agent-doc gc --dry-run` showed the two stale actors as closable with the installed binary
+- `agent-doc sync --no-autostart --focus /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` closed both stale `starting` records through the normal sync path
+- `jq` and SQLite checks now show no remaining `state=starting` actor records
+
+Committed and pushed:
+- `src/agent-doc` branch `20260422/codex-agent-backend`: `68ee689 fix: expire stuck starting actors`
+- parent `agent-loop` `main`: `b73a1c3a8 chore: update agent-doc submodule`
+
+Existing unrelated parent worktree changes remain untouched.
+<!-- agent:boundary:19b44d85 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+In compact exchange command, remove inclusion of `Active backlog:` section, which duplicates content in agent:backlog. Instead, render a summary digest of the compacted content.
+#next-steps
+---
 minor (v0.34.0) release + publish. merge into main
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
@@ -54,7 +79,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
@@ -141,4 +165,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#emptyrsprepair] Fix empty-response missed-patchback repair: already-committed/no-body recovery must stop before child-agent dispatch and point to write --commit. Plan: tasks/agent-doc/plan-empty-response-repair-write.md
 - 2026-05-10 [#pbdupchurn] Stop duplicate response patchback two-commit cleanup churn: duplicate blocks must be rejected or deduped before the closeout commit, and successful closeout must not require follow-up dedupe/snapshot/parent-pointer repair. Plan: tasks/agent-doc/plan-duplicate-patchback-dedupe-churn.md
 - 2026-05-10 [#bugtargetroot] `#agent-doc-bug` target resolves to nested session-share backlog instead of parent agent-loop backlog when session docs live under `src/session-share`; resolve preset backlog targets against the intended project root and fail closed on ambiguous mirrored task trees. Plan: tasks/agent-doc/plan-agent-doc-bug-target-resolution.md
+- 2026-05-11 [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 <!-- /agent:done -->

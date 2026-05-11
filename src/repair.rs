@@ -15,6 +15,9 @@
 //!   Template/CRDT documents always replay through the template write path
 //!   (`write::apply_template_from_string`) even when the captured response is raw text
 //!   without `<!-- patch:... -->` fences (for example `compact exchange` closeouts).
+//!   Template replay first passes through `replay_guard`; blocked transcript/full-document
+//!   payloads are captured under `.agent-doc/repair-blocked`, and sanitized replayable
+//!   payloads such as patch bodies extracted from leading commentary are what get written.
 //!   Non-template documents use plain append (`write::apply_append_from_string`).
 //!   Removes the pending file on successful write.
 //! - Empty pending files are cleaned up without triggering a write; `run` returns `RepairOutcome::Noop`.
@@ -1213,16 +1216,24 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
     let (fm, _) = frontmatter::parse(&doc_content)
         .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
     let use_template_write = fm.resolve_mode().is_template() || response.contains("<!-- patch:");
-    if use_template_write
-        && let crate::replay_guard::ReplayPayloadClassification::Blocked(reason) =
-            crate::replay_guard::classify_replay_payload(&response)
-    {
-        fail_closed_on_blocked_template_replay(file, &response, &reason)?;
-    }
-    if use_template_write {
-        write::apply_template_from_string(file, &response)?;
+    let response_to_write = if use_template_write {
+        match crate::replay_guard::classify_replay_payload(&response) {
+            crate::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+                fail_closed_on_blocked_template_replay(file, &response, &reason)?;
+                response.clone()
+            }
+            crate::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+                response.into_owned()
+            }
+            crate::replay_guard::ReplayPayloadClassification::Empty => response.clone(),
+        }
     } else {
-        write::apply_append_from_string(file, &response)?;
+        response.clone()
+    };
+    if use_template_write {
+        write::apply_template_from_string(file, &response_to_write)?;
+    } else {
+        write::apply_append_from_string(file, &response_to_write)?;
     }
 
     // Remove the pending file after successful write
@@ -2496,6 +2507,41 @@ mod tests {
         let blocked_payload = std::fs::read_to_string(captures[0].path()).unwrap();
         assert!(blocked_payload.contains("agent component markers"));
         assert!(blocked_payload.contains("response_body"));
+    }
+
+    #[test]
+    fn recover_replays_guard_prefixed_template_patch() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Hello\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let response = concat!(
+            "<!-- no-pending-capture -->\n",
+            "<!-- patch:exchange -->\n",
+            "### Re: topic — gpt-5\n",
+            "Recovered body.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        save_pending(&doc, response).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::ReplayedResponse);
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("### Re: topic — gpt-5"));
+        assert!(result.contains("Recovered body."));
+        assert!(
+            !dir.path().join(".agent-doc/repair-blocked").exists(),
+            "guard-prefixed patch payload should not be parked as blocked"
+        );
     }
 
     #[test]

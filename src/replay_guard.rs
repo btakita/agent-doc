@@ -12,6 +12,8 @@
 //!   malformed patch payloads.
 //! - Patch-bearing payloads are replayable only when `template::parse_patches`
 //!   returns at least one patch and at least one `patch:exchange` block.
+//! - Patch-bearing payloads may carry only known replay guard comments outside
+//!   patch blocks, such as `<!-- no-pending-capture -->`.
 //! - When a patch-bearing payload has unmatched text, replay is allowed only
 //!   for the narrow "plain progress commentary before the patch body" shape; in
 //!   that case the replayable payload is the extracted patch-only body.
@@ -31,6 +33,7 @@
 //! - `classify_blocks_prompt_lines`
 //! - `classify_blocks_multiple_response_headings`
 //! - `classify_blocks_patch_payload_with_unmatched_transcript`
+//! - `classify_patch_payload_with_leading_guard_marker_as_replayable`
 //! - `classify_patch_payload_with_safe_leading_commentary_extracts_patch_body`
 
 use std::borrow::Cow;
@@ -70,6 +73,28 @@ fn is_safe_leading_patch_commentary(prefix: &str) -> bool {
     }
 
     true
+}
+
+fn is_replay_guard_marker(line: &str) -> bool {
+    matches!(
+        line.trim(),
+        "<!-- no-pending-capture -->" | "<!-- no-pending-done-guard -->"
+    )
+}
+
+fn unmatched_is_only_replay_guard_markers(unmatched: &str) -> bool {
+    let mut saw_marker = false;
+    for line in unmatched.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if !is_replay_guard_marker(line) {
+            return false;
+        }
+        saw_marker = true;
+    }
+    saw_marker
 }
 
 pub(crate) fn classify_replay_payload(message: &str) -> ReplayPayloadClassification<'_> {
@@ -146,6 +171,9 @@ pub(crate) fn classify_replay_payload(message: &str) -> ReplayPayloadClassificat
                     );
                 }
                 if !unmatched.trim().is_empty() {
+                    if unmatched_is_only_replay_guard_markers(&unmatched) {
+                        return ReplayPayloadClassification::Replayable(Cow::Borrowed(trimmed));
+                    }
                     let first_patch = trimmed
                         .find("<!-- patch:")
                         .or_else(|| trimmed.find("<!-- replace:"));
@@ -272,6 +300,13 @@ mod tests {
         assert_blocked(
             "<!-- patch:exchange -->\n### Re: topic — gpt-5\nBody\n<!-- /patch:exchange -->\nextra transcript",
             "extra transcript content",
+        );
+    }
+
+    #[test]
+    fn classify_patch_payload_with_leading_guard_marker_as_replayable() {
+        assert_replayable(
+            "<!-- no-pending-capture -->\n<!-- patch:exchange -->\n### Re: topic — gpt-5\nBody\n<!-- /patch:exchange -->\n",
         );
     }
 

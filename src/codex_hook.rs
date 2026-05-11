@@ -1160,6 +1160,58 @@ agent-doc {}\n",
     }
 
     #[test]
+    fn stop_auto_closes_guard_prefixed_patch_payload() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let original = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, original).unwrap();
+        crate::snapshot::save(&doc, original).unwrap();
+        init_git_repo(dir.path(), &doc);
+        crate::cycle_state::start_preflight(&doc, Some(original), Some(original)).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let payload = concat!(
+            "<!-- no-pending-capture -->\n",
+            "<!-- patch:exchange -->\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Hook closeout body.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: payload.to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("### Re: Please reply — gpt-5"));
+        assert!(content.contains("Hook closeout body."));
+        assert!(
+            !dir.path()
+                .join(".agent-doc/codex-hooks/blocked-stop")
+                .exists(),
+            "guard-prefixed patch payload should not be captured as blocked"
+        );
+        match crate::session_check::inspect(&doc).unwrap() {
+            crate::session_check::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected committed session-check status, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn stop_auto_closes_partial_backlog_patch_against_structured_backlog() {
         let dir = setup_project();
         let doc = dir.path().join("task.md");

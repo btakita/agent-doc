@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Stale `starting` actor cleanup no longer trusts a live PID forever.** Normal `preflight`, `start`, `sync`, and `gc` cleanup now keep a one-hour-old `starting` actor only when the recorded supervisor PID is alive and its lease heartbeat is still fresh. A stuck `agent-doc start --route-owned` process with an old heartbeat is closed and projected from SQLite on the next normal cleanup pass. Added a regression for the live-PID/stale-heartbeat case and updated the session actor specs. This closes `#startgcleak` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Direct `agent-doc run` now stops when pre-commit repair consumes the whole diff.** If the initial diff only reflected an already-committed missed patchback and the pre-commit repair brings the snapshot back to `HEAD`, `run` rechecks the diff and fails before child-agent dispatch with an `agent-doc write --commit <FILE>` recovery hint. Added an integration regression proving a configured child agent is not invoked. This closes `#emptyrsprepair` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Agent-owned partial patchbacks can be adopted from empty strict repair writes.** `agent-doc repair` now adopts already-visible responses from interrupted `response_captured` / `write_applied` cycles even when no pending response artifact remains, and strict `write --commit` with empty stdin runs that adoption path before failing as an empty response. This closes `#partialpatchbackadopt` in `tasks/agent-doc/agent-doc-bugs2.md`.

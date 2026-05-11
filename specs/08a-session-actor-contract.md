@@ -140,10 +140,12 @@ Later phases may refine caller values without changing the field names.
   blocked/closed actor states, stale projections, and recent failed operator
   attempts are durable controller diagnostics that editor plugins can display
   without scraping tmux state.
-- `agent-doc gc`, plus normal `preflight`, `start`, and `sync` maintenance, may close a stale `starting` actor after one hour only when
-  there is no fresh supervisor heartbeat and no live supervisor PID for the same
-  document generation. The controller remains authoritative for that transition
-  and `session-actors.json` is re-emitted as a projection, not edited directly.
+- `agent-doc gc`, plus normal `preflight`, `start`, and `sync` maintenance,
+  may close a stale `starting` actor after one hour unless a live supervisor PID
+  still has a fresh heartbeat for the same document generation. A live PID with
+  a stale heartbeat is stuck startup state, not proof that boot is still making
+  progress. The controller remains authoritative for that transition and
+  `session-actors.json` is re-emitted as a projection, not edited directly.
 - The phase-7 repair boundary is now explicit: normal `sync` may capture
   diagnostics and fail closed on stash/window or closeout drift, but it does
   not run hidden layout rescue or closeout replay anymore. Those mutations live

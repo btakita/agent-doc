@@ -1113,8 +1113,10 @@ fn supervisor_lease_is_fresh_or_alive(
         .last_heartbeat
         .map(|timestamp| now.saturating_sub(timestamp) <= stale_after.as_secs())
         .unwrap_or(false);
-    let live_process = lease.supervisor_pid.map(process_is_alive).unwrap_or(false);
-    fresh_heartbeat || live_process
+    if !fresh_heartbeat {
+        return false;
+    }
+    lease.supervisor_pid.map(process_is_alive).unwrap_or(false)
 }
 
 pub fn close_stale_starting_actors_for_caller(
@@ -3698,6 +3700,61 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(updated.state, crate::session_actor::ActorState::Starting);
+    }
+
+    #[test]
+    fn gc_closes_stale_starting_actor_with_stale_heartbeat_even_when_pid_is_alive() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/stuck-starting.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-stuck-starting\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let record = crate::session_actor::record_session_start_direct(
+            &doc,
+            "session-stuck-starting",
+            "%42",
+            "@1",
+            1,
+        )
+        .unwrap();
+        upsert_supervisor_lease(
+            dir.path(),
+            &record,
+            Some(std::process::id()),
+            Some("/tmp/stuck-starting.sock"),
+            "starting",
+        )
+        .unwrap();
+        let old = timestamp_secs() - 7200;
+        let conn = Connection::open(state_db_path(dir.path())).unwrap();
+        conn.execute(
+            "UPDATE actor_transitions SET timestamp = ?1 WHERE new_generation = 1",
+            params![sqlite_i64(old, "old transition timestamp").unwrap()],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE supervisor_leases SET last_heartbeat = ?1 WHERE document_id = ?2 AND generation = 1",
+            params![
+                sqlite_i64(old, "old heartbeat timestamp").unwrap(),
+                record.document_id
+            ],
+        )
+        .unwrap();
+
+        let (closed, kept) =
+            close_stale_starting_actors(dir.path(), Duration::from_secs(3600), false).unwrap();
+        assert_eq!(closed, 1);
+        assert_eq!(kept, 0);
+
+        let updated = load_actor_record(dir.path(), &record.document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.state, crate::session_actor::ActorState::Closed);
+        assert_eq!(updated.last_transition.reason, "stale_starting_actor");
     }
 
     #[test]

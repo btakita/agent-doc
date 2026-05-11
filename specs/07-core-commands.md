@@ -83,7 +83,7 @@ Two modes:
 
 - Garbage-collects orphaned snapshots, captures, locks, hooks, status files, repair diagnostics, Codex blocked-stop diagnostics, sockets, and dead registry entries under `.agent-doc/`.
 - The orphaned-socket cleanup keeps sockets whose supervisor PID is alive or whose socket still answers.
-- Stale `starting` actor records older than one hour are closed when no fresh supervisor lease or live supervisor PID still proves the actor is booting; this updates the controller SQLite store and re-emits `session-actors.json` as a projection.
+- Stale `starting` actor records older than one hour are closed unless a live supervisor PID still has a fresh supervisor heartbeat proving the actor is booting; this updates the controller SQLite store and re-emits `session-actors.json` as a projection. A live PID with a stale heartbeat is treated as stuck startup state.
 - `preflight` runs the full orphan-file GC automatically at most once per day via `.agent-doc/gc.stamp`; `preflight`, `start`, and `sync` still run the lightweight stale-`starting` actor cleanup every cycle.
 
 ## audit-docs

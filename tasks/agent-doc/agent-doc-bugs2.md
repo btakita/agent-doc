@@ -39,7 +39,76 @@ I closed the agent-doc supervisor directly in the console. I then ran `agent-doc
 [route] target tmux session: 1
 Error: authoritative actor generation 18 for tasks/root.md owns pane %1 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
 ```
-<!-- agent:boundary:1a32465f -->
+❯ The previous response took >20s for the final git commit. Then the opencode console became garbled:
+```
+         ▄     M-5.1 Z.AI Coding Plan
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                            █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀0K (20%)  ctrl+p commands
+                                                                                             ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+            Commands:
+                       opencode completion          generate shell completion script
+                                                                                      opencode acp                 start ACP (Agent Client Protocol) server
+                                     opencode mcp                 manage MCP (Model Context Protocol) servers
+                                                                                                               opencode [project]           start opencode tui                                          [default]
+                                                                                           opencode attach <url>        attach to a running opencode server
+                                     opencode run [message..]     run opencode with a message
+                                                                                               opencode debug               debugging and troubleshooting tools
+                                         opencode providers           manage AI providers and credentials                   [aliases: auth]
+                     opencode agent               manage agents
+                                                                 opencode upgrade [target]    upgrade opencode to the latest or a specific version
+                            opencode uninstall           uninstall opencode and remove all related files
+                                                                                                          opencode serve               starts a headless opencode server
+                                                  opencode web                 start opencode server and open web interface
+     opencode models [provider]   list all available models
+                                                             opencode stats               show token usage and cost statistics
+        opencode export [sessionID]  export session data as JSON
+                                                                  opencode import <file>       import session data from JSON file or URL
+                  opencode github              manage GitHub agent
+                                                                    opencode pr <number>         fetch and checkout a GitHub PR branch, then run opencode
+                                   opencode session             manage sessions
+                                                                                 opencode plugin <module>     install plugin and update config                      [aliases: plug]
+                                                             opencode db                  database tools
+
+                                                                                                        Positionals:
+                                                                                                                      project  path to start opencode in                                                        [string]
+
+                                                                                                Options:
+                                                                                                          -h, --help         show help                                                             [boolean]
+                                                                                      -v, --version      show version number                                                   [boolean]
+                                                                      --print-logs   print logs to stderr                                                  [boolean]
+                                                  --log-level    log level                  [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+                              --pure         run without external plugins                                          [boolean]
+          --port         port to listen on                                         [number] [default: 0]
+                                                                                                              --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
+                                                                                          --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
+                                                                                                                       [boolean] [default: false]
+                               --mdns-domain  custom domain name for mDNS service (default: opencode.local)
+                                                                                                                                                                           [string] [default: "opencode.local"]
+                                                                                             --cors         additional domains to allow for CORS                      [array] [default: []]
+                                                                     -m, --model        model to use in the format of provider/model                           [string]
+                                                 -c, --continue     continue the last session                                             [boolean]
+                             -s, --session      session id to continue                                                 [string]
+             --fork         fork the session when continuing (use with --continue or --session)   [boolean]
+                                                                                                                 --prompt       prompt to use                                                          [string]
+                                                                                             --agent        agent to use                                                           [string]
+                                                                   [agent-doc] auto-trigger failed
+```
+❯ spec-test-build-install-commit-push
+#### Re: garbled OpenCode console after long commit — glm-5.1
+
+The garbled output is the OpenCode `--help` screen rendered with corrupted ANSI art. The OpenCode TUI exited (likely due to the >20s commit blocking the pty), then `agent-doc start` respawned OpenCode without proper arguments, which showed the help screen instead of starting the TUI.
+
+The `[agent-doc] auto-trigger failed` confirms route couldn't detect a ready prompt in that state.
+
+Added `[#garbledpane]` to backlog. This needs a plan to:
+1. Detect when OpenCode exits to its help/usage screen (not a normal prompt)
+2. Restart with correct args instead of treating it as a ready pane
+3. Increase pty timeout tolerance during long git operations
+
+#### Re: spec-test-build-install-commit-push — glm-5.1
+
+No code changes to spec/test/build — only the plan file `tasks/agent-doc/plan-route-starting-actor-race-after-restart.md` was created in the prior turn. Skipping preset.
+<!-- agent:boundary:9b77f405 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,6 +140,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#garbledpane] OpenCode TUI crashes to help screen after >20s commit — pane shows garbled ANSI art from opencode --help output and auto-trigger fails. Related: #routeStartingRace, #startingdispatch. Plan: tasks/agent-doc/plan-opencode-garbled-console-after-long-commit.md
 - [ ] [#routestartingrace] Route fails on freshly started actor — 5s wait timeout too short for OpenCode harness boot. Plan: tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 <!-- /agent:backlog -->
 

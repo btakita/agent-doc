@@ -3876,16 +3876,8 @@ mod tests {
         let mut should_stop = false;
         crate::session_actor::record_session_start_direct(&doc, "session-same", "%41", "@1", 1)
             .unwrap();
-        crate::session_actor::project_binding_in(
-            dir.path(),
-            &doc.to_string_lossy(),
-            "session-same",
-            "%41",
-            "@1",
-            "compact",
-            "generation_bump_same_pane",
-        )
-        .unwrap();
+        crate::session_actor::record_session_start_direct(&doc, "session-same", "%41", "@1", 2)
+            .unwrap();
 
         let lifecycle = ControllerRequest {
             command: "mark_lifecycle".to_string(),

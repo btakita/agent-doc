@@ -391,6 +391,73 @@ pub fn record_session_start(
     record_session_start_direct(file, session_id, pane_id, window_id, generation)
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn transition_state_in(
+    base_dir: &Path,
+    document_id: &str,
+    session_id: &str,
+    pane_id: &str,
+    expected_generation: Option<u64>,
+    state: ActorState,
+    caller: &str,
+    reason: &str,
+) -> Result<ActorRecord> {
+    let Some(current) = load_record_in(base_dir, document_id)? else {
+        anyhow::bail!(
+            "missing authoritative actor record for {}",
+            document_id
+        );
+    };
+    if current.session_id != session_id {
+        anyhow::bail!(
+            "stale actor transition for {}: session {} no longer owns generation {} (current session {})",
+            document_id,
+            session_id,
+            current.generation,
+            current.session_id
+        );
+    }
+    if let Some(expected) = expected_generation
+        && current.generation != expected
+    {
+        anyhow::bail!(
+            "stale actor transition for {}: generation {} is no longer current (current generation {})",
+            document_id,
+            expected,
+            current.generation
+        );
+    }
+    if current.pane_id != pane_id {
+        anyhow::bail!(
+            "stale actor transition for {}: pane {} no longer owns generation {} (current pane {})",
+            document_id,
+            pane_id,
+            current.generation,
+            current.pane_id
+        );
+    }
+    let harness = if current.harness.trim().is_empty() {
+        detect_document_harness_in(base_dir, document_id)
+    } else {
+        current.harness.clone()
+    };
+    store_record_in(
+        base_dir,
+        document_id,
+        ActorRecordUpdate {
+            session_id,
+            pane_id,
+            window_id: &current.window_id,
+            harness: &harness,
+            state,
+            caller,
+            reason,
+            generation: current.generation,
+            expected_prior_generation: Some(current.generation),
+        },
+    )
+}
+
 pub(crate) fn transition_state_direct(
     file: &Path,
     session_id: &str,
@@ -408,59 +475,15 @@ pub(crate) fn transition_state_direct(
         );
     };
     let file_key = canonical.to_string_lossy().to_string();
-    let Some(current) = load_record_in(&base_dir, &file_key)? else {
-        anyhow::bail!(
-            "missing authoritative actor record for {}",
-            canonical.display()
-        );
-    };
-    if current.session_id != session_id {
-        anyhow::bail!(
-            "stale actor transition for {}: session {} no longer owns generation {} (current session {})",
-            canonical.display(),
-            session_id,
-            current.generation,
-            current.session_id
-        );
-    }
-    if let Some(expected) = expected_generation
-        && current.generation != expected
-    {
-        anyhow::bail!(
-            "stale actor transition for {}: generation {} is no longer current (current generation {})",
-            canonical.display(),
-            expected,
-            current.generation
-        );
-    }
-    if current.pane_id != pane_id {
-        anyhow::bail!(
-            "stale actor transition for {}: pane {} no longer owns generation {} (current pane {})",
-            canonical.display(),
-            pane_id,
-            current.generation,
-            current.pane_id
-        );
-    }
-    let harness = if current.harness.trim().is_empty() {
-        detect_document_harness_in(&base_dir, &file_key)
-    } else {
-        current.harness.clone()
-    };
-    store_record_in(
+    transition_state_in(
         &base_dir,
         &file_key,
-        ActorRecordUpdate {
-            session_id,
-            pane_id,
-            window_id: &current.window_id,
-            harness: &harness,
-            state,
-            caller,
-            reason,
-            generation: current.generation,
-            expected_prior_generation: Some(current.generation),
-        },
+        session_id,
+        pane_id,
+        expected_generation,
+        state,
+        caller,
+        reason,
     )
 }
 

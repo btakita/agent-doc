@@ -2569,8 +2569,13 @@ fn handle_mark_lifecycle(
         .with_context(|| format!("unknown lifecycle state: {state_raw}"))?;
     let caller = request_string(&request.caller, "caller")?;
     let reason = request_string(&request.reason, "reason")?;
-    let record = crate::session_actor::transition_state_direct(
-        &file,
+    let document_id = crate::session_actor::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    let record = crate::session_actor::transition_state_in(
+        &bootstrap.project_root,
+        &document_id,
         &session_id,
         &pane_id,
         Some(generation),
@@ -4106,6 +4111,73 @@ mod tests {
         assert_eq!(record.generation, 2);
         assert_eq!(record.last_transition.caller, "session");
         assert_eq!(record.last_transition.reason, "manual_attach");
+    }
+
+    #[test]
+    fn controller_mark_lifecycle_resolves_relative_path_via_project_root() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/relative.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-relative\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let start = ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-relative".to_string()),
+            pane_id: Some("%51".to_string()),
+            window_id: Some("@1".to_string()),
+            generation: Some(1),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&start).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+
+        let relative = std::path::PathBuf::from("tasks/relative.md");
+        let lifecycle = ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(relative),
+            session_id: Some("session-relative".to_string()),
+            pane_id: Some("%51".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("ready".to_string()),
+            caller: Some("route".to_string()),
+            reason: Some("dispatch_ready_prompt".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok, "mark_lifecycle with relative path failed");
+        assert_eq!(envelope.data.unwrap().state, crate::session_actor::ActorState::Ready);
     }
 
     #[test]

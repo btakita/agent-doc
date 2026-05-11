@@ -3862,6 +3862,59 @@ mod tests {
     }
 
     #[test]
+    fn controller_lifecycle_allows_same_pane_stale_generation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/same-pane.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-same\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(&doc, "session-same", "%41", "@1", 1)
+            .unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+            "session-same",
+            "%41",
+            "@1",
+            "compact",
+            "generation_bump_same_pane",
+        )
+        .unwrap();
+
+        let lifecycle = ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-same".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("ready".to_string()),
+            caller: Some("supervisor".to_string()),
+            reason: Some("prompt_ready".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok, "same-pane stale generation should succeed: {:?}", envelope.error);
+        assert_eq!(envelope.data.unwrap().state, crate::session_actor::ActorState::Ready);
+    }
+
+    #[test]
     fn controller_actor_binding_and_dispatch_use_authoritative_generation() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

@@ -420,12 +420,16 @@ pub(crate) fn transition_state_in(
     if let Some(expected) = expected_generation
         && current.generation != expected
     {
-        anyhow::bail!(
-            "stale actor transition for {}: generation {} is no longer current (current generation {})",
-            document_id,
-            expected,
-            current.generation
-        );
+        if current.pane_id != pane_id {
+            anyhow::bail!(
+                "stale actor transition for {}: generation {} pane {} no longer current (current generation {} pane {})",
+                document_id,
+                expected,
+                pane_id,
+                current.generation,
+                current.pane_id
+            );
+        }
     }
     if current.pane_id != pane_id {
         anyhow::bail!(

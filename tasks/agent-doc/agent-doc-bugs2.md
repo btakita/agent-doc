@@ -103,7 +103,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#opencodesshconfig] OpenCode session cannot SSH to `required_ssh_targets` — `socket: Operation not permitted` occurs because opencode's sandbox blocks network syscalls. Workaround options: (1) copy a per-project `.opencode/config.json` that grants network/SSH permissions, (2) file an agent-doc bug (this item), (3) both. Agent-doc should either detect the sandbox restriction and fail closed before dispatch, or inject the required `.opencode/config.json` permissions automatically when `required_ssh_targets` is set in the session frontmatter.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -196,4 +195,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#rspcmt3] Re-open response patchback commit recovery for the current agent-doc-bugs2 turn: user-visible prompt/patchback changes remained dirty after `agent-doc commit` reported the prior response already committed, and `session-check` required a second closeout for the active Codex prompt. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
 - 2026-05-11 [#2fha] 2026-05-11 [#nopatchbackopencode] OpenCode agent-doc turn completed but response was not patched back into the session document — the user had to manually request patchback for the monsterrodholders.md production-sync response. Patchback should fire automatically after the agent writes a response, regardless of agent backend (Claude Code / Codex / OpenCode). Plan: investigate whether OpenCode integration skips the finalize/patchback step that Claude Code and Codex run.
 - 2026-05-11 [#opencodesshproof] OpenCode harness has no SSH capability proof — session log shows `codex_capability_proof` entries for Codex generations but zero proof entries for OpenCode generations, so `required_ssh_targets` frontmatter is not enforced and the agent discovers `socket: Operation not permitted` mid-response instead of failing closed. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md
+- 2026-05-11 [#opencodesshconfig] OpenCode session cannot SSH to `required_ssh_targets` — `socket: Operation not permitted` occurs because opencode's sandbox blocks network syscalls. Workaround options: (1) copy a per-project `.opencode/config.json` that grants network/SSH permissions, (2) file an agent-doc bug (this item), (3) both. Agent-doc should either detect the sandbox restriction and fail closed before dispatch, or inject the required `.opencode/config.json` permissions automatically when `required_ssh_targets` is set in the session frontmatter.
 <!-- /agent:done -->

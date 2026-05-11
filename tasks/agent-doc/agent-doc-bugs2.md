@@ -87,7 +87,23 @@ Root cause: the OpenCode section of `runbooks/harness-invocation.md` described t
 
 All 2075 tests pass. Build + install verified. Pushed to main.
 &lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:96c39bc0 -->
+❯ do [#rspcmt6]. spec-test-build-install-commit-push
+### Re: #rspcmt6 harness-agnostic uncommitted exchange drift detection — glm-5.1
+
+Root cause: `detect_active_session_post_commit_drift()` in `session_check.rs` required Codex session tracking (`CODEX_THREAD_ID` / `CODEX_SESSION_ID`) and silently returned `None` for all non-Codex harnesses. When the response IS in the exchange (so `prompt_only_exchange_tail` doesn't fire), no existing guard could detect that the working tree had uncommitted exchange content drift.
+
+**Changes:**
+
+| File | Change |
+|------|--------|
+| `session_check.rs` | Added `detect_uncommitted_exchange_drift()` — harness-agnostic guard that detects new appended exchange content beyond the committed snapshot without requiring any session tracking. Runs as fallback after `detect_active_session_post_commit_drift` in all three committed-cycle branches of `inspect_core`. Also added `exchange_has_new_appended_content()` and `extract_normalized_exchange_body()` helpers. |
+| `session_check.rs` tests | Added `uncommitted_exchange_drift_detected_without_codex_session` (proves guard fires for table-row drift without Codex session) and `uncommitted_exchange_drift_ignored_when_only_status_changed` (proves guard does NOT fire for status-only drift). |
+| `VERSIONS.md` | Added #rspcmt6 entry |
+| `plan-response-patchback-uncommitted.md` | Extended with #rspcmt6 reproduction, root cause analysis, and regression coverage |
+
+All 1919 tests pass. Build + install verified. Pushed to main.
+&lt;!-- /agent:exchange --&gt;
+<!-- agent:boundary:e756f7e5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,7 +135,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspcmt6] #agent-doc-bug: OpenCode agent-doc response patched into exchange but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the diff-summary response after "Run the post docker commands." was written into the exchange section but `tasks/monsterrodholders.md` remains dirty (uncommitted patchback lines). Additionally, the v1.32 surgical-revert code changes in `src/monsterrodholders-dev/` (mrh-performance.php + test script) were also left uncommitted despite the status saying "awaiting spec-test-commit-push." Same class as #rspcmt2-#rspcmt5. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode finalize-not-committing evidence.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -222,4 +237,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#rspcmt4] 2026-05-11 OpenCode agent-doc turn response patchback not committed — boost-client/tasks/monsterrodholders.md v1.29 deploy response was patched into the exchange section but agent-doc finalize/closeout did not commit the document. User had to manually request commit. Same class as #rspcmt2, #rspcmt3. Reproduction: session a9421282, GLM-5.1 agent. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode-specific closeout evidence.
 - 2026-05-11 [#rspcmt5] 2026-05-11 Direct Codex chat `commit-push` closeout completed commits/pushes but wrote no response patchback into `src/session-share/tasks/root.md`; user had to request "write response to document" afterward. Same class as #rspcmt2-#rspcmt4, but this evidence is the normal chat/preset path rather than an agent-doc child-run path. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with a direct-chat closeout invariant and require session-check/write-back before final success reporting.
 - 2026-05-11 [#noexchopencode2] #agent-doc-bug: OpenCode agent response output to user but not written into session document `agent:exchange` block. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — sidebar revert assessment response appeared in CLI output but was never patched back into the exchange section. User had to manually request "Write the response into the document." Same class as #nopatchbackopencode, #rspcmt4, #rspcmt5. OpenCode integration may skip the finalize/patchback step that other harness backends run.
+- 2026-05-11 [#rspcmt6] #agent-doc-bug: OpenCode agent-doc response patched into exchange but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the diff-summary response after "Run the post docker commands." was written into the exchange section but `tasks/monsterrodholders.md` remains dirty (uncommitted patchback lines). Additionally, the v1.32 surgical-revert code changes in `src/monsterrodholders-dev/` (mrh-performance.php + test script) were also left uncommitted despite the status saying "awaiting spec-test-commit-push." Same class as #rspcmt2-#rspcmt5. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with OpenCode finalize-not-committing evidence.
 <!-- /agent:done -->

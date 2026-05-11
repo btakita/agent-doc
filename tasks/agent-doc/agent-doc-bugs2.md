@@ -35,6 +35,11 @@ Compacted content:
 - Archived 1 response topic(s): #rootlatepatch late fallback patch guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 <!-- agent:boundary:9754bdf4 -->
+I closed the agent-doc supervisor directly in the console. I then ran `agent-doc start .../root.md` in the console. When I used the JB plugin to `Run Agent Doc`, I saw an error:
+```
+[route] target tmux session: 1
+Error: authoritative actor generation 18 for tasks/root.md owns pane %1 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
+```
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,6 +71,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#routestartingrace] Route fails on freshly started actor — 5s wait timeout too short for OpenCode harness boot. Plan: tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

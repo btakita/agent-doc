@@ -34,7 +34,27 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): #assistanttailprompt and compact exchange summary
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9c7ad6eb -->
+❯ do [#wvpf]. spec-test-build-install-commit-push
+### Re: #wvpf — gpt-5
+
+Fixed the Codex hook test-state race.
+
+The hook now records state in the nearest `.agent-doc` root for the invocation CWD and the document root, while still including the git workspace root for nested `.agent-doc` workspaces. It no longer mirrors test/session state into unrelated ambient ancestor roots such as `/tmp/.agent-doc`. Hook cleanup also treats an already-removed session sidecar as absence, so concurrent cleanup cannot fail on a stale `remove_file` race.
+
+Updated `src/agent-doc/SPEC.md` and `src/agent-doc/src/codex_hook.rs`, added a regression for ambient ancestor roots, and kept the nested-root cleanup regression passing.
+
+Verification:
+- `cargo test codex_hook::tests -- --test-threads=2`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits:
+- `cef0796` in `src/agent-doc`: `fix: isolate Codex hook test state`, pushed to `origin/20260422/codex-agent-backend`
+- `3b0d8cb1c` in the parent repo: `chore: update agent-doc submodule`
+
+No additional follow-up backlog items from this fix.
+<!-- agent:boundary:7b808326 -->
 <!-- /agent:exchange -->
 ###
 
@@ -52,7 +72,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#wvpf] [recommended] Fix Codex hook tests so parallel make check cannot race on shared /tmp/.agent-doc/codex-hooks session cleanup; the default make check run failed once when stop_auto_closes_patch_payload_with_safe_leading_commentary tried to remove an already-missing session file, while the isolated test and serial make check passed.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
 <!-- /agent:backlog -->
@@ -141,4 +160,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - 2026-05-11 [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - 2026-05-11 [#assistanttailprompt] #agent-doc-bug: session-check can misclassify assistant-owned closeout/status prose at the end of a template exchange response as an unresolved prompt-only tail, forcing a second 'Closeout repair:' patchback after a successful response commit. Plan: tasks/agent-doc/plan-session-check-assistant-tail-misclassified.md
+- 2026-05-11 [#wvpf] [recommended] Fix Codex hook tests so parallel make check cannot race on shared /tmp/.agent-doc/codex-hooks session cleanup; the default make check run failed once when stop_auto_closes_patch_payload_with_safe_leading_commentary tried to remove an already-missing session file, while the isolated test and serial make check passed.
 <!-- /agent:done -->

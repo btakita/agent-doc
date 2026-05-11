@@ -35,7 +35,27 @@ Active backlog:
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
-<!-- agent:boundary:eeb5bda5 -->
+❯ do [#startingdispatch]. spec-test-build-install-commit-push
+### Re: starting actor dispatch gate — gpt-5
+
+Implemented `#startingdispatch`.
+
+Route now treats `starting` authoritative actors as non-dispatchable until they refresh to `ready`. The reroute path waits through the existing bounded startup recovery window, logs `route_authoritative_actor_starting_not_ready` if the actor remains `starting`, and fails closed before controller dispatch authorization, supervisor IPC, or direct tmux input. `busy` remains eligible for one supervisor-owned queued reopen; `starting` no longer is. I also updated the route regressions, routing specs, README, and changelog.
+
+Commits:
+- `2438370` in `src/agent-doc`: `fix: gate route dispatch on starting actors`
+- `2947ccf8b` in the parent repo: `agent-doc: gate starting actor dispatch`
+
+Verification completed:
+- `cargo fmt`
+- `cargo check`
+- `cargo test authoritative_actor_optimistic_queue_excludes_starting_state`
+- `make check`
+- `cargo build`
+- `make install`
+
+Push will run after this closeout so the session response commit is included.
+<!-- agent:boundary:d5650a10 -->
 <!-- /agent:exchange -->
 ###
 
@@ -56,7 +76,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
 <!-- /agent:backlog -->
@@ -143,4 +162,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#pbdupchurn] Stop duplicate response patchback two-commit cleanup churn: duplicate blocks must be rejected or deduped before the closeout commit, and successful closeout must not require follow-up dedupe/snapshot/parent-pointer repair. Plan: tasks/agent-doc/plan-duplicate-patchback-dedupe-churn.md
 - 2026-05-10 [#bugtargetroot] `#agent-doc-bug` target resolves to nested session-share backlog instead of parent agent-loop backlog when session docs live under `src/session-share`; resolve preset backlog targets against the intended project root and fail closed on ambiguous mirrored task trees. Plan: tasks/agent-doc/plan-agent-doc-bug-target-resolution.md
 - 2026-05-11 [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
+- 2026-05-11 [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 <!-- /agent:done -->

@@ -35,7 +35,22 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): #nopatchbackopencode
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ae66ec27 -->
+❯ For opencode, is the canonical invocation of plugins `/plugin-name` or `plugin-name`?
+### Re: OpenCode plugin invocation — glm-5.1
+
+OpenCode has **three distinct concepts** that use different invocation patterns:
+
+1. **Skills** — invoked via the `skill` tool by the agent, not by slash commands: `skill({ name: "skill-name" })`. Skills are discovered from `SKILL.md` files in `.opencode/skills/`, `.claude/skills/`, or `~/.claude/skills/`. The agent sees available skills in its tool description and loads them on demand. Users don't invoke skills directly.
+
+2. **Commands** — invoked with a leading slash in the TUI: `/command-name`. Custom commands are defined in `.opencode/commands/` as markdown files. The slash is canonical for commands.
+
+3. **Plugins** — not invoked by users at all. Plugins are JavaScript/TypeScript modules placed in `.opencode/plugins/` or installed via npm in config. They hook into events automatically at startup. There's no `/plugin-name` invocation pattern for plugins.
+
+So the answer depends on what you mean by "plugin":
+- **Skills** (instructions for the agent): `skill-name` via the tool, no slash
+- **Commands** (user-triggered prompts): `/command-name` with slash
+- **Plugins** (event hooks): no user invocation, auto-loaded at startup
+<!-- agent:boundary:4bc7c570 -->
 <!-- /agent:exchange -->
 ###
 <!--

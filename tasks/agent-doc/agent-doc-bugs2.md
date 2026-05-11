@@ -29,113 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-073249.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-094153.md`*
 
 Compacted content:
-- Archived 3 response topic(s): OpenCode plugin invocation; /agent-doc command vs agent-doc skill; /agent-doc command for OpenCode
+- Archived 5 response topic(s): OpenCode SSH capability proof; OpenCode capability proof error messages use harness name; mark_lifecycle relative path fix; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#opencodesshproof]. spec-test-build-install-commit-push
-### Re: OpenCode SSH capability proof — glm-5.1
-
-Implemented harness-agnostic capability proof so OpenCode sessions with `required_ssh_targets` run SSH probes before dispatch, matching existing Codex behavior.
-
-**Changes (4 files):**
-
-- `src/agent/codex.rs` — `prove_managed_session_capabilities()` now accepts a `harness: &str` parameter; log events use `{harness}_capability_proof` prefix instead of hardcoded `codex_capability_proof`
-- `src/start.rs` — Removed `harness.binary == "codex"` guard around capability proof thread spawning; proof runs for any harness with SSH targets; thread name and actor transition use harness-specific labels
-- `src/route.rs` — Renamed `CodexManagedCapabilityProofStatus` → `ManagedCapabilityProofStatus`, `codex_managed_capability_proof_status()` → `managed_capability_proof_status()`, `wait_for_codex_managed_capability_proof()` → `wait_for_managed_capability_proof()`; all bail messages and ops_log events use `harness.binary` instead of hardcoded "Codex"; added `managed_capability_proof_status_opencode_tracks_pending_and_failed` test
-- `src/session_actor_cmd.rs` — `codex_capability_proof_status()` → `capability_proof_status()`; status display uses `ctx.harness` prefix; guard expanded from `"codex"` to `"codex" | "opencode"`
-
-**Regression safety:** Codex sessions emit `codex_capability_proof` events exactly as before. OpenCode sessions with `required_ssh_targets` now emit `opencode_capability_proof` events. The route layer checks proof status using the correct harness-specific prefix.
-
-Commit: `4feb4c9` pushed to `20260422/codex-agent-backend`.
-❯ do [#opencodesshconfig]. spec-test-build-install-commit-push
-
-❯ The error message says. Codex should be replaced with Opencode.
-```
-❯ /home/brian/.cargo/bin/agent-doc start tasks/monsterrodholders.md
-Registered session a9421282 → pane %269
-Starting opencode...
-                    [start] managed opencode capability proof failed; terminating unusable child session: Codex child network probe failed: Codex child probe command exited nonzero: ⠀                                ▄
-```
-### Re: OpenCode capability proof error messages use harness name — glm-5.1
-
-Fixed all hardcoded "Codex" strings in capability proof error messages to use the dynamic `harness` parameter. The following functions in `src/agent/codex.rs` were updated:
-
-- `classify_child_network_probe_failure(detail, harness)` — returns `String` with harness name
-- `classify_child_writable_root_probe_failure(detail, harness)` — returns `String` with harness name
-- `wait_with_timeout(..., harness)` — probe output and timeout messages use harness name
-- `validate_codex_child_network_probe_output(..., harness)` — failure messages use harness name
-- `prove_codex_child_network_access(..., harness)` — spawn and exit messages use harness name
-- `prove_codex_child_writable_roots(..., harness)` — spawn and exit messages use harness name
-
-The `harness` parameter flows from `prove_managed_session_capabilities` (which already had it) through to all child probe functions.
-
-Added regression test `opencode_child_network_probe_classifies_sandbox_denial` verifying OpenCode sessions get "OpenCode" in error messages and not "Codex".
-
-Commit: `c7658ac` pushed to `20260422/codex-agent-backend`.
-❯ Error running agent-doc on root.md using claude. spec-test-build-install-commit-push
-```
-resync: stash pane %273 is registered in its own project root — skipping kill
-resync: stash pane %284 is registered in its own project root — skipping kill
-resync: stash pane %274 is registered in its own project root — skipping kill
-resync: stash pane %269 is registered in its own project root — skipping kill
-resync: stash pane %275 is registered in its own project root — skipping kill
-resync: stash pane %285 is registered in its own project root — skipping kill
-[route] target tmux session: 4
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-[route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
-Error: authoritative actor generation 14 for tasks/root.md owns pane %272 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
-```
-```
-resync: stash pane %284 is registered in its own project root — skipping kill
-resync: stash pane %269 is registered in its own project root — skipping kill
-resync: stash pane %273 is registered in its own project root — skipping kill
-resync: stash pane %275 is registered in its own project root — skipping kill
-resync: stash pane %285 is registered in its own project root — skipping kill
-resync: stash pane %274 is registered in its own project root — skipping kill
-[route] target tmux session: 4
-Error: authoritative actor generation 15 for tasks/root.md owns pane %272 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
-```
-
-### Re: mark_lifecycle relative path fix — glm-5.1
-
-Fixed and pushed in commit `c4f9d17`.
-
-**Root cause:** `handle_mark_lifecycle` delegated to `transition_state_direct(&file)` which called `file.canonicalize()` inside the controller daemon. When `route.rs` sent a relative path (e.g. `tasks/root.md`), the controller's CWD couldn't resolve it, producing "missing authoritative actor record". This left the actor stuck in `Starting`, blocking dispatch.
-
-**Fix:** Extracted `transition_state_in(base_dir, document_id, ...)` and made `handle_mark_lifecycle` use `bootstrap.project_root` + `canonical_document_id_in` for path resolution, matching the pattern used by `handle_actor_binding`, `handle_dispatch`, and `handle_supervisor_heartbeat`.
-
-**Regression test:** `controller_mark_lifecycle_resolves_relative_path_via_project_root`.
-❯ `Run Agent Doc` with opencode should send `/agent-doc <path>` to the opencode cli.
-❯ spec-test-build-install-commit-push
-### Re: OpenCode trigger command uses /agent-doc slash command — glm-5.1
-
-Changed the OpenCode `trigger_command_template` from `"agent-doc {file}"` to `"/agent-doc {file}"` in `harness.rs:102`, matching Claude Code's slash-command convention. Since OpenCode supports slash commands (installed via `agent-doc skill install --harness opencode`), the routed trigger now sends `/agent-doc <path>` to the opencode CLI instead of the bare `agent-doc <path>`.
-
-**Changes (1 file, 3 locations):**
-- `src/harness.rs:102` — `trigger_command_template: "/agent-doc {file}"` for opencode harness
-- `src/harness.rs:706` — Updated `trigger_command_substitution_opencode` test expectation
-- `src/harness.rs:1127` — Updated `harness_isolation_trigger_commands_both_route_file` test expectation
-
-All 1896 tests pass. Commit `3106a82` pushed to `20260422/codex-agent-backend`.
-❯ Is agent-doc installed as an opencode command on opencode?
-### Re: agent-doc as OpenCode command — glm-5.1
-
-Yes — agent-doc is installed as an OpenCode slash command. `.opencode/commands/agent-doc.md` registers `/agent-doc` with the body `agent-doc $ARGUMENTS`, so `/agent-doc <file>` in the OpenCode CLI invokes the agent-doc binary directly.
-<!-- agent:boundary:241781f3 -->
+<!-- agent:boundary:bf4b76be -->
 <!-- /agent:exchange -->
 ###
 <!--

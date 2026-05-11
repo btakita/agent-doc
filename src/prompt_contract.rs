@@ -1,3 +1,4 @@
+use anyhow::Result;
 use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -95,17 +96,17 @@ pub(crate) fn explicit_backlog_targets(
     prompt_targets: &[String],
     added_diff_lines: &[String],
     prompt_presets: &IndexMap<String, String>,
-) -> Vec<PathBuf> {
+) -> Result<Vec<PathBuf>> {
     let mut targets = Vec::new();
     for text in effective_prompt_texts(prompt_targets, added_diff_lines, prompt_presets) {
-        let Some(target) = explicit_backlog_target_in_text(current_file, &text) else {
+        let Some(target) = explicit_backlog_target_in_text(current_file, &text)? else {
             continue;
         };
         if !targets.iter().any(|existing| existing == &target) {
             targets.push(target);
         }
     }
-    targets
+    Ok(targets)
 }
 
 pub(crate) fn response_explicitly_has_no_followups(response_text: &str) -> bool {
@@ -453,15 +454,15 @@ fn text_requests_plan_work(text: &str) -> bool {
     lower.contains("create a plan") || lower.contains("write a plan")
 }
 
-fn explicit_backlog_target_in_text(current_file: &Path, text: &str) -> Option<PathBuf> {
+fn explicit_backlog_target_in_text(current_file: &Path, text: &str) -> Result<Option<PathBuf>> {
     let lower = text.to_ascii_lowercase();
     let references_backlog_target = lower.contains("add to the backlog of")
         || lower.contains("add to backlog of")
         || lower.contains("backlog of ");
     if !references_backlog_target {
-        return None;
+        return Ok(None);
     }
-    crate::security::referenced_markdown_path(current_file, text)
+    crate::security::referenced_markdown_path_checked(current_file, text)
 }
 
 fn count_issue_units_in_text(text: &str) -> usize {
@@ -726,7 +727,8 @@ mod tests {
         )]);
 
         let targets =
-            explicit_backlog_targets(&current, &["#agent-doc-bug".to_string()], &[], &presets);
+            explicit_backlog_targets(&current, &["#agent-doc-bug".to_string()], &[], &presets)
+                .unwrap();
 
         assert_eq!(targets, vec![target]);
     }
@@ -750,9 +752,82 @@ mod tests {
         )]);
 
         let targets =
-            explicit_backlog_targets(&current, &["#agent-doc-bug".to_string()], &[], &presets);
+            explicit_backlog_targets(&current, &["#agent-doc-bug".to_string()], &[], &presets)
+                .unwrap();
 
         assert_eq!(targets, vec![target.canonicalize().unwrap()]);
+    }
+
+    #[test]
+    fn explicit_backlog_target_uses_parent_project_prefix_from_nested_root() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("agent-loop");
+        let nested = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join("tasks")).unwrap();
+        let current = nested.join("tasks/root.md");
+        let target = root.join("tasks/agent-doc/agent-doc-bugs2.md");
+        std::fs::write(&current, "# source\n").unwrap();
+        std::fs::write(&target, "# parent bugs\n").unwrap();
+        std::fs::write(
+            nested.join("tasks/agent-doc/agent-doc-bugs2.md"),
+            "# nested bugs\n",
+        )
+        .unwrap();
+
+        let presets = IndexMap::from([(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md"
+                .to_string(),
+        )]);
+
+        let targets =
+            explicit_backlog_targets(&current, &["#agent-doc-bug".to_string()], &[], &presets)
+                .unwrap();
+
+        assert_eq!(targets, vec![target.canonicalize().unwrap()]);
+    }
+
+    #[test]
+    fn explicit_backlog_target_fails_on_ambiguous_nested_task_tree() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("agent-loop");
+        let nested = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join("tasks")).unwrap();
+        let current = nested.join("tasks/root.md");
+        std::fs::write(&current, "# source\n").unwrap();
+        std::fs::write(
+            root.join("tasks/agent-doc/agent-doc-bugs2.md"),
+            "# parent bugs\n",
+        )
+        .unwrap();
+        std::fs::write(
+            nested.join("tasks/agent-doc/agent-doc-bugs2.md"),
+            "# nested bugs\n",
+        )
+        .unwrap();
+
+        let presets = IndexMap::from([(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/agent-doc/agent-doc-bugs2.md"
+                .to_string(),
+        )]);
+
+        let err =
+            explicit_backlog_targets(&current, &["#agent-doc-bug".to_string()], &[], &presets)
+                .unwrap_err();
+
+        assert!(
+            err.to_string().contains("ambiguous markdown reference"),
+            "{err:#}"
+        );
     }
 
     #[test]

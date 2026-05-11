@@ -357,7 +357,7 @@ fn pending_mutations_for_doc(
             prompt_targets,
             added_diff_lines,
             &fm.prompt_presets,
-        )
+        )?
         .into_iter()
         .map(|path| path.display().to_string())
         .collect();

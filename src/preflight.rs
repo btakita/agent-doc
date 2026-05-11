@@ -172,6 +172,9 @@ pub struct PreflightOutput {
     /// `prompt_presets` and fails closed if any requested preset is missing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_presets_requested: Vec<String>,
+    /// Explicit cross-document backlog targets resolved from prompt/preset text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub explicit_backlog_targets: Vec<String>,
     /// Resolved model tier the skill should use to gate this cycle.
     /// Computed from (in precedence order): inline `/model` command,
     /// `<!-- agent:model -->` component, `agent_doc_model_tier` frontmatter,
@@ -1364,7 +1367,16 @@ pub fn run(file: &Path) -> Result<()> {
         &prompt_targets,
         &added_diff_lines,
         &frontmatter_prompt_presets,
-    );
+    )?;
+    let explicit_backlog_target_paths = explicit_backlog_targets
+        .iter()
+        .map(|path| {
+            std::fs::canonicalize(path)
+                .unwrap_or_else(|_| path.to_path_buf())
+                .display()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
     let explicit_backlog_requirements =
         explicit_backlog_target_requirements(file, &source_frontmatter, &explicit_backlog_targets)?;
     let required_explicit_backlog_item_count = if explicit_backlog_requirements.is_empty() {
@@ -1465,6 +1477,7 @@ pub fn run(file: &Path) -> Result<()> {
         builtin_commands,
         orchestration_request,
         prompt_presets_requested,
+        explicit_backlog_targets: explicit_backlog_target_paths,
         effective_tier: Some(effective_tier_value.to_string()),
         required_tier: required_tier_value.map(|t| t.to_string()),
         suggested_tier: Some(suggested.to_string()),

@@ -167,6 +167,16 @@ item, and the pending text must include the concrete plan-file path. The
 backlog entry is the durable pointer; it should not require later archaeology to
 discover which `plan-*.md` file was intended.
 
+**Preset target authority:** prompt-preset text such as `#agent-doc-bug` may
+name a cross-document backlog target. When the target path starts with a known
+project directory name, such as
+`agent-loop/tasks/agent-doc/agent-doc-bugs2.md`, preflight resolves it against
+that project root even if the current session document lives in a nested
+project with its own `.agent-doc` tree. If the path could match multiple
+existing task trees, or if a project-prefixed target does not exist, preflight
+fails closed before any backlog item can be written. Preflight output includes
+the resolved `explicit_backlog_targets` paths for operator verification.
+
 **State transition matrix:**
 
 | From \ Op | `--done` | `--pending-gate` | `--pending-ungate` |

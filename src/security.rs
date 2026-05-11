@@ -39,7 +39,17 @@ pub fn enforce_cross_document_review(
 }
 
 pub fn referenced_markdown_path(current_file: &Path, text: &str) -> Option<PathBuf> {
+    referenced_markdown_path_checked(current_file, text)
+        .ok()
+        .flatten()
+}
+
+pub fn referenced_markdown_path_checked(
+    current_file: &Path,
+    text: &str,
+) -> Result<Option<PathBuf>> {
     let current = normalize_path(current_file);
+    let project_roots = project_roots_for(current_file);
     for raw in text.split_whitespace() {
         let candidate = raw.trim_matches(|c: char| {
             matches!(
@@ -52,13 +62,24 @@ pub fn referenced_markdown_path(current_file: &Path, text: &str) -> Option<PathB
         }
 
         let path = Path::new(candidate);
-        let mut possibilities = Vec::new();
+        let mut possibilities = Vec::<PathBuf>::new();
+        let has_project_prefix = first_component(path).is_some_and(|first| {
+            project_roots.iter().any(|root| {
+                root.file_name()
+                    .is_some_and(|name| Component::Normal(name) == first)
+            })
+        });
         if path.is_absolute() {
             possibilities.push(path.to_path_buf());
         } else {
-            if let Some(root) = find_project_root(current_file) {
+            for root in &project_roots {
+                if let Some(stripped) = strip_redundant_project_prefix(root, path) {
+                    possibilities.push(root.join(stripped));
+                }
+            }
+            for root in &project_roots {
                 possibilities.push(root.join(path));
-                if let Some(stripped) = strip_redundant_project_prefix(&root, path) {
+                if let Some(stripped) = strip_redundant_project_prefix(root, path) {
                     possibilities.push(root.join(stripped));
                 }
             }
@@ -72,25 +93,60 @@ pub fn referenced_markdown_path(current_file: &Path, text: &str) -> Option<PathB
 
         let mut fallback = None;
         let mut matched_current = false;
+        let mut existing = Vec::new();
         for resolved in possibilities {
             let resolved = normalize_path(&resolved);
             if resolved == current {
                 matched_current = true;
-                break;
+                continue;
             }
             if resolved.exists() {
-                return Some(resolved);
+                if !existing.iter().any(|seen| seen == &resolved) {
+                    existing.push(resolved);
+                }
+                continue;
             }
             fallback.get_or_insert(resolved);
+        }
+        if existing.len() > 1 {
+            anyhow::bail!(
+                "ambiguous markdown reference `{}` from {} matched multiple project roots: {}",
+                candidate,
+                current_file.display(),
+                existing
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        if let Some(resolved) = existing.into_iter().next() {
+            return Ok(Some(resolved));
+        }
+        if has_project_prefix {
+            let attempted = fallback
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| candidate.to_string());
+            anyhow::bail!(
+                "project-prefixed markdown reference `{}` from {} did not resolve to an existing file (first candidate: {})",
+                candidate,
+                current_file.display(),
+                attempted
+            );
         }
         if matched_current {
             continue;
         }
         if let Some(resolved) = fallback {
-            return Some(resolved);
+            return Ok(Some(resolved));
         }
     }
-    None
+    Ok(None)
+}
+
+fn first_component(path: &Path) -> Option<Component<'_>> {
+    path.components().next()
 }
 
 fn strip_redundant_project_prefix(root: &Path, path: &Path) -> Option<PathBuf> {
@@ -114,18 +170,22 @@ fn normalize_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn find_project_root(path: &Path) -> Option<PathBuf> {
+fn project_roots_for(path: &Path) -> Vec<PathBuf> {
     let mut current = if path.is_dir() {
         path.to_path_buf()
     } else {
-        path.parent()?.to_path_buf()
+        match path.parent() {
+            Some(parent) => parent.to_path_buf(),
+            None => return Vec::new(),
+        }
     };
+    let mut roots = Vec::new();
     loop {
         if current.join(".agent-doc").is_dir() {
-            return Some(current);
+            roots.push(normalize_path(&current));
         }
         if !current.pop() {
-            return None;
+            return roots;
         }
     }
 }
@@ -173,6 +233,92 @@ mod tests {
         .unwrap();
 
         assert_eq!(resolved, target.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn referenced_markdown_path_resolves_parent_project_prefix_from_nested_root() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("agent-loop");
+        let nested = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join("tasks")).unwrap();
+        let current = nested.join("tasks/root.md");
+        let parent_target = root.join("tasks/agent-doc/agent-doc-bugs2.md");
+        let nested_target = nested.join("tasks/agent-doc/agent-doc-bugs2.md");
+        std::fs::write(&current, "# root\n").unwrap();
+        std::fs::write(&parent_target, "# parent bugs\n").unwrap();
+        std::fs::write(&nested_target, "# nested bugs\n").unwrap();
+
+        let resolved = referenced_markdown_path_checked(
+            &current,
+            "Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(resolved, parent_target.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn referenced_markdown_path_fails_on_ambiguous_nested_task_tree() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("agent-loop");
+        let nested = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join("tasks/agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join("tasks")).unwrap();
+        let current = nested.join("tasks/root.md");
+        std::fs::write(&current, "# root\n").unwrap();
+        std::fs::write(
+            root.join("tasks/agent-doc/agent-doc-bugs2.md"),
+            "# parent bugs\n",
+        )
+        .unwrap();
+        std::fs::write(
+            nested.join("tasks/agent-doc/agent-doc-bugs2.md"),
+            "# nested bugs\n",
+        )
+        .unwrap();
+
+        let err = referenced_markdown_path_checked(
+            &current,
+            "Add to the backlog of tasks/agent-doc/agent-doc-bugs2.md",
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string().contains("ambiguous markdown reference"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn referenced_markdown_path_fails_missing_project_prefixed_target() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().join("agent-loop");
+        let nested = root.join("src/session-share");
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join("tasks")).unwrap();
+        let current = nested.join("tasks/root.md");
+        std::fs::write(&current, "# root\n").unwrap();
+
+        let err = referenced_markdown_path_checked(
+            &current,
+            "Add to the backlog of agent-loop/tasks/agent-doc/missing.md",
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("project-prefixed markdown reference"),
+            "{err:#}"
+        );
     }
 
     #[test]

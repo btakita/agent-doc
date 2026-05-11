@@ -22,25 +22,10 @@ prompt_presets:
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-❯ In main.rs, I see errors:
-❯ - session_id and supervisor_instance_id are not part of registry::RegistryEntry
+### Session Summary
 
-❯ spec-test-build-install-commit-push
-### Re: #agent-doc-bug — gpt-5
-
-Planned agent-doc backlog items:
-- [ ] [#tmuxpresetpath] Normalize repo-local #agent-doc-bug backlog target paths so copied agent-loop/tasks/... presets do not resolve to doubled paths. Plan: `tasks/agent-doc/plan-tmux-router-preset-backlog-target-path-normalization.md`
-- [ ] [#tmuxplanscope] Narrow prompt-contract escalation so copied prompt_presets definitions do not force unrelated software-task turns into plan_backlog_only. Plan: `tasks/agent-doc/plan-tmux-router-preset-trigger-scope.md`
-- [ ] [#tmuxreprocmd] Capture the exact command, crate root, and tooling context that produced the non-reproducing tmux-router RegistryEntry field mismatch. Plan: `tasks/software/plan-tmux-router-repro-command-capture.md`
-
-Additional context captured for the later execution turn:
-- Existing tracked follow-up: [#tmuxregdiag] uses `tasks/software/plan-tmux-router-registry-entry-diagnostic.md` to prove stale diagnostics vs a hidden compile path before any code change.
-- `src/tmux-router/src/registry.rs` already defines both `session_id` and `supervisor_instance_id` on `RegistryEntry`.
-- `src/tmux-router/src/main.rs` constructs `RegistryEntry` with those fields.
-- `cargo check -p tmux-router` passed in `src/tmux-router` on 2026-05-07.
-
-This cycle stayed in `execution_scope=plan_backlog_only`, so code edits, tests, builds, installs, commits, and pushes for the reported `spec-test-build-install-commit-push` request are deferred to a later execution turn.
-<!-- agent:boundary:97f69bd9 -->
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/bf77544025b6498b4b3adb22564450277365202aaae611f028b3a133487cde76-20260511-032318.md`*
+<!-- agent:boundary:48604107 -->
 <!-- /agent:exchange -->
 
 ## Queue

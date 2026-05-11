@@ -85,7 +85,7 @@
 //! - verify_snapshot_committed_no_head: file not tracked → `NoHead`
 //! - submodule_noop_commit_updates_stale_parent_pointer: no-op commit in submodule still updates stale parent pointer
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use fs2::FileExt;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashSet;
@@ -1412,7 +1412,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     // - Agent response → committed (no git gutter)
     // - User's subsequent edits → uncommitted (green git gutter)
     let mut snapshot_content = crate::snapshot::load(file)?;
-    let file_content = std::fs::read_to_string(file).unwrap_or_default();
+    let mut file_content = std::fs::read_to_string(file).unwrap_or_default();
     let head_doc = show_head(file)?;
     let snapshot_matched_head_before_absorb = snapshot_content
         .as_deref()
@@ -1564,6 +1564,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         crate::snapshot::save(file, &file_content)?;
         snapshot_content = Some(file_content.clone());
     }
+
+    dedupe_snapshot_and_worktree_before_commit(file, &mut snapshot_content, &mut file_content)?;
 
     let mut snapshot_matches_head = snapshot_content
         .as_deref()
@@ -1777,6 +1779,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     if let Ok(Some(reloaded)) = crate::snapshot::load(file) {
         snapshot_content = Some(reloaded);
     }
+    file_content = std::fs::read_to_string(file).unwrap_or_default();
+    dedupe_snapshot_and_worktree_before_commit(file, &mut snapshot_content, &mut file_content)?;
     let elapsed_reposition = t_reposition.elapsed().as_millis();
     if elapsed_reposition > 0 {
         eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
@@ -1971,6 +1975,54 @@ fn vcs_refresh_signal_path(file: &Path) -> Option<PathBuf> {
     let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
     signal_file.parent().filter(|p| p.exists())?;
     Some(signal_file)
+}
+
+fn dedupe_snapshot_and_worktree_before_commit(
+    file: &Path,
+    snapshot_content: &mut Option<String>,
+    file_content: &mut String,
+) -> Result<()> {
+    let Some(snapshot) = snapshot_content.as_deref() else {
+        return Ok(());
+    };
+    let deduped_snapshot = crate::dedupe::dedupe_responses(snapshot);
+    if deduped_snapshot == snapshot {
+        return Ok(());
+    }
+
+    eprintln!(
+        "[commit] deduped consecutive duplicate response block(s) before staging {}",
+        file.display()
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "commit_pre_stage_dedupe file={} before_commit=true",
+            file.display()
+        ),
+    );
+    crate::snapshot::save(file, &deduped_snapshot)?;
+    *snapshot_content = Some(deduped_snapshot);
+
+    let deduped_file = crate::dedupe::dedupe_responses(file_content);
+    if deduped_file != *file_content {
+        std::fs::write(file, &deduped_file).with_context(|| {
+            format!(
+                "failed to repair duplicate response blocks in {}",
+                file.display()
+            )
+        })?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "commit_pre_stage_dedupe_repaired_worktree file={} before_commit=true",
+                file.display()
+            ),
+        );
+        *file_content = deduped_file;
+    }
+
+    Ok(())
 }
 
 /// Strip ephemeral guard markers from the snapshot and working-tree file on disk.
@@ -2920,6 +2972,81 @@ mod tests {
         let input = "**Re: Something** (HEAD)\nSome text.\n";
         let result = strip_head_markers(input);
         assert_eq!(result, "**Re: Something**\nSome text.\n");
+    }
+
+    #[test]
+    fn commit_dedupes_duplicate_response_snapshot_before_staging() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let initial = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+❯ do #pbdupchurn
+<!-- /agent:exchange -->
+";
+        commit_file(root, "session.md", initial, "add session");
+
+        let duplicated = "\
+---
+agent_doc_session: test
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+❯ do #pbdupchurn
+### Re: #pbdupchurn — gpt-5
+
+Implemented.
+### Re: #pbdupchurn — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        let doc = root.join("session.md");
+        fs::write(&doc, duplicated).unwrap();
+        crate::snapshot::save(&doc, duplicated).unwrap();
+
+        let before = Command::new("git")
+            .current_dir(root)
+            .args(["rev-list", "--count", "HEAD"])
+            .output()
+            .unwrap();
+        let before_count: usize = String::from_utf8_lossy(&before.stdout)
+            .trim()
+            .parse()
+            .unwrap();
+
+        let did_commit = commit(&doc).expect("deduped closeout should commit");
+        assert!(did_commit);
+
+        let after = Command::new("git")
+            .current_dir(root)
+            .args(["rev-list", "--count", "HEAD"])
+            .output()
+            .unwrap();
+        let after_count: usize = String::from_utf8_lossy(&after.stdout)
+            .trim()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            after_count,
+            before_count + 1,
+            "dedupe must happen before the first closeout commit, not in a second cleanup commit"
+        );
+
+        let head = show_head(&doc).unwrap().unwrap();
+        let snapshot = crate::snapshot::load(&doc).unwrap().unwrap();
+        let working = fs::read_to_string(&doc).unwrap();
+        assert_eq!(head.matches("### Re: #pbdupchurn — gpt-5").count(), 1);
+        assert_eq!(snapshot.matches("### Re: #pbdupchurn — gpt-5").count(), 1);
+        assert_eq!(working.matches("### Re: #pbdupchurn — gpt-5").count(), 1);
     }
 
     #[test]

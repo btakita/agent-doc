@@ -51,6 +51,8 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 ### Write-path invariants
 
 - Template/CRDT retries must adopt the already-visible response instead of appending a duplicate block.
+- IPC sidecar success paths must run adjacent response-block dedupe on the exact content they will save as the snapshot. If dedupe changes that content, the working tree and editor repair payload must use the same deduped document before commit.
+- The commit transaction must re-run adjacent response-block dedupe on the staged snapshot content while holding the commit lock. A successful closeout must never rely on a later `agent-doc dedupe` or cleanup commit to remove a duplicate response block that was visible before staging.
 - Prompt-prefix normalization for append-mode exchange comes from the shared prompt-bearing classifier, not ad hoc line-shape guesses.
 - IPC sidecar verification and post-commit working-tree prompt-prefix repair must preserve duplicate prompt-target occurrences by count; one earlier prefixed `spec-test-...` line must not mask a later bare duplicate.
 - IPC sidecar verification fallbacks must merge the current disk content with `content_ours` against the explicit pre-response baseline, re-apply `normalize_prefix_lines` to that merged fallback before saving it as the snapshot, repair the working tree to the same normalized fallback, and re-deliver that exact fallback to the editor via full-content IPC before returning success. A bare prompt-target line in fallback content, plugin-written disk content, or a stale editor buffer must not become the next committed closeout baseline, and concurrent non-exchange user edits such as scratch-comment deletion must not be restored by the repair.

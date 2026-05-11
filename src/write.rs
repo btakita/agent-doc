@@ -5025,6 +5025,83 @@ fn redeliver_normalization_fallback_to_editor(file: &Path, fallback: &str) {
     }
 }
 
+fn repair_disk_from_ipc_dedupe(file: &Path, content: &str) -> Result<()> {
+    atomic_write(file, content).with_context(|| {
+        format!(
+            "failed to repair {} after IPC duplicate-response dedupe",
+            file.display()
+        )
+    })?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_dedupe_repaired_working_tree file={} bytes={}",
+            file.display(),
+            content.len()
+        ),
+    );
+    Ok(())
+}
+
+fn redeliver_ipc_dedupe_to_editor(file: &Path, content: &str) {
+    match try_ipc_full_content(file, content) {
+        Ok(true) => {
+            eprintln!("[write] IPC duplicate-response repair re-delivered to editor");
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "ipc_dedupe_redelivered_editor file={} bytes={}",
+                    file.display(),
+                    content.len()
+                ),
+            );
+        }
+        Ok(false) => {
+            eprintln!(
+                "[write] WARNING: IPC duplicate-response repair updated disk, but editor IPC repair was not consumed; reload the document if the editor view is stale"
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "ipc_dedupe_editor_repair_not_consumed file={} bytes={}",
+                    file.display(),
+                    content.len()
+                ),
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "[write] WARNING: IPC duplicate-response repair updated disk, but editor IPC repair failed: {}; reload the document if the editor view is stale",
+                e
+            );
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "ipc_dedupe_editor_repair_failed file={} error={}",
+                    file.display(),
+                    e
+                ),
+            );
+        }
+    }
+}
+
+fn dedupe_ipc_snapshot_content(file: &Path, content: &str, source: &str) -> (String, bool) {
+    let deduped = dedupe_consecutive_response_blocks(content, file);
+    let changed = deduped != content;
+    if changed {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ipc_snapshot_deduped file={} source={} before_commit=true",
+                file.display(),
+                source
+            ),
+        );
+    }
+    (deduped, changed)
+}
+
 /// Result of an IPC write attempt, including the patch_id used.
 ///
 /// The `patch_id` is returned so callers (e.g., `run_stream()` timeout fallback)
@@ -5211,6 +5288,10 @@ pub fn try_ipc(
                         (snap_content, "ack_content_sidecar", false)
                     };
 
+                    let (effective_snap, dedupe_repair) =
+                        dedupe_ipc_snapshot_content(file, &effective_snap, snap_source);
+                    let repair_disk = repair_disk || dedupe_repair;
+
                     eprintln!(
                         "[write] snapshot from {} ({} bytes)",
                         snap_source,
@@ -5220,8 +5301,13 @@ pub fn try_ipc(
                         let _ = std::fs::remove_file(path);
                     }
                     if repair_disk {
-                        repair_disk_from_normalization_fallback(file, &effective_snap)?;
-                        redeliver_normalization_fallback_to_editor(file, &effective_snap);
+                        if dedupe_repair {
+                            repair_disk_from_ipc_dedupe(file, &effective_snap)?;
+                            redeliver_ipc_dedupe_to_editor(file, &effective_snap);
+                        } else {
+                            repair_disk_from_normalization_fallback(file, &effective_snap)?;
+                            redeliver_normalization_fallback_to_editor(file, &effective_snap);
+                        }
                     }
                     crate::ops_log::log_op(
                         file,
@@ -5686,7 +5772,12 @@ fn write_ipc_and_poll(
             // Plugin applied the patch — update snapshot as actual post-write disk state.
             // `current_on_disk` is from ack-content sidecar when available, or 200ms file read.
             // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
-            let snap_content = current_on_disk;
+            let (snap_content, dedupe_repair) =
+                dedupe_ipc_snapshot_content(doc_file, &current_on_disk, "ipc_file");
+            if dedupe_repair {
+                repair_disk_from_ipc_dedupe(doc_file, &snap_content)?;
+                redeliver_ipc_dedupe_to_editor(doc_file, &snap_content);
+            }
             crate::ops_log::log_op(
                 doc_file,
                 &format!(

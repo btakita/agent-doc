@@ -29,32 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-094153.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-100225.md`*
 
 Compacted content:
-- Archived 5 response topic(s): OpenCode SSH capability proof; OpenCode capability proof error messages use harness name; mark_lifecycle relative path fix; 2 more
+- Archived 1 response topic(s): #dupeexchangeblock fix
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#dupeexchangeblock]. spec-test-build-install-commit-push
-### Re: #dupeexchangeblock fix — gpt-5
-
-**Root cause:** `sanitize_patches` only sanitized patch block content, not unmatched response text. When an agent response contained `&lt;!-- agent:exchange --&gt;...&lt;!-- /agent:exchange --&gt;` markers outside of `<!-- patch:exchange -->` blocks, the unmatched text retained those raw markers. When appended to the existing exchange component, these markers created duplicate exchange blocks.
-
-Additionally, `normalize_template_structure_or_fail` did not call `repair_duplicate_exchange_opener` as defense-in-depth, so any duplicate exchange blocks introduced by CRDT/git merge could survive.
-
-**Fix (two layers):**
-
-1. **Layer 1 — sanitize unmatched text:** Added `sanitize_unmatched()` that applies `sanitize_component_tags` to unmatched response text. Updated all 5 call sites (`run_template`, `run_stream`, `canonicalize_response_for_capture`, `apply_stream_from_string`, `apply_template_from_string`) to sanitize both patches and unmatched text. `src/agent-doc/src/write.rs:6091-6094`
-
-2. **Layer 2 — defense-in-depth repair:** Added `repair_duplicate_exchange_opener` call to `normalize_template_structure_or_fail` so any duplicate exchange blocks that survive the patch/merge phase are merged before the write. `src/agent-doc/src/write.rs:3423-3430`
-
-**Tests:** Two new regression tests:
-- `sanitize_unmatched_escapes_exchange_markers_in_response` — verifies unmatched text with exchange markers gets escaped
-- `apply_patches_sanitize_unmatched_prevents_duplicate_exchange_block` — end-to-end test showing sanitized unmatched text cannot create a second exchange block
-
-**Plan:** `tasks/agent-doc/plan-duplicate-exchange-block-patchback.md`
-
-**Verification:** `make check` — all tests pass. `cargo install --path .` — installed locally.
-<!-- agent:boundary:0f3418cd -->
+<!-- agent:boundary:f5df8905 -->
 <!-- /agent:exchange -->
 ###
 <!--

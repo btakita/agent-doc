@@ -2,11 +2,11 @@
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent: opencode
 claude_model: claude-opus-4-6
+opencode_model: GLM-5.1
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
-opencode_model: GLM-5.1
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix.
@@ -60,7 +60,9 @@ The **skill** (`agent-doc <FILE>` as a plain message) already works in OpenCode.
 A **`/agent-doc` command** in `.opencode/commands/agent-doc.md` would do the same thing — the TUI would autocomplete it, and the template would emit `agent-doc $ARGUMENTS` as the prompt. The only difference is UX: slash commands get TUI autocomplete, tab-completion from the `/` menu, and a description shown in the command picker. Skills rely on the agent recognizing the text pattern.
 
 So they'd produce the same result. A `/agent-doc` command would just be a convenience wrapper — a named command with autocomplete that triggers the same skill path. It wouldn't add new functionality, just better discoverability in the TUI.
-<!-- agent:boundary:031a2bec -->
+Add the `/agent-doc` command and remove the "In OpenCode, invoke agent-doc by writing one of these as a normal message: `agent-doc <FILE>`" in SKILL.md. Update the plugins to use the `/agent-doc` command.
+spec-test-build-install-commit-push
+<!-- agent:boundary:5c475f44 -->
 <!-- /agent:exchange -->
 ###
 <!--

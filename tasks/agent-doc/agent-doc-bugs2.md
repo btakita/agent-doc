@@ -29,31 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-044634.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-045636.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #wvpf
+- Archived 1 response topic(s): syncbudgetstill
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#syncbudgetstill]. spec-test-build-install-commit-push
-### Re: syncbudgetstill — gpt-5
-
-Implemented `#syncbudgetstill`.
-
-Changed safe-passive post-lock focus so it prefers the local `session-actors.json` projection before issuing a controller actor-binding RPC. If it has to fall back to the controller, the result now goes into the same per-sync proof cache used later by ownership and synthetic registry checks. I also moved `window_resolution` logging so a slow post-lock focus handoff is measured only as `postlock_actor_focus`, not double-counted as window resolution.
-
-Updated the sync specs and changelog, and added a focused cache regression: `authoritative_actor_cache_returns_prefilled_record_without_live_probe`.
-
-Verification passed:
-- `cargo test authoritative_actor_cache_returns_prefilled_record_without_live_probe`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commit / push:
-- `src/agent-doc`: `63951ee fix: keep safe-passive focus on fast path`, pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `6e8e38ae7 chore: update agent-doc submodule`, pushed to `origin/main`
-<!-- agent:boundary:5c7fde9f -->
+<!-- agent:boundary:4769ede6 -->
 <!-- /agent:exchange -->
 ###
 

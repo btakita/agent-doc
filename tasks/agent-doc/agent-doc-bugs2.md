@@ -29,35 +29,13 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-024215.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-025708.md`*
 
 Active backlog:
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
-❯ Content that I added into the html comment below agent:exchange in this doc was deleted by agent-doc.
-❯ spec-test-build-install-commit-push
-### Re: post-exchange HTML comment relocation — gpt-5
-
-I reproduced the bad closeout shape from this document: `HEAD` still had the two prompt-looking lines inside the ordinary HTML comment below `agent:exchange`, while this preflight moved those lines into the live exchange. The lower-level template/comment scanners already had coverage for ordinary comments, but the preflight relocation path did not have a regression for the exact `###` separator plus post-exchange scratch-comment shape.
-
-I added that regression in `src/agent-doc/src/preflight.rs` and pinned the invariant in `src/agent-doc/specs/07-closeout-commands.md`: prompt-tail relocation before diff must ignore ordinary HTML comment bodies after `agent:exchange`, even if they contain preset names such as `spec-test-build-install-commit-push`.
-
-Verification and install completed:
-
-- `cargo test preflight_does_not_relocate_prompt_text_inside_post_exchange_html_comment`
-- `cargo test html_comment`
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits pushed:
-
-- `agent-doc` submodule: `a7ffd26 test: preserve post-exchange scratch comments` pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `e28e80c1c chore: update agent-doc submodule` pushed to `origin/main`
-
-I left the unrelated dirty files in the parent worktree alone.
-<!-- agent:boundary:6cecd154 -->
+<!-- agent:boundary:9bced47b -->
 <!-- /agent:exchange -->
 ###
 

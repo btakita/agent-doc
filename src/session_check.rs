@@ -4093,4 +4093,103 @@ Body\n\
             }
         }
     }
+
+    #[test]
+    fn session_check_active_session_drift_message_is_harness_agnostic() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/captures")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/codex-hooks")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Done.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "old prompt\n",
+            "### Re: old — gpt-5\n\n",
+            "old response\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        crate::snapshot::save(&doc, content).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(content), Some(content))
+            .unwrap();
+
+        let drifted = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Done. Manual active-turn drift.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "old prompt\n",
+            "### Re: old — gpt-5\n\n",
+            "old response\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, drifted).unwrap();
+
+        crate::codex_hook::record_external_prompt_for_file(&doc, "test-session", "new prompt")
+            .unwrap();
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "test-session");
+
+        let status = inspect(&doc).unwrap();
+        match status {
+            SessionCheckStatus::Interrupted(msg) => {
+                assert!(
+                    !msg.contains("active Codex session"),
+                    "error message should be harness-agnostic, not Codex-specific: {msg}"
+                );
+                assert!(
+                    msg.contains("active harness session"),
+                    "error message should say 'active harness session': {msg}"
+                );
+                assert!(
+                    !msg.contains("let the Stop hook recover"),
+                    "error message should not reference Stop hook exclusively: {msg}"
+                );
+                assert!(
+                    msg.contains("let the hook recover"),
+                    "error message should say 'let the hook recover': {msg}"
+                );
+            }
+            other => panic!("expected Interrupted status, got {other:?}"),
+        }
+    }
 }

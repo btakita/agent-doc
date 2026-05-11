@@ -2,7 +2,7 @@
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent_doc_format: template
 agent_doc_write: crdt
-agent: opencode
+agent: codex
 claude_model: claude-opus-4-6
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
@@ -29,104 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-212355.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-224836.md`*
 
 Compacted content:
-- Archived 4 response topic(s): garbled OpenCode console after long commit; spec-test-build-install-commit-push; do [#garbledpane]; 1 more
+- Archived 5 response topic(s): tmux window missing; #next-steps; do [#idprefix]; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ The tmux session no longer has the agent-doc tmux window. There is only the stash tmux window. When I first started the session, there was another window that bumped the agent-doc tmux window to window 1. I then manually removed my custom tmux window 0. 
-❯ - Fix regression in agent-doc recovering tmux to the canonical state.
-❯ - Review logs to identify agent-doc
-
-❯ #next-steps
-
-### Re: tmux window missing — base-index auto-repair — glm-5.1
-
-#### Root cause
-
-Session 1 has only one window — `stash` (@4) with 5 panes. Pane %28 (agent-doc-bugs2.md actor, generation 143) is trapped inside the stash window. The agent-doc window is gone entirely.
-
-**Why repair didn't fire:** `check_layout()` in preflight detects "window index 0 missing in session '1' (base-index compliance)" but `maybe_auto_resync_on_drift()` only handles `"session drift:"` prefixed issues. `repair_layout()` — which has Phase 2 logic to rescue a registered pane from stash via `break-pane` — is never called during preflight. It only runs from the sync/doctor paths.
-
-**ops.log evidence:**
-- `route_authoritative_actor_starting_not_ready` at pane %28, generation 143, elapsed 16219ms (timeout 15000ms) — the route can't dispatch because the actor is stuck in `starting` state inside the stash window
-- The pane was registered at window @4 (stash), confirming the agent-doc window was lost when the user manually killed window 0
-
-#### Fix applied
-
-Added `maybe_auto_repair_base_index()` in `preflight.rs` (lines 496–558):
-- Detects "window index 0 missing" in layout issues
-- Uses a consecutive-detection counter (`.agent-doc/state/base-index-repair.count`) — tolerates one false positive before acting
-- On second consecutive detection, calls `sync::repair_layout()` which:
-  - Phase 2: breaks the registered pane out of stash into a new agent-doc window via `break-pane`
-  - Phase 3: normalizes window indices (agent-doc → 0, stash → 1+)
-- Resets the counter on successful repair
-
-**Files changed:**
-- `src/agent-doc/src/preflight.rs` — added `maybe_auto_repair_base_index()`, wired into preflight step 0c, added 2 tests
-
-**Verification:** `make check` passes (clippy + 1938 tests including 2 new ones). Installed locally.
-
-#### Remaining issue: starting actor race
-
-Pane %28 is stuck in `starting` state even after the window repair lands. This is the `#routestartingrace` bug — the 15s route timeout is too short for OpenCode harness boot. The auto-repair will fix the window layout on the next preflight, but the route may still fail until the starting actor transitions to `ready`.
-
-### Re: #next-steps — glm-5.1
-
-- Next preflight will trigger auto-repair (this is the second detection), so the agent-doc window should be restored
-- May need to manually run `agent-doc start tasks/agent-doc/agent-doc-bugs2.md` if the starting actor at pane %28 doesn't transition to ready
-- The `#routestartingrace` backlog item remains the longer-term fix for the 15s timeout
-❯ - Add #next-steps to the backlog.
-❯ - The previous turn should have added #next-steps to the backlog. #agent-doc-bug
-❯ - JB `Run Agent Doc` had an error:
-
-```
-resync: stash pane %31 is registered in its own project root — skipping kill
-[route] target tmux session: 1
-Error: authoritative actor generation 145 for tasks/agent-doc/agent-doc-bugs2.md owns pane %34 but route will not inject a new trigger because the authoritative actor is still starting (waited 15s for opencode startup). Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/agent-doc/agent-doc-bugs2.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/agent-doc/agent-doc-bugs2.md`.
-```
-❯ do [#idprefix]. spec-test-build-install-commit-push
-### Re: do [#idprefix] — inline tag ID extraction — glm-5.1
-
-#### Root cause
-
-When `--pending-add` receives text containing `[#tag]` inline (e.g., `2026-05-11 [#nopatchbackopencode] description`), `parse_custom_id_prefix` only checks the text start for `id=` or `[#tag]` prefixes. Since the tag is embedded after the date prefix, no custom ID is found and `assign_unique_hash` generates a random short hash like `#2fha` instead.
-
-#### Fix applied
-
-Added `extract_inline_tag_id()` in `pending.rs` (lines 701-744):
-- Scans text body for `[#tag]` patterns after `parse_custom_id_prefix` finds no leading prefix
-- Extracts the first valid `[#tag]` as the checklist ID
-- Removes the inline tag from the rendered item text
-- Falls back to hash generation when no inline tag exists
-- Leading `id=` or `[#tag]` prefix still takes precedence over inline extraction
-
-Modified `op_add()` to call `extract_inline_tag_id` as a fallback between leading-prefix check and hash generation.
-
-**Files changed:**
-- `src/agent-doc/src/pending.rs` — added `extract_inline_tag_id()`, wired into `op_add()`, 7 new tests
-
-**Verification:** `make check` passes (clippy + 1951 tests). Installed locally. CLI tested:
-```
-$ agent-doc backlog test.md add "2026-05-11 [#nopatchbackopencode] OpenCode agent-doc turn completed"
-nopatchbackopencode
-```
-Result: `- [ ] [#nopatchbackopencode] 2026-05-11 OpenCode agent-doc turn completed`
-
-**Committed:** `ebc845a` in agent-doc, `75e99e1` in agent-loop. Pushed to origin.
-
-### Re: #next-steps backlog — glm-5.1
-
-The user already added three backlog items from the #next-steps triage:
-
-1. `[#idprefix]` Backlog item uses internal ID instead of declared tag. **Fixed this turn.** Plan: tasks/agent-doc/plan-id-prefix-mismatch-backlog.md
-2. `[#rspcmt7]` Current SessionShare root response patchback uncommitted. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
-3. `[#nextstepscapture]` #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
-
-### Re: JB Run Agent Doc error — glm-5.1
-
-The route error (`authoritative actor generation 145 still starting`) is the `#routestartingrace` issue — the 15s route timeout is too short for OpenCode harness boot. The auto-repair from the previous turn should have restored the agent-doc window. If the pane is still stuck in starting state, run `agent-doc start tasks/agent-doc/agent-doc-bugs2.md` to force a fresh start.
-<!-- agent:boundary:91ec7724 -->
+<!-- agent:boundary:ab8742ea -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -175,6 +83,7 @@ minor (v0.34.0) release + publish. merge into main
 <!-- agent:backlog -->
 - [ ] [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
 - [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
+- [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

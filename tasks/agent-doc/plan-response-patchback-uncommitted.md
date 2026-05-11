@@ -79,3 +79,75 @@ the command must fail closed with an explicit recovery command.
   reporting success.
 - Manual `agent-doc commit <file>` recovery remains safe, but should not be
   required after a normal successful response.
+
+## OpenCode-Specific Evidence (#rspcmt4)
+
+### Reproduction
+
+- **Document:** `boost-client/tasks/monsterrodholders.md` v1.29 deploy
+- **Session:** a9421282, GLM-5.1 agent
+- **Harness:** OpenCode
+- **Symptom:** Response was patched into the exchange section but agent-doc
+  finalize/closeout did not commit the document. User had to manually request
+  commit.
+- **Same class as:** #rspcmt2, #rspcmt3
+
+### Root Cause Analysis
+
+The binary-level closeout path (`write.rs` finalize_commit, session_check.rs)
+is harness-agnostic and correctly commits when invoked. The failure is at the
+**instruction surface layer**:
+
+1. **Missing session-check in OpenCode runbook** — The OpenCode section of
+   `runbooks/harness-invocation.md` did not require running `agent-doc
+   session-check <FILE>` after finalize (unlike the Codex section which has
+   explicit session-check + fail-closed instructions).
+
+2. **No Stop hook backstop** — Codex has `codex_hook.rs` Stop handler that
+   auto-closes open cycles from `last_assistant_message`. OpenCode has no
+   equivalent hook mechanism. If the agent process ends or the user interrupts
+   before finalize commits, there is no automatic recovery.
+
+3. **No active session tracking** — `detect_active_session_post_commit_drift()`
+   in `session_check.rs:1165` uses `codex_hook::load_active_session_for_current_file()`
+   which always returns `None` for OpenCode sessions because there is no OpenCode
+   equivalent of `.agent-doc/codex-hooks/` session state.
+
+4. **Codex-only error messages** — session-check error messages referenced "the
+   active Codex session" and "let the Stop hook recover" which are misleading
+   for OpenCode sessions.
+
+### Instruction Surface Alignment
+
+The shared `SKILL.md` (line 32) and `SPEC.md` (line 73) already mandate
+session-check for "Codex/OpenCode/direct-exec" paths. The gap was that the
+OpenCode-specific harness runbook section did not implement this requirement.
+
+### Fixes Applied
+
+1. `runbooks/harness-invocation.md` OpenCode section now requires:
+   - `agent-doc session-check <FILE>` immediately after finalize
+   - Fail-closed guard (nonzero check → continue recovery, do not report success)
+   - Session-check after manual repair `write --commit` too
+
+2. `runbooks/commit.md` updated to name "Codex and OpenCode" instead of just
+   "Codex" for the direct-exec session-check requirement.
+
+3. `README.md` updated from "Codex post-write guard" to "Direct-exec post-write
+   guard" covering both Codex and OpenCode.
+
+4. `session_check.rs` error messages changed from "active Codex session" and
+   "Stop hook" to harness-agnostic "active harness session" and "hook" language.
+
+### Remaining OpenCode Gaps (follow-up items)
+
+- **No OpenCode hook backstop** — Unlike Codex, there is no `opencode_hook.rs`
+  or equivalent Stop/UserPromptSubmit mechanism. If the OpenCode agent crashes
+  mid-turn, recovery is manual.
+
+- **No active session tracking** — `detect_active_session_post_commit_drift()`
+  silently returns `None` for non-Codex sessions. A future OpenCode-specific
+  session tracking mechanism could close this gap.
+
+- **No OpenCode hook tests** — The codebase has extensive Codex hook tests but
+  no equivalent for OpenCode lifecycle events.

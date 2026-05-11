@@ -29,36 +29,13 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-040418.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-042348.md`*
 
 Active backlog:
-- [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
+- [ ] [#assistanttailprompt] #agent-doc-bug: session-check can misclassify assistant-owned closeout/status prose at the end of a template exchange response as an unresolved prompt-only tail, forcing a second 'Closeout repair:' patchback after a successful response commit. Plan: tasks/agent-doc/plan-session-check-assistant-tail-misclassified.md
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
-❯ do [#startingdispatch]. spec-test-build-install-commit-push
-### Re: starting actor dispatch gate — gpt-5
-
-Implemented `#startingdispatch`.
-
-Route now treats `starting` authoritative actors as non-dispatchable until they refresh to `ready`. The reroute path waits through the existing bounded startup recovery window, logs `route_authoritative_actor_starting_not_ready` if the actor remains `starting`, and fails closed before controller dispatch authorization, supervisor IPC, or direct tmux input. `busy` remains eligible for one supervisor-owned queued reopen; `starting` no longer is. I also updated the route regressions, routing specs, README, and changelog.
-
-Commits:
-- `2438370` in `src/agent-doc`: `fix: gate route dispatch on starting actors`
-- `2947ccf8b` in the parent repo: `agent-doc: gate starting actor dispatch`
-
-Verification completed:
-- `cargo fmt`
-- `cargo check`
-- `cargo test authoritative_actor_optimistic_queue_excludes_starting_state`
-- `make check`
-- `cargo build`
-- `make install`
-
-❯ Push will run after this closeout so the session response commit is included.
-### Re: closeout repair — gpt-5
-
-Closeout repair: the preceding push note is status text from this same completed turn, not a user prompt. The implementation, verification, local install, and commits remain as recorded above.
-<!-- agent:boundary:03626319 -->
+<!-- agent:boundary:14c74278 -->
 <!-- /agent:exchange -->
 ###
 

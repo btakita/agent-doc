@@ -76,8 +76,57 @@ Pane %28 is stuck in `starting` state even after the window repair lands. This i
 - Next preflight will trigger auto-repair (this is the second detection), so the agent-doc window should be restored
 - May need to manually run `agent-doc start tasks/agent-doc/agent-doc-bugs2.md` if the starting actor at pane %28 doesn't transition to ready
 - The `#routestartingrace` backlog item remains the longer-term fix for the 15s timeout
-&lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:545ad123 -->
+❯ - Add #next-steps to the backlog.
+❯ - The previous turn should have added #next-steps to the backlog. #agent-doc-bug
+❯ - JB `Run Agent Doc` had an error:
+
+```
+resync: stash pane %31 is registered in its own project root — skipping kill
+[route] target tmux session: 1
+Error: authoritative actor generation 145 for tasks/agent-doc/agent-doc-bugs2.md owns pane %34 but route will not inject a new trigger because the authoritative actor is still starting (waited 15s for opencode startup). Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/agent-doc/agent-doc-bugs2.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/agent-doc/agent-doc-bugs2.md`.
+```
+❯ do [#idprefix]. spec-test-build-install-commit-push
+### Re: do [#idprefix] — inline tag ID extraction — glm-5.1
+
+#### Root cause
+
+When `--pending-add` receives text containing `[#tag]` inline (e.g., `2026-05-11 [#nopatchbackopencode] description`), `parse_custom_id_prefix` only checks the text start for `id=` or `[#tag]` prefixes. Since the tag is embedded after the date prefix, no custom ID is found and `assign_unique_hash` generates a random short hash like `#2fha` instead.
+
+#### Fix applied
+
+Added `extract_inline_tag_id()` in `pending.rs` (lines 701-744):
+- Scans text body for `[#tag]` patterns after `parse_custom_id_prefix` finds no leading prefix
+- Extracts the first valid `[#tag]` as the checklist ID
+- Removes the inline tag from the rendered item text
+- Falls back to hash generation when no inline tag exists
+- Leading `id=` or `[#tag]` prefix still takes precedence over inline extraction
+
+Modified `op_add()` to call `extract_inline_tag_id` as a fallback between leading-prefix check and hash generation.
+
+**Files changed:**
+- `src/agent-doc/src/pending.rs` — added `extract_inline_tag_id()`, wired into `op_add()`, 7 new tests
+
+**Verification:** `make check` passes (clippy + 1951 tests). Installed locally. CLI tested:
+```
+$ agent-doc backlog test.md add "2026-05-11 [#nopatchbackopencode] OpenCode agent-doc turn completed"
+nopatchbackopencode
+```
+Result: `- [ ] [#nopatchbackopencode] 2026-05-11 OpenCode agent-doc turn completed`
+
+**Committed:** `ebc845a` in agent-doc, `75e99e1` in agent-loop. Pushed to origin.
+
+### Re: #next-steps backlog — glm-5.1
+
+The user already added three backlog items from the #next-steps triage:
+
+1. `[#idprefix]` Backlog item uses internal ID instead of declared tag. **Fixed this turn.** Plan: tasks/agent-doc/plan-id-prefix-mismatch-backlog.md
+2. `[#rspcmt7]` Current SessionShare root response patchback uncommitted. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
+3. `[#nextstepscapture]` #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
+
+### Re: JB Run Agent Doc error — glm-5.1
+
+The route error (`authoritative actor generation 145 still starting`) is the `#routestartingrace` issue — the 15s route timeout is too short for OpenCode harness boot. The auto-repair from the previous turn should have restored the agent-doc window. If the pane is still stuck in starting state, run `agent-doc start tasks/agent-doc/agent-doc-bugs2.md` to force a fresh start.
+<!-- agent:boundary:91ec7724 -->
 <!-- /agent:exchange -->
 ###
 <!--

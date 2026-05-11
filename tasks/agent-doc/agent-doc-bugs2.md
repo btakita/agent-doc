@@ -29,32 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-043432.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-044634.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #assistanttailprompt and compact exchange summary
+- Archived 1 response topic(s): #wvpf
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#wvpf]. spec-test-build-install-commit-push
-### Re: #wvpf — gpt-5
-
-Fixed the Codex hook test-state race.
-
-The hook now records state in the nearest `.agent-doc` root for the invocation CWD and the document root, while still including the git workspace root for nested `.agent-doc` workspaces. It no longer mirrors test/session state into unrelated ambient ancestor roots such as `/tmp/.agent-doc`. Hook cleanup also treats an already-removed session sidecar as absence, so concurrent cleanup cannot fail on a stale `remove_file` race.
-
-Updated `src/agent-doc/SPEC.md` and `src/agent-doc/src/codex_hook.rs`, added a regression for ambient ancestor roots, and kept the nested-root cleanup regression passing.
-
-Verification:
-- `cargo test codex_hook::tests -- --test-threads=2`
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits:
-- `cef0796` in `src/agent-doc`: `fix: isolate Codex hook test state`, pushed to `origin/20260422/codex-agent-backend`
-- `3b0d8cb1c` in the parent repo: `chore: update agent-doc submodule`
-
-No additional follow-up backlog items from this fix.
-<!-- agent:boundary:7b808326 -->
+<!-- agent:boundary:df64710c -->
 <!-- /agent:exchange -->
 ###
 

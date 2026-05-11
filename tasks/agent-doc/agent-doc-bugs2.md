@@ -66,7 +66,25 @@ So the practical diagnosis is: a response headed `### Re: livekit agent readines
 The `tracked side-effect edits: build-party` note is also just a clue: session-check saw non-session tracked repo changes alongside the suspicious response drift, so it reported them as likely side effects of the same unfinished work turn.
 
 I added a follow-up backlog item because this is still the `#partialpatchbackadopt` family: agent-doc should distinguish an agent-doc-owned partial/zero-patch write from a truly manual patchback and give an adoption path that works even when the immediate recovery attempt has empty stdin.
-<!-- agent:boundary:7dde1546 -->
+❯ do [#partialpatchbackadopt2]. spec-test-build-install-commit-push
+### Re: partialpatchbackadopt2 — gpt-5
+
+`#partialpatchbackadopt2` is already covered by the current `src/agent-doc` codebase and published branch state.
+
+I verified the implementation rather than adding a duplicate patch: `src/agent-doc` is clean, `20260422/codex-agent-backend` has no outgoing commits, and `git push origin 20260422/codex-agent-backend` returned `Everything up-to-date`. The relevant checked-in work is the existing partial-patchback adoption path: strict empty-stdin `write --commit` runs repair first, repair can adopt an already-visible response from an agent-doc-owned `response_captured` / `write_applied` cycle, and the closeout spec documents that behavior.
+
+Verification completed:
+
+- `cargo test -p agent-doc write_commit_empty_stdin_adopts_visible_agent_owned_partial_patchback`
+- `cargo test -p agent-doc repair_adopts_visible_response_for_open_agent_doc_write_cycle`
+- `cargo build -p agent-doc`
+- `cargo install --path . --locked`
+- `cargo test -p agent-doc`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `git -C src/agent-doc push origin 20260422/codex-agent-backend` -> `Everything up-to-date`
+
+No source commit was created in this cycle because there were no `src/agent-doc` source/spec/test changes to commit; the requested fix is already present and pushed. I marked `#partialpatchbackadopt2` done.
+<!-- agent:boundary:36cd1db9 -->
 <!-- /agent:exchange -->
 ###
 
@@ -84,7 +102,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#partialpatchbackadopt2] [recommended] Re-open session-check/write recovery for current src/session-share/tasks/root.md evidence: commit blocked on visible '### Re: livekit agent readiness - gpt-5' after zero-patch/IPC write state, then empty-stdin write --commit could not adopt the agent-doc-owned visible response and only reported direct response patchback.
+- [ ] [#emptyrsprepair] Fix empty-response missed-patchback repair: already-committed/no-body recovery must stop before child-agent dispatch and point to write --commit. Plan: tasks/agent-doc/plan-empty-response-repair-write.md
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
@@ -167,4 +185,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#capproofverify] [recommended] Verify async Codex capability proof on a fresh managed restart: last logged network_child proof cost was about 10.1s, and there is no post-275e82b live proof sample yet showing pane render is decoupled from proof latency.
 - 2026-05-10 [#projecthostscope] Prevent cross-project host/SSH target leakage in agent-doc managed Codex sessions: route/tool context should not let globally approved commands or unrelated SSH profiles make an agent infer that an unrelated client host, such as monsterrodholders-server, is the production host for a different project; require project-local docs/frontmatter/runbook evidence or an explicit user directive before using a named remote host in answers or checks.
 - 2026-05-10 [#partialpatchbackadopt] [recommended] Fix session-check/write recovery for agent-doc-owned partial patchbacks: when a prior agent-doc/Codex write path leaves an assistant heading/body visible outside the committed snapshot, classify it as an interrupted/adoptable agent-doc write instead of only direct response patchback, and make empty-stdin recovery point to the correct repair/adoption path.
+- 2026-05-10 [#partialpatchbackadopt2] [recommended] Re-open session-check/write recovery for current src/session-share/tasks/root.md evidence: commit blocked on visible '### Re: livekit agent readiness - gpt-5' after zero-patch/IPC write state, then empty-stdin write --commit could not adopt the agent-doc-owned visible response and only reported direct response patchback.
 <!-- /agent:done -->

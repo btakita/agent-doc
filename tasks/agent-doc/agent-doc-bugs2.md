@@ -29,29 +29,15 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-113308.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-114438.md`*
 
 Compacted content:
-- Archived 3 response topic(s): dispatch-only capability proof gate blocks degraded authoritative actor reopen; why the supervisor is unreachable; busy pane after Clear Session Context + Run Agent Doc
+- Archived 1 response topic(s): [#escrecov] OpenCode Escape interrupt recovery verified
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#escrecov]. spec-test-commit-push
-### Re: [#escrecov] OpenCode Escape interrupt recovery verified — gpt-5
-
-Verified `attempt_opencode_busy_interrupt_recovery` in `route.rs:5053-5106` and test `resolve_or_create_pane_retries_busy_opencode_pane_after_escape_interrupt` in `route.rs:9880-9962`.
-
-**Implementation** (already committed): When a busy OpenCode pane is detected during route dispatch, the function sends two Escape keys (200ms + 100ms delays) then calls `wait_for_agent_ready_outcome` to check for idle prompt. Returns `Recovered` / `Blocked` / `TimedOut` accordingly.
-
-**Test coverage**: The `#[ignore]` tmux integration test uses `write_mock_busy_opencode_recovers_on_escape` — a mock that simulates a busy OpenCode pane printing "esc interrupt", responds to any key (Escape) with a `> ` prompt, then accepts the dispatched `agent-doc` command. Test asserts `resolve_or_create_pane_with_auto_fix_retry` reuses the pane and the dispatch arrives.
-
-**Verification**: 410 unit tests pass, clippy clean, `cargo check` clean. No spec updates needed — no spec references the function name. The test requires live tmux (`make tmux-ci`) so could not be run in this harness session.
-&lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:68c5464d -->
+<!-- agent:boundary:647d80f2 -->
 <!-- /agent:exchange -->
 ###
 <!--
-The session actor should remain alive across agent restarts (e.g. initiated by /clear in opencode). This should fix th JB plugin `Run Agent Doc` after `Clear Session Context` issue.
-spec-test-commit-push
----
 ```
 3. Workaround: delegate SSH via the host — if OpenCode can't SSH directly, have agent-doc run the SSH deploy           step outside the managed pane (in the harness supervisor process), not inside the OpenCode child.
 ```

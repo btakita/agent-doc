@@ -646,6 +646,17 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 marker
             )));
         }
+        if let Some(marker) = detect_uncommitted_exchange_drift(file)? {
+            return Ok(SessionCheckStatus::Interrupted(format!(
+                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document has uncommitted exchange changes beyond the committed snapshot: {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle before reporting success.",
+                state.cycle_id,
+                phase_name(state.phase),
+                state.last_event,
+                marker,
+                file.display(),
+                file.display()
+            )));
+        }
         if let Some(marker) = detect_unstarted_prompt_bearing_diff(file)? {
             return Ok(SessionCheckStatus::Interrupted(format!(
                 "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
@@ -702,6 +713,14 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                     marker
+                )));
+            }
+            if let Some(marker) = detect_uncommitted_exchange_drift(file)? {
+                return Ok(SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: document has uncommitted exchange changes beyond the committed snapshot (no cycle state): {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle.",
+                    marker,
+                    file.display(),
+                    file.display()
                 )));
             }
             if let Some(marker) = detect_unstarted_prompt_bearing_diff(file)? {
@@ -788,6 +807,14 @@ fn inspect_core(file: &Path) -> Result<SessionCheckStatus> {
                 return Ok(SessionCheckStatus::Interrupted(format!(
                     "[session-check] INTERRUPTED: last ops.log event is terminal, but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: {}. Reopen closeout for this turn or let the hook recover it from the final assistant message.",
                     marker
+                )));
+            }
+            if let Some(marker) = detect_uncommitted_exchange_drift(file)? {
+                return Ok(SessionCheckStatus::Interrupted(format!(
+                    "[session-check] INTERRUPTED: last ops.log event is terminal, but the document has uncommitted exchange changes beyond the committed snapshot: {}. Run `agent-doc finalize {}` or `agent-doc write --commit {}` to close the cycle.",
+                    marker,
+                    file.display(),
+                    file.display()
                 )));
             }
             if let Some(marker) = detect_unstarted_prompt_bearing_diff(file)? {
@@ -1204,6 +1231,71 @@ fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>
         ),
     };
     Ok(Some(detail))
+}
+
+fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> {
+    let Some(snapshot) = crate::snapshot::load(file)? else {
+        return Ok(None);
+    };
+    let current = match std::fs::read_to_string(file) {
+        Ok(content) => content,
+        Err(_) => return Ok(None),
+    };
+    if current == snapshot {
+        return Ok(None);
+    }
+    let norm_current = crate::git::normalize_committed_exchange_artifacts(&current);
+    let norm_snapshot = crate::git::normalize_committed_exchange_artifacts(&snapshot);
+    if norm_current == norm_snapshot {
+        return Ok(None);
+    }
+    if !exchange_has_new_appended_content(&norm_snapshot, &norm_current) {
+        return Ok(None);
+    }
+    let prompt_marker = detect_unstarted_prompt_bearing_diff(file)?;
+    let detail = match prompt_marker {
+        Some(marker) => format!("uncommitted working tree drift beyond snapshot with exchange changes; {}", marker),
+        None => "uncommitted working tree drift beyond snapshot with exchange changes".to_string(),
+    };
+    Ok(Some(detail))
+}
+
+fn exchange_has_new_appended_content(snapshot: &str, current: &str) -> bool {
+    let Some(snapshot_exchange) = extract_normalized_exchange_body(snapshot) else {
+        return false;
+    };
+    let Some(current_exchange) = extract_normalized_exchange_body(current) else {
+        return false;
+    };
+    if current_exchange == snapshot_exchange {
+        return false;
+    }
+    let snapshot_lines: Vec<&str> = snapshot_exchange.lines().collect();
+    let current_lines: Vec<&str> = current_exchange.lines().collect();
+    if current_lines.len() <= snapshot_lines.len() {
+        return false;
+    }
+    for (i, line) in snapshot_lines.iter().enumerate() {
+        if current_lines.get(i) != Some(line) {
+            return false;
+        }
+    }
+    let appended: String = current_lines[snapshot_lines.len()..].join("\n");
+    if appended.lines().any(|line| crate::diff::text_line_looks_like_prompt_target(line)) {
+        return false;
+    }
+    true
+}
+
+fn extract_normalized_exchange_body(doc: &str) -> Option<String> {
+    let (_, body) = crate::frontmatter::parse(doc).ok()?;
+    let components = crate::component::parse(body).ok()?;
+    for component in &components {
+        if component.name == "exchange" {
+            return Some(component.content(body).to_string());
+        }
+    }
+    None
 }
 
 fn exchange_only_promptless_content_drift(snapshot: &str, current: &str) -> bool {
@@ -4311,6 +4403,116 @@ Body\n\
                 );
             }
             other => panic!("expected Interrupted status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn uncommitted_exchange_drift_detected_without_codex_session() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ run the post docker commands\n",
+            "### Re: docker deploy — glm-5.1\n\n",
+            "Deploy completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ run the post docker commands\n",
+            "### Re: docker deploy — glm-5.1\n\n",
+            "Deploy completed.\n\n",
+            "| File | Change |\n",
+            "|------|--------|\n",
+            "| mrh-performance.php | Reverted caching changes |\n",
+            "| test script | Updated assertions |\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, current).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("uncommitted exchange changes")
+                        || message.contains("direct response patchback"),
+                    "message should mention uncommitted exchange drift or direct response patchback: {message}"
+                );
+                assert!(
+                    message.contains("agent-doc finalize")
+                        || message.contains("agent-doc write --commit")
+                        || message.contains("agent-doc write --commit"),
+                    "message should prescribe finalize or write --commit: {message}"
+                );
+            }
+            other => panic!("expected interrupted status for #rspcmt6, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn uncommitted_exchange_drift_ignored_when_only_status_changed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Old status.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "New status updated by user.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: done — gpt-5\n\n",
+            "Completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, current).unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(_) => {}
+            other => panic!("expected ok status for status-only drift, got {other:?}"),
         }
     }
 }

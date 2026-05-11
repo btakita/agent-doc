@@ -29,24 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-101917.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-104003.md`*
 
 Compacted content:
-- Archived 1 response topic(s): stale actor transition generation mismatch
+- Archived 1 response topic(s): stale generation fix test + spec + build
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#stalegenfix]. spec-test-build-install-commit-push
-### Re: stale generation fix test + spec + build — glm-5.1
-
-The fix was already committed in `cc5a214`. This turn strengthened the regression test, resolved a clippy lint, and documented the rule in SPEC.md.
-
-**Changes:**
-- `src/agent-doc/src/project_controller.rs:3877-3879` — replaced `project_binding_in` (which doesn't bump generation for same pane) with `record_session_start_direct(gen=2)` so the test actually exercises the stale-generation transition path
-- `src/agent-doc/src/session_actor.rs:420-432` — collapsed nested if into a single guard for clippy (`collapsible_if`)
-- `SPEC.md:87` — documented the same-owner same-pane generation bypass rule
-- All 2582 tests pass; build + install completed; pushed `fea74ab` to `20260422/codex-agent-backend`
-
-&lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:c16cfe0b -->
+<!-- agent:boundary:a30faffd -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -29,106 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-150108.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-212355.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #rootlatepatch late fallback patch guard
+- Archived 4 response topic(s): garbled OpenCode console after long commit; spec-test-build-install-commit-push; do [#garbledpane]; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-I closed the agent-doc supervisor directly in the console. I then ran `agent-doc start .../root.md` in the console. When I used the JB plugin to `Run Agent Doc`, I saw an error:
-```
-[route] target tmux session: 1
-Error: authoritative actor generation 18 for tasks/root.md owns pane %1 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
-```
-❯ The previous response took >20s for the final git commit. Then the opencode console became garbled:
-```
-         ▄     M-5.1 Z.AI Coding Plan
-  ╹▀▀▀▀▀▀▀▀▀▀▀▀█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                            █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀0K (20%)  ctrl+p commands
-                                                                                             ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
-
-            Commands:
-                       opencode completion          generate shell completion script
-                                                                                      opencode acp                 start ACP (Agent Client Protocol) server
-                                     opencode mcp                 manage MCP (Model Context Protocol) servers
-                                                                                                               opencode [project]           start opencode tui                                          [default]
-                                                                                           opencode attach <url>        attach to a running opencode server
-                                     opencode run [message..]     run opencode with a message
-                                                                                               opencode debug               debugging and troubleshooting tools
-                                         opencode providers           manage AI providers and credentials                   [aliases: auth]
-                     opencode agent               manage agents
-                                                                 opencode upgrade [target]    upgrade opencode to the latest or a specific version
-                            opencode uninstall           uninstall opencode and remove all related files
-                                                                                                          opencode serve               starts a headless opencode server
-                                                  opencode web                 start opencode server and open web interface
-     opencode models [provider]   list all available models
-                                                             opencode stats               show token usage and cost statistics
-        opencode export [sessionID]  export session data as JSON
-                                                                  opencode import <file>       import session data from JSON file or URL
-                  opencode github              manage GitHub agent
-                                                                    opencode pr <number>         fetch and checkout a GitHub PR branch, then run opencode
-                                   opencode session             manage sessions
-                                                                                 opencode plugin <module>     install plugin and update config                      [aliases: plug]
-                                                             opencode db                  database tools
-
-                                                                                                        Positionals:
-                                                                                                                      project  path to start opencode in                                                        [string]
-
-                                                                                                Options:
-                                                                                                          -h, --help         show help                                                             [boolean]
-                                                                                      -v, --version      show version number                                                   [boolean]
-                                                                      --print-logs   print logs to stderr                                                  [boolean]
-                                                  --log-level    log level                  [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
-                              --pure         run without external plugins                                          [boolean]
-          --port         port to listen on                                         [number] [default: 0]
-                                                                                                              --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
-                                                                                          --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
-                                                                                                                       [boolean] [default: false]
-                               --mdns-domain  custom domain name for mDNS service (default: opencode.local)
-                                                                                                                                                                           [string] [default: "opencode.local"]
-                                                                                             --cors         additional domains to allow for CORS                      [array] [default: []]
-                                                                     -m, --model        model to use in the format of provider/model                           [string]
-                                                 -c, --continue     continue the last session                                             [boolean]
-                             -s, --session      session id to continue                                                 [string]
-             --fork         fork the session when continuing (use with --continue or --session)   [boolean]
-                                                                                                                 --prompt       prompt to use                                                          [string]
-                                                                                             --agent        agent to use                                                           [string]
-                                                                   [agent-doc] auto-trigger failed
-```
-❯ spec-test-build-install-commit-push
-#### Re: garbled OpenCode console after long commit — glm-5.1
-
-The garbled output is the OpenCode `--help` screen rendered with corrupted ANSI art. The OpenCode TUI exited (likely due to the >20s commit blocking the pty), then `agent-doc start` respawned OpenCode without proper arguments, which showed the help screen instead of starting the TUI.
-
-The `[agent-doc] auto-trigger failed` confirms route couldn't detect a ready prompt in that state.
-
-Added `[#garbledpane]` to backlog. This needs a plan to:
-1. Detect when OpenCode exits to its help/usage screen (not a normal prompt)
-2. Restart with correct args instead of treating it as a ready pane
-3. Increase pty timeout tolerance during long git operations
-
-#### Re: spec-test-build-install-commit-push — glm-5.1
-
-No code changes to spec/test/build — only the plan file `tasks/agent-doc/plan-route-starting-actor-race-after-restart.md` was created in the prior turn. Skipping preset.
-❯ do [#garbledpane]. spec-test-build-install-commit-push
-### Re: do [#garbledpane] — glm-5.1
-
-Implemented help/usage screen detection for OpenCode harness. When the pane shows OpenCode's help output (>=3 lines starting with `opencode `), the system now:
-
-1. **Dispatch blocker** — `dispatch_blocker_reason` returns `"help/usage screen detected"`, preventing route from injecting into a non-functional pane
-2. **Auto-trigger fast-fail** — the auto-trigger thread detects the help screen immediately and returns `Cancelled` instead of waiting for the 30s timeout, so the restart loop can restart fresh sooner
-3. **Route blocking** — `wait_for_agent_ready_outcome` won't match any help-screen line as a ready prompt, and the blocker prevents injection
-
-Changes: `src/harness.rs` (+76 lines), `src/start.rs` (+53 lines), `src/session_check.rs` (clippy fix). 7 new unit tests. All 2088 tests pass. Built + installed + pushed.
-❯ do [#routestartingrace]. spec-test-build-install-commit-push
-❯ After I run 1 agent-doc turn using opencode, the ui becomes unpromptable.
-❯ spec-test-build-install-commit-push
-### Re: OpenCode unpromptable after 1 agent-doc turn — glm-5.1
-
-**Root cause**: The global config `~/.config/agent-doc/config.toml` has `codex_network_access = "enabled"`, which triggers the Codex-specific capability proof for ALL harnesses including OpenCode. The proof spawns `opencode exec --json` to test network/writable-root access, which fails. On failure, the actor transitions to `Blocked`, the child process is killed (`shared.kill_child()`), and the supervisor enters a restart loop: restart → capability proof fails → kill → restart. The user never gets an interactive prompt.
-
-**Evidence from ops.log**: Generations 129, 131, 133, 135, 137, 139, 141 all show `state=blocked reason=opencode_capability_proof_failed`, confirming the restart loop.
-
-**Fix** (`1813045`): `managed_capability_contract_required` now accepts a `harness` parameter and returns `false` for non-Codex harnesses. The Codex sandbox probes (DNS, child network, writable roots) are specific to Codex's sandbox model and don't apply to OpenCode's runtime. Updated `start.rs` call site and added OpenCode-specific assertions in the existing test. All 2142+ tests pass. Built + installed + pushed.
-<!-- agent:boundary:686d5abf -->
+<!-- agent:boundary:a157dea4 -->
 <!-- /agent:exchange -->
 ###
 <!--

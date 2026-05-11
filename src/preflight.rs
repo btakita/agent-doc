@@ -3642,6 +3642,81 @@ mod tests {
     }
 
     #[test]
+    fn preflight_does_not_relocate_prompt_text_inside_post_exchange_html_comment() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "Content that I added into the html comment below agent:exchange in this doc was deleted by agent-doc.\n",
+            "spec-test-build-install-commit-push\n",
+            "---\n",
+            "older scratch note\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        let exchange_close = file_after.find("<!-- /agent:exchange -->").unwrap();
+        let hidden_prompt = file_after
+            .find("Content that I added into the html comment below agent:exchange")
+            .unwrap();
+        let comment_open = file_after.find("\n<!--\n").unwrap();
+        let comment_close = file_after.find("\n-->\n\n<!-- agent:backlog -->").unwrap();
+        assert!(
+            hidden_prompt > exchange_close,
+            "scratch-comment prompt text must stay outside exchange:\n{file_after}"
+        );
+        assert!(
+            hidden_prompt > comment_open && hidden_prompt < comment_close,
+            "scratch-comment prompt text must remain inside the ordinary HTML comment:\n{file_after}"
+        );
+        assert!(
+            !file_after.contains(
+                "\nContent that I added into the html comment below agent:exchange in this doc was deleted by agent-doc.\nspec-test-build-install-commit-push\n<!-- /agent:exchange -->"
+            ),
+            "preflight must not move scratch-comment text into exchange:\n{file_after}"
+        );
+    }
+
+    #[test]
     fn preflight_session_accretion_does_not_auto_compact_exchange() {
         let dir = setup_project();
         let root = dir.path();

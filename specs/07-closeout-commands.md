@@ -102,6 +102,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - If the file diff is empty but the active harness prompt still contains body text after `agent-doc <FILE>`, preflight synthesizes an in-memory diff from that prompt body.
 - Preflight must fail closed before diffing when the snapshot/file pair already looks like an uncommitted assistant closeout with no recoverable cycle left to explain it.
 - Explicit backlog targets extracted from prompt presets are resolved relative to the project root. If a relative target begins with the current project directory name, that redundant prefix is stripped before falling back to a non-existent doubled path.
+- Prompt-tail relocation before diff must ignore ordinary HTML comment bodies after `agent:exchange`, even when those comments contain prompt-looking text or preset names. Scratch-comment text must remain outside exchange instead of being moved into the live prompt tail.
 
 ## session-check
 

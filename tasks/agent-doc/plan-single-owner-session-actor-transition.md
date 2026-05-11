@@ -1,4 +1,4 @@
-# Plan — transition `agent-doc` to a single-owner session actor model
+# Plan — transition `agent-doc` to a project-controller / session-actor model
 
 **Pending:** `#sgown`
 **Status:** Draft
@@ -17,6 +17,19 @@ That creates exactly the drift the recent `agent-doc-bugs2.md` failures keep exp
 The architectural fix is to stop reconciling competing ownership guesses on the normal path.
 
 ## Target Model
+
+Adopt the vocabulary:
+
+```text
+Project Controller -> Session Actor -> Harness Supervisor -> Harness Child
+```
+
+The `Project Controller` is the project/workspace-level service that owns the
+singleton launch/socket boundary, creates or finds per-document owners, and
+protects project-wide invariants. Each `Session Actor` is the only authority for
+one document session. Each `Harness Supervisor` is the runtime wrapper around
+one Codex/Claude `Harness Child` and reports lifecycle observations back to its
+owning session actor.
 
 Make one per-document session actor the only authority for ownership.
 
@@ -84,9 +97,10 @@ Rules:
 - Keep `sessions.json` as a read projection during migration.
 - Evaluate sqlite only if the simpler store cannot provide the atomicity and inspection needed; do not introduce it just because it is available.
 
-### Phase 3: Move supervisor ownership into the actor
+### Phase 3: Move harness-supervisor lifecycle reporting into the actor
 
-- Make supervisor startup register through the actor instead of writing ownership directly into registry/session history.
+- Make harness-supervisor startup register through the actor instead of writing
+  ownership directly into registry/session history.
 - Add explicit actor commands for:
   - `start`
   - `attach`
@@ -96,7 +110,8 @@ Rules:
   - `mark-busy`
   - `mark-waiting-input`
   - `close`
-- Have the supervisor report prompt-readiness and closeout events as actor transitions.
+- Have the harness supervisor report prompt-readiness and closeout events as
+  actor transitions.
 
 ### Phase 4: Convert route to actor dispatch
 

@@ -1,7 +1,25 @@
 # Plan — evaluate a sqlite-backed session store for `agent-doc`
 
 **Pending:** `#2dkn`
-**Status:** Draft
+**Status:** Accepted / scoped behind Project Controller
+
+## Decision
+
+Prototype one project-root `.agent-doc/state.db`, but not as a free-standing
+multi-writer authority. The prototype should be the durable state and journal
+behind the Project Controller from
+`tasks/agent-doc/plan-project-controller-session-actor-mvp.md`.
+
+The controller remains the live serializer for project-wide decisions: launch
+locking, session actor lookup, stale owner cleanup, lease interpretation, and
+repair ordering. SQLite owns persistence, generation compare-and-swap,
+transition history, uniqueness checks, dispatch attempts, and projection drift
+diagnostics. `sessions.json`, `session-actors.json`, tmux-router state, and text
+logs remain generated projections/diagnostics during the migration.
+
+Do not build a direct "all supervisors coordinate through SQLite" path. That
+would make storage atomic but would still leave conflict resolution distributed
+across multiple live processes.
 
 ## Problem
 
@@ -28,6 +46,18 @@ The recent single-owner actor work improves ownership semantics, but it also
 raises the bar for the storage layer: once one actor record becomes
 authoritative, the project needs a clearer answer for compare-and-swap updates,
 cross-process reads, and history/projection queries.
+
+Use the accepted ownership vocabulary while evaluating this storage layer:
+
+```text
+Project Controller -> Session Actor -> Harness Supervisor -> Harness Child
+```
+
+The database, if adopted, should persist the authoritative `Session Actor`
+record and transition history. It should not blur that authority into the
+`Harness Supervisor`, which owns only the live harness process lifecycle, or
+into the `Project Controller`, which owns project-level lookup, launch locking,
+and global repair policy.
 
 ## Goal
 

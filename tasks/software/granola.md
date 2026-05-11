@@ -36,7 +36,6 @@ Each skill follows the same contract:
 Related: tasks/software/proof.md (Proof adapter — designed, not yet built)
 
 ### `/granola` Skill Design
-
 **Commands:**
 - `granola ingest <url>` — fetch shared note, hydrate into agent-doc template
 - `granola push <file>` — push agent-doc exchange back to Granola (browser automation initially)

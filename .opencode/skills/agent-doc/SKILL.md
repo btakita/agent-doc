@@ -1,5 +1,5 @@
 ---
-description: "Interactive markdown session for OpenCode. TRIGGER: user writes agent-doc <file> as a normal OpenCode message. Requires a markdown session document, installed CLI, and write+commit every cycle."
+description: "Interactive markdown session for OpenCode. TRIGGER: user invokes /agent-doc <file> command. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
 agent-doc-version: "0.33.16"
@@ -15,18 +15,16 @@ This shared hot path serves Claude Code, Codex, OpenCode, Cursor, and direct har
 
 ## Invocation
 
-In OpenCode, invoke agent-doc by writing one of these as a normal message:
-
 ```
-agent-doc <FILE>
-agent-doc claim <FILE>
-agent-doc compact <FILE>
-agent-doc compact exchange <FILE>
+/agent-doc <FILE>
+/agent-doc claim <FILE>
+/agent-doc compact <FILE>
+/agent-doc compact exchange <FILE>
 ```
 
 Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
-Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.
+**Note:** Slash commands (`/agent-doc`) are installed as an OpenCode command via `agent-doc skill install --harness opencode`. Other harnesses receive the document path directly.
 ## Hot Path Digest
 
 - **Document is the UI** — user edits ARE the prompt; respond in the document and console.

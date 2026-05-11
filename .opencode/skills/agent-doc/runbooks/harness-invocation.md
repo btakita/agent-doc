@@ -6,7 +6,7 @@ The core workflow (preflight, respond, persist the response) is identical across
 ## Harness-Native Entrypoints
 
 - A harness-native `agent-doc` invocation is an executable workflow entry, not a generic request to edit the markdown file by hand.
-- Claude Code `/agent-doc <FILE>`, Codex `agent-doc <FILE>`, OpenCode `agent-doc <FILE>`, and equivalent direct-entry forms all start the same binary-owned response cycle.
+- Claude Code `/agent-doc <FILE>`, Codex `agent-doc <FILE>`, OpenCode `/agent-doc <FILE>`, and equivalent direct-entry forms all start the same binary-owned response cycle.
 - Do **not** treat that turn as successful until the response crosses `agent-doc finalize <FILE>` for the normal path or `agent-doc write --commit <FILE>` for a repair path.
 - Do **not** end a normal harness-native `agent-doc` turn with "not committed" or equivalent wording unless the user explicitly asked to leave the response uncommitted.
 - MCP auth / OAuth steps are part of that same turn. If a tool pauses for authentication or browser approval, resume the managed response afterward and still finish with `finalize` / `write --commit` plus `session-check`; the auth step is not the success boundary.
@@ -75,9 +75,9 @@ Identify your harness from your environment:
 
 ## OpenCode
 
-- **Invocation:** Direct prompt injection or user instruction referencing the document, using `agent-doc <FILE>` as a normal message.
+- **Invocation:** User types `/agent-doc <FILE>` which triggers the installed OpenCode command. The command template emits `agent-doc <FILE>` as the prompt, which the agent recognizes and loads the skill.
 - **Entry semantics:** once that message is accepted, the turn is inside the binary-owned response cycle. Do **not** downgrade it into a manual document-editing task or report a useful-but-uncommitted success state.
-- **Slash commands:** OpenCode does not use the Claude Code `/agent-doc` skill command. If preflight returns `slash_commands`, skip them. If `builtin_commands`, write a document note.
+- **Slash commands:** The `/agent-doc` command is an OpenCode custom command installed by `agent-doc skill install --harness opencode` into `.opencode/commands/agent-doc.md`. If preflight returns `slash_commands`, skip them (OpenCode handles them natively). If `builtin_commands`, write a document note.
 - **Write-back:** Execute `agent-doc finalize` directly for the normal response cycle.
 - **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file; use `agent-doc write --commit <FILE>` once the prompt already exists.
 

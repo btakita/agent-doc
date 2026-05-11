@@ -777,6 +777,7 @@ pub(crate) fn prove_managed_session_capabilities(
     env: &std::collections::HashMap<String, String>,
     fm: &Frontmatter,
     global_config: &crate::config::Config,
+    harness: &str,
 ) -> Result<Option<String>> {
     if !managed_capability_contract_required(args, fm, global_config) {
         return Ok(None);
@@ -822,10 +823,11 @@ pub(crate) fn prove_managed_session_capabilities(
     timings.total = total_start.elapsed();
 
     Ok(Some(format!(
-        "codex_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={} {}",
+        "{}_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={} {}",
+        harness,
         proof_status_label(network_required, network_required),
         if network_required {
-            "codex_child_dns_https"
+            "child_dns_https"
         } else {
             "not_required"
         },
@@ -2219,6 +2221,7 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &env,
             &fm,
             &crate::config::Config::default(),
+            "codex",
         )
         .unwrap()
         .unwrap();

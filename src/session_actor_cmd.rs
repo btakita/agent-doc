@@ -738,10 +738,11 @@ fn print_status_summary(ctx: &SessionContext) {
         ),
         None => println!("session_log: missing"),
     }
-    if ctx.harness == "codex" {
+    if matches!(ctx.harness.as_str(), "codex" | "opencode") {
         println!(
-            "codex_capability_proof: {}",
-            codex_capability_proof_status(ctx)
+            "{}_capability_proof: {}",
+            ctx.harness,
+            capability_proof_status(ctx)
         );
     }
     match &ctx.operator_status.supervisor_lease {
@@ -785,7 +786,7 @@ fn print_status_summary(ctx: &SessionContext) {
     }
 }
 
-fn codex_capability_proof_status(ctx: &SessionContext) -> String {
+fn capability_proof_status(ctx: &SessionContext) -> String {
     let content = match std::fs::read_to_string(&ctx.canonical_file) {
         Ok(content) => content,
         Err(err) => return format!("unknown (failed to read document: {err})"),
@@ -808,21 +809,17 @@ fn codex_capability_proof_status(ctx: &SessionContext) -> String {
     if let Err(err) = crate::startup_miss::session_log_has_event_after_latest_start(
         &ctx.canonical_file,
         &ctx.session_id,
-        "codex_capability_proof status=proven",
+        &format!("{}_capability_proof status=proven", ctx.harness),
     ) {
         return format!("unknown ({err})");
     }
-    for (prefix, label) in [
-        ("codex_capability_proof status=proven", "proven"),
-        ("codex_capability_proof status=failed", "failed"),
-        ("codex_capability_proof status=pending", "pending"),
-    ] {
+    for status in ["proven", "failed", "pending"] {
         match crate::startup_miss::session_log_has_event_after_latest_start(
             &ctx.canonical_file,
             &ctx.session_id,
-            prefix,
+            &format!("{}_capability_proof status={}", ctx.harness, status),
         ) {
-            Ok(true) => return label.to_string(),
+            Ok(true) => return status.to_string(),
             Ok(false) => {}
             Err(err) => return format!("unknown ({err})"),
         }

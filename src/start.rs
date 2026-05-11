@@ -1012,27 +1012,29 @@ fn spawn_auto_trigger_thread(
         .expect("spawn auto-trigger thread")
 }
 
-fn spawn_managed_codex_capability_proof_thread(
+fn spawn_managed_capability_proof_thread(
     shared: Arc<SupervisorShared>,
-    command: String,
+    harness_binary: String,
     args: Vec<String>,
     env: std::collections::HashMap<String, String>,
     fm: frontmatter::Frontmatter,
     global_config: config::Config,
     mut session_log: Option<std::fs::File>,
 ) -> std::thread::JoinHandle<()> {
+    let thread_name = format!("{harness_binary}-capability-proof");
     std::thread::Builder::new()
-        .name("codex-capability-proof".into())
+        .name(thread_name)
         .spawn(move || {
             match crate::agent::codex::prove_managed_session_capabilities(
-                &command,
+                &harness_binary,
                 &args,
                 &env,
                 &fm,
                 &global_config,
+                &harness_binary,
             ) {
                 Ok(Some(event)) => {
-                    eprintln!("[start] managed Codex capability proof: {}", event);
+                    eprintln!("[start] managed {} capability proof: {}", harness_binary, event);
                     shared.set_capability_proof_gate(CapabilityProofGate::Proven, None);
                     log_event(&mut session_log, &event);
                 }
@@ -1040,7 +1042,7 @@ fn spawn_managed_codex_capability_proof_thread(
                     shared.set_capability_proof_gate(CapabilityProofGate::NotRequired, None);
                     log_event(
                         &mut session_log,
-                        "codex_capability_proof status=not_required",
+                        &format!("{}_capability_proof status=not_required", harness_binary),
                     );
                 }
                 Err(err) => {
@@ -1052,20 +1054,21 @@ fn spawn_managed_codex_capability_proof_thread(
                     shared.transition_actor_state(
                         crate::session_actor::ActorState::Blocked,
                         "supervisor",
-                        "codex_capability_proof_failed",
+                        &format!("{}_capability_proof_failed", harness_binary),
                     );
                     log_event(
                         &mut session_log,
-                        &format!("codex_capability_proof status=failed error={detail:?}"),
+                        &format!("{}_capability_proof status=failed error={detail:?}", harness_binary),
                     );
                     eprintln!(
-                        "[start] managed Codex capability proof failed; terminating unusable child session: {detail}"
+                        "[start] managed {} capability proof failed; terminating unusable child session: {detail}",
+                        harness_binary
                     );
                     shared.kill_child();
                 }
             }
         })
-        .expect("spawn codex capability proof thread")
+        .expect("spawn capability proof thread")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -2141,16 +2144,15 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
             anyhow::bail!(err);
         }
     }
-    let codex_capability_proof_required = harness.binary == "codex"
-        && crate::agent::codex::managed_capability_contract_required(
-            &base_args,
-            &fm,
-            &global_config,
-        );
-    if harness.binary == "codex" && !codex_capability_proof_required {
+    let capability_proof_required = crate::agent::codex::managed_capability_contract_required(
+        &base_args,
+        &fm,
+        &global_config,
+    );
+    if !capability_proof_required {
         log_event(
             &mut session_log,
-            "codex_capability_proof status=not_required",
+            &format!("{}_capability_proof status=not_required", harness.binary),
         );
     }
 
@@ -2199,10 +2201,13 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
         Some(crate::session_actor::ActorState::Starting),
         Some(pane_id.clone()),
     ));
-    let capability_proof_thread = if codex_capability_proof_required {
+    let capability_proof_thread = if capability_proof_required {
         shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
-        log_event(&mut session_log, "codex_capability_proof status=pending");
-        Some(spawn_managed_codex_capability_proof_thread(
+        log_event(
+            &mut session_log,
+            &format!("{}_capability_proof status=pending", harness.binary),
+        );
+        Some(spawn_managed_capability_proof_thread(
             shared.clone(),
             harness.binary.clone(),
             base_args.clone(),

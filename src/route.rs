@@ -823,7 +823,7 @@ fn reapply_codex_launch_contract_after_clear(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CodexManagedCapabilityProofStatus {
+enum ManagedCapabilityProofStatus {
     NotRequired,
     Pending,
     Proven,
@@ -831,14 +831,11 @@ enum CodexManagedCapabilityProofStatus {
     Missing,
 }
 
-fn codex_managed_capability_proof_status(
+fn managed_capability_proof_status(
     file: &Path,
     session_id: &str,
     harness: &HarnessConfig,
-) -> Result<CodexManagedCapabilityProofStatus> {
-    if harness.binary != "codex" {
-        return Ok(CodexManagedCapabilityProofStatus::NotRequired);
-    }
+) -> Result<ManagedCapabilityProofStatus> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let fm = frontmatter::parse_for_file(&content, file).map(|(fm, _)| fm)?;
@@ -848,49 +845,50 @@ fn codex_managed_capability_proof_status(
     let global_config = crate::config::load().unwrap_or_default();
     if !crate::agent::codex::managed_capability_contract_required_for_doc(file, &fm, &global_config)
     {
-        return Ok(CodexManagedCapabilityProofStatus::NotRequired);
+        return Ok(ManagedCapabilityProofStatus::NotRequired);
+    }
+    let prefix = format!("{}_capability_proof status=", harness.binary);
+    if crate::startup_miss::session_log_has_event_after_latest_start(
+        file,
+        session_id,
+        &format!("{}proven", prefix),
+    )? {
+        return Ok(ManagedCapabilityProofStatus::Proven);
     }
     if crate::startup_miss::session_log_has_event_after_latest_start(
         file,
         session_id,
-        "codex_capability_proof status=proven",
+        &format!("{}failed", prefix),
     )? {
-        return Ok(CodexManagedCapabilityProofStatus::Proven);
+        return Ok(ManagedCapabilityProofStatus::Failed);
     }
     if crate::startup_miss::session_log_has_event_after_latest_start(
         file,
         session_id,
-        "codex_capability_proof status=failed",
+        &format!("{}pending", prefix),
     )? {
-        return Ok(CodexManagedCapabilityProofStatus::Failed);
+        return Ok(ManagedCapabilityProofStatus::Pending);
     }
-    if crate::startup_miss::session_log_has_event_after_latest_start(
-        file,
-        session_id,
-        "codex_capability_proof status=pending",
-    )? {
-        return Ok(CodexManagedCapabilityProofStatus::Pending);
-    }
-    Ok(CodexManagedCapabilityProofStatus::Missing)
+    Ok(ManagedCapabilityProofStatus::Missing)
 }
 
-fn wait_for_codex_managed_capability_proof(
+fn wait_for_managed_capability_proof(
     file: &Path,
     session_id: &str,
     harness: &HarnessConfig,
     timeout: Duration,
-) -> Result<CodexManagedCapabilityProofStatus> {
+) -> Result<ManagedCapabilityProofStatus> {
     let deadline = Instant::now() + timeout;
     loop {
-        let status = codex_managed_capability_proof_status(file, session_id, harness)?;
-        if status != CodexManagedCapabilityProofStatus::Pending || Instant::now() >= deadline {
+        let status = managed_capability_proof_status(file, session_id, harness)?;
+        if status != ManagedCapabilityProofStatus::Pending || Instant::now() >= deadline {
             return Ok(status);
         }
         std::thread::sleep(Duration::from_millis(250));
     }
 }
 
-fn reapply_codex_capability_contract_before_reuse(
+fn reapply_capability_contract_before_reuse(
     tmux: &Tmux,
     file: &Path,
     pane: &str,
@@ -902,41 +900,47 @@ fn reapply_codex_capability_contract_before_reuse(
     if !enforce_capability_proof {
         return Ok(pane.to_string());
     }
-    let proof_status = wait_for_codex_managed_capability_proof(
+    let proof_status = wait_for_managed_capability_proof(
         file,
         session_id,
         harness,
         fresh_route_start_ack_timeout(),
     )?;
     let reason = match proof_status {
-        CodexManagedCapabilityProofStatus::NotRequired | CodexManagedCapabilityProofStatus::Proven => {
+        ManagedCapabilityProofStatus::NotRequired | ManagedCapabilityProofStatus::Proven => {
             return Ok(pane.to_string());
         }
-        CodexManagedCapabilityProofStatus::Pending => {
+        ManagedCapabilityProofStatus::Pending => {
             anyhow::bail!(
-                "managed Codex capability proof for {} on pane {} is still pending after waiting {}s; prompt dispatch remains gated until the proof succeeds",
+                "managed {} capability proof for {} on pane {} is still pending after waiting {}s; prompt dispatch remains gated until the proof succeeds",
+                harness.binary,
                 file.display(),
                 pane,
                 fresh_route_start_ack_timeout().as_secs()
             );
         }
-        CodexManagedCapabilityProofStatus::Failed => {
+        ManagedCapabilityProofStatus::Failed => {
             anyhow::bail!(
-                "managed Codex capability proof for {} on pane {} failed; prompt dispatch is disabled for this pane. Inspect diagnostics, then run `agent-doc start {}` manually to recover",
+                "managed {} capability proof for {} on pane {} failed; prompt dispatch is disabled for this pane. Inspect diagnostics, then run `agent-doc start {}` manually to recover",
+                harness.binary,
                 file.display(),
                 pane,
                 file.display()
             );
         }
-        CodexManagedCapabilityProofStatus::Missing => {
-            "managed Codex session has no current capability proof for requested network, SSH, or writable-root access".to_string()
+        ManagedCapabilityProofStatus::Missing => {
+            format!(
+                "managed {} session has no current capability proof for requested network, SSH, or writable-root access",
+                harness.binary
+            )
         }
     };
 
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_codex_capability_restart_fresh file={} pane={} harness={} reason={}",
+            "route_{}_capability_restart_fresh file={} pane={} harness={} reason={}",
+            harness.binary,
             file.display(),
             pane,
             harness.binary,
@@ -944,10 +948,11 @@ fn reapply_codex_capability_contract_before_reuse(
         ),
     );
     eprintln!(
-        "[route] {} for {} on pane {} — restarting the live Codex session fresh once before reuse",
+        "[route] {} for {} on pane {} — restarting the live {} session fresh once before reuse",
         reason,
         file.display(),
-        pane
+        pane,
+        harness.binary
     );
 
     if !restart_via_supervisor_with_mode(file, session_id, "fresh") {
@@ -977,29 +982,29 @@ fn reapply_codex_capability_contract_before_reuse(
             file.display()
         );
     }
-    match wait_for_codex_managed_capability_proof(
+    match wait_for_managed_capability_proof(
         file,
         session_id,
         harness,
         fresh_route_start_ack_timeout(),
     )? {
-        CodexManagedCapabilityProofStatus::NotRequired
-        | CodexManagedCapabilityProofStatus::Proven => {}
-        CodexManagedCapabilityProofStatus::Pending => anyhow::bail!(
+        ManagedCapabilityProofStatus::NotRequired
+        | ManagedCapabilityProofStatus::Proven => {}
+        ManagedCapabilityProofStatus::Pending => anyhow::bail!(
             "{} for {}, and the fresh recovery session in pane {} did not finish capability proof within {}s. Prompt dispatch remains gated until the proof succeeds",
             reason,
             file.display(),
             dispatch_pane,
             fresh_route_start_ack_timeout().as_secs()
         ),
-        CodexManagedCapabilityProofStatus::Failed => anyhow::bail!(
+        ManagedCapabilityProofStatus::Failed => anyhow::bail!(
             "{} for {}, and the fresh recovery session in pane {} failed capability proof. Run `agent-doc start {}` manually to recover",
             reason,
             file.display(),
             dispatch_pane,
             file.display()
         ),
-        CodexManagedCapabilityProofStatus::Missing => anyhow::bail!(
+        ManagedCapabilityProofStatus::Missing => anyhow::bail!(
             "{} for {}, and the fresh recovery session in pane {} never recorded a capability proof. Run `agent-doc start {}` manually to recover",
             reason,
             file.display(),
@@ -1031,7 +1036,7 @@ fn reapply_codex_launch_contract_before_reuse(
         harness,
         respect_tracked_clear_restart,
     )?;
-    reapply_codex_capability_contract_before_reuse(
+    reapply_capability_contract_before_reuse(
         tmux,
         file,
         &dispatch_pane,
@@ -1847,27 +1852,30 @@ fn dispatch_only_reopen_existing_pane(
     let dispatch_pane = reapply_codex_launch_contract_before_reuse(
         tmux, file, pane_id, session_id, file_path, harness, false, false,
     )?;
-    match wait_for_codex_managed_capability_proof(
+    match wait_for_managed_capability_proof(
         file,
         session_id,
         harness,
         fresh_route_start_ack_timeout(),
     )? {
-        CodexManagedCapabilityProofStatus::NotRequired
-        | CodexManagedCapabilityProofStatus::Proven => {}
-        CodexManagedCapabilityProofStatus::Pending => anyhow::bail!(
-            "dispatch-only Codex reopen for {} on pane {} is gated because managed capability proof is still pending after waiting {}s",
+        ManagedCapabilityProofStatus::NotRequired
+        | ManagedCapabilityProofStatus::Proven => {}
+        ManagedCapabilityProofStatus::Pending => anyhow::bail!(
+            "dispatch-only {} reopen for {} on pane {} is gated because managed capability proof is still pending after waiting {}s",
+            harness.binary,
             file.display(),
             dispatch_pane,
             fresh_route_start_ack_timeout().as_secs()
         ),
-        CodexManagedCapabilityProofStatus::Failed => anyhow::bail!(
-            "dispatch-only Codex reopen for {} on pane {} is disabled because managed capability proof failed",
+        ManagedCapabilityProofStatus::Failed => anyhow::bail!(
+            "dispatch-only {} reopen for {} on pane {} is disabled because managed capability proof failed",
+            harness.binary,
             file.display(),
             dispatch_pane
         ),
-        CodexManagedCapabilityProofStatus::Missing => anyhow::bail!(
-            "dispatch-only Codex reopen for {} on pane {} is disabled because this network/SSH/write-root session has no current capability proof",
+        ManagedCapabilityProofStatus::Missing => anyhow::bail!(
+            "dispatch-only {} reopen for {} on pane {} is disabled because this network/SSH/write-root session has no current capability proof",
+            harness.binary,
             file.display(),
             dispatch_pane
         ),
@@ -2197,35 +2205,38 @@ fn load_authoritative_actor_binding(
         return Ok(None);
     }
     if enforce_capability_proof {
-        match wait_for_codex_managed_capability_proof(
+        match wait_for_managed_capability_proof(
             file,
             session_id,
             harness,
             fresh_route_start_ack_timeout(),
         )? {
-            CodexManagedCapabilityProofStatus::NotRequired
-            | CodexManagedCapabilityProofStatus::Proven => {}
-            CodexManagedCapabilityProofStatus::Pending => {
+            ManagedCapabilityProofStatus::NotRequired
+            | ManagedCapabilityProofStatus::Proven => {}
+            ManagedCapabilityProofStatus::Pending => {
                 anyhow::bail!(
-                    "managed Codex capability proof for {} on pane {} is still pending after waiting {}s; prompt dispatch remains gated until the proof succeeds",
+                    "managed {} capability proof for {} on pane {} is still pending after waiting {}s; prompt dispatch remains gated until the proof succeeds",
+                    harness.binary,
                     file.display(),
                     record.pane_id,
                     fresh_route_start_ack_timeout().as_secs()
                 );
             }
-            CodexManagedCapabilityProofStatus::Failed => {
+            ManagedCapabilityProofStatus::Failed => {
                 anyhow::bail!(
-                    "managed Codex capability proof for {} on pane {} failed; prompt dispatch is disabled for this pane. Inspect diagnostics, then run `agent-doc start {}` manually to recover",
+                    "managed {} capability proof for {} on pane {} failed; prompt dispatch is disabled for this pane. Inspect diagnostics, then run `agent-doc start {}` manually to recover",
+                    harness.binary,
                     file.display(),
                     record.pane_id,
                     file.display()
                 );
             }
-            CodexManagedCapabilityProofStatus::Missing => {
+            ManagedCapabilityProofStatus::Missing => {
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "route_authoritative_actor_missing_codex_capability_proof file={} pane={} harness={} generation={}",
+                        "route_authoritative_actor_missing_{}_capability_proof file={} pane={} harness={} generation={}",
+                        harness.binary,
                         file.display(),
                         record.pane_id,
                         harness.binary,
@@ -6772,7 +6783,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_managed_capability_proof_status_tracks_pending_and_failed() {
+    fn managed_capability_proof_status_tracks_pending_and_failed() {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
         let session_id = "route-proof-status";
@@ -6783,9 +6794,9 @@ mod tests {
         );
 
         assert_eq!(
-            codex_managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex())
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex())
                 .unwrap(),
-            CodexManagedCapabilityProofStatus::Pending
+            ManagedCapabilityProofStatus::Pending
         );
 
         let doc = write_codex_proof_status_fixture(
@@ -6794,9 +6805,38 @@ mod tests {
             "codex_capability_proof status=failed error=\"dns\"",
         );
         assert_eq!(
-            codex_managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex())
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex())
                 .unwrap(),
-            CodexManagedCapabilityProofStatus::Failed
+            ManagedCapabilityProofStatus::Failed
+        );
+    }
+
+    #[test]
+    fn managed_capability_proof_status_opencode_tracks_pending_and_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let session_id = "route-proof-status-opencode";
+        let doc = write_codex_proof_status_fixture(
+            dir.path(),
+            session_id,
+            "opencode_capability_proof status=pending",
+        );
+
+        assert_eq!(
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode())
+                .unwrap(),
+            ManagedCapabilityProofStatus::Pending
+        );
+
+        let doc = write_codex_proof_status_fixture(
+            dir.path(),
+            session_id,
+            "opencode_capability_proof status=failed error=\"ssh\"",
+        );
+        assert_eq!(
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode())
+                .unwrap(),
+            ManagedCapabilityProofStatus::Failed
         );
     }
 

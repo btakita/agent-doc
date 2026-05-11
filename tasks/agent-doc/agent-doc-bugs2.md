@@ -34,12 +34,36 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 5 response topic(s): opencode agent support; opencode start still opened Claude; install agent-doc on OpenCode; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-do [#nopatchbackopencode]. spec-test-build-install-commit-push
-<!-- agent:boundary:c3701ce7 -->
+❯ do [#nopatchbackopencode]. spec-test-build-install-commit-push
+### Re: #nopatchbackopencode — gpt-5
+Completed #2fha / #nopatchbackopencode.
+
+Implemented the OpenCode instruction-surface fix so installed OpenCode agent-doc skills no longer inherit Claude slash-command wording and still carry the same mandatory `finalize` / `write --commit` closeout contract.
+
+Changes made:
+- Added OpenCode-specific rendered skill content in `src/agent-doc/src/skill.rs`: description, plain `agent-doc <FILE>` invocation block, auto-update guidance, audit coverage, and regression tests.
+- Updated source specs/runbooks/docs to name OpenCode alongside Claude/Codex for binary-owned entrypoints, missed-patchback repair, and direct-exec `session-check` requirements.
+- Refreshed generated harness instruction surfaces with `agent-doc skill install --all`, including `.opencode/skills/agent-doc/SKILL.md` and its runbooks.
+
+Verification:
+- `cargo test -p agent-doc skill::tests::`
+- `make check` after the final edits
+- `cargo run --quiet -- audit-docs`
+- `make install`
+- `agent-doc skill install --all`
+
+Commits created before this session closeout:
+- `f2186ea` in `src/agent-doc`: `fix: install opencode closeout instructions`
+- `313f5ca42` in the parent repo: `fix: refresh opencode agent-doc instructions`
+
+Per the session commit ordering rule, I will push after this `agent-doc finalize` closeout commit lands so the response commit is included.
+<!-- agent:boundary:68b143c8 -->
 <!-- /agent:exchange -->
 ###
-
 <!--
+`[#2fha] 2026-05-11 [#nopatchbackopencode] ...` backlog item should have had the id `[#nopatchbackopencode]`.
+spec-
+---
 minor (v0.34.0) release + publish. merge into main
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
@@ -53,7 +77,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#2fha] 2026-05-11 [#nopatchbackopencode] OpenCode agent-doc turn completed but response was not patched back into the session document — the user had to manually request patchback for the monsterrodholders.md production-sync response. Patchback should fire automatically after the agent writes a response, regardless of agent backend (Claude Code / Codex / OpenCode). Plan: investigate whether OpenCode integration skips the finalize/patchback step that Claude Code and Codex run.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -144,4 +167,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - 2026-05-11 [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
 - 2026-05-11 [#rspcmt3] Re-open response patchback commit recovery for the current agent-doc-bugs2 turn: user-visible prompt/patchback changes remained dirty after `agent-doc commit` reported the prior response already committed, and `session-check` required a second closeout for the active Codex prompt. Plan: tasks/agent-doc/plan-response-patchback-uncommitted.md
+- 2026-05-11 [#2fha] 2026-05-11 [#nopatchbackopencode] OpenCode agent-doc turn completed but response was not patched back into the session document — the user had to manually request patchback for the monsterrodholders.md production-sync response. Patchback should fire automatically after the agent writes a response, regardless of agent backend (Claude Code / Codex / OpenCode). Plan: investigate whether OpenCode integration skips the finalize/patchback step that Claude Code and Codex run.
 <!-- /agent:done -->

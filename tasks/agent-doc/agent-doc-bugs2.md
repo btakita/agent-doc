@@ -76,7 +76,26 @@ The `agent-doc write --commit tasks/root.md --force-disk < /dev/null` recovery f
 Current state has moved on: running `agent-doc session-check src/session-share/tasks/root.md` now reports a different unresolved prompt target, `Review the production and development logs. Are there any unfixed errors? #next-steps`, not the `livekit agent readiness` patchback marker.
 
 I added `#partialpatchbackadopt` to track the real follow-up: make this recovery path distinguish agent-doc-owned partial patchbacks from true manual/direct patchbacks, and make empty-stdin repair guidance point to an adoption/repair path instead of a command that cannot work without a response body.
-<!-- agent:boundary:55ba0723 -->
+❯ Why is there a reference to monsterrodholders-server in /home/brian/work/btakita/agent-loop/src/session-share? See /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md?
+
+❯ boost-client + monsterrodholders is a separate project and client from session-share (dreamable) + build-party. Why did the reference leak into session-share? #next-steps
+### Re: monsterrodholders-server leak — gpt-5
+
+The `monsterrodholders-server` reference leaked into `src/session-share/tasks/root.md` from the agent environment, not from the session-share / BuildParty docs.
+
+What I found:
+
+- The two visible references were introduced in `src/session-share` commit `eff838052` (`agent-doc(root): 2026-05-10 22:13:55`) during the response to `Review the production and development logs. Are there any unfixed errors? #next-steps`.
+- `git blame` points both `tasks/root.md:46` and the backlog item at `tasks/root.md:91` to that same commit.
+- The BuildParty runbook says only “run the worker from the `velvet-thunder/` subtree on the Docker host”; it does not name `monsterrodholders-server`. The VT specs similarly define a generic Docker host contract around `scripts/deploy_livekit_cloud_worker.sh`, not a host alias.
+- The name `monsterrodholders-server` is present in the broader Codex environment: `~/.ssh/config` defines that host, and the global Codex approval rules include `ssh monsterrodholders-server` from the separate boost-client / Monster Rod Holders work.
+
+So the likely chain is: the previous agent needed to review “production logs,” saw a generic “Docker host” runbook, and incorrectly filled in the only familiar/approved production SSH target in the harness context. That was a bad inference. It crossed a client/project boundary: boost-client + Monster Rod Holders is separate from session-share / Dreamable / BuildParty.
+
+I did not edit `src/session-share/tasks/root.md` in this cycle because it currently has a separate unresolved prompt (`do [#vt-vercel-log-access]...`) and this turn is in the agent-doc bugs document. The specific bad session-share follow-up is `#vt-prod-worker-host`: it should not assert that `monsterrodholders-server` is the expected host. It should be rewritten as “confirm the intended BuildParty worker host” unless there is project-local evidence naming a real host.
+
+I added `#projecthostscope` here to track the agent-doc-side fix: managed sessions should not let globally approved SSH targets or unrelated project history become implicit production-host evidence for another project. Top backlog item is now `#projecthostscope`.
+<!-- agent:boundary:d0166829 -->
 <!-- /agent:exchange -->
 ###
 
@@ -94,6 +113,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#projecthostscope] Prevent cross-project host/SSH target leakage in agent-doc managed Codex sessions: route/tool context should not let globally approved commands or unrelated SSH profiles make an agent infer that an unrelated client host, such as monsterrodholders-server, is the production host for a different project; require project-local docs/frontmatter/runbook evidence or an explicit user directive before using a named remote host in answers or checks.
 - [ ] [#partialpatchbackadopt] [recommended] Fix session-check/write recovery for agent-doc-owned partial patchbacks: when a prior agent-doc/Codex write path leaves an assistant heading/body visible outside the committed snapshot, classify it as an interrupted/adoptable agent-doc write instead of only direct response patchback, and make empty-stdin recovery point to the correct repair/adoption path.
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.

@@ -29,57 +29,14 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-032337.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-035235.md`*
 
 Active backlog:
-- [ ] [#pbdupchurn] Stop duplicate response patchback two-commit cleanup churn: duplicate blocks must be rejected or deduped before the closeout commit, and successful closeout must not require follow-up dedupe/snapshot/parent-pointer repair. Plan: tasks/agent-doc/plan-duplicate-patchback-dedupe-churn.md
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
+- [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - 1 more active item(s)
-❯ do [#pbdupchurn]. spec-test-build-install-commit-push
-### Re: #pbdupchurn — gpt-5
-
-Implemented the duplicate patchback closeout guard.
-
-Changes:
-- IPC sidecar success now dedupes adjacent duplicate `### Re:` response blocks before saving the snapshot, and repairs disk/editor state from that same deduped content when needed.
-- The commit path now dedupes the exact snapshot blob inside the commit lock before staging, and repairs matching working-tree duplicates before the first closeout commit.
-- Updated the closeout spec and added a regression proving duplicate snapshots are deduped before staging, producing one closeout commit instead of a follow-up cleanup commit.
-
-Verification:
-- `cargo test commit_dedupes_duplicate_response_snapshot_before_staging`
-- `cargo test normalize_final_template_content_removes_adjacent_duplicate_response_blocks`
-- `make check`
-- `make build`
-- `make install`
-
-Commits:
-- `85da5cd` in `src/agent-doc`: `fix: dedupe response patchbacks before commit`
-- `5d0dc4a58` in parent repo: `chore: update agent-doc submodule`
-❯ do [#bugtargetroot]. spec-test-build-install-commit-push
-### Re: #bugtargetroot — gpt-5
-
-Implemented the preset backlog target resolver fix.
-
-Changes:
-- `#agent-doc-bug` / prompt-preset backlog targets now resolve project-prefixed paths like `agent-loop/tasks/agent-doc/agent-doc-bugs2.md` against the matching ancestor project root, even when the active session document is under a nested `.agent-doc` tree such as `src/session-share`.
-- Ambiguous mirrored task-tree targets now fail closed instead of silently choosing the nested/local mirror, and missing project-prefixed targets fail before backlog writes.
-- Preflight now reports resolved `explicit_backlog_targets` paths so the closeout target is inspectable.
-- Updated the pending-system spec and added regressions for parent-project resolution, local mirror avoidance, ambiguous nested trees, and missing project-prefixed targets.
-
-Verification:
-- `cargo test referenced_markdown_path`
-- `cargo test explicit_backlog_target`
-- `make check`
-- `make build`
-- `make install`
-
-Commits:
-- `9dc021b` in `src/agent-doc`: `fix: resolve preset backlog targets by project root`
-- `edf5c7025` in parent repo: `chore: update agent-doc submodule`
-
-No new follow-up backlog items.
-<!-- agent:boundary:4bb9748d -->
+<!-- agent:boundary:81cc6cca -->
 <!-- /agent:exchange -->
 ###
 

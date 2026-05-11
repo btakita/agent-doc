@@ -1848,37 +1848,50 @@ fn dispatch_only_reopen_existing_pane(
     auto_fix_attempted: bool,
     pane_id: &str,
     delivery: DispatchOnlyReopenDelivery,
+    skip_capability_proof: bool,
 ) -> Result<String> {
     let dispatch_pane = reapply_codex_launch_contract_before_reuse(
         tmux, file, pane_id, session_id, file_path, harness, false, false,
     )?;
-    match wait_for_managed_capability_proof(
-        file,
-        session_id,
-        harness,
-        fresh_route_start_ack_timeout(),
-    )? {
-        ManagedCapabilityProofStatus::NotRequired
-        | ManagedCapabilityProofStatus::Proven => {}
-        ManagedCapabilityProofStatus::Pending => anyhow::bail!(
-            "dispatch-only {} reopen for {} on pane {} is gated because managed capability proof is still pending after waiting {}s",
-            harness.binary,
-            file.display(),
-            dispatch_pane,
-            fresh_route_start_ack_timeout().as_secs()
-        ),
-        ManagedCapabilityProofStatus::Failed => anyhow::bail!(
-            "dispatch-only {} reopen for {} on pane {} is disabled because managed capability proof failed",
-            harness.binary,
-            file.display(),
-            dispatch_pane
-        ),
-        ManagedCapabilityProofStatus::Missing => anyhow::bail!(
-            "dispatch-only {} reopen for {} on pane {} is disabled because this network/SSH/write-root session has no current capability proof",
-            harness.binary,
-            file.display(),
-            dispatch_pane
-        ),
+    if !skip_capability_proof {
+        match wait_for_managed_capability_proof(
+            file,
+            session_id,
+            harness,
+            fresh_route_start_ack_timeout(),
+        )? {
+            ManagedCapabilityProofStatus::NotRequired
+            | ManagedCapabilityProofStatus::Proven => {}
+            ManagedCapabilityProofStatus::Pending => anyhow::bail!(
+                "dispatch-only {} reopen for {} on pane {} is gated because managed capability proof is still pending after waiting {}s",
+                harness.binary,
+                file.display(),
+                dispatch_pane,
+                fresh_route_start_ack_timeout().as_secs()
+            ),
+            ManagedCapabilityProofStatus::Failed => anyhow::bail!(
+                "dispatch-only {} reopen for {} on pane {} is disabled because managed capability proof failed",
+                harness.binary,
+                file.display(),
+                dispatch_pane
+            ),
+            ManagedCapabilityProofStatus::Missing => anyhow::bail!(
+                "dispatch-only {} reopen for {} on pane {} is disabled because this network/SSH/write-root session has no current capability proof",
+                harness.binary,
+                file.display(),
+                dispatch_pane
+            ),
+        }
+    } else {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_skip_capability_proof file={} pane={} harness={} reason=degraded_supervisor_unreachable",
+                file.display(),
+                dispatch_pane,
+                harness.binary
+            ),
+        );
     }
     let log_status = crate::startup_miss::session_log_status(file, session_id)
         .ok()
@@ -2002,6 +2015,7 @@ fn retry_dispatch_only_after_busy_pane(
                     true,
                     busy_pane,
                     delivery,
+                    false,
                 );
             }
             BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart => {
@@ -2022,6 +2036,7 @@ fn retry_dispatch_only_after_busy_pane(
                     true,
                     busy_pane,
                     delivery,
+                    false,
                 );
             }
             BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart => {
@@ -2068,6 +2083,7 @@ fn retry_dispatch_only_after_busy_pane(
                     true,
                     busy_pane,
                     delivery,
+                    false,
                 );
             }
             BusyPaneAutoFixOutcome::FailClosed => {}
@@ -2098,6 +2114,7 @@ fn retry_dispatch_only_after_busy_pane(
                     true,
                     busy_pane,
                     delivery,
+                    false,
                 );
             }
             BusyPaneInterruptRecoveryOutcome::Blocked { reason } => {
@@ -2889,6 +2906,7 @@ fn resolve_or_create_pane_dispatch_only(
                 false,
                 &actor.record.pane_id,
                 DispatchOnlyReopenDelivery::DirectPaneSubmit,
+                true,
             );
         }
 
@@ -2967,6 +2985,7 @@ fn resolve_or_create_pane_dispatch_only(
             false,
             dispatch_pane,
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            false,
         );
     }
 
@@ -3033,6 +3052,7 @@ fn resolve_or_create_pane_dispatch_only(
             false,
             &new_pane,
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            false,
         );
     }
 
@@ -15045,5 +15065,20 @@ Body\n\
         assert!(std::str::from_utf8(truncated_longer.as_bytes()).is_ok());
         assert_eq!(truncated_longer.chars().count(), 60);
         assert!(longer.starts_with(&truncated_longer));
+    }
+
+    #[test]
+    fn skip_capability_proof_bypasses_failed_proof_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let session_id = "route-skip-proof";
+        let doc = write_codex_proof_status_fixture(
+            dir.path(),
+            session_id,
+            "opencode_capability_proof status=failed error=\"dns\"",
+        );
+        let status = managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode())
+            .unwrap();
+        assert_eq!(status, ManagedCapabilityProofStatus::Failed);
     }
 }

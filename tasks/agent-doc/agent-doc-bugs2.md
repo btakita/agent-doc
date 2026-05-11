@@ -49,7 +49,37 @@ Short answer: the second previous session by live start order, `src/boost-client
 The adjacent `src/session-share/tasks/root.md` session is different: its Claude process is still alive, and pane `%35` still shows an in-progress turn with child exploration work visible. So if you meant `root.md`, yes, that one appears to still be mid-turn; if you meant the older MonsterRodHolders session, no, it is alive but idle.
 
 I captured this as a bug because the current tooling makes "session still exists" too easy to confuse with "turn still running." Plan: `tasks/agent-doc/plan-incorrect-close-running-turn-status.md`.
-<!-- agent:boundary:ab8858fa -->
+❯ Please complete:
+❯ JB Plugin `Run Agent Doc` had an error after running `/clear` on root.md:
+```
+resync: stash pane %11 is registered in its own project root — skipping kill
+resync: stash pane %7 is registered in its own project root — skipping kill
+[route] target tmux session: 1
+Error: authoritative actor generation 22 for tasks/root.md owns pane %12 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
+```
+❯ spec-test-build-install-commit-push
+❯ do [#routereap]. spec-test-build-install-commit-push
+### Re: `#routereap` — gpt-5
+
+Implemented `#routereap` in `src/agent-doc` and marked it done.
+
+The route-owned completion thread now makes an explicit reap decision after a committed cycle. In auto mode it keeps the pane alive when the document still has live backlog items, queued prompts, dirty post-commit edits, or an unresolved exchange-tail prompt; otherwise it preserves the one-shot reap behavior. The decision is logged to both the session log and ops log with policy, decision, reason, cycle, and event provenance.
+
+I also added a hidden `agent-doc start --route-owned-reap-policy <auto|reap-after-commit|keep-alive>` control for explicit overrides, plus regression coverage for live backlog, queue, dirty document, one-shot empty document, explicit reap override, and exchange-tail prompt detection.
+
+Verification/build/install completed:
+- `cargo test --bin agent-doc start::tests::route_owned`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits:
+- `src/agent-doc`: `f41aeb7` (`fix: keep route-owned sessions alive`) pushed to `origin/20260422/codex-agent-backend`
+- superproject gitlink: `29a144df2` (`agent-doc: keep route-owned sessions alive`)
+
+I left the pre-existing unrelated dirty files in `src/agent-doc`, `src/boost-client`, and the active session document outside the manual implementation commit.
+<!-- agent:boundary:389fa70f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -198,4 +228,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#garbledpane] OpenCode TUI crashes to help screen after >20s commit — pane shows garbled ANSI art from opencode --help output and auto-trigger fails. Related: #routeStartingRace, #startingdispatch. Plan: tasks/agent-doc/plan-opencode-garbled-console-after-long-commit.md
 - 2026-05-11 [#routestartingrace] Route fails on freshly started actor — 5s wait timeout too short for OpenCode harness boot. Plan: tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - 2026-05-11 [#idprefix] Backlog item [#2fha] uses internal ID instead of declared tag [#nopatchbackopencode]. Plan: tasks/agent-doc/plan-id-prefix-mismatch-backlog.md
+- 2026-05-11 [#routereap] #agent-doc-bug: route-owned pane reaped after successful finalize commit — completion thread in start.rs unconditionally kills the pane after detecting a committed cycle, even when the session document has an active backlog and ongoing exchange (multi-turn session). Should check session liveness signals before reaping. Plan: tasks/agent-doc/plan-route-owned-post-commit-pane-reap.md
 <!-- /agent:done -->

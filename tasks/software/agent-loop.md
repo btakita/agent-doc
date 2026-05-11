@@ -55,6 +55,9 @@ The existing tsift pending items (release workflow, audit subcommands) are prese
 Marked `#bamc` done here — it now lives in `tasks/tsift.md`.
 <!-- agent:boundary:6ff88172 -->
 <!-- /agent:exchange -->
+###
+<!--
+-->
 
 <!-- agent:pending -->
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json

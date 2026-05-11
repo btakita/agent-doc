@@ -76,7 +76,15 @@ Pane %28 is stuck in `starting` state even after the window repair lands. This i
 - Next preflight will trigger auto-repair (this is the second detection), so the agent-doc window should be restored
 - May need to manually run `agent-doc start tasks/agent-doc/agent-doc-bugs2.md` if the starting actor at pane %28 doesn't transition to ready
 - The `#routestartingrace` backlog item remains the longer-term fix for the 15s timeout
-&lt;!-- /agent:exchange --&gt;
+- Add #next-steps to the backlog.
+- The previous turn should have added #next-steps to the backlog. #agent-doc-bug
+- JB `Run Agent Doc` had an error:
+
+```
+resync: stash pane %31 is registered in its own project root — skipping kill
+[route] target tmux session: 1
+Error: authoritative actor generation 145 for tasks/agent-doc/agent-doc-bugs2.md owns pane %34 but route will not inject a new trigger because the authoritative actor is still starting (waited 15s for opencode startup). Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/agent-doc/agent-doc-bugs2.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/agent-doc/agent-doc-bugs2.md`.
+```
 <!-- agent:boundary:c69ec0c8 -->
 <!-- /agent:exchange -->
 ###
@@ -124,6 +132,9 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
+- [ ] [#idprefix] Backlog item [#2fha] uses internal ID instead of declared tag [#nopatchbackopencode]. Plan: tasks/agent-doc/plan-id-prefix-mismatch-backlog.md
+- [ ] [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

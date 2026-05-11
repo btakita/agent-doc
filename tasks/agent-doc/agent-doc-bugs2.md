@@ -58,10 +58,45 @@ Error: dispatch-only opencode reopen for tasks/agent-doc/agent-doc-bugs2.md on p
 - All other call sites (busy retry, registered pane alive, registry scan) pass `false`, preserving the existing proof gate.
 - Updated spec `specs/07-session-tmux-commands.md` line 49 to clarify the degraded fallback must skip the proof gate.
 - Added regression test `skip_capability_proof_bypasses_failed_proof_status`.
-<!-- agent:boundary:2bf2ded6 -->
+❯ Why is the supervisor unreachable?
+### Re: why the supervisor is unreachable — gpt-5
+
+The supervisor becomes unreachable when `query_supervisor_runtime` (`route.rs:678`) fails its IPC health check. The function sends a `State` command to the supervisor's Unix domain socket (path resolved via `supervisor_socket_path` → `.agent-doc/controller.sock`). When the IPC call returns `Err` or a non-ok response, health is set to `SupervisorHealth::Unreachable` (`route.rs:726-729`).
+
+In the "Clear Session Context" scenario from your error log, `agent-doc clear` kills the supervisor process. After that:
+
+1. The socket file may still exist on disk (not yet cleaned up), so the code reaches the `send_command` IPC path rather than the earlier `NoSocket` branch.
+2. The killed supervisor can't respond — the IPC call gets a connection refused or timeout.
+3. The match arm at line 726 maps that failure to `SupervisorHealth::Unreachable`.
+
+Other possible supervisor health states for context:
+- **`NoSocket`** — socket file doesn't exist at all (line 685-690)
+- **`Halted`** — supervisor responded but state is `"halted"` (line 711)
+- **`Restartable`** — supervisor responded but is not running/healthy (line 713)
+- **`Healthy`** — running + state is `"healthy"` (line 708-709)
+
+The degraded authoritative actor fallback (the fix in d0ae7ed) exists precisely for this case: the pane is alive and owned by the correct session, but the supervisor that normally gates capability proof is dead. Skipping the proof gate on the degraded path lets the dispatch succeed despite the unreachable supervisor.
+&lt;!-- /agent:exchange --&gt;
+<!-- agent:boundary:af24514e -->
 <!-- /agent:exchange -->
 ###
 <!--
+This error occurred after using the JB plugin to call ` 
+```
+resync: stash pane %290 is registered in its own project root — skipping kill
+resync: stash pane %271 is registered in its own project root — skipping kill
+resync: stash pane %281 is registered in its own project root — skipping kill
+resync: stash pane %269 is registered in its own project root — skipping kill
+resync: stash pane %256 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+[route] dispatch-only opencode reroute for tasks/agent-doc/agent-doc-bugs2.md is using authoritative pane %268 without supervisor state because supervisor health is unreachable
+[route] Still waiting for opencode (5s)... last line:   ~/work/btakita/agent-loop:main                            
+[route] Still waiting for opencode (10s)... last line:    ⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                  
+[route] Still waiting for opencode (15s)... last line:    ⬝⬝■■■■■■  esc interrupt                                  
+[route] registered pane %268 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md is busy with pending document drift — applying scoped `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once before failing closed
+[sync] found alive agent-doc child (pid 3031142) in pane %268 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+Error: registered pane %268 for tasks/agent-doc/agent-doc-bugs2.md is still not showing an idle opencode prompt after automatically applying `agent-doc fix tasks/agent-doc/agent-doc-bugs2.md` once; refusing to inject a routed trigger into a busy session (pane=%268 pane_pid=3078566 pane_session=4 current_command=agent-doc)
+```
 ```
 3. Workaround: delegate SSH via the host — if OpenCode can't SSH directly, have agent-doc run the SSH deploy           step outside the managed pane (in the harness supervisor process), not inside the OpenCode child.
 ```

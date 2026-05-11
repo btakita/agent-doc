@@ -44,13 +44,24 @@ I did find current unfixed evidence worth re-queuing:
 - Safe-passive sync still misses its budget: recent samples show `safe_passive_total` at `1047-1282ms`, with `postlock_actor_focus`, `window_resolution`, and `controller_actor_lookup` over their sub-budgets. This is performance rather than closeout correctness, but the budget regression is still live.
 
 I added backlog items for those three. No tests were run; this was log/session-history triage only.
-<!-- agent:boundary:6b45ea23 -->
+<!-- agent:boundary:40bd71e5 -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+Why did 
 ```
+• Ran agent-doc session-check tasks/root.md
+  └ [session-check] INTERRUPTED: found likely direct response patchback without agent-doc cycle: ### Re: livekit agent
+    readiness - gpt-5; tracked side-effect edits: build-party Use `agent-doc write --commit tasks/root.md` once the
+    visible response body is final, then re-run `agent-doc session-check tasks/root.md`.
 
+• Ran agent-doc write --commit tasks/root.md --force-disk < /dev/null
+  └ [commit] file is in submodule /home/brian/work/btakita/agent-loop/src/session-share — running git ops there
+    Error: refusing to treat tasks/root.md as already committed: found likely direct response patchback without
+    … +2 lines (ctrl + t to view transcript)
+    Caused by:
+        empty response — nothing to write
 ```
 ---
 minor (v0.34.0) release + publish. merge into main
@@ -66,6 +77,9 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
+- [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
+- [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

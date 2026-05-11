@@ -769,7 +769,11 @@ pub(crate) fn managed_capability_contract_required(
     args: &[String],
     fm: &Frontmatter,
     global_config: &crate::config::Config,
+    harness: &str,
 ) -> bool {
+    if !matches!(harness, "codex") {
+        return false;
+    }
     super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled
         || !fm.required_ssh_targets.is_empty()
         || !add_dirs_from_args(args).is_empty()
@@ -783,7 +787,7 @@ pub(crate) fn prove_managed_session_capabilities(
     global_config: &crate::config::Config,
     harness: &str,
 ) -> Result<Option<String>> {
-    if !managed_capability_contract_required(args, fm, global_config) {
+    if !managed_capability_contract_required(args, fm, global_config, harness) {
         return Ok(None);
     }
 
@@ -2176,14 +2180,17 @@ mod tests {
     fn managed_capability_contract_requires_network_ssh_or_writable_roots() {
         let config = crate::config::Config::default();
         let mut fm = Frontmatter::default();
-        assert!(!managed_capability_contract_required(&[], &fm, &config));
+        assert!(!managed_capability_contract_required(&[], &fm, &config, "codex"));
+        assert!(!managed_capability_contract_required(&[], &fm, &config, "opencode"));
 
         fm.codex_network_access = Some(CodexNetworkAccess::Enabled);
-        assert!(managed_capability_contract_required(&[], &fm, &config));
+        assert!(managed_capability_contract_required(&[], &fm, &config, "codex"));
+        assert!(!managed_capability_contract_required(&[], &fm, &config, "opencode"));
 
         fm.codex_network_access = None;
         fm.required_ssh_targets = vec!["example-host".to_string()];
-        assert!(managed_capability_contract_required(&[], &fm, &config));
+        assert!(managed_capability_contract_required(&[], &fm, &config, "codex"));
+        assert!(!managed_capability_contract_required(&[], &fm, &config, "opencode"));
 
         fm.required_ssh_targets.clear();
         assert!(managed_capability_contract_required(
@@ -2194,7 +2201,19 @@ mod tests {
                 "/tmp/example".to_string()
             ],
             &fm,
-            &config
+            &config,
+            "codex"
+        ));
+        assert!(!managed_capability_contract_required(
+            &[
+                "exec".to_string(),
+                "--json".to_string(),
+                "--add-dir".to_string(),
+                "/tmp/example".to_string()
+            ],
+            &fm,
+            &config,
+            "opencode"
         ));
     }
 

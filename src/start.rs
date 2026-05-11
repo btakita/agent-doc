@@ -2173,6 +2173,7 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
         &base_args,
         &fm,
         &global_config,
+        &harness.binary,
     );
     if !capability_proof_required {
         log_event(

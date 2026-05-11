@@ -1467,11 +1467,15 @@ fn dispatch_only_starting_pane_ready_timeout() -> Duration {
     }
 }
 
-fn dispatch_only_starting_pane_recovery_timeout() -> Duration {
+fn dispatch_only_starting_pane_recovery_timeout(harness: Option<&HarnessConfig>) -> Duration {
     if cfg!(test) {
-        Duration::from_millis(400)
-    } else {
-        Duration::from_secs(5)
+        return Duration::from_millis(400);
+    }
+    match harness.map(|h| h.binary.as_str()) {
+        Some("opencode") => Duration::from_secs(15),
+        Some("claude") => Duration::from_secs(10),
+        Some("codex") => Duration::from_secs(8),
+        _ => Duration::from_secs(5),
     }
 }
 
@@ -1535,7 +1539,7 @@ fn wait_for_starting_pane_recovery_target(
     initial_status: Option<&crate::startup_miss::SessionLogStatus>,
 ) -> Option<StartingPaneRecoveryTarget> {
     let registry_base_dir = registry_base_dir_for_dispatch(file_path);
-    let deadline = std::time::Instant::now() + dispatch_only_starting_pane_recovery_timeout();
+    let deadline = std::time::Instant::now() + dispatch_only_starting_pane_recovery_timeout(None);
     let poll = Duration::from_millis(100);
 
     while std::time::Instant::now() < deadline {
@@ -2408,11 +2412,13 @@ fn wait_for_authoritative_actor_ready(
     harness: &HarnessConfig,
     initial: &AuthoritativeActorDispatchTarget,
 ) -> Result<Option<AuthoritativeActorDispatchTarget>> {
-    let deadline = Instant::now() + dispatch_only_starting_pane_recovery_timeout();
+    let timeout = dispatch_only_starting_pane_recovery_timeout(Some(harness));
+    let deadline = Instant::now() + timeout;
     let poll = Duration::from_millis(100);
     let mut last_state = initial.actor_state();
     let mut last_generation = initial.record.generation;
     let mut last_pane = initial.record.pane_id.clone();
+    let start = Instant::now();
 
     while Instant::now() < deadline {
         if let Some(refreshed) = load_authoritative_actor_binding(
@@ -2425,22 +2431,36 @@ fn wait_for_authoritative_actor_ready(
             if refreshed_state == crate::session_actor::ActorState::Ready
                 && authoritative_actor_dispatch_target_eligible(&refreshed)
             {
+                let elapsed_ms = start.elapsed().as_millis();
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_starting_actor_ready file={} pane={} harness={} generation={} elapsed_ms={}",
+                        file.display(),
+                        last_pane,
+                        harness.binary,
+                        last_generation,
+                        elapsed_ms
+                    ),
+                );
                 return Ok(Some(refreshed));
             }
         }
         std::thread::sleep(poll);
     }
 
+    let elapsed_ms = start.elapsed().as_millis();
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_authoritative_actor_starting_not_ready file={} pane={} harness={} generation={} actor_state={} timeout_ms={}",
+            "route_authoritative_actor_starting_not_ready file={} pane={} harness={} generation={} actor_state={} timeout_ms={} elapsed_ms={}",
             file.display(),
             last_pane,
             harness.binary,
             last_generation,
             last_state.as_str(),
-            dispatch_only_starting_pane_recovery_timeout().as_millis()
+            timeout.as_millis(),
+            elapsed_ms
         ),
     );
     Ok(None)
@@ -2640,11 +2660,13 @@ fn route_via_authoritative_actor(
             return Ok(ack_pane.unwrap_or(dispatch_pane));
         }
         anyhow::bail!(
-            "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {}. {}",
+            "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {} (waited {}s for {} startup). {}",
             actor.record.generation,
             file.display(),
             dispatch_pane,
             reason,
+            dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
+            harness.binary,
             authoritative_actor_dispatch_recovery_hint(actor_state, file)
         );
     }
@@ -15456,5 +15478,32 @@ Body\n\
             },
         };
         assert!(!authoritative_actor_dispatch_target_eligible(&no_state));
+    }
+
+    #[test]
+    fn dispatch_only_starting_pane_recovery_timeout_default() {
+        let timeout = dispatch_only_starting_pane_recovery_timeout(None);
+        assert_eq!(timeout, Duration::from_millis(400));
+    }
+
+    #[test]
+    fn dispatch_only_starting_pane_recovery_timeout_opencode() {
+        let h = crate::harness::HarnessConfig::opencode();
+        let timeout = dispatch_only_starting_pane_recovery_timeout(Some(&h));
+        assert_eq!(timeout, Duration::from_millis(400));
+    }
+
+    #[test]
+    fn dispatch_only_starting_pane_recovery_timeout_claude() {
+        let h = crate::harness::HarnessConfig::claude();
+        let timeout = dispatch_only_starting_pane_recovery_timeout(Some(&h));
+        assert_eq!(timeout, Duration::from_millis(400));
+    }
+
+    #[test]
+    fn dispatch_only_starting_pane_recovery_timeout_codex() {
+        let h = crate::harness::HarnessConfig::codex();
+        let timeout = dispatch_only_starting_pane_recovery_timeout(Some(&h));
+        assert_eq!(timeout, Duration::from_millis(400));
     }
 }

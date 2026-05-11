@@ -77,7 +77,7 @@ Pane %28 is stuck in `starting` state even after the window repair lands. This i
 - May need to manually run `agent-doc start tasks/agent-doc/agent-doc-bugs2.md` if the starting actor at pane %28 doesn't transition to ready
 - The `#routestartingrace` backlog item remains the longer-term fix for the 15s timeout
 &lt;!-- /agent:exchange --&gt;
-<!-- agent:boundary:8151c394 -->
+<!-- agent:boundary:545ad123 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -124,6 +124,8 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
+- [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -230,4 +232,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#rootlatepatch] Late fallback patch can re-dirty an already committed session document: `src/session-share/tasks/root.md` had a valid committed closeout, then a delayed fallback patch reintroduced a stale duplicate response and corrupted the `#vt-semantic-hero-screenshot` heading into `#vt-semantic-hero-scree nshot`, causing `session-check` to report an uncommitted/direct patchback. Plan: tasks/agent-doc/plan-late-fallback-patch-redirties-committed-doc.md
 - 2026-05-11 [#garbledpane] OpenCode TUI crashes to help screen after >20s commit — pane shows garbled ANSI art from opencode --help output and auto-trigger fails. Related: #routeStartingRace, #startingdispatch. Plan: tasks/agent-doc/plan-opencode-garbled-console-after-long-commit.md
 - 2026-05-11 [#routestartingrace] Route fails on freshly started actor — 5s wait timeout too short for OpenCode harness boot. Plan: tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
+- 2026-05-11 [#idprefix] Backlog item [#2fha] uses internal ID instead of declared tag [#nopatchbackopencode]. Plan: tasks/agent-doc/plan-id-prefix-mismatch-backlog.md
 <!-- /agent:done -->

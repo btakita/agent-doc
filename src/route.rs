@@ -15274,4 +15274,187 @@ Body\n\
             .unwrap();
         assert_eq!(status, ManagedCapabilityProofStatus::Failed);
     }
+
+    fn test_actor_record(pane_id: &str) -> crate::session_actor::ActorRecord {
+        crate::session_actor::ActorRecord {
+            document_id: "test-doc".to_string(),
+            session_id: "test-session".to_string(),
+            generation: 1,
+            pane_id: pane_id.to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state: crate::session_actor::ActorState::Ready,
+            last_transition: crate::session_actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "test".to_string(),
+                timestamp: 0,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        }
+    }
+
+    fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTarget {
+        AuthoritativeActorDispatchTarget {
+            record: test_actor_record(pane_id),
+            runtime: SupervisorRuntime {
+                health: SupervisorHealth::NoSocket,
+                actor_state: None,
+            },
+        }
+    }
+
+    #[test]
+    fn dispatch_only_can_use_degraded_authoritative_actor_returns_true_when_registered_matches() {
+        let actor = test_degraded_actor("%42");
+        assert!(dispatch_only_can_use_degraded_authoritative_actor(
+            &actor,
+            Some("%42"),
+            None,
+        ));
+    }
+
+    #[test]
+    fn dispatch_only_can_use_degraded_authoritative_actor_returns_true_when_live_owner_matches() {
+        let actor = test_degraded_actor("%42");
+        assert!(dispatch_only_can_use_degraded_authoritative_actor(
+            &actor,
+            None,
+            Some("%42"),
+        ));
+    }
+
+    #[test]
+    fn dispatch_only_can_use_degraded_authoritative_actor_returns_true_when_both_match() {
+        let actor = test_degraded_actor("%42");
+        assert!(dispatch_only_can_use_degraded_authoritative_actor(
+            &actor,
+            Some("%42"),
+            Some("%42"),
+        ));
+    }
+
+    #[test]
+    fn dispatch_only_can_use_degraded_authoritative_actor_returns_false_when_no_match() {
+        let actor = test_degraded_actor("%42");
+        assert!(!dispatch_only_can_use_degraded_authoritative_actor(
+            &actor,
+            Some("%99"),
+            Some("%99"),
+        ));
+    }
+
+    #[test]
+    fn dispatch_only_can_use_degraded_authoritative_actor_returns_false_when_none_provided() {
+        let actor = test_degraded_actor("%42");
+        assert!(!dispatch_only_can_use_degraded_authoritative_actor(
+            &actor,
+            None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn authoritative_actor_dispatch_guard_reason_returns_none_for_healthy_with_state() {
+        let runtime = SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(crate::session_actor::ActorState::Ready),
+        };
+        assert!(authoritative_actor_dispatch_guard_reason(&runtime).is_none());
+    }
+
+    #[test]
+    fn authoritative_actor_dispatch_guard_reason_returns_reason_for_restartable() {
+        let runtime = SupervisorRuntime {
+            health: SupervisorHealth::Restartable,
+            actor_state: Some(crate::session_actor::ActorState::Ready),
+        };
+        let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
+        assert!(
+            reason.contains("restartable"),
+            "expected restartable in reason: {reason}"
+        );
+    }
+
+    #[test]
+    fn authoritative_actor_dispatch_guard_reason_returns_reason_for_halted() {
+        let runtime = SupervisorRuntime {
+            health: SupervisorHealth::Halted { restart_count: 3 },
+            actor_state: Some(crate::session_actor::ActorState::Ready),
+        };
+        let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
+        assert!(
+            reason.contains("halted"),
+            "expected halted in reason: {reason}"
+        );
+    }
+
+    #[test]
+    fn authoritative_actor_dispatch_guard_reason_returns_reason_for_unreachable() {
+        let runtime = SupervisorRuntime {
+            health: SupervisorHealth::Unreachable,
+            actor_state: Some(crate::session_actor::ActorState::Ready),
+        };
+        let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
+        assert!(
+            reason.contains("unreachable"),
+            "expected unreachable in reason: {reason}"
+        );
+    }
+
+    #[test]
+    fn authoritative_actor_dispatch_guard_reason_returns_reason_for_no_socket() {
+        let runtime = SupervisorRuntime {
+            health: SupervisorHealth::NoSocket,
+            actor_state: Some(crate::session_actor::ActorState::Ready),
+        };
+        let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
+        assert!(
+            reason.contains("no_socket"),
+            "expected no_socket in reason: {reason}"
+        );
+    }
+
+    #[test]
+    fn authoritative_actor_dispatch_guard_reason_returns_reason_for_missing_actor_state() {
+        let runtime = SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: None,
+        };
+        let reason = authoritative_actor_dispatch_guard_reason(&runtime).unwrap();
+        assert!(
+            reason.contains("missing"),
+            "expected missing in reason: {reason}"
+        );
+    }
+
+    #[test]
+    fn authoritative_actor_dispatch_target_eligible_true_only_when_no_guard_reason() {
+        let healthy = AuthoritativeActorDispatchTarget {
+            record: test_actor_record("%1"),
+            runtime: SupervisorRuntime {
+                health: SupervisorHealth::Healthy,
+                actor_state: Some(crate::session_actor::ActorState::Ready),
+            },
+        };
+        assert!(authoritative_actor_dispatch_target_eligible(&healthy));
+
+        let degraded = AuthoritativeActorDispatchTarget {
+            record: test_actor_record("%1"),
+            runtime: SupervisorRuntime {
+                health: SupervisorHealth::NoSocket,
+                actor_state: None,
+            },
+        };
+        assert!(!authoritative_actor_dispatch_target_eligible(&degraded));
+
+        let no_state = AuthoritativeActorDispatchTarget {
+            record: test_actor_record("%1"),
+            runtime: SupervisorRuntime {
+                health: SupervisorHealth::Healthy,
+                actor_state: None,
+            },
+        };
+        assert!(!authoritative_actor_dispatch_target_eligible(&no_state));
+    }
 }

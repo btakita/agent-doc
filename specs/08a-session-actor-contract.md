@@ -184,3 +184,18 @@ Later phases may refine caller values without changing the field names.
 - Startup-miss, route, sync, and closeout recovery may read those logs, but
   they must not infer authority from multiple competing mutable sources once a
   newer generation is recorded.
+- Dispatch-only degraded authoritative actor path: when the supervisor socket is
+  unhealthy (Restartable, Halted, Unreachable, NoSocket) or actor_state is
+  missing, but the authoritative actor pane still matches the registered dispatch
+  pane or live owner binding, `route --dispatch-only` may submit directly through
+  that pane. The degraded fallback must skip the managed capability proof gate
+  because the supervisor is unreachable and cannot re-establish proof; a missing
+  or previously-failed proof must not block dispatch when the pane is still the
+  authoritative binding. Route logs the degraded decision with
+  `route_dispatch_only_authoritative_fallback` and
+  `route_dispatch_only_skip_capability_proof reason=degraded_supervisor_unreachable`
+  ops-log entries. Pure unit tests must cover the decision functions
+  (`dispatch_only_can_use_degraded_authoritative_actor`,
+  `authoritative_actor_dispatch_guard_reason`,
+  `authoritative_actor_dispatch_target_eligible`) for all supervisor health
+  variants and matching/non-matching pane bindings.

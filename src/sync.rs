@@ -456,42 +456,64 @@ fn safe_passive_lock_contention_message(elapsed: Duration, budget: Duration) -> 
     )
 }
 
-fn safe_passive_focus_actor_after_sync_lock(tmux: &Tmux, focus: Option<&str>) -> Option<String> {
+fn safe_passive_focus_actor_after_sync_lock(
+    tmux: &Tmux,
+    focus: Option<&str>,
+    proof_cache: &SyncProofCache,
+) -> Option<String> {
     let focus = focus?.trim();
     if focus.is_empty() {
         return None;
     }
     let focus_path = Path::new(focus);
     let session_id = frontmatter::read_session_id(focus_path)?;
-    let record = load_live_authoritative_actor_record_uncached(tmux, focus_path, &session_id)?;
-    if let Err(err) = tmux.select_pane(&record.pane_id) {
+    let (pane_id, generation, source) = if let Some(pane_id) =
+        crate::focus::local_actor_projection_pane_for_document(focus_path, &session_id, tmux)
+    {
+        (pane_id, None, "local_projection")
+    } else {
+        let record = load_live_authoritative_actor_record_cached(
+            tmux,
+            focus_path,
+            &session_id,
+            proof_cache,
+        )?;
+        (record.pane_id, Some(record.generation), "controller")
+    };
+    if let Err(err) = tmux.select_pane(&pane_id) {
         eprintln!(
-            "[sync] warning: failed safe-passive post-lock focus of controller actor pane {} for {}: {}",
-            record.pane_id,
+            "[sync] warning: failed safe-passive post-lock focus of actor pane {} for {}: {}",
+            pane_id,
             focus_path.display(),
             err
         );
         sync_log(&format!(
-            "warning: safe_passive_postlock_actor_focus_failed file={} pane={} err={}",
+            "warning: safe_passive_postlock_actor_focus_failed file={} pane={} source={} err={}",
             focus_path.display(),
-            record.pane_id,
+            pane_id,
+            source,
             err
         ));
         return None;
     }
+    let generation = generation
+        .map(|generation| generation.to_string())
+        .unwrap_or_else(|| "projection".to_string());
     eprintln!(
-        "[sync] safe_passive_postlock_actor_focus pane={} file={} generation={}",
-        record.pane_id,
+        "[sync] safe_passive_postlock_actor_focus pane={} file={} generation={} source={}",
+        pane_id,
         focus_path.display(),
-        record.generation
+        generation,
+        source
     );
     sync_log(&format!(
-        "safe_passive_postlock_actor_focus file={} pane={} generation={}",
+        "safe_passive_postlock_actor_focus file={} pane={} generation={} source={}",
         focus_path.display(),
-        record.pane_id,
-        record.generation
+        pane_id,
+        generation,
+        source
     ));
-    Some(record.pane_id)
+    Some(pane_id)
 }
 
 fn log_sync_latency(
@@ -2838,6 +2860,7 @@ fn run_with_options(
         .into_iter()
         .filter(|col| !col.is_empty())
         .collect();
+    let proof_cache = SyncProofCache::default();
 
     // Resolve the target session/window without mutating stash/layout state.
     // Phase-7 keeps layout rescue on explicit repair surfaces only.
@@ -2900,9 +2923,16 @@ fn run_with_options(
     } else {
         None
     };
+    log_sync_latency(
+        focus,
+        "window_resolution",
+        window_resolution_start.elapsed(),
+        SYNC_WINDOW_RESOLUTION_BUDGET,
+        auto_start_mode,
+    );
     if matches!(auto_start_mode, AutoStartMode::SafePassive) {
         let focus_start = Instant::now();
-        let _ = safe_passive_focus_actor_after_sync_lock(tmux, focus);
+        let _ = safe_passive_focus_actor_after_sync_lock(tmux, focus, &proof_cache);
         log_sync_latency(
             focus,
             "postlock_actor_focus",
@@ -2928,13 +2958,6 @@ fn run_with_options(
         focus,
         auto_start_mode.log_label()
     ));
-    log_sync_latency(
-        focus,
-        "window_resolution",
-        window_resolution_start.elapsed(),
-        SYNC_WINDOW_RESOLUTION_BUDGET,
-        auto_start_mode,
-    );
 
     // Diagnostic: log pane count at key checkpoints to find where stashed panes reappear
     if let Some(w) = window {
@@ -2991,7 +3014,6 @@ fn run_with_options(
     }
 
     let registry_path = sessions::registry_path();
-    let proof_cache = SyncProofCache::default();
     // Track session_id → file path for post-sync claim updates
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
     let blocked_unresolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
@@ -7894,6 +7916,44 @@ mod tests {
             "{controller}"
         );
         assert!(controller.contains("status=over_budget"), "{controller}");
+    }
+
+    #[test]
+    fn authoritative_actor_cache_returns_prefilled_record_without_live_probe() {
+        let proof_cache = SyncProofCache::default();
+        let file = Path::new("/tmp/agent-doc-cache-hit.md");
+        let session_id = "cache-session";
+        let record = crate::session_actor::ActorRecord {
+            document_id: file.display().to_string(),
+            session_id: session_id.to_string(),
+            generation: 42,
+            pane_id: "%cached".to_string(),
+            window_id: "@cached".to_string(),
+            harness: "codex".to_string(),
+            state: crate::session_actor::ActorState::Ready,
+            last_transition: crate::session_actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "prefilled_cache".to_string(),
+                timestamp: 0,
+                prior_generation: 41,
+                new_generation: 42,
+            },
+        };
+        proof_cache.actor_records.borrow_mut().insert(
+            (sync_proof_file_key(file), session_id.to_string()),
+            Some(record),
+        );
+
+        let cached = load_live_authoritative_actor_record_cached(
+            &Tmux::default_server(),
+            file,
+            session_id,
+            &proof_cache,
+        )
+        .expect("prefilled cache hit should not require a live tmux pane");
+
+        assert_eq!(cached.pane_id, "%cached");
+        assert_eq!(cached.generation, 42);
     }
 
     #[test]

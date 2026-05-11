@@ -320,6 +320,13 @@ Sync must measure controller actor-binding calls as `controller_actor_lookup`
 and any sessions.json projection update as `projection_refresh`; over-budget
 entries should point at the controller phase instead of only reporting broad
 ownership-proof latency.
+Safe-passive post-lock focus must use the local actor projection when it is
+live, avoiding a controller RPC on the editor fast path. If it must fall back to
+the controller actor-binding call, that result must be stored in the per-sync
+proof cache so later controller actor lookup, ownership proof, and synthetic
+registry construction do not pay for the same lookup again. The broad
+`window_resolution` bucket covers target session/window resolution only;
+post-lock focus is timed separately as `postlock_actor_focus`.
 
 `agent-doc start` creates owner generations through the controller. `route`
 and `sync` read actor bindings through the controller before consulting

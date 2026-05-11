@@ -50,7 +50,7 @@ use std::path::Path;
 use crate::sessions::Tmux;
 use crate::{frontmatter, sessions};
 
-fn local_actor_projection_pane_for_document(
+pub(crate) fn local_actor_projection_pane_for_document(
     file: &Path,
     session_id: &str,
     tmux: &Tmux,

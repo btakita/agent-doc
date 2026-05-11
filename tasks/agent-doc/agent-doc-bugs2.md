@@ -29,39 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-042348.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-043432.md`*
 
-Active backlog:
-- [ ] [#assistanttailprompt] #agent-doc-bug: session-check can misclassify assistant-owned closeout/status prose at the end of a template exchange response as an unresolved prompt-only tail, forcing a second 'Closeout repair:' patchback after a successful response commit. Plan: tasks/agent-doc/plan-session-check-assistant-tail-misclassified.md
-- [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
-- [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
-❯ do [#assistanttailprompt]. spec-test-build-install-commit-push
-❯ ---
-❯ In compact exchange command, remove inclusion of `Active backlog:` section, which duplicates content in agent:backlog. Instead, render a summary digest of the compacted content.
-❯ #next-steps
-### Re: #assistanttailprompt and compact exchange summary — gpt-5
-
-Implemented and pushed.
-
-- `src/agent-doc/src/session_check.rs` now preserves assistant-response ownership after `### Re:` headings until a real user prompt marker or structural boundary, so assistant closeout/status prose is not misread as an unresolved prompt-only tail.
-- `src/agent-doc/src/compact.rs` now builds default exchange compaction summaries from the archived exchange content itself, and no longer duplicates `agent:backlog`, `agent:queue`, or `agent:icebox` content into `agent:exchange`.
-- `src/agent-doc/specs/07-closeout-commands.md` documents the new compact-summary contract.
-
-Verification:
-- `cargo test prompt_only_exchange_tail -- --test-threads=2`
-- `cargo test exchange_compact_default_summary_includes_archived_content_digest -- --test-threads=2`
-- `make check` exposed an existing parallel cleanup race in `codex_hook::tests::stop_auto_closes_patch_payload_with_safe_leading_commentary`
-- `cargo test codex_hook::tests::stop_auto_closes_patch_payload_with_safe_leading_commentary -- --test-threads=1`
-- `make check TEST_THREADS=1`
-- `cargo clippy -- -D warnings`
-- `make install`
-
-Pushed commits:
-- `src/agent-doc`: `efc193d` (`fix: tighten exchange closeout classification`)
-- parent `agent-loop`: `7e6060621` (`chore: update agent-doc submodule`)
-
-I added one recommended follow-up backlog item for the parallel Codex hook test cleanup race. No additional implementation follow-up is needed for the requested fixes.
-<!-- agent:boundary:35d80b03 -->
+Compacted content:
+- Archived 1 response topic(s): #assistanttailprompt and compact exchange summary
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+<!-- agent:boundary:9c7ad6eb -->
 <!-- /agent:exchange -->
 ###
 

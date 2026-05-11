@@ -34,11 +34,32 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): #wvpf
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:df64710c -->
+❯ do [#syncbudgetstill]. spec-test-build-install-commit-push
+### Re: syncbudgetstill — gpt-5
+
+Implemented `#syncbudgetstill`.
+
+Changed safe-passive post-lock focus so it prefers the local `session-actors.json` projection before issuing a controller actor-binding RPC. If it has to fall back to the controller, the result now goes into the same per-sync proof cache used later by ownership and synthetic registry checks. I also moved `window_resolution` logging so a slow post-lock focus handoff is measured only as `postlock_actor_focus`, not double-counted as window resolution.
+
+Updated the sync specs and changelog, and added a focused cache regression: `authoritative_actor_cache_returns_prefilled_record_without_live_probe`.
+
+Verification passed:
+- `cargo test authoritative_actor_cache_returns_prefilled_record_without_live_probe`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commit / push:
+- `src/agent-doc`: `63951ee fix: keep safe-passive focus on fast path`, pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `6e8e38ae7 chore: update agent-doc submodule`, pushed to `origin/main`
+<!-- agent:boundary:5c7fde9f -->
 <!-- /agent:exchange -->
 ###
 
 <!--
+The agent:boundary should not create a git commit to prevent a noisy git history. Please assess logs for unnecessary git commits and remove from the process. #next-steps
+---
 minor (v0.34.0) release + publish. merge into main
 ---
 /home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
@@ -52,7 +73,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 - [ ] [#bugchainorder] `#agent-doc-bug` declaration-chain capture can add backlog items in reverse order from the declaration chain; preserve declaration order for batched bug captures and require explicit closeout text for intentional priority overrides. Plan: tasks/agent-doc/plan-agent-doc-bug-declaration-chain-order.md
 <!-- /agent:backlog -->
 
@@ -141,4 +161,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - 2026-05-11 [#assistanttailprompt] #agent-doc-bug: session-check can misclassify assistant-owned closeout/status prose at the end of a template exchange response as an unresolved prompt-only tail, forcing a second 'Closeout repair:' patchback after a successful response commit. Plan: tasks/agent-doc/plan-session-check-assistant-tail-misclassified.md
 - 2026-05-11 [#wvpf] [recommended] Fix Codex hook tests so parallel make check cannot race on shared /tmp/.agent-doc/codex-hooks session cleanup; the default make check run failed once when stop_auto_closes_patch_payload_with_safe_leading_commentary tried to remove an already-missing session file, while the isolated test and serial make check passed.
+- 2026-05-11 [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.
 <!-- /agent:done -->

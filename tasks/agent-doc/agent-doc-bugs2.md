@@ -56,7 +56,7 @@ Verification:
 Commits:
 - `85da5cd` in `src/agent-doc`: `fix: dedupe response patchbacks before commit`
 - `5d0dc4a58` in parent repo: `chore: update agent-doc submodule`
-<!-- agent:boundary:5f2dcd25 -->
+<!-- agent:boundary:9342080b -->
 <!-- /agent:exchange -->
 ###
 
@@ -74,7 +74,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#bugtargetroot] `#agent-doc-bug` target resolves to nested session-share backlog instead of parent agent-loop backlog when session docs live under `src/session-share`; resolve preset backlog targets against the intended project root and fail closed on ambiguous mirrored task trees. Plan: tasks/agent-doc/plan-agent-doc-bug-target-resolution.md
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - [ ] [#syncbudgetstill] [recommended] Re-open sync latency budget work for current evidence: safe_passive_total still hits 1047-1282ms and postlock_actor_focus/window_resolution/controller_actor_lookup exceed sub-budgets after earlier sync-budget items were reaped.

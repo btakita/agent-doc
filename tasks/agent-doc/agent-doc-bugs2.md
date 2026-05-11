@@ -45,7 +45,33 @@ Standing findings:
 - Codex capability proof latency is not proven fixed from the live logs yet. Git has the async proof implementation, but the latest measured child network proof I found was still about `10108ms`; I did not find a post-`275e82b` fresh-restart sample proving pane render is decoupled from that cost.
 
 I added backlog items for those next steps in priority order. No tests were run because this cycle was log and git-history triage only.
-<!-- agent:boundary:b7c97a63 -->
+❯ do [#sidecarfallbackstill]. spec-test-build-install-commit-push
+### Re: #sidecarfallbackstill — gpt-5
+
+Implemented and pushed the sidecar prefix-divergence fix.
+
+The root cause was editor-side ordering: JetBrains and VS Code applied `normalize_prefix_lines` before `reposition_boundary`, so prompts typed after the previous boundary marker were outside the user region seen by the ack-content sidecar. The binary's `content_ours` path already saw the post-reposition shape, so verification repeatedly rejected the sidecar with `reason=prefix_divergence` and fell back.
+
+Changes made:
+- JetBrains Document and VFS patch paths now reposition the exchange boundary before applying `normalizePrefixLines`.
+- VS Code patch application now does the same for component-based IPC patches.
+- Added JetBrains and VS Code regressions for prompts typed after a stale boundary.
+- Updated `editors/PLUGIN-SPEC.md`, `VERSIONS.md`, and bumped the JetBrains plugin to `0.2.107`.
+
+Verification/build/install:
+- `cargo test -p agent-doc normalize_exchange_prefixes_for_targets -- --nocapture`
+- `cargo test -p agent-doc verify_sidecar_normalization -- --nocapture`
+- `npm test` in `editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test`
+- `make check`
+- `make install`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+- `agent-doc plugin install --local jetbrains`, installed to IntelliJ IDEA 2026.1; IDE restart is required to activate it.
+
+Commits pushed:
+- `src/agent-doc`: `5fc0701 fix: normalize editor prefixes after boundary reposition`
+- parent repo: `da75c3938 agent-doc: update prefix normalization fix`
+<!-- agent:boundary:853e579f -->
 <!-- /agent:exchange -->
 ###
 
@@ -63,7 +89,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sidecarfallbackstill] Fix recurring sidecar prefix-divergence fallback after the latest prefix-body and duplicate-closeout fixes: ops.log still shows sidecar_normalization_fallback reason=prefix_divergence on clean agent-doc-bugs2 closeouts, so tighten snapshot/ack normalization until fallback is exceptional again.
 - [ ] [#autogcstart] Ensure stale starting actor cleanup runs in the normal preflight/start/sync path: session-actors.json still has old starting projections for agent-doc-bugs.md, agent-doc-bugs4.md, and interior-design after 6147f99, so auto-gc or route-time reconciliation is still incomplete.
 - [ ] [#blockedstopextract] Fix blocked-stop repair for transcript-wrapped patch responses: current codex-hooks/blocked-stop and repair-blocked payloads contain valid patch blocks but are rejected for extra transcript content, so extract the patch or fail with a precise recoverable instruction.
 - [ ] [#capproofverify] [recommended] Verify async Codex capability proof on a fresh managed restart: last logged network_child proof cost was about 10.1s, and there is no post-275e82b live proof sample yet showing pane render is decoupled from proof latency.
@@ -140,4 +165,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-10 [#bppfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
 - 2026-05-10 [#rootpatchmiss] Direct Codex agent-doc turn completed commits/pushes but did not write the final response into `src/session-share/tasks/root.md`; extend `tasks/agent-doc/plan-response-missing-after-manual-closeout.md` with the May 10 `#vt-agent-deploy` reproduction and fail closed on prompt-only exchange closeout.
 - 2026-05-10 [#next-steps] Triage the current activity/session-log findings: sidecar prefix-divergence fallback still fires, stale starting actors remain in session-actors, blocked-stop repair payloads exist for transcript-wrapped patch responses, and Codex child network proof still adds about 10s on restart.
+- 2026-05-10 [#sidecarfallbackstill] Fix recurring sidecar prefix-divergence fallback after the latest prefix-body and duplicate-closeout fixes: ops.log still shows sidecar_normalization_fallback reason=prefix_divergence on clean agent-doc-bugs2 closeouts, so tighten snapshot/ack normalization until fallback is exceptional again.
 <!-- /agent:done -->

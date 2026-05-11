@@ -10,8 +10,9 @@
 //!   returning `(line_start, line_end)` for surgical replacement.
 //! - `find_boundary_id_in_component` scans a component for any boundary marker, skipping matches
 //!   inside fenced code blocks.
-//! - `run` (CLI entry point) atomically writes the updated document, refreshes the snapshot, and
-//!   signals the IDE plugin via a VCS refresh signal file; prints the UUID to stdout.
+//! - `run` (CLI entry point) atomically writes the updated document without refreshing the
+//!   saved snapshot, then signals the IDE plugin via a VCS refresh signal file; prints the UUID
+//!   to stdout.
 //! - `signal_editor_refresh` writes `.agent-doc/patches/vcs-refresh.signal` so the PatchWatcher
 //!   triggers a VFS refresh before the next IPC patch write.
 //!
@@ -22,8 +23,9 @@
 //! - `insert(doc, component_name) -> Result<(String, String)>` — returns `(uuid, updated_doc)`;
 //!   errors if the named component is not found.
 //! - `remove_all(doc) -> String` — pure function; original trailing-newline behaviour preserved.
-//! - `run(file, component) -> Result<()>` — atomic write + snapshot update + IDE signal; prints
-//!   UUID to stdout on success.
+//! - `run(file, component) -> Result<()>` — atomic transient write + IDE signal; prints UUID to
+//!   stdout on success. Marker-only boundary setup must not advance the saved snapshot because the
+//!   next preflight commit would otherwise be allowed to create a boundary-only git commit.
 //!
 //! ## Evals
 //! - format_and_extract: `format_marker("abc-123")` → `"<!-- agent:boundary:abc-123 -->"`;
@@ -231,9 +233,6 @@ pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
     std::fs::rename(&tmp, file)
         .with_context(|| format!("failed to rename {} to {}", tmp.display(), file.display()))?;
 
-    // Update snapshot so the boundary marker doesn't show up as a diff
-    snapshot::save(file, &updated)?;
-
     // Signal IDE plugin to refresh the file so it sees the new boundary
     // before the next IPC patch write. Without this, the plugin's in-memory
     // document won't have the boundary, causing fallback to plain append.
@@ -334,5 +333,27 @@ mod tests {
         // Only one boundary marker should remain
         let marker_count = result.matches(BOUNDARY_PREFIX).count();
         assert_eq!(marker_count, 1, "should have exactly one boundary marker");
+    }
+
+    #[test]
+    fn run_does_not_advance_snapshot_with_marker_only_churn() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+        let original = "<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n";
+        std::fs::write(&file, original).unwrap();
+        snapshot::save(&file, original).unwrap();
+
+        run(&file, Some("exchange")).unwrap();
+
+        let current = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            current.contains(BOUNDARY_PREFIX),
+            "boundary command should still prepare the working document"
+        );
+        assert_eq!(
+            snapshot::load(&file).unwrap().unwrap(),
+            original,
+            "marker-only boundary setup must not become the committed snapshot basis"
+        );
     }
 }

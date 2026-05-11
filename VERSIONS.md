@@ -6,6 +6,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **`#agent-doc-bug` declaration chains now preserve backlog order.** `agent-doc plan` now expands multiple prompt-bearing `#agent-doc-bug` declarations into ordered expected add mutations for explicit backlog targets, and logs the declaration/final insertion order for multi-item batches. The first declared bug remains above later bugs unless the response explicitly documents an intentional priority override. This closes `#bugchainorder` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
+- **Standalone boundary setup no longer advances the commit snapshot.** `agent-doc boundary` still writes a transient marker into the working document and signals the editor, but it no longer updates the saved snapshot. That prevents the next preflight/commit from turning marker-only setup churn into a noisy boundary-only git commit.
+
 - **Route no longer dispatches into `starting` authoritative actors.** Managed and dispatch-only reroutes now wait for a `starting` controller actor to refresh to `ready` before recording a dispatch attempt or sending tmux/supervisor input; if the actor stays `starting`, route fails closed with a state-gate diagnostic instead of creating an interrupted startup cycle. `busy` actors remain eligible for one supervisor-owned queued reopen. Added route regressions and updated the routing/session-actor specs. This closes `#startingdispatch` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Stale `starting` actor cleanup no longer trusts a live PID forever.** Normal `preflight`, `start`, `sync`, and `gc` cleanup now keep a one-hour-old `starting` actor only when the recorded supervisor PID is alive and its lease heartbeat is still fresh. A stuck `agent-doc start --route-owned` process with an old heartbeat is closed and projected from SQLite on the next normal cleanup pass. Added a regression for the live-PID/stale-heartbeat case and updated the session actor specs. This closes `#startgcleak` in `tasks/agent-doc/agent-doc-bugs2.md`.

@@ -177,6 +177,13 @@ existing task trees, or if a project-prefixed target does not exist, preflight
 fails closed before any backlog item can be written. Preflight output includes
 the resolved `explicit_backlog_targets` paths for operator verification.
 
+**Declaration-chain order:** when multiple prompt-bearing changes in one cycle
+each invoke `#agent-doc-bug`, `agent-doc plan` treats them as one ordered batch.
+The `pending_mutations` entries and repeated `--pending-add-to` placeholders
+must follow declaration order so the first declared bug remains above later
+bugs after insertion. If an agent intentionally changes priority, the closeout
+must say so explicitly instead of relying on reversed insertion side effects.
+
 **State transition matrix:**
 
 | From \ Op | `--done` | `--pending-gate` | `--pending-ungate` |

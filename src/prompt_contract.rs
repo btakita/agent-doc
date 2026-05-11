@@ -176,6 +176,40 @@ pub(crate) fn required_plan_reference_count(
     required_issue_unit_count(prompt_bearing_changes)
 }
 
+pub(crate) fn ordered_issue_units_for_agent_doc_bug(
+    prompt_targets: &[String],
+    added_diff_lines: &[String],
+    prompt_presets: &IndexMap<String, String>,
+    prompt_bearing_changes: &[crate::diff::PromptBearingChange],
+) -> Vec<String> {
+    if !effective_prompt_references_preset(
+        prompt_targets,
+        added_diff_lines,
+        prompt_presets,
+        "#agent-doc-bug",
+    ) {
+        return Vec::new();
+    }
+
+    let content_edit_units = ordered_issue_units_from_changes(
+        prompt_bearing_changes,
+        crate::diff::PromptBearingChangeKind::ContentEdit,
+    );
+    if !content_edit_units.is_empty() {
+        return content_edit_units;
+    }
+
+    let prompt_target_units = ordered_issue_units_from_changes(
+        prompt_bearing_changes,
+        crate::diff::PromptBearingChangeKind::PromptTarget,
+    );
+    if !prompt_target_units.is_empty() {
+        return prompt_target_units;
+    }
+
+    vec!["#agent-doc-bug".to_string()]
+}
+
 fn effective_prompt_texts(
     prompt_targets: &[String],
     added_diff_lines: &[String],
@@ -465,12 +499,24 @@ fn explicit_backlog_target_in_text(current_file: &Path, text: &str) -> Result<Op
     crate::security::referenced_markdown_path_checked(current_file, text)
 }
 
-fn count_issue_units_in_text(text: &str) -> usize {
+fn ordered_issue_units_from_changes(
+    prompt_bearing_changes: &[crate::diff::PromptBearingChange],
+    kind: crate::diff::PromptBearingChangeKind,
+) -> Vec<String> {
+    prompt_bearing_changes
+        .iter()
+        .filter(|change| change.kind == kind)
+        .flat_map(|change| issue_units_in_text(&change.text))
+        .collect()
+}
+
+fn issue_units_in_text(text: &str) -> Vec<String> {
     let mut in_fence = false;
     let mut fence_char = '\0';
     let mut fence_len = 0usize;
-    let mut list_items = 0usize;
-    let mut has_substantive_line = false;
+    let mut list_items = Vec::new();
+    let mut substantive_groups: Vec<Vec<String>> = Vec::new();
+    let mut current_substantive_group: Vec<String> = Vec::new();
 
     for raw_line in text.lines() {
         let trimmed = raw_line.trim();
@@ -502,22 +548,36 @@ fn count_issue_units_in_text(text: &str) -> usize {
         }
 
         if is_top_level_issue_list_item(trimmed) {
-            list_items += 1;
+            list_items.push(strip_top_level_issue_marker(trimmed).to_string());
+            continue;
+        }
+
+        if trimmed == "---" {
+            if !current_substantive_group.is_empty() {
+                substantive_groups.push(std::mem::take(&mut current_substantive_group));
+            }
             continue;
         }
 
         if !trimmed.starts_with('/') && !trimmed.eq_ignore_ascii_case("#agent-doc-bug") {
-            has_substantive_line = true;
+            current_substantive_group.push(trimmed.to_string());
         }
     }
-
-    if list_items > 0 {
-        list_items
-    } else if has_substantive_line {
-        1
-    } else {
-        0
+    if !current_substantive_group.is_empty() {
+        substantive_groups.push(current_substantive_group);
     }
+
+    if !list_items.is_empty() {
+        return list_items;
+    }
+    substantive_groups
+        .into_iter()
+        .map(|group| group.join("\n"))
+        .collect()
+}
+
+fn count_issue_units_in_text(text: &str) -> usize {
+    issue_units_in_text(text).len()
 }
 
 fn required_issue_unit_count(prompt_bearing_changes: &[crate::diff::PromptBearingChange]) -> usize {
@@ -544,6 +604,29 @@ fn required_issue_unit_count(prompt_bearing_changes: &[crate::diff::PromptBearin
 
 fn is_top_level_issue_list_item(trimmed: &str) -> bool {
     trimmed.starts_with("- ") || trimmed.starts_with("* ") || is_numbered_list_item(trimmed)
+}
+
+fn strip_top_level_issue_marker(trimmed: &str) -> &str {
+    if let Some(rest) = trimmed.strip_prefix("- ") {
+        return rest.trim_start();
+    }
+    if let Some(rest) = trimmed.strip_prefix("* ") {
+        return rest.trim_start();
+    }
+    let digits = trimmed.chars().take_while(|ch| ch.is_ascii_digit()).count();
+    if digits > 0
+        && trimmed
+            .as_bytes()
+            .get(digits)
+            .is_some_and(|byte| *byte == b'.')
+        && trimmed
+            .as_bytes()
+            .get(digits + 1)
+            .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        return trimmed[digits + 1..].trim_start();
+    }
+    trimmed
 }
 
 fn is_numbered_list_item(trimmed: &str) -> bool {
@@ -908,5 +991,55 @@ mod tests {
         );
 
         assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn ordered_issue_units_preserve_declaration_chain_order() {
+        let presets = IndexMap::from([(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md"
+                .to_string(),
+        )]);
+        let prompt_targets = vec![
+            "First issue. #agent-doc-bug".to_string(),
+            "Second issue. #agent-doc-bug".to_string(),
+            "Third issue. #agent-doc-bug".to_string(),
+        ];
+        let changes = prompt_targets
+            .iter()
+            .map(|text| crate::diff::PromptBearingChange {
+                kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+                text: text.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        let units = ordered_issue_units_for_agent_doc_bug(&prompt_targets, &[], &presets, &changes);
+
+        assert_eq!(
+            units,
+            vec![
+                "First issue. #agent-doc-bug",
+                "Second issue. #agent-doc-bug",
+                "Third issue. #agent-doc-bug"
+            ]
+        );
+    }
+
+    #[test]
+    fn ordered_issue_units_split_top_level_lists_in_order() {
+        let presets = IndexMap::from([(
+            "#agent-doc-bug".to_string(),
+            "Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/bugs.md"
+                .to_string(),
+        )]);
+        let prompt_targets = vec!["#agent-doc-bug\n1. First issue\n2. Second issue".to_string()];
+        let changes = vec![crate::diff::PromptBearingChange {
+            kind: crate::diff::PromptBearingChangeKind::PromptTarget,
+            text: prompt_targets[0].clone(),
+        }];
+
+        let units = ordered_issue_units_for_agent_doc_bug(&prompt_targets, &[], &presets, &changes);
+
+        assert_eq!(units, vec!["First issue", "Second issue"]);
     }
 }

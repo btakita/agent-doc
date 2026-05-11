@@ -135,10 +135,11 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         });
     };
 
-    let prompt_targets = diff::classify_prompt_bearing_changes(&diff_text)
-        .into_iter()
+    let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&diff_text);
+    let prompt_targets = prompt_bearing_changes
+        .iter()
         .filter(|change| change.kind == diff::PromptBearingChangeKind::PromptTarget)
-        .map(|change| change.text)
+        .map(|change| change.text.clone())
         .collect::<Vec<_>>();
     let added_diff_lines = crate::prompt_contract::collect_added_diff_lines(&diff_text);
 
@@ -162,6 +163,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &repo_actions,
         &prompt_targets,
         &added_diff_lines,
+        &prompt_bearing_changes,
     )?;
     let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
 
@@ -303,6 +305,7 @@ fn pending_mutations_for_doc(
     repo_actions: &[String],
     prompt_targets: &[String],
     added_diff_lines: &[String],
+    prompt_bearing_changes: &[diff::PromptBearingChange],
 ) -> Result<Vec<PendingMutationPlan>> {
     let (fm, _) = frontmatter::parse(content).context("failed to parse frontmatter")?;
     let components = component::parse(content).context("failed to parse document components")?;
@@ -361,15 +364,60 @@ fn pending_mutations_for_doc(
         .into_iter()
         .map(|path| path.display().to_string())
         .collect();
-        pending_mutations.push(PendingMutationPlan {
-            kind: PendingMutationKind::ExpectAdd,
-            id: String::new(),
-            text: "user requested backlog/recommendations".to_string(),
-            target_files,
-        });
+        let issue_units = crate::prompt_contract::ordered_issue_units_for_agent_doc_bug(
+            prompt_targets,
+            added_diff_lines,
+            &fm.prompt_presets,
+            prompt_bearing_changes,
+        );
+        if issue_units.len() > 1 {
+            eprintln!(
+                "[plan] #agent-doc-bug declaration_order={} final_insert_order={}",
+                issue_units
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, unit)| format!("{}:{}", idx + 1, truncate_for_plan_log(unit)))
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+                issue_units
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, unit)| format!("{}:{}", idx + 1, truncate_for_plan_log(unit)))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            );
+        }
+        if issue_units.is_empty() {
+            pending_mutations.push(PendingMutationPlan {
+                kind: PendingMutationKind::ExpectAdd,
+                id: String::new(),
+                text: "user requested backlog/recommendations".to_string(),
+                target_files,
+            });
+        } else {
+            for issue in issue_units {
+                pending_mutations.push(PendingMutationPlan {
+                    kind: PendingMutationKind::ExpectAdd,
+                    id: String::new(),
+                    text: issue,
+                    target_files: target_files.clone(),
+                });
+            }
+        }
     }
 
     Ok(pending_mutations)
+}
+
+fn truncate_for_plan_log(text: &str) -> String {
+    const MAX: usize = 80;
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= MAX {
+        return normalized;
+    }
+    let mut out = normalized.chars().take(MAX).collect::<String>();
+    out.push_str("...");
+    out
 }
 
 fn extract_do_pending_id(action: &str) -> Option<String> {
@@ -893,6 +941,59 @@ prompt_presets:
             "expected finalize hint to include --pending-add-to, got {:?}",
             plan.required_commands
         );
+    }
+
+    #[test]
+    fn plan_preserves_agent_doc_bug_declaration_order_for_target_adds() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let target = dir.path().join("bugs.md");
+        std::fs::write(
+            &target,
+            "<!-- agent:backlog -->\n- [ ] [#old1] Existing\n<!-- /agent:backlog -->\n",
+        )
+        .unwrap();
+
+        let baseline = format!(
+            r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+prompt_presets:
+  '#agent-doc-bug': Please create a plan. Add to the backlog of {}
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#,
+            target.display()
+        );
+
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "First captured bug. #agent-doc-bug\n---\nSecond captured bug. #agent-doc-bug\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, &baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+        let expect_adds = plan
+            .pending_mutations
+            .iter()
+            .filter(|mutation| mutation.kind == PendingMutationKind::ExpectAdd)
+            .collect::<Vec<_>>();
+
+        assert_eq!(expect_adds.len(), 2);
+        assert_eq!(expect_adds[0].text, "First captured bug. #agent-doc-bug");
+        assert_eq!(expect_adds[1].text, "Second captured bug. #agent-doc-bug");
+        assert_eq!(expect_adds[0].target_files, expect_adds[1].target_files);
     }
 
     #[test]

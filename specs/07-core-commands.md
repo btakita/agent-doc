@@ -174,6 +174,14 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 - Non-item separator lines and headings inside backlog/icebox must be preserved during mutation.
 - Flush-left parent items are the tracked units; indented nested lists travel with the parent during edit/reorder/reap/transfer.
 
+## boundary
+
+`agent-doc boundary <FILE> [COMPONENT]`
+
+- Inserts a transient `agent:boundary` marker into the working-tree document and signals the editor so the next IPC write can use a current insertion point.
+- It must not update the saved snapshot, stage files, or create a git commit. The marker is setup state, not a response closeout boundary.
+- A later preflight/commit may normalize marker-only working-tree churn as already committed, but standalone boundary insertion must never become the snapshot basis for a boundary-only commit.
+
 ## terminal
 
 `agent-doc terminal <FILE> [--session NAME]`

@@ -575,17 +575,17 @@ class PatchWatcher(private val project: Project) : Disposable {
                 else applyComponentPatchNative(result, "output", patch.unmatched, caretOffset)
         }
 
-        // Normalize after patches/unmatched content so later exchange rewrites do not
-        // overwrite the repaired ❯ prefixes in the editor buffer / ack sidecar.
-        if (patch.normalizePrefixLines.isNotEmpty()) {
-            result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
-        }
-
         // Reposition boundary to end of exchange if requested
         if (patch.repositionBoundary) {
             result = NativePatching.repositionBoundaryToEnd(result, patch.repositionBoundaryId)
                 ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId)
                 ?: result
+        }
+
+        // Normalize after patches and boundary reposition so prompts typed after
+        // the prior boundary are included in the user region seen by the sidecar.
+        if (patch.normalizePrefixLines.isNotEmpty()) {
+            result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
         }
         result = annotateExchangeHeadingsAgainstBaselineUtil(result, "exchange", content) ?: result
 
@@ -656,16 +656,16 @@ class PatchWatcher(private val project: Project) : Disposable {
                     else applyComponentPatchNative(result, "output", patch.unmatched, null)
             }
 
-            // Normalize after patches/unmatched content so later exchange rewrites do not
-            // overwrite the repaired ❯ prefixes in the editor buffer / ack sidecar.
-            if (patch.normalizePrefixLines.isNotEmpty()) {
-                result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
-            }
-
             if (patch.repositionBoundary) {
                 result = NativePatching.repositionBoundaryToEnd(result, patch.repositionBoundaryId)
                     ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId)
                     ?: result
+            }
+
+            // Normalize after patches and boundary reposition so prompts typed
+            // after the prior boundary are included in the user region.
+            if (patch.normalizePrefixLines.isNotEmpty()) {
+                result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
             }
             result = annotateExchangeHeadingsAgainstBaselineUtil(result, "exchange", content) ?: result
 

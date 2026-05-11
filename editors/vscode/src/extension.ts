@@ -1468,7 +1468,15 @@ class PatchWatcher implements vscode.Disposable {
             }
         }
 
-        // Apply ❯  prefix normalization for user-input lines in exchange
+        if (patch.reposition_boundary) {
+            const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
+            content = native.repositionBoundaryToEnd(content, projectRoot, patch.reposition_boundary_id)
+                ?? this.repositionBoundaryToEndTs(content, 'exchange', patch.reposition_boundary_id)
+                ?? content;
+        }
+
+        // Apply ❯  prefix normalization after boundary reposition so prompts
+        // typed after the prior boundary are in the exchange user region.
         if (patch.normalize_prefix_lines && patch.normalize_prefix_lines.length > 0) {
             content = this.normalizeExchangePrefixes(content, patch.normalize_prefix_lines);
         }

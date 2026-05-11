@@ -125,6 +125,23 @@ describe('repositionBoundaryToEnd', () => {
             'exactly one boundary marker',
         );
     });
+
+    it('moves prompts typed after a stale boundary into the user region before prefix repair', () => {
+        const doc = [
+            '<!-- agent:exchange patch=append -->',
+            '### Re: earlier — gpt-5',
+            '',
+            'Response one.',
+            '<!-- agent:boundary:aaa11111 -->',
+            'do [#sidecarfallbackstill]. spec-test-build-install-commit-push',
+            '<!-- /agent:exchange -->',
+        ].join('\n');
+
+        const result = repositionBoundaryToEnd(doc, 'exchange', 'bbb22222');
+        assert.ok(result, 'should return repositioned content');
+        assert.ok(result!.includes('do [#sidecarfallbackstill]. spec-test-build-install-commit-push\n<!-- agent:boundary:bbb22222 -->'));
+        assert.ok(!result!.includes('aaa11111'));
+    });
 });
 
 describe('repositionBoundaryToEndPreserveHead', () => {

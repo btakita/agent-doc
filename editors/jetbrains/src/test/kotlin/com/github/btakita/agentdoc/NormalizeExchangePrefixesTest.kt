@@ -138,6 +138,38 @@ New user prompt.
     }
 
     @Test
+    fun `reposition before normalization repairs prompt typed after stale boundary`() {
+        val doc = """
+<!-- agent:exchange patch=append -->
+### Re: earlier — gpt-5
+
+Response one.
+<!-- agent:boundary:aaa11111 -->
+do [#sidecarfallbackstill]. spec-test-build-install-commit-push
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val normalizedBeforeReposition = normalizeExchangePrefixesUtil(
+            doc,
+            listOf("do [#sidecarfallbackstill]. spec-test-build-install-commit-push")
+        )
+        assertFalse(
+            "Prompt after the stale boundary is not in the user region until boundary cleanup",
+            normalizedBeforeReposition.contains("❯ do [#sidecarfallbackstill]")
+        )
+
+        val repositioned = repositionBoundaryToEndUtil(doc, "exchange", "bbb22222")
+        assertNotNull(repositioned)
+        val result = normalizeExchangePrefixesUtil(
+            repositioned!!,
+            listOf("do [#sidecarfallbackstill]. spec-test-build-install-commit-push")
+        )
+
+        assertTrue(result.contains("❯ do [#sidecarfallbackstill]. spec-test-build-install-commit-push\n"))
+        assertTrue(result.contains("<!-- agent:boundary:bbb22222 -->"))
+    }
+
+    @Test
     fun `does not prefix assistant verification list before latest boundary`() {
         val doc = """
 <!-- agent:exchange patch=append -->

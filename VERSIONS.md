@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Editor IPC prefix repair now repositions before normalization.** JetBrains and VS Code patch application now move the exchange boundary before applying `normalize_prefix_lines`, so prompts typed after the previous boundary marker are inside the user region seen by the ack-content sidecar. This should keep clean closeouts from repeatedly logging `sidecar_normalization_fallback reason=prefix_divergence`. Added editor regressions and updated the plugin IPC spec. This closes `#sidecarfallbackstill` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Tracked-work completion now uses `--done`.** `write` and `finalize` now expose `--done <id>` as the public flag for marking either `agent:backlog` or `agent:icebox` work complete. The old `--pending-done` spelling and the transitional `--backlog-done` spelling are accepted as deprecated aliases with warnings, while `plan` and recovery hints now emit `--done`. This closes the CLI rename request in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Prompt-only exchange tails now fail closed after closeout.** `session-check` now scans the live `agent:exchange` tail after otherwise-clean closed cycles and interrupts when it ends in a prompt-looking block with no later assistant response, even if that prompt already matches the committed snapshot. This catches direct Codex/manual turns like the May 10 `#vt-agent-deploy` patchback miss where implementation commits succeeded but the final response never landed in the session document. This closes `#rootpatchmiss` in `tasks/agent-doc/agent-doc-bugs2.md`.

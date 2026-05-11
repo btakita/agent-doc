@@ -3,7 +3,8 @@
 //! ## Spec
 //! - Defines `Config`: global user configuration loaded from `~/.config/agent-doc/config.toml`
 //!   (or `$XDG_CONFIG_HOME/agent-doc/config.toml`). Fields: `default_agent`, `agents` map,
-//!   `agent_args`, `claude_args`, `codex_args` (harness aliases), `execution_mode`, `terminal`.
+//!   `agent_args`, `claude_args`, `codex_args`, `opencode_args` (harness aliases),
+//!   `execution_mode`, `terminal`.
 //! - Defines `AgentConfig`: per-named-agent settings (`command`, `args`, `result_path`,
 //!   `session_path`).
 //! - Defines `TerminalConfig`: command template for launching an external terminal; supports
@@ -75,6 +76,10 @@ pub struct Config {
     /// Codex-only alias for `agent_args`. `agent_args` takes precedence when both are set.
     #[serde(default)]
     pub codex_args: Option<String>,
+    /// Additional CLI arguments to pass to the `opencode` process.
+    /// OpenCode-only alias for `agent_args`. `agent_args` takes precedence when both are set.
+    #[serde(default)]
+    pub opencode_args: Option<String>,
     /// Explicit Codex network policy for agent-doc-launched sessions.
     /// `inherit` keeps the ambient launcher setting, `enabled` removes
     /// `CODEX_SANDBOX_NETWORK_DISABLED`, and `disabled` forces it on.
@@ -162,6 +167,7 @@ mod tests {
 agent_args = "--json -s workspace-write"
 claude_args = "--dangerously-skip-permissions"
 codex_args = "-s danger-full-access"
+opencode_args = "--dangerously-skip-permissions"
 codex_network_access = "enabled"
 "#;
         let cfg: Config = toml::from_str(toml_str).unwrap();
@@ -171,6 +177,10 @@ codex_network_access = "enabled"
             Some("--dangerously-skip-permissions")
         );
         assert_eq!(cfg.codex_args.as_deref(), Some("-s danger-full-access"));
+        assert_eq!(
+            cfg.opencode_args.as_deref(),
+            Some("--dangerously-skip-permissions")
+        );
         assert_eq!(cfg.codex_network_access, Some(CodexNetworkAccess::Enabled));
     }
 
@@ -208,5 +218,17 @@ codex_network_access = "enabled"
         };
         let resolved = cfg.agent_args.or(cfg.codex_args);
         assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
+    }
+
+    #[test]
+    fn test_config_opencode_args_fallback() {
+        // When agent_args is absent, opencode_args is used for OpenCode-specific resolution.
+        let cfg = Config {
+            agent_args: None,
+            opencode_args: Some("--dangerously-skip-permissions".to_string()),
+            ..Default::default()
+        };
+        let resolved = cfg.agent_args.or(cfg.opencode_args);
+        assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
     }
 }

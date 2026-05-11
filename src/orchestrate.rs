@@ -596,6 +596,12 @@ fn resolve_orchestrate_agent_args(
             .or_else(|| fm.codex_args.clone())
             .or_else(|| global_config.agent_args.clone())
             .or_else(|| global_config.codex_args.clone()),
+        "opencode" => fm
+            .agent_args
+            .clone()
+            .or_else(|| fm.opencode_args.clone())
+            .or_else(|| global_config.agent_args.clone())
+            .or_else(|| global_config.opencode_args.clone()),
         _ => fm
             .agent_args
             .clone()
@@ -2470,6 +2476,18 @@ mod tests {
         let config = Config::default();
         let result = resolve_orchestrate_agent_args(&fm, "codex", &config);
         assert_eq!(result.as_deref(), Some("-s danger-full-access"));
+    }
+
+    #[test]
+    fn resolve_orchestrate_agent_args_opencode_frontmatter() {
+        let fm = frontmatter::Frontmatter {
+            opencode_args: Some("--dangerously-skip-permissions".into()),
+            codex_args: Some("-s danger-full-access".into()),
+            ..Default::default()
+        };
+        let config = Config::default();
+        let result = resolve_orchestrate_agent_args(&fm, "opencode", &config);
+        assert_eq!(result.as_deref(), Some("--dangerously-skip-permissions"));
     }
 
     #[test]

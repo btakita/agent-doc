@@ -8,6 +8,8 @@
 //!     config `agent_args` > config `claude_args` > `AGENT_DOC_CLAUDE_ARGS`
 //!   - Codex: frontmatter `agent_args` > frontmatter `codex_args` >
 //!     config `agent_args` > config `codex_args`
+//!   - OpenCode: frontmatter `agent_args` > frontmatter `opencode_args` >
+//!     config `agent_args` > config `opencode_args`
 //! - Requires an active tmux session; bails immediately if not inside tmux.
 //! - If another pane already owns the same document session, `start` fails
 //!   closed instead of reusing, restarting, or superseding that pane. The
@@ -104,6 +106,8 @@
 //!   over config `claude_args`, with `AGENT_DOC_CLAUDE_ARGS` as fallback.
 //! - `start_codex_uses_codex_specific_alias_chain`: Codex resolves `codex_args`
 //!   after `agent_args` and ignores `claude_args`.
+//! - `start_opencode_uses_opencode_specific_alias_chain`: OpenCode resolves
+//!   `opencode_args` after `agent_args` and ignores Claude/Codex aliases.
 
 use anyhow::{Context, Result};
 use portable_pty::PtySize;
@@ -2109,7 +2113,7 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     if let Some(ref args) = resolved_agent_args {
         base_args.extend(args.split_whitespace().map(String::from));
     }
-    // Inject --model from claude_model/codex_model frontmatter when not already in args
+    // Inject --model from harness-specific model frontmatter when not already in args.
     if !base_args.iter().any(|a| a == "--model") {
         let harness_key = match harness.binary.as_str() {
             "claude" => "claude-code",
@@ -2855,6 +2859,12 @@ fn resolve_agent_args(
             .or_else(|| fm.codex_args.clone())
             .or_else(|| global_config.agent_args.clone())
             .or_else(|| global_config.codex_args.clone()),
+        "opencode" => fm
+            .agent_args
+            .clone()
+            .or_else(|| fm.opencode_args.clone())
+            .or_else(|| global_config.agent_args.clone())
+            .or_else(|| global_config.opencode_args.clone()),
         _ => fm
             .agent_args
             .clone()
@@ -3099,6 +3109,56 @@ mod tests {
         assert_eq!(resolved.as_deref(), Some("-s danger-full-access"));
     }
 
+    #[test]
+    fn resolve_agent_args_opencode_prefers_opencode_alias_chain() {
+        let fm = Frontmatter {
+            opencode_args: Some("--dangerously-skip-permissions".into()),
+            codex_args: Some("-s danger-full-access".into()),
+            claude_args: Some("--old-claude".into()),
+            ..Default::default()
+        };
+        let cfg = Config {
+            opencode_args: Some("--from-config".into()),
+            codex_args: Some("-s workspace-write".into()),
+            claude_args: Some("--old-flag".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::opencode();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn resolve_agent_args_opencode_ignores_claude_and_codex_aliases() {
+        let fm = Frontmatter {
+            claude_args: Some("--dangerously-skip-permissions".into()),
+            codex_args: Some("-s danger-full-access".into()),
+            ..Default::default()
+        };
+        let cfg = Config {
+            claude_args: Some("--old-flag".into()),
+            codex_args: Some("-s workspace-write".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::opencode();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved, None);
+    }
+
+    #[test]
+    fn resolve_agent_args_opencode_uses_config_opencode_args_fallback() {
+        let fm = Frontmatter::default();
+        let cfg = Config {
+            opencode_args: Some("--dangerously-skip-permissions".into()),
+            claude_args: Some("--old-flag".into()),
+            codex_args: Some("-s workspace-write".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::opencode();
+        let resolved = resolve_agent_args(&fm, &cfg, &harness);
+        assert_eq!(resolved.as_deref(), Some("--dangerously-skip-permissions"));
+    }
+
     // --- model injection from frontmatter tests ---
 
     /// Helper: simulates the base_args construction logic from run() for testing
@@ -3165,6 +3225,20 @@ mod tests {
         let args = build_base_args_for_test(&fm, &harness);
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"o3-pro".to_string()));
+    }
+
+    #[test]
+    fn model_injected_from_opencode_model_frontmatter() {
+        let fm = Frontmatter {
+            opencode_args: Some("--dangerously-skip-permissions".into()),
+            opencode_model: Some("zai/glm-5".into()),
+            ..Default::default()
+        };
+        let harness = crate::harness::HarnessConfig::opencode();
+        let args = build_base_args_for_test(&fm, &harness);
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"zai/glm-5".to_string()));
+        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
     }
 
     #[test]

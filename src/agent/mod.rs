@@ -3,7 +3,8 @@
 //! ## Spec
 //! - Defines the `Agent` trait: one method `send(prompt, session_id, fork, model)` → `AgentResponse`.
 //! - `AgentResponse` carries the response text and an optional session ID for session resumption.
-//! - `resolve(name, config)` maps a backend name (`"claude"`, `"codex"`, `"junie"`, or a config-defined name)
+//! - `resolve(name, config)` maps a backend name (`"claude"`, `"codex"`, `"opencode"`,
+//!   `"junie"`, or a config-defined name)
 //!   to a boxed `Agent` implementation.
 //! - When `config` is provided for an unknown name, falls back to the Claude backend using
 //!   the configured command and args.
@@ -25,6 +26,7 @@
 pub mod claude;
 pub mod codex;
 pub mod junie;
+pub mod opencode;
 pub mod streaming;
 
 use anyhow::Result;
@@ -329,6 +331,7 @@ fn build_backend_command(
         .unwrap_or_else(|| match name {
             "claude" => claude::default_base_args(),
             "codex" => codex::default_base_args(),
+            "opencode" => opencode::default_base_args(),
             _ => Vec::new(),
         });
     if let Some(file) = file {
@@ -376,6 +379,7 @@ pub fn resolve(
     match name {
         "claude" => Ok(Box::new(claude::Claude::new(cmd, args).with_env(env))),
         "codex" => Ok(Box::new(codex::Codex::new(cmd, args).with_env(env))),
+        "opencode" => Ok(Box::new(opencode::OpenCode::new(cmd, args).with_env(env))),
         "junie" => Ok(Box::new(junie::Junie::new(cmd, args))),
         other => {
             if config.is_some() {
@@ -402,6 +406,7 @@ pub fn resolve_for_file(
                 .with_env(env)
                 .with_required_ssh_targets(fm.required_ssh_targets.clone()),
         )),
+        "opencode" => Ok(Box::new(opencode::OpenCode::new(cmd, args).with_env(env))),
         "junie" => Ok(Box::new(junie::Junie::new(cmd, args))),
         other => {
             if config.is_some() {
@@ -428,6 +433,7 @@ pub fn resolve_streaming_for_file(
                 .with_env(env)
                 .with_required_ssh_targets(fm.required_ssh_targets.clone()),
         ))),
+        "opencode" => Ok(None),
         "junie" => Ok(None),
         other => {
             if config.is_some() {

@@ -4,14 +4,14 @@
 
 Location: `{XDG_CONFIG_HOME}/agent-doc/config.toml` (default `~/.config/agent-doc/config.toml`).
 
-Fields: `default_agent`, `agent_args`, `claude_args`, `codex_args`, `codex_network_access`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
+Fields: `default_agent`, `agent_args`, `claude_args`, `codex_args`, `opencode_args`, `codex_network_access`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
 
 ## agent_args
 
 Additional CLI arguments passed to the active agent process when spawned by `agent-doc start`.
 Space-separated string.
 
-For both Claude and Codex, `agent_args` is the harness-neutral override and takes precedence over harness-specific aliases. When the active document lives in a git submodule, agent-doc supplements the resolved args with `--add-dir` entries for the superproject working tree plus any external git metadata directories needed outside the submodule root, including nested child submodule gitdirs under `.git/modules/...`. That keeps submodule-rooted sessions able to patch parent-repo docs and complete the normal git lifecycle even when the task commits inside a nested submodule. Both Claude Code and Codex `exec` accept `--add-dir`; however, `codex exec resume` does not — the Codex backend strips `--add-dir` entries from resume args since the resumed session inherits writable roots from the original `exec`.
+For Claude, Codex, and OpenCode, `agent_args` is the harness-neutral override and takes precedence over harness-specific aliases. When the active Claude/Codex document lives in a git submodule, agent-doc supplements the resolved args with `--add-dir` entries for the superproject working tree plus any external git metadata directories needed outside the submodule root, including nested child submodule gitdirs under `.git/modules/...`. That keeps submodule-rooted sessions able to patch parent-repo docs and complete the normal git lifecycle even when the task commits inside a nested submodule. Both Claude Code and Codex `exec` accept `--add-dir`; however, `codex exec resume` does not — the Codex backend strips `--add-dir` entries from resume args since the resumed session inherits writable roots from the original `exec`.
 
 ## claude_args
 
@@ -22,6 +22,11 @@ Space-separated string. Claude-only compatibility alias for older documents/conf
 
 Additional CLI arguments passed to the `codex` process when spawned by `agent-doc start`.
 Space-separated string. Codex-only alias for explicit Codex session configuration.
+
+## opencode_args
+
+Additional CLI arguments passed to the `opencode` process when spawned by `agent-doc start`.
+Space-separated string. OpenCode-only alias for explicit OpenCode session configuration.
 
 ## codex_network_access
 
@@ -36,17 +41,19 @@ Frontmatter and global config share the same field name: `codex_network_access`.
 
 Claude sources, in precedence order (highest first):
 
-1. **Frontmatter**: `agent_args: "--model sonnet"`, `claude_args: "--dangerously-skip-permissions"`, `codex_args: "-s danger-full-access"`, or `codex_network_access: enabled` in the document's YAML frontmatter
-2. **Global config**: `agent_args = "--model sonnet"`, `claude_args = "--dangerously-skip-permissions"`, `codex_args = "-s danger-full-access"`, or `codex_network_access = "enabled"` in `~/.config/agent-doc/config.toml`
+1. **Frontmatter**: `agent_args: "--model sonnet"`, `claude_args: "--dangerously-skip-permissions"`, `codex_args: "-s danger-full-access"`, `opencode_args: "--dangerously-skip-permissions"`, or `codex_network_access: enabled` in the document's YAML frontmatter
+2. **Global config**: `agent_args = "--model sonnet"`, `claude_args = "--dangerously-skip-permissions"`, `codex_args = "-s danger-full-access"`, `opencode_args = "--dangerously-skip-permissions"`, or `codex_network_access = "enabled"` in `~/.config/agent-doc/config.toml`
 3. **Environment variable**: `AGENT_DOC_CLAUDE_ARGS="--dangerously-skip-permissions"`
 
 Claude resolution chain: `frontmatter agent_args > frontmatter claude_args > config agent_args > config claude_args > AGENT_DOC_CLAUDE_ARGS`.
 
 Codex resolution chain: `frontmatter agent_args > frontmatter codex_args > config agent_args > config codex_args`.
 
+OpenCode resolution chain: `frontmatter agent_args > frontmatter opencode_args > config agent_args > config opencode_args`.
+
 Codex network resolution chain: `frontmatter codex_network_access > config codex_network_access > inherit`.
 
-`claude_args` and `AGENT_DOC_CLAUDE_ARGS` are ignored when the active harness is not Claude. `codex_args` is ignored when the active harness is not Codex.
+`claude_args` and `AGENT_DOC_CLAUDE_ARGS` are ignored when the active harness is not Claude. `codex_args` is ignored when the active harness is not Codex. `opencode_args` is ignored when the active harness is not OpenCode.
 
 ## Project Config
 

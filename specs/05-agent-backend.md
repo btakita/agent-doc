@@ -17,6 +17,10 @@
 
 Default: `claude -p --output-format json --permission-mode acceptEdits`. Session handling: `--resume {id}` or `--continue --fork-session`. Appends `--append-system-prompt` with document-mode instructions. Removes `CLAUDECODE` env var. Parses JSON: `result`, `session_id`, `is_error`.
 
+## OpenCode Backend
+
+Default: `opencode run`. Session handling: `--session {id}` or `--continue --fork`. Model handling uses `--model <provider/model>`, so a document can set `agent: opencode` with `opencode_model: zai/glm-5` (or another OpenCode model ID). Removes `OPENCODE_CLIENT` env var. The non-streaming backend returns trimmed stdout and does not persist a session id because default `opencode run` output does not expose one.
+
 ## Prompt Contract
 
 For resumed document turns, the prompt must include:

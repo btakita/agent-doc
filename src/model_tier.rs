@@ -12,7 +12,7 @@
 //!   to identify the active agent harness, falling back to `"default"`.
 //! - `resolve_tier_to_model(tier, harness, config)` maps a `Tier` to the concrete model name
 //!   configured for the given harness, falling back to built-in defaults for the
-//!   `claude-code`, `codex`, and `default` harnesses.
+//!   `claude-code`, `codex`, `opencode`, and `default` harnesses.
 //! - `tier_from_model_name(name, harness, config)` is the reverse lookup: given a concrete
 //!   model name (e.g., `"opus"`), find the tier it belongs to in the harness mapping.
 //! - `Tier::FromStr` accepts case-insensitive `auto | low | med | high`.
@@ -187,12 +187,14 @@ fn builtin_for(harness: &str) -> TierMap {
 /// Detect the active harness from environment variables.
 ///
 /// Returns `"claude-code"` if `CLAUDE_CODE_SESSION` is set, `"codex"` if `CODEX_SESSION`
-/// is set, otherwise `"default"`.
+/// is set, `"opencode"` if `OPENCODE_CLIENT` is set, otherwise `"default"`.
 pub fn detect_harness() -> String {
     if std::env::var("CLAUDE_CODE_SESSION").is_ok() || std::env::var("CLAUDECODE").is_ok() {
         "claude-code".to_string()
     } else if std::env::var("CODEX_SESSION").is_ok() {
         "codex".to_string()
+    } else if std::env::var("OPENCODE_CLIENT").is_ok() {
+        "opencode".to_string()
     } else {
         "default".to_string()
     }
@@ -539,7 +541,7 @@ mod tests {
         // in parallel). Just assert the function returns one of the known values.
         let h = detect_harness();
         assert!(
-            matches!(h.as_str(), "claude-code" | "codex" | "default"),
+            matches!(h.as_str(), "claude-code" | "codex" | "opencode" | "default"),
             "unexpected harness: {h}"
         );
     }

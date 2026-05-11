@@ -5,9 +5,10 @@
 //! - Parameterizes binary name, restart behavior, prompt patterns, trigger command,
 //!   env vars to remove, and feature support flags.
 //! - `RestartBehavior`: how the supervisor restarts after a crash — either append args
-//!   to base_args (Claude: `--continue`) or prefix a resume subcommand while preserving
+//!   to base_args (Claude/OpenCode: `--continue`) or prefix a resume subcommand while preserving
 //!   the resolved base args (Codex: `resume --last` + resume-compatible sandbox/model flags).
-//! - `HarnessConfig::claude()` and `HarnessConfig::codex()` provide defaults.
+//! - `HarnessConfig::claude()`, `HarnessConfig::codex()`, and `HarnessConfig::opencode()`
+//!   provide defaults.
 //! - `HarnessConfig::from_context()` resolves from frontmatter `agent` field,
 //!   config `default_agent`, with Claude as fallback.
 //!
@@ -92,6 +93,26 @@ impl HarnessConfig {
         }
     }
 
+    pub fn opencode() -> Self {
+        Self {
+            binary: "opencode".into(),
+            restart_behavior: RestartBehavior::Append(vec!["--continue".into()]),
+            clean_exit_behavior: CleanExitBehavior::PromptUser,
+            prompt_patterns: vec![">".into(), "›".into()],
+            trigger_command_template: "agent-doc {file}".into(),
+            env_remove: vec!["OPENCODE_CLIENT".into()],
+            supports_no_mcp: false,
+            supports_enable_tool_search: false,
+            tmux_session_fallback: "opencode".into(),
+            process_names: vec![
+                "agent-doc".into(),
+                "opencode".into(),
+                "bun".into(),
+                "node".into(),
+            ],
+        }
+    }
+
     /// Resolve harness config from frontmatter and global config.
     /// Precedence: `fm.agent` > `config.default_agent` > `"claude"`.
     pub fn from_context(fm: &Frontmatter, config: &Config) -> Self {
@@ -106,6 +127,7 @@ impl HarnessConfig {
     pub fn from_agent_name(name: &str) -> Self {
         match name {
             "codex" => Self::codex(),
+            "opencode" | "open-code" | "open_code" => Self::opencode(),
             _ => Self::claude(),
         }
     }
@@ -171,6 +193,7 @@ impl HarnessConfig {
             "codex" => {
                 matches!(trimmed, "❯" | ">" | "›") || is_codex_idle_placeholder_prompt(trimmed)
             }
+            "opencode" => matches!(trimmed, ">" | "›"),
             _ => self.matches_prompt(trimmed),
         }
     }
@@ -508,6 +531,22 @@ mod tests {
     }
 
     #[test]
+    fn opencode_defaults() {
+        let h = HarnessConfig::opencode();
+        assert_eq!(h.binary, "opencode");
+        assert!(!h.supports_no_mcp);
+        assert!(!h.supports_enable_tool_search);
+        assert_eq!(
+            h.restart_behavior,
+            RestartBehavior::Append(vec!["--continue".into()])
+        );
+        assert_eq!(h.clean_exit_behavior, CleanExitBehavior::PromptUser);
+        assert!(h.env_remove.contains(&"OPENCODE_CLIENT".to_string()));
+        assert_eq!(h.tmux_session_fallback, "opencode");
+        assert!(h.process_names.contains(&"opencode".to_string()));
+    }
+
+    #[test]
     fn from_agent_name_claude() {
         let h = HarnessConfig::from_agent_name("claude");
         assert_eq!(h.binary, "claude");
@@ -517,6 +556,12 @@ mod tests {
     fn from_agent_name_codex() {
         let h = HarnessConfig::from_agent_name("codex");
         assert_eq!(h.binary, "codex");
+    }
+
+    #[test]
+    fn from_agent_name_opencode() {
+        let h = HarnessConfig::from_agent_name("opencode");
+        assert_eq!(h.binary, "opencode");
     }
 
     #[test]
@@ -656,6 +701,12 @@ mod tests {
     }
 
     #[test]
+    fn trigger_command_substitution_opencode() {
+        let h = HarnessConfig::opencode();
+        assert_eq!(h.trigger_command("plan.md"), "agent-doc plan.md");
+    }
+
+    #[test]
     fn matches_prompt_exact() {
         let h = HarnessConfig::claude();
         assert!(h.matches_prompt("❯"));
@@ -699,6 +750,17 @@ mod tests {
         assert!(h.is_prompt_line("  >  "));
         assert!(h.is_prompt_line("›"));
         assert!(h.is_prompt_line("› "));
+    }
+
+    #[test]
+    fn is_prompt_line_opencode_patterns() {
+        let h = HarnessConfig::opencode();
+        assert!(h.is_prompt_line(">"));
+        assert!(h.is_prompt_line("> "));
+        assert!(h.is_prompt_line("  >  "));
+        assert!(h.is_prompt_line("›"));
+        assert!(h.is_prompt_line("› "));
+        assert!(!h.is_prompt_line("❯"));
     }
 
     #[test]
@@ -930,6 +992,17 @@ Press Enter to restart, or 'q' to exit.
     }
 
     #[test]
+    fn is_agent_process_name_opencode() {
+        let h = HarnessConfig::opencode();
+        assert!(h.is_agent_process_name("opencode"));
+        assert!(h.is_agent_process_name("bun"));
+        assert!(h.is_agent_process_name("node"));
+        assert!(h.is_agent_process_name("agent-doc"));
+        assert!(!h.is_agent_process_name("claude"));
+        assert!(!h.is_agent_process_name("codex"));
+    }
+
+    #[test]
     fn cmdline_is_agent_claude() {
         let h = HarnessConfig::claude();
         assert!(h.cmdline_is_agent("claude -p --output-format stream-json"));
@@ -945,26 +1018,41 @@ Press Enter to restart, or 'q' to exit.
         assert!(!h.cmdline_is_agent("claude -p"));
     }
 
+    #[test]
+    fn cmdline_is_agent_opencode() {
+        let h = HarnessConfig::opencode();
+        assert!(h.cmdline_is_agent("opencode --model zai/glm-5"));
+        assert!(h.cmdline_is_agent("agent-doc start plan.md"));
+        assert!(!h.cmdline_is_agent("codex exec --json"));
+    }
+
     // --- Multi-harness isolation tests ---
 
     #[test]
     fn harness_isolation_no_shared_binary() {
         let claude = HarnessConfig::claude();
         let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
         assert_ne!(claude.binary, codex.binary);
+        assert_ne!(claude.binary, opencode.binary);
+        assert_ne!(codex.binary, opencode.binary);
     }
 
     #[test]
     fn harness_isolation_no_shared_tmux_session() {
         let claude = HarnessConfig::claude();
         let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
         assert_ne!(claude.tmux_session_fallback, codex.tmux_session_fallback);
+        assert_ne!(claude.tmux_session_fallback, opencode.tmux_session_fallback);
+        assert_ne!(codex.tmux_session_fallback, opencode.tmux_session_fallback);
     }
 
     #[test]
     fn harness_isolation_env_remove_disjoint() {
         let claude = HarnessConfig::claude();
         let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
         for var in &claude.env_remove {
             assert!(
                 !codex.env_remove.contains(var),
@@ -977,12 +1065,19 @@ Press Enter to restart, or 'q' to exit.
                 "env_remove overlap: {var} in both codex and claude"
             );
         }
+        for var in &opencode.env_remove {
+            assert!(
+                !claude.env_remove.contains(var) && !codex.env_remove.contains(var),
+                "env_remove overlap: {var} in opencode and another harness"
+            );
+        }
     }
 
     #[test]
     fn harness_isolation_process_names_no_cross_claim() {
         let claude = HarnessConfig::claude();
         let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
         assert!(
             claude.is_agent_process_name("claude"),
             "claude harness should claim 'claude'"
@@ -999,24 +1094,37 @@ Press Enter to restart, or 'q' to exit.
             !codex.is_agent_process_name("claude"),
             "codex harness must not claim 'claude'"
         );
+        assert!(
+            opencode.is_agent_process_name("opencode"),
+            "opencode harness should claim 'opencode'"
+        );
+        assert!(
+            !opencode.is_agent_process_name("claude") && !opencode.is_agent_process_name("codex"),
+            "opencode harness must not claim claude/codex"
+        );
     }
 
     #[test]
     fn harness_isolation_shared_agent_doc_process() {
         let claude = HarnessConfig::claude();
         let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
         assert!(claude.is_agent_process_name("agent-doc"));
         assert!(codex.is_agent_process_name("agent-doc"));
+        assert!(opencode.is_agent_process_name("agent-doc"));
     }
 
     #[test]
     fn harness_isolation_trigger_commands_both_route_file() {
         let claude = HarnessConfig::claude();
         let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
         let claude_cmd = claude.trigger_command("tasks/bugs.md");
         let codex_cmd = codex.trigger_command("tasks/bugs.md");
+        let opencode_cmd = opencode.trigger_command("tasks/bugs.md");
         assert_eq!(claude_cmd, "/agent-doc tasks/bugs.md");
         assert_eq!(codex_cmd, "agent-doc tasks/bugs.md");
+        assert_eq!(opencode_cmd, "agent-doc tasks/bugs.md");
     }
 
     #[test]
@@ -1066,12 +1174,19 @@ Press Enter to restart, or 'q' to exit.
             agent: Some("codex".into()),
             ..Default::default()
         };
+        let fm_opencode = Frontmatter {
+            agent: Some("opencode".into()),
+            ..Default::default()
+        };
         let config = Config::default();
         let h1 = HarnessConfig::from_context(&fm_claude, &config);
         let h2 = HarnessConfig::from_context(&fm_codex, &config);
+        let h3 = HarnessConfig::from_context(&fm_opencode, &config);
         assert_eq!(h1.binary, "claude");
         assert_eq!(h2.binary, "codex");
+        assert_eq!(h3.binary, "opencode");
         assert_ne!(h1.tmux_session_fallback, h2.tmux_session_fallback);
+        assert_ne!(h2.tmux_session_fallback, h3.tmux_session_fallback);
     }
 
     #[test]
@@ -1095,15 +1210,19 @@ Press Enter to restart, or 'q' to exit.
     fn multi_harness_prompt_pattern_overlap_is_intentional() {
         let claude = HarnessConfig::claude();
         let codex = HarnessConfig::codex();
+        let opencode = HarnessConfig::opencode();
         // Both share ❯ — that's fine, it just means both detect it
         assert!(claude.matches_prompt("❯"));
         assert!(codex.matches_prompt("❯"));
+        assert!(!opencode.matches_prompt("❯"));
         // > is codex-only
         assert!(!claude.matches_prompt(">"));
         assert!(codex.matches_prompt(">"));
+        assert!(opencode.matches_prompt(">"));
         // ⏵ is claude-only
         assert!(claude.matches_prompt("⏵"));
         assert!(!codex.matches_prompt("⏵"));
+        assert!(!opencode.matches_prompt("⏵"));
     }
 
     #[test]

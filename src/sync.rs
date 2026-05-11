@@ -5280,7 +5280,7 @@ fn find_alive_pane_via_registry_rebind_successor(
 /// Check if a process (by PID) is running agent-doc for a specific file.
 ///
 /// Uses `ps -p <pid> -o command=` which works on both Linux and macOS.
-/// Check if a tmux pane is running an active agent session (agent-doc / claude / codex).
+/// Check if a tmux pane is running an active agent session.
 ///
 /// Used as a `protect_pane` callback to prevent stashing panes with active sessions.
 /// Checks the pane's PID and its child processes for agent process names in the command line.
@@ -5318,7 +5318,7 @@ fn is_pane_busy(tmux: &Tmux, pane_id: &str) -> bool {
     false
 }
 
-/// Check if a process (by PID) is running an agent session (agent-doc / claude / codex).
+/// Check if a process (by PID) is running an agent session.
 #[allow(dead_code)]
 fn pid_is_agent_session(pid: &str) -> bool {
     let output = match std::process::Command::new("ps")
@@ -5329,7 +5329,10 @@ fn pid_is_agent_session(pid: &str) -> bool {
         _ => return false,
     };
     let cmdline = String::from_utf8_lossy(&output.stdout);
-    cmdline.contains("agent-doc") || cmdline.contains("claude") || cmdline.contains("codex")
+    cmdline.contains("agent-doc")
+        || cmdline.contains("claude")
+        || cmdline.contains("codex")
+        || cmdline.contains("opencode")
 }
 
 fn path_has_component_suffix(path: &Path, suffix: &Path) -> bool {
@@ -5412,7 +5415,10 @@ fn token_is_agent_doc_binary(token: &str) -> bool {
 }
 
 fn token_is_harness_binary(token: &str) -> bool {
-    matches!(token_basename(token), "claude" | "codex" | "node")
+    matches!(
+        token_basename(token),
+        "claude" | "codex" | "opencode" | "bun" | "node"
+    )
 }
 
 fn token_is_non_owner_agent_doc_subcommand(token: &str) -> bool {

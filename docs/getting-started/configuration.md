@@ -18,6 +18,10 @@ command = "codex"
 args = ["--prompt"]
 result_path = ".output"
 session_path = ".id"
+
+[agents.opencode]
+command = "opencode"
+args = ["run"]
 ```
 
 ## Fields
@@ -47,8 +51,8 @@ Set `agent` and `model` in the document's YAML frontmatter:
 ```yaml
 ---
 session: null
-agent: codex
-model: gpt-4
+agent: opencode
+opencode_model: zai/glm-5
 ---
 ```
 

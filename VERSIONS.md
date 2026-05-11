@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **OpenCode harness support.** `agent: opencode` now resolves to an OpenCode managed pane with `agent-doc <file>` trigger routing, `opencode_model` / `opencode_args` frontmatter and config aliases, and a minimal non-streaming `agent-doc run --agent opencode` backend that invokes `opencode run`. This supports OpenCode model IDs such as `zai/glm-5` via the same `--model` injection path.
+
 - **`#agent-doc-bug` declaration chains now preserve backlog order.** `agent-doc plan` now expands multiple prompt-bearing `#agent-doc-bug` declarations into ordered expected add mutations for explicit backlog targets, and logs the declaration/final insertion order for multi-item batches. The first declared bug remains above later bugs unless the response explicitly documents an intentional priority override. This closes `#bugchainorder` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Standalone boundary setup no longer advances the commit snapshot.** `agent-doc boundary` still writes a transient marker into the working document and signals the editor, but it no longer updates the saved snapshot. That prevents the next preflight/commit from turning marker-only setup churn into a noisy boundary-only git commit.

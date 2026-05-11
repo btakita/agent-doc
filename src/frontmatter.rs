@@ -88,10 +88,11 @@
 //! - parse_prompt_presets_roundtrip: preset map with multiline values → parse/write preserves keys
 //!   and bodies exactly
 //! - parse_codex_network_access_field: `codex_network_access: enabled` → enum value
-//! - resolve_harness_model: `claude_model` overrides `model` under `claude-code`, `codex_model`
-//!   overrides `model` under `codex`, fallback to `model` for unknown harnesses
-//! - parse_harness_model_fields: `claude_model` and `codex_model` round-trip through parse/write
-//! - merge_fields_claude_model / merge_fields_codex_model: merge patches for harness model fields
+//! - resolve_harness_model: harness-specific model fields override `model`
+//!   for `claude-code`, `codex`, and `opencode`
+//! - parse_harness_model_fields: harness model fields round-trip through parse/write
+//! - merge_fields_claude_model / merge_fields_codex_model / merge_fields_opencode_model:
+//!   merge patches for harness model fields
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -267,6 +268,10 @@ pub struct Frontmatter {
     /// When running under Codex, this takes precedence over `model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_model: Option<String>,
+    /// Per-harness model override for OpenCode sessions.
+    /// When running under OpenCode, this takes precedence over `model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     /// **Deprecated.** Tmux session name for pane affinity (e.g., "claude").
@@ -320,6 +325,10 @@ pub struct Frontmatter {
     /// Codex-only alias for `agent_args`. `agent_args` takes precedence when both are set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_args: Option<String>,
+    /// Additional CLI arguments to pass to the `opencode` process.
+    /// OpenCode-only alias for `agent_args`. `agent_args` takes precedence when both are set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_args: Option<String>,
     /// Explicit Codex network policy. `inherit` keeps the launcher's ambient
     /// `CODEX_SANDBOX_NETWORK_DISABLED` setting, `enabled` removes it, and
     /// `disabled` forces it on for the child session.
@@ -507,12 +516,15 @@ impl Frontmatter {
 
     /// Resolve the effective model for attribution, given the active harness.
     ///
-    /// Priority: harness-specific field (`claude_model` / `codex_model`) > generic `model`.
-    /// Harness values: `"claude-code"` → `claude_model`, `"codex"` → `codex_model`.
+    /// Priority: harness-specific field (`claude_model` / `codex_model` / `opencode_model`)
+    /// over generic `model`.
+    /// Harness mapping: `"claude-code"` uses `claude_model`, `"codex"` uses `codex_model`,
+    /// and `"opencode"` uses `opencode_model`.
     pub fn resolve_harness_model(&self, harness: &str) -> Option<&str> {
         let harness_specific = match harness {
             "claude-code" => self.claude_model.as_deref(),
             "codex" => self.codex_model.as_deref(),
+            "opencode" => self.opencode_model.as_deref(),
             _ => None,
         };
         harness_specific.or(self.model.as_deref())
@@ -622,6 +634,7 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
             "model" => fm.model = val_str(),
             "claude_model" => fm.claude_model = val_str(),
             "codex_model" => fm.codex_model = val_str(),
+            "opencode_model" => fm.opencode_model = val_str(),
             "branch" => fm.branch = val_str(),
             "tmux_session" => fm.tmux_session = val_str(),
             "agent_doc_mode" | "mode" | "response_mode" => fm.mode = val_str(),
@@ -665,6 +678,7 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
             "agent_args" => fm.agent_args = val_str(),
             "claude_args" => fm.claude_args = val_str(),
             "codex_args" => fm.codex_args = val_str(),
+            "opencode_args" => fm.opencode_args = val_str(),
             "codex_network_access" => {
                 if let Some(s) = value.as_str()
                     && let Ok(mode) =
@@ -1095,6 +1109,7 @@ mod tests {
             model: Some("opus".to_string()),
             claude_model: None,
             codex_model: None,
+            opencode_model: None,
             branch: Some("dev".to_string()),
             tmux_session: None,
             mode: None,
@@ -1104,6 +1119,7 @@ mod tests {
             agent_args: None,
             claude_args: None,
             codex_args: None,
+            opencode_args: None,
             codex_network_access: None,
             required_ssh_targets: Vec::new(),
             required_ssh_profile: None,
@@ -1132,6 +1148,7 @@ mod tests {
         assert_eq!(fm2.model, fm.model);
         assert_eq!(fm2.claude_model, fm.claude_model);
         assert_eq!(fm2.codex_model, fm.codex_model);
+        assert_eq!(fm2.opencode_model, fm.opencode_model);
         assert_eq!(fm2.branch, fm.branch);
         assert_eq!(fm2.collaboration, fm.collaboration);
         assert_eq!(fm2.security_review, fm.security_review);
@@ -1641,11 +1658,12 @@ mod tests {
         assert_eq!(fm.agent_args.as_deref(), Some("--json -s workspace-write"));
         assert!(fm.claude_args.is_none());
         assert!(fm.codex_args.is_none());
+        assert!(fm.opencode_args.is_none());
     }
 
     #[test]
     fn parse_agent_args_and_harness_aliases() {
-        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\ncodex_network_access: enabled\nrequired_ssh_targets:\n  - monsterrodholders-server\n---\nBody\n";
+        let content = "---\nagent_args: \"--json\"\nclaude_args: \"--dangerously-skip-permissions\"\ncodex_args: \"-s danger-full-access\"\nopencode_args: \"--dangerously-skip-permissions\"\ncodex_network_access: enabled\nrequired_ssh_targets:\n  - monsterrodholders-server\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("--json"));
         assert_eq!(
@@ -1653,6 +1671,10 @@ mod tests {
             Some("--dangerously-skip-permissions")
         );
         assert_eq!(fm.codex_args.as_deref(), Some("-s danger-full-access"));
+        assert_eq!(
+            fm.opencode_args.as_deref(),
+            Some("--dangerously-skip-permissions")
+        );
         assert_eq!(fm.codex_network_access, Some(CodexNetworkAccess::Enabled));
         assert_eq!(
             fm.required_ssh_targets,
@@ -1665,6 +1687,7 @@ mod tests {
         let fm = Frontmatter {
             agent_args: Some("--json -s workspace-write".to_string()),
             codex_args: Some("-s danger-full-access".to_string()),
+            opencode_args: Some("--dangerously-skip-permissions".to_string()),
             codex_network_access: Some(CodexNetworkAccess::Enabled),
             required_ssh_targets: vec!["monsterrodholders-server".to_string()],
             ..Default::default()
@@ -1673,6 +1696,10 @@ mod tests {
         let (fm2, _) = parse(&written).unwrap();
         assert_eq!(fm2.agent_args.as_deref(), Some("--json -s workspace-write"));
         assert_eq!(fm2.codex_args.as_deref(), Some("-s danger-full-access"));
+        assert_eq!(
+            fm2.opencode_args.as_deref(),
+            Some("--dangerously-skip-permissions")
+        );
         assert_eq!(fm2.codex_network_access, Some(CodexNetworkAccess::Enabled));
         assert_eq!(
             fm2.required_ssh_targets,
@@ -1682,12 +1709,13 @@ mod tests {
 
     #[test]
     fn merge_fields_agent_args() {
-        let content = "---\nclaude_args: old\ncodex_args: old-codex\n---\nBody\n";
+        let content = "---\nclaude_args: old\ncodex_args: old-codex\nopencode_args: old-opencode\n---\nBody\n";
         let result = merge_fields(content, "agent_args: new").unwrap();
         let (fm, _) = parse(&result).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("new"));
         assert_eq!(fm.claude_args.as_deref(), Some("old"));
         assert_eq!(fm.codex_args.as_deref(), Some("old-codex"));
+        assert_eq!(fm.opencode_args.as_deref(), Some("old-opencode"));
     }
 
     #[test]
@@ -1697,6 +1725,15 @@ mod tests {
         let (fm, _) = parse(&result).unwrap();
         assert_eq!(fm.agent_args.as_deref(), Some("old"));
         assert_eq!(fm.codex_args.as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn merge_fields_opencode_args() {
+        let content = "---\nagent_args: old\n---\nBody\n";
+        let result = merge_fields(content, "opencode_args: new").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.agent_args.as_deref(), Some("old"));
+        assert_eq!(fm.opencode_args.as_deref(), Some("new"));
     }
 
     #[test]
@@ -1820,9 +1857,22 @@ targets = [\"monsterrodholders-server\"]\n",
             model: Some("gpt-5".to_string()),
             claude_model: Some("opus".to_string()),
             codex_model: Some("o3-pro".to_string()),
+            opencode_model: Some("zai/glm-5".to_string()),
             ..Default::default()
         };
         assert_eq!(fm.resolve_harness_model("codex"), Some("o3-pro"));
+    }
+
+    #[test]
+    fn resolve_harness_model_opencode_uses_opencode_model() {
+        let fm = Frontmatter {
+            model: Some("gpt-5".to_string()),
+            claude_model: Some("opus".to_string()),
+            codex_model: Some("o3-pro".to_string()),
+            opencode_model: Some("zai/glm-5".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(fm.resolve_harness_model("opencode"), Some("zai/glm-5"));
     }
 
     #[test]
@@ -1833,6 +1883,7 @@ targets = [\"monsterrodholders-server\"]\n",
         };
         assert_eq!(fm.resolve_harness_model("claude-code"), Some("gpt-5"));
         assert_eq!(fm.resolve_harness_model("codex"), Some("gpt-5"));
+        assert_eq!(fm.resolve_harness_model("opencode"), Some("gpt-5"));
         assert_eq!(fm.resolve_harness_model("default"), Some("gpt-5"));
     }
 
@@ -1854,11 +1905,12 @@ targets = [\"monsterrodholders-server\"]\n",
 
     #[test]
     fn parse_harness_model_fields() {
-        let content = "---\nmodel: gpt-5\nclaude_model: opus\ncodex_model: o3-pro\n---\nBody\n";
+        let content = "---\nmodel: gpt-5\nclaude_model: opus\ncodex_model: o3-pro\nopencode_model: zai/glm-5\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.model.as_deref(), Some("gpt-5"));
         assert_eq!(fm.claude_model.as_deref(), Some("opus"));
         assert_eq!(fm.codex_model.as_deref(), Some("o3-pro"));
+        assert_eq!(fm.opencode_model.as_deref(), Some("zai/glm-5"));
     }
 
     #[test]
@@ -1867,6 +1919,7 @@ targets = [\"monsterrodholders-server\"]\n",
             model: Some("gpt-5".to_string()),
             claude_model: Some("opus".to_string()),
             codex_model: Some("o3-pro".to_string()),
+            opencode_model: Some("zai/glm-5".to_string()),
             ..Default::default()
         };
         let doc = write(&fm, "Body\n").unwrap();
@@ -1874,6 +1927,7 @@ targets = [\"monsterrodholders-server\"]\n",
         assert_eq!(fm2.model.as_deref(), Some("gpt-5"));
         assert_eq!(fm2.claude_model.as_deref(), Some("opus"));
         assert_eq!(fm2.codex_model.as_deref(), Some("o3-pro"));
+        assert_eq!(fm2.opencode_model.as_deref(), Some("zai/glm-5"));
         assert_eq!(body, "Body\n");
     }
 
@@ -1893,5 +1947,14 @@ targets = [\"monsterrodholders-server\"]\n",
         let (fm, _) = parse(&result).unwrap();
         assert_eq!(fm.model.as_deref(), Some("gpt-5"));
         assert_eq!(fm.codex_model.as_deref(), Some("o3-pro"));
+    }
+
+    #[test]
+    fn merge_fields_opencode_model() {
+        let content = "---\nmodel: gpt-5\n---\nBody\n";
+        let result = merge_fields(content, "opencode_model: zai/glm-5").unwrap();
+        let (fm, _) = parse(&result).unwrap();
+        assert_eq!(fm.model.as_deref(), Some("gpt-5"));
+        assert_eq!(fm.opencode_model.as_deref(), Some("zai/glm-5"));
     }
 }

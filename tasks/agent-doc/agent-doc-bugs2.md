@@ -29,38 +29,14 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-030342.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-032337.md`*
 
 Active backlog:
-- [ ] [#emptyrsprepair] Fix empty-response missed-patchback repair: already-committed/no-body recovery must stop before child-agent dispatch and point to write --commit. Plan: tasks/agent-doc/plan-empty-response-repair-write.md
+- [ ] [#pbdupchurn] Stop duplicate response patchback two-commit cleanup churn: duplicate blocks must be rejected or deduped before the closeout commit, and successful closeout must not require follow-up dedupe/snapshot/parent-pointer repair. Plan: tasks/agent-doc/plan-duplicate-patchback-dedupe-churn.md
 - [ ] [#startgcleak] Fix the stale-starting cleanup gap after #autogcstart: current .agent-doc/session-actors.json still leaves agent-doc-bugs.md and agent-doc-bugs4.md in state=starting after normal preflight/sync; close stale records or explain why they are still live in the normal path.
 - [ ] [#startingdispatch] Fail closed or wait before dispatching into actor_state=starting: ops.log shows route_dispatch_only_starting_actor_direct_pane_submit for agent-doc-bugs2.md generation=118 followed by interrupted_cycle_detected phase=PreflightStarted, so route can still inject during startup and create interrupted cycles.
 - 1 more active item(s)
-❯ do [#emptyrsprepair]. spec-test-build-install-commit-push
-### Re: empty response repair dispatch — gpt-5
-
-Implemented `#emptyrsprepair`.
-
-`agent-doc run` now rechecks the diff after its pre-commit repair step. If that repair proves the original diff was only an already-committed missed patchback and no prompt-bearing work remains, `run` fails before child-agent dispatch and points the operator to `agent-doc write --commit <FILE>`.
-
-Updated coverage and docs:
-
-- Added `run_stops_before_child_dispatch_when_precommit_consumes_stale_repair_diff` to prove the configured child agent is not invoked.
-- Updated `SPEC.md`, `specs/07-core-commands.md`, `README.md`, `CLAUDE.md`, `SKILL.md`, and `VERSIONS.md`.
-- Refreshed generated managed instruction mirrors.
-
-Verification:
-
-- `cargo test --manifest-path src/agent-doc/Cargo.toml run_stops_before_child_dispatch_when_precommit_consumes_stale_repair_diff -- --nocapture`
-- `make check` in `src/agent-doc` (rerun after final docs/skill edits)
-- `make install` in `src/agent-doc` (rerun after final docs/skill edits)
-- `cargo run --quiet --manifest-path src/agent-doc/Cargo.toml -- audit-docs`
-
-Commits / push:
-
-- `src/agent-doc`: `d759d4b fix: stop empty repair run dispatch`, pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `255e426f0 chore: refresh agent-doc repair instructions`, pushed to `origin/main`
-<!-- agent:boundary:23624aca -->
+<!-- agent:boundary:2400a50a -->
 <!-- /agent:exchange -->
 ###
 

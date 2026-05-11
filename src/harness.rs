@@ -99,7 +99,7 @@ impl HarnessConfig {
             restart_behavior: RestartBehavior::Append(vec!["--continue".into()]),
             clean_exit_behavior: CleanExitBehavior::PromptUser,
             prompt_patterns: vec![">".into(), "›".into()],
-            trigger_command_template: "agent-doc {file}".into(),
+            trigger_command_template: "/agent-doc {file}".into(),
             env_remove: vec!["OPENCODE_CLIENT".into()],
             supports_no_mcp: false,
             supports_enable_tool_search: false,
@@ -703,7 +703,7 @@ mod tests {
     #[test]
     fn trigger_command_substitution_opencode() {
         let h = HarnessConfig::opencode();
-        assert_eq!(h.trigger_command("plan.md"), "agent-doc plan.md");
+        assert_eq!(h.trigger_command("plan.md"), "/agent-doc plan.md");
     }
 
     #[test]
@@ -1124,7 +1124,7 @@ Press Enter to restart, or 'q' to exit.
         let opencode_cmd = opencode.trigger_command("tasks/bugs.md");
         assert_eq!(claude_cmd, "/agent-doc tasks/bugs.md");
         assert_eq!(codex_cmd, "agent-doc tasks/bugs.md");
-        assert_eq!(opencode_cmd, "agent-doc tasks/bugs.md");
+        assert_eq!(opencode_cmd, "/agent-doc tasks/bugs.md");
     }
 
     #[test]

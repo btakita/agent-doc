@@ -12,7 +12,7 @@
 //! - Install is idempotent: calling it multiple times with identical content is a no-op.
 //! - When CWD is inside a git submodule, resolves to the superproject root so that
 //!   the skill file lands in the workspace root that Claude Code actually reads.
-//! - Claude/Codex installed instructions are rendered from one shared source
+//! - Claude/Codex/OpenCode installed instructions are rendered from one shared source
 //!   surface; only harness-specific invocation wording and frontmatter
 //!   description may differ.
 //!
@@ -43,6 +43,8 @@ const SKILL_TEMPLATE: &str = include_str!("../SKILL.md");
 const CLAUDE_DESCRIPTION: &str = "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle.";
 
 const CODEX_DESCRIPTION: &str = "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc.";
+
+const OPENCODE_DESCRIPTION: &str = "Interactive markdown session for OpenCode. TRIGGER: user writes agent-doc <file> as a normal OpenCode message. Requires a markdown session document, installed CLI, and write+commit every cycle.";
 
 const GENERIC_DESCRIPTION: &str = "Interactive markdown session. TRIGGER: user invokes the harness-native agent-doc entrypoint. Requires a markdown session document, installed CLI, and write+commit every cycle.";
 
@@ -78,23 +80,42 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.
 "#;
 
+const OPENCODE_INVOCATION_SECTION: &str = r#"## Invocation
+
+In OpenCode, invoke agent-doc by writing one of these as a normal message:
+
+```
+agent-doc <FILE>
+agent-doc claim <FILE>
+agent-doc compact <FILE>
+agent-doc compact exchange <FILE>
+```
+
+Arguments: `FILE` — path to the session document (e.g., `plan.md`).
+
+Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.
+"#;
+
 const GENERIC_INVOCATION_SECTION: &str = r#"## Invocation
 
 Use the harness-native `agent-doc` entrypoint for the environment you are in:
 
 - Claude Code: `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, `/agent-doc compact exchange <FILE>`
 - Codex: `agent-doc <FILE>`, `agent-doc claim <FILE>`, `agent-doc compact <FILE>`, `agent-doc compact exchange <FILE>`
+- OpenCode: `agent-doc <FILE>`, `agent-doc claim <FILE>`, `agent-doc compact <FILE>`, `agent-doc compact exchange <FILE>`
 
 Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
 **Note:** Codex does not support project-defined slash commands. If this root file disagrees with the installed harness-specific instructions, treat the installed harness file as authoritative for the current turn.
 "#;
 
-const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run the active-harness install: Claude Code `agent-doc skill install --harness claude --reload compact`; Codex `agent-doc skill install --harness codex --reload restart`; other harnesses `agent-doc skill install`. If install says already up to date, treat this file as stale duplicate instructions, use installed harness instructions, and continue with the task. Stop only on a real `SKILL_RELOAD=...`; see [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
+const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run the active-harness install: Claude Code `agent-doc skill install --harness claude --reload compact`; Codex `agent-doc skill install --harness codex --reload restart`; OpenCode `agent-doc skill install --harness opencode`; other harnesses `agent-doc skill install`. If install says already up to date, treat this file as stale duplicate instructions, use installed harness instructions, and continue with the task. Stop only on a real `SKILL_RELOAD=...`; see [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
 const CLAUDE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness claude --reload compact`; on `SKILL_RELOAD=compact`, ask the user to run `/compact` and re-invoke, then stop. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Claude skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
 const CODEX_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness codex --reload restart`; on `SKILL_RELOAD=restart`, tell the user to restart this Codex session and re-invoke `agent-doc <FILE>`, then stop. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Codex instructions. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
+
+const OPENCODE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness opencode`; if it says already up to date, treat as stale instruction drift, continue this turn, and use the installed OpenCode skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
 /// Bundled runbooks installed alongside the skill.
 const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
@@ -164,6 +185,7 @@ fn content_for_env(env: agent_kit::detect::Environment) -> String {
     use agent_kit::detect::Environment;
     let (description, invocation_section) = match env {
         Environment::Codex => (CODEX_DESCRIPTION, CODEX_INVOCATION_SECTION),
+        Environment::OpenCode => (OPENCODE_DESCRIPTION, OPENCODE_INVOCATION_SECTION),
         Environment::Generic => (GENERIC_DESCRIPTION, GENERIC_INVOCATION_SECTION),
         _ => (CLAUDE_DESCRIPTION, CLAUDE_INVOCATION_SECTION),
     };
@@ -241,6 +263,7 @@ fn auto_update_line_for_env(env: agent_kit::detect::Environment) -> &'static str
     use agent_kit::detect::Environment;
     match env {
         Environment::Codex => CODEX_AUTO_UPDATE_LINE,
+        Environment::OpenCode => OPENCODE_AUTO_UPDATE_LINE,
         Environment::Generic => AUTO_UPDATE_LINE,
         _ => CLAUDE_AUTO_UPDATE_LINE,
     }
@@ -287,6 +310,7 @@ pub(crate) fn audit_managed_instruction_surfaces(root: Option<&Path>) -> Result<
     let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     for env in [
         agent_kit::detect::Environment::Generic,
+        agent_kit::detect::Environment::OpenCode,
         agent_kit::detect::Environment::Codex,
         agent_kit::detect::Environment::ClaudeCode,
     ] {
@@ -684,6 +708,7 @@ mod tests {
     fn rendered_harness_content_stays_compact() {
         for env in [
             Environment::ClaudeCode,
+            Environment::OpenCode,
             Environment::Codex,
             Environment::Generic,
         ] {
@@ -816,6 +841,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
+        super::install_runbooks_for(Environment::OpenCode, Some(dir.path())).unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
 
         let claude = std::fs::read_to_string(
@@ -824,8 +850,13 @@ mod tests {
         )
         .unwrap();
         let codex = std::fs::read_to_string(dir.path().join(".codex/runbooks/commit.md")).unwrap();
+        let opencode = std::fs::read_to_string(
+            dir.path()
+                .join(".opencode/skills/agent-doc/runbooks/commit.md"),
+        )
+        .unwrap();
 
-        for content in [&claude, &codex] {
+        for content in [&claude, &codex, &opencode] {
             assert!(content.contains("Every appended `agent-doc` response must be committed"));
             assert!(content.contains("agent-doc finalize <FILE>"));
             assert!(content.contains("agent-doc write --commit <FILE>"));
@@ -839,6 +870,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
+        super::install_runbooks_for(Environment::OpenCode, Some(dir.path())).unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
 
         let claude = std::fs::read_to_string(
@@ -848,8 +880,13 @@ mod tests {
         .unwrap();
         let codex =
             std::fs::read_to_string(dir.path().join(".codex/runbooks/pending-ops.md")).unwrap();
+        let opencode = std::fs::read_to_string(
+            dir.path()
+                .join(".opencode/skills/agent-doc/runbooks/pending-ops.md"),
+        )
+        .unwrap();
 
-        for content in [&claude, &codex] {
+        for content in [&claude, &codex, &opencode] {
             assert!(content.contains("create the plan file"));
             assert!(content.contains("include that exact plan"));
             assert!(content.contains("file path in the item text"));
@@ -862,6 +899,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         super::install_runbooks_for(Environment::ClaudeCode, Some(dir.path())).unwrap();
+        super::install_runbooks_for(Environment::OpenCode, Some(dir.path())).unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
 
         let claude = std::fs::read_to_string(
@@ -872,20 +910,27 @@ mod tests {
         let codex =
             std::fs::read_to_string(dir.path().join(".codex/runbooks/harness-invocation.md"))
                 .unwrap();
+        let opencode = std::fs::read_to_string(
+            dir.path()
+                .join(".opencode/skills/agent-doc/runbooks/harness-invocation.md"),
+        )
+        .unwrap();
 
-        for content in [&claude, &codex] {
+        for content in [&claude, &codex, &opencode] {
             assert!(content.contains("## Harness-Native Entrypoints"));
             assert!(content.contains("executable workflow entry"));
             assert!(content.contains(
                 "Do **not** end a normal harness-native `agent-doc` turn with \"not committed\""
             ));
             assert!(content.contains("## Manual Repair Default"));
-            assert!(content.contains("For both **Claude Code** and **Codex**"));
+            assert!(content.contains("For **Claude Code**, **Codex**, and **OpenCode**"));
             assert!(content.contains("agent-doc write --commit <FILE>"));
             assert!(content.contains("bare `agent-doc write`"));
         }
         assert!(codex.contains("agent-doc session-check <FILE>"));
         assert!(codex.contains("Do **not** report success or stop"));
+        assert!(opencode.contains("## OpenCode"));
+        assert!(opencode.contains("Write-back"));
     }
 
     #[test]
@@ -908,6 +953,29 @@ mod tests {
         assert!(content.contains("continue this turn"));
         assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
+    }
+
+    #[test]
+    fn install_for_opencode_writes_opencode_specific_content() {
+        let dir = tempfile::tempdir().unwrap();
+
+        super::config_for_env(Environment::OpenCode)
+            .install_for(Environment::OpenCode, Some(dir.path()))
+            .unwrap();
+
+        let path = dir.path().join(".opencode/skills/agent-doc/SKILL.md");
+        let content = std::fs::read_to_string(&path).unwrap();
+
+        assert!(content.contains("Interactive markdown session for OpenCode"));
+        assert!(content.contains("In OpenCode, invoke agent-doc"));
+        assert!(content.contains("agent-doc <FILE>"));
+        assert!(content.contains("agent-doc skill install --harness opencode"));
+        assert!(content.contains("installed OpenCode skill"));
+        assert!(content.contains("agent-doc finalize <FILE>"));
+        assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
+        assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
+        assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
+        assert!(!content.contains("Do **not** type `/agent-doc`"));
     }
 
     #[test]
@@ -1253,6 +1321,25 @@ mod tests {
     }
 
     #[test]
+    fn opencode_content_uses_plain_text_invocation() {
+        let content = super::content_for_env(Environment::OpenCode);
+
+        assert!(content.contains("Interactive markdown session for OpenCode"));
+        assert!(content.contains("In OpenCode, invoke agent-doc"));
+        assert!(content.contains("agent-doc <FILE>"));
+        assert!(content.contains("agent-doc skill install --harness opencode"));
+        assert!(content.contains("installed OpenCode skill"));
+        assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
+        assert!(content.contains("binary-owned response cycle"));
+        assert!(content.contains("final document-mutation boundary for the cycle"));
+        assert!(content.contains("MCP auth / OAuth steps are sub-steps"));
+        assert!(content.contains("Imperative edits are executable directives"));
+        assert!(content.contains("Do not require the same instruction to be repeated in chat"));
+        assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>"));
+        assert!(!content.contains("Codex CLI will reject it"));
+    }
+
+    #[test]
     fn claude_content_keeps_slash_invocation() {
         let content = super::content_for_env(Environment::ClaudeCode);
 
@@ -1272,8 +1359,10 @@ mod tests {
 
         assert!(content.contains("Claude Code: `/agent-doc <FILE>`"));
         assert!(content.contains("Codex: `agent-doc <FILE>`"));
+        assert!(content.contains("OpenCode: `agent-doc <FILE>`"));
         assert!(content.contains("agent-doc skill install --harness claude --reload compact"));
         assert!(content.contains("agent-doc skill install --harness codex --reload restart"));
+        assert!(content.contains("agent-doc skill install --harness opencode"));
         assert!(content.contains("stale duplicate instructions"));
         assert!(content.contains("continue with the task"));
     }
@@ -1282,15 +1371,22 @@ mod tests {
     fn generated_harness_content_shares_hot_path_outside_invocation() {
         let claude = super::content_for_env(Environment::ClaudeCode);
         let codex = super::content_for_env(Environment::Codex);
+        let opencode = super::content_for_env(Environment::OpenCode);
 
         let claude_shared = super::remove_markdown_section(&claude, "## Invocation");
         let codex_shared = super::remove_markdown_section(&codex, "## Invocation");
+        let opencode_shared = super::remove_markdown_section(&opencode, "## Invocation");
         let claude_shared = claude_shared.replace(CLAUDE_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
         let codex_shared = codex_shared.replace(CODEX_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
+        let opencode_shared = opencode_shared.replace(OPENCODE_AUTO_UPDATE_LINE, "<AUTO_UPDATE>");
 
         assert_eq!(
             claude_shared.replace(CLAUDE_DESCRIPTION, "<DESC>"),
             codex_shared.replace(CODEX_DESCRIPTION, "<DESC>")
+        );
+        assert_eq!(
+            claude_shared.replace(CLAUDE_DESCRIPTION, "<DESC>"),
+            opencode_shared.replace(OPENCODE_DESCRIPTION, "<DESC>")
         );
     }
 
@@ -1358,9 +1454,10 @@ mod tests {
         ));
         assert!(content.contains("Do **not** emit status-only progress prose while doing neither"));
         assert!(content.contains("## Manual Repair Default"));
-        assert!(content.contains("For both **Claude Code** and **Codex**"));
+        assert!(content.contains("For **Claude Code**, **Codex**, and **OpenCode**"));
         assert!(content.contains("Claude Code"));
         assert!(content.contains("Codex"));
+        assert!(content.contains("OpenCode"));
         assert!(content.contains("Harness Detection"));
         assert!(content.contains("Response Header Attribution"));
         assert!(content.contains("Do **not** type `/agent-doc`"));
@@ -1543,15 +1640,21 @@ mod tests {
         super::config_for_env(Environment::ClaudeCode)
             .install_for(Environment::ClaudeCode, Some(dir.path()))
             .unwrap();
+        super::config_for_env(Environment::OpenCode)
+            .install_for(Environment::OpenCode, Some(dir.path()))
+            .unwrap();
         super::config_for_env(Environment::Codex)
             .install_for(Environment::Codex, Some(dir.path()))
             .unwrap();
 
         let claude =
             std::fs::read_to_string(dir.path().join(".claude/skills/agent-doc/SKILL.md")).unwrap();
+        let opencode =
+            std::fs::read_to_string(dir.path().join(".opencode/skills/agent-doc/SKILL.md"))
+                .unwrap();
         let codex = std::fs::read_to_string(dir.path().join(".codex/AGENTS.md")).unwrap();
 
-        for content in [&claude, &codex] {
+        for content in [&claude, &codex, &opencode] {
             assert!(content.contains("agent-doc finalize <FILE>"));
             assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
             assert!(content.contains("requires the cycle to reach `committed`"));

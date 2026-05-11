@@ -92,7 +92,7 @@ Two modes:
 
 - Audits instruction files such as `CLAUDE.md`, `AGENTS.md`, `README.md`, and `SKILL.md` for path accuracy, staleness, actionable content, and line budget.
 - Discovery prunes heavy skip directories before descent so audit time is spent on real instruction surfaces.
-- Generated agent-doc instruction surfaces are audited as release artifacts: if a root `AGENTS.md`, `.codex/AGENTS.md`, or `.claude/skills/agent-doc/SKILL.md` still carries the agent-doc managed frontmatter/sections, it must match the content rendered by the running binary. Custom root instruction files that do not look agent-doc-managed remain user-owned and are not rewritten or failed for content mismatch.
+- Generated agent-doc instruction surfaces are audited as release artifacts: if a root `AGENTS.md`, `.codex/AGENTS.md`, `.opencode/skills/agent-doc/SKILL.md`, or `.claude/skills/agent-doc/SKILL.md` still carries the agent-doc managed frontmatter/sections, it must match the content rendered by the running binary. Custom root instruction files that do not look agent-doc-managed remain user-owned and are not rewritten or failed for content mismatch.
 
 ## prompt
 

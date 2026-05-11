@@ -6,7 +6,7 @@ The core workflow (preflight, respond, persist the response) is identical across
 ## Harness-Native Entrypoints
 
 - A harness-native `agent-doc` invocation is an executable workflow entry, not a generic request to edit the markdown file by hand.
-- Claude Code `/agent-doc <FILE>`, Codex `agent-doc <FILE>`, and equivalent direct-entry forms all start the same binary-owned response cycle.
+- Claude Code `/agent-doc <FILE>`, Codex `agent-doc <FILE>`, OpenCode `agent-doc <FILE>`, and equivalent direct-entry forms all start the same binary-owned response cycle.
 - Do **not** treat that turn as successful until the response crosses `agent-doc finalize <FILE>` for the normal path or `agent-doc write --commit <FILE>` for a repair path.
 - Do **not** end a normal harness-native `agent-doc` turn with "not committed" or equivalent wording unless the user explicitly asked to leave the response uncommitted.
 - MCP auth / OAuth steps are part of that same turn. If a tool pauses for authentication or browser approval, resume the managed response afterward and still finish with `finalize` / `write --commit` plus `session-check`; the auth step is not the success boundary.
@@ -26,7 +26,7 @@ The core workflow (preflight, respond, persist the response) is identical across
 
 ## Manual Repair Default
 
-- For both **Claude Code** and **Codex**, the default documented manual-repair path is `agent-doc write --commit <FILE>` once the user prompt is already present in the document.
+- For **Claude Code**, **Codex**, and **OpenCode**, the default documented manual-repair path is `agent-doc write --commit <FILE>` once the user prompt is already present in the document.
 - Do **not** document or follow a manual-repair flow that stops after bare `agent-doc write`; that leaves the response on the wrong side of the commit boundary.
 - If the user prompt itself is missing, insert that prompt into `exchange` first, then return to `agent-doc write --commit <FILE>` for the assistant response.
 
@@ -43,6 +43,7 @@ Identify your harness from your environment:
 |--------|---------|
 | You have a `Skill` tool and slash commands (`/agent-doc`) | **Claude Code** |
 | You are Codex CLI / `CODEX_CLI` env var is set | **Codex** |
+| You are OpenCode / `OPENCODE` env var is set | **OpenCode** |
 | You are Cursor / `CURSOR_SESSION_ID` env var is set | **Cursor** |
 | None of the above | **Generic** |
 
@@ -71,6 +72,14 @@ Identify your harness from your environment:
 - **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file. After `agent-doc write --commit <FILE>`, run the same `agent-doc session-check <FILE>` guard before ending the turn. That repair write-back should also be the last substantial action of the turn.
 - **Session resume:** Codex uses `codex resume --last` instead of `--continue` for ordinary continue flows.
 - **Tracked `/clear` recovery:** if the latest tracked Codex prompt for a document was `/clear`, the next managed `agent-doc route` rerun (not `--dispatch-only`) must restart the live session fresh before injecting `agent-doc <FILE>` so the original sandbox, writable roots, and network policy are reapplied instead of trusting post-clear resume inheritance. Editor `Run Agent Doc` actions still use `agent-doc route --dispatch-only`, which must send the bare `agent-doc <FILE>` reopen into the live session instead of turning a post-clear reroute into a restart shortcut.
+
+## OpenCode
+
+- **Invocation:** Direct prompt injection or user instruction referencing the document, using `agent-doc <FILE>` as a normal message.
+- **Entry semantics:** once that message is accepted, the turn is inside the binary-owned response cycle. Do **not** downgrade it into a manual document-editing task or report a useful-but-uncommitted success state.
+- **Slash commands:** OpenCode does not use the Claude Code `/agent-doc` skill command. If preflight returns `slash_commands`, skip them. If `builtin_commands`, write a document note.
+- **Write-back:** Execute `agent-doc finalize` directly for the normal response cycle.
+- **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file; use `agent-doc write --commit <FILE>` once the prompt already exists.
 
 ## Cursor / Generic
 

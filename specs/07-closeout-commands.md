@@ -123,4 +123,4 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Optional closeout sidecars such as cycle-state, capture, startup-miss, and ops-log files are advisory; if one disappears between discovery and read, session-check treats it as absent state instead of surfacing a transient `ENOENT`.
 - Runs the pending-capture, pending-done, backlog-shadow, backlog-replay, completed-item reap, snapshot-vs-HEAD, and parent-submodule-pointer closeout guards after a committed cycle.
 - Fails closed when a live backlog/icebox line looks like a tracked checklist item with an id but is not parseable as a canonical pending item. This prevents malformed prefixes from hiding an open item from the pending-done guard.
-- The Codex/direct-exec harness path is expected to run this immediately after `finalize` or strict `write --commit`, and must fail closed if the check reports an open or bypassed cycle.
+- The Codex/OpenCode/direct-exec harness path is expected to run this immediately after `finalize` or strict `write --commit`, and must fail closed if the check reports an open or bypassed cycle.

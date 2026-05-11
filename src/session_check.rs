@@ -1922,6 +1922,84 @@ Body\n\
     }
 
     #[test]
+    fn prompt_only_exchange_tail_catches_direct_chat_preset_no_patchback() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: deploy — gpt-5\n\n",
+            "Deployed v1.\n",
+            "❯ commit-push\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("prompt-only closeout tail"),
+                    "should mention prompt-only closeout tail: {message}"
+                );
+                assert!(
+                    message.contains("commit-push"),
+                    "should reference the preset prompt: {message}"
+                );
+                assert!(
+                    message.contains("agent-doc finalize")
+                        || message.contains("agent-doc write --commit"),
+                    "should name the recovery command: {message}"
+                );
+            }
+            other => panic!(
+                "expected prompt-only closeout interruption for direct-chat preset, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
     fn prompt_only_exchange_tail_ignores_answered_tail_prompt() {
         let current = concat!(
             "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",

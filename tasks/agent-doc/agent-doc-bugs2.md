@@ -49,7 +49,32 @@ Implemented harness-agnostic capability proof so OpenCode sessions with `require
 **Regression safety:** Codex sessions emit `codex_capability_proof` events exactly as before. OpenCode sessions with `required_ssh_targets` now emit `opencode_capability_proof` events. The route layer checks proof status using the correct harness-specific prefix.
 
 Commit: `4feb4c9` pushed to `20260422/codex-agent-backend`.
-<!-- agent:boundary:6ca03340 -->
+❯ do [#opencodesshconfig]. spec-test-build-install-commit-push
+
+❯ The error message says. Codex should be replaced with Opencode.
+```
+❯ /home/brian/.cargo/bin/agent-doc start tasks/monsterrodholders.md
+Registered session a9421282 → pane %269
+Starting opencode...
+                    [start] managed opencode capability proof failed; terminating unusable child session: Codex child network probe failed: Codex child probe command exited nonzero: ⠀                                ▄
+```
+### Re: OpenCode capability proof error messages use harness name — glm-5.1
+
+Fixed all hardcoded "Codex" strings in capability proof error messages to use the dynamic `harness` parameter. The following functions in `src/agent/codex.rs` were updated:
+
+- `classify_child_network_probe_failure(detail, harness)` — returns `String` with harness name
+- `classify_child_writable_root_probe_failure(detail, harness)` — returns `String` with harness name
+- `wait_with_timeout(..., harness)` — probe output and timeout messages use harness name
+- `validate_codex_child_network_probe_output(..., harness)` — failure messages use harness name
+- `prove_codex_child_network_access(..., harness)` — spawn and exit messages use harness name
+- `prove_codex_child_writable_roots(..., harness)` — spawn and exit messages use harness name
+
+The `harness` parameter flows from `prove_managed_session_capabilities` (which already had it) through to all child probe functions.
+
+Added regression test `opencode_child_network_probe_classifies_sandbox_denial` verifying OpenCode sessions get "OpenCode" in error messages and not "Codex".
+
+Commit: `c7658ac` pushed to `20260422/codex-agent-backend`.
+<!-- agent:boundary:ccf3fc60 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,6 +103,16 @@ resync: stash pane %285 is registered in its own project root — skipping kill
 [route] warning: failed to promote starting authoritative actor %272 for tasks/root.md after seeing a dispatch-ready prompt: project controller command `mark_lifecycle` failed: missing authoritative actor record for tasks/root.md
 Error: authoritative actor generation 14 for tasks/root.md owns pane %272 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
 ```
+```
+resync: stash pane %284 is registered in its own project root — skipping kill
+resync: stash pane %269 is registered in its own project root — skipping kill
+resync: stash pane %273 is registered in its own project root — skipping kill
+resync: stash pane %275 is registered in its own project root — skipping kill
+resync: stash pane %285 is registered in its own project root — skipping kill
+resync: stash pane %274 is registered in its own project root — skipping kill
+[route] target tmux session: 4
+Error: authoritative actor generation 15 for tasks/root.md owns pane %272 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
+```
 ---
 I saw an error in the opencode console. spec-test-build-install-commit-push
 ```
@@ -87,6 +122,9 @@ I saw an error in the opencode console. spec-test-build-install-commit-push
 ```
 3. Workaround: delegate SSH via the host — if OpenCode can't SSH directly, have agent-doc run the SSH deploy           step outside the managed pane (in the harness supervisor process), not inside the OpenCode child.
 ```
+---
+Confirm that z.ai subscriptions are message based and not token based. If message based, is agent-doc inefficient on message based plans? Please review code + logs.
+#next-steps
 ---
 `[#2fha] 2026-05-11 [#nopatchbackopencode] ...` backlog item should have had the id `[#nopatchbackopencode]`.
 ---

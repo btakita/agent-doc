@@ -34,14 +34,20 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 6 response topic(s): incorrect close running turn; do [#rspcmt7]; preflight-started-recovery; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f2906b7b -->
-<!-- /agent:exchange -->
-<!--
-Error with JB `Clear Session Context`
+❯ Error with JB `Clear Session Context`
 ```
 Session is still running for tasks/root.md. Pane %2 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop/src/session-share · Context 9% used
 ```
----
+### Re: JB Clear Session Context busy warning — gpt-5
+
+This is now the typed protected-busy warning path, not the older raw `agent-doc command failed` leak. The fail-closed part is correct: `session clear` should refuse while the owning pane is actively running an `agent-doc` turn, because clearing there can discard work or break closeout.
+
+I checked the reported `src/session-share/tasks/root.md` session after the warning. Direct pane evidence now says `alive-idle` and `prompt_ready=true` for pane `%2`, while the supervisor/controller projection still reports `busy`. That split is the remaining bug surface: JetBrains needs a direct `Refresh and retry` path when the pane has already returned to idle, an explicit confirmed `Interrupt and clear` path when the user wants to discard the running turn, and backend reconciliation for stale busy projection when live pane evidence is idle.
+
+Created and committed the focused plan at `tasks/agent-doc/plan-jb-clear-session-busy-actions.md` (`607a553d9`) and added backlog item `#jbclearbusyactions`. I did not run the full suite because this cycle only added a plan/backlog capture, not product code.
+<!-- agent:boundary:1f11502c -->
+<!-- /agent:exchange -->
+<!--
 Seeing an error when calling JB `Clear Session Context`:
 ```
 agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %13 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="● Tip Override global tool settings per agent configuration"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
@@ -78,6 +84,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbclearbusyactions] #agent-doc-bug: JetBrains Clear Session Context protected busy warning still leaves no refresh-and-retry or intentional interrupt-and-clear action, and current tasks/root.md evidence shows live pane idle while supervisor/controller projection remains busy. Plan: tasks/agent-doc/plan-jb-clear-session-busy-actions.md
 - [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->

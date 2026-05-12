@@ -143,6 +143,52 @@ The typical edit cycle: write in your editor, trigger `agent-doc route --dispatc
 
 ## Architecture
 
+```mermaid
+flowchart LR
+  user["User edits session document"]
+  editor["Editor plugin or CLI"]
+  route["route / sync / start / claim"]
+  controller["Project controller\nactor + lease state"]
+  tmux["tmux supervisor pane"]
+  harness["Agent harness\nClaude / Codex / OpenCode"]
+
+  preflight["preflight / plan\nrecover, diff, classify"]
+  response["Agent response\npatch blocks"]
+  finalize["finalize / write --commit\nstrict closeout"]
+  sessionCheck["session-check\npost-write guard"]
+
+  subgraph DocumentState["Document state"]
+    doc["Markdown session document\nfrontmatter + components"]
+    baseline["Snapshots + baselines"]
+    capture["Durable captures"]
+    cycle["Cycle state"]
+  end
+
+  subgraph BinaryCore["Rust binary core"]
+    diff["diff + prompt contract"]
+    template["template patch engine"]
+    merge["CRDT / 3-way merge"]
+    ipc["IPC-first editor patches"]
+    git["selective git commit"]
+    hooks["hooks + ops log"]
+  end
+
+  user --> editor --> route --> controller --> tmux --> harness
+  editor --> preflight
+  preflight --> diff --> harness
+  harness --> response --> finalize
+  finalize --> template --> merge --> ipc --> doc
+  finalize --> git --> sessionCheck
+  sessionCheck --> hooks
+
+  doc <--> baseline
+  preflight --> cycle
+  response --> capture
+  diff --> doc
+  template --> doc
+  git --> baseline
+```
+
 The binary owns all deterministic behavior: component parsing, patch application, CRDT merge, snapshot management, git operations, tmux routing, and IPC writes. The bundled skill / AGENTS instructions are the non-deterministic orchestrator layer — they read the diff, generate responses, and decide what to write.
 
 **Binary vs. Agent Responsibility:**

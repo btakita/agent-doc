@@ -34,7 +34,27 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 3 response topic(s): prior session running state; `#routereap`; route-owned reap purpose
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:de7c8d38 -->
+❯ On the tmux pane autostart, agent-doc immediately restarts the process. The started pane should not restart. spec-test-build-install-commit-push
+### Re: tmux pane autostart restart — gpt-5
+
+Implemented the route-owned autostart fix. `agent-doc start --route-owned` now uses the local restart/quit prompt on clean child exits instead of applying Codex/OpenCode's normal auto-resume policy, so a freshly autostarted tmux pane will not immediately spawn another child process after the first child exits.
+
+Updated the session/tmux command spec and added regressions covering Codex, OpenCode, and the preserved non-route-owned Codex auto-resume behavior.
+
+Verification completed:
+- `cargo check`
+- `cargo test route_owned_start_prompts`
+- `cargo test non_route_owned_start_preserves_codex_auto_resume_policy`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+- `src/agent-doc`: `7f7736f fix: stop route-owned clean-exit autorestart`
+- parent `agent-loop`: `ff71571c2 agent-doc: update route-owned restart fix`
+
+Unrelated dirty work remains in `src/agent-doc` internals, `src/boost-client`, and `src/session-share`; I left those unstaged.
+<!-- agent:boundary:85fa7eb6 -->
 <!-- /agent:exchange -->
 ###
 <!--

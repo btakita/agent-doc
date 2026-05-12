@@ -65,14 +65,8 @@ CI check: latest listed GitHub `CI` runs are older failing pushes from April 24,
 Committed:
 - `src/agent-doc`: `1d6edd9 fix: repair sync tmux stash layout`
 - parent repo submodule pointer: `d9c741fa4 chore: update agent-doc submodule`
-<!-- agent:boundary:fb076e17 -->
-<!-- /agent:exchange -->
-###
-<!--
-Move JB `Copy Session Diagnostics` outside the numeric shortcuts.
----
-tmux window was agent-doc, now is stash.
-I ran the JB `Sync Tmux Layout` with this document selected in the editor.
+❯ tmux window was agent-doc, now is stash.
+❯ I ran the JB `Sync Tmux Layout` with this document selected in the editor.
 ```
 resync: stash pane %19 is registered in its own project root — skipping kill
 resync: stash pane %2 is registered in its own project root — skipping kill
@@ -84,6 +78,42 @@ resync: stash pane %13 is registered in its own project root — skipping kill
 [route] latency budget exceeded: phase dispatch_start_proof took 10069ms (budget 10000ms, pane=%1, harness=codex, outcome=unproven_but_accepted)
 Error: dispatch-only codex reopen for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %1 via direct_pane_submit (tmux_literal_enter_delayed), but Codex never recorded a routed submission proof after waiting 10s; the pane is live but not dispatch-ready enough to confirm the reopen. Restore an idle Codex prompt or restart the session and reroute again
 ```
+❯ When I run `Sync Tmux Layout` on this document, an error:
+```
+Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
+```
+❯ spec-test-build-install-commit-push
+### Re: dispatch-only startup reroute gating — gpt-5
+
+Implemented and pushed the `Sync Tmux Layout` / dispatch-only startup fix in `src/agent-doc`.
+
+What changed:
+- Dispatch-only reroutes no longer direct-submit into startup-window panes until the pane reaches a harness-specific dispatch-ready prompt.
+- Removed the special tracked `/clear` exception that allowed a still-`starting` authoritative Codex/OpenCode actor to receive a bare reopen before readiness.
+- Codex model/context footer lines like `gpt-5.5 high ... Context ...` are documented and tested as UI chrome, not dispatch-ready prompts.
+- Updated `README.md`, `SPEC.md`, and `specs/08-session-routing.md` to keep the route contract durable.
+
+Verification passed:
+- `cargo test ready_prompt_candidate_rejects_codex_footer_without_prompt`
+- `cargo test resolve_or_create_pane_dispatch_only_refuses_while_latest_run_is_still_starting -- --ignored`
+- `cargo test route_dispatch_only_refuses_starting_authoritative_actor_after_tracked_clear_until_ready -- --ignored`
+- `cargo test dispatch_only_send_reopen_direct_pane_submit_avoids_extra_enter_retries -- --ignored`
+- `make check`
+- `make tmux-ci` final run: 221 ignored/live tmux tests passed
+- `cargo build`
+- `cargo install --path .`
+- `cargo run -- audit-docs`
+
+CI review: latest GitHub Actions `CI` runs for `agent-doc` are older failed `main` pushes from April 24, 2026; the latest listed run is `24906567276`, and it failed before a usable tmux leg. Local `make tmux-ci` is green.
+
+Committed and pushed:
+- `src/agent-doc`: `b109bf8 fix: gate startup dispatch-only reroutes`
+- parent repo: `d3c6a07e4 agent-doc: gate startup dispatch-only reroutes`
+<!-- agent:boundary:ed8cbdfa -->
+<!-- /agent:exchange -->
+###
+<!--
+Move JB `Copy Session Diagnostics` outside the numeric shortcuts.
 ---
 I don't have a good track on the lifecycle logic that starts panes, kills panes, edge cases, etc.
 Can we make a nested list and diagram of the lifecycle logic?
@@ -116,6 +146,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#4w5x] [recommended] Evaluate extending dispatch-only prompt gating beyond startup-window reroutes after collecting ready-actor accepted-but-unproven Codex route logs; current fix gates startup/latest-run and starting-authoritative actor paths only.
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.

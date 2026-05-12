@@ -34,12 +34,30 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 4 response topic(s): tmux route and sync implementation; JetBrains clear stale busy guard; JetBrains Clear Context busy bypass; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e3562ef9 -->
+❯ do [#codexresumegitdir]. spec-test-build-install-commit-push
+❯ Is CI not running on our current branch? Please ensure our PR branch has CI so we can see recent tmux test results on CI.
+### Re: Codex Resume Writable Roots — gpt-5
+
+Implemented `#codexresumegitdir`.
+
+The Codex capability proof now records a normalized `writable_root_contract` for required `--add-dir` roots, and route/session status only treat a proof as current when that contract matches the active document after the latest `session_start`. Direct `codex exec resume` turns with required writable roots now fresh-start instead of silently stripping `--add-dir` and resuming into an older root policy.
+
+I also added GitHub Actions at `.github/workflows/agent-doc.yml` with separate `make check` and `make tmux-ci` jobs for PRs to `main`, pushes to `main`, and `20*/**` branches. `gh pr status` showed no PR for the current `main` branch, and `gh workflow list` / `gh run list` showed no existing workflow/runs before this change.
+
+Verification passed locally:
+- focused Codex writable-root contract regressions
+- `make check`
+- `make tmux-ci` (222 live tmux tests)
+- `cargo run --quiet -- audit-docs`
+- `make install` (`agent-doc 0.33.16` installed)
+
+Commits prepared before session closeout:
+- `src/agent-doc` submodule: `d86823d fix: prove codex writable root contract`
+- parent repo: `52bba3eb3 ci: add agent-doc tmux workflow`
+<!-- agent:boundary:54e9db28 -->
 <!-- /agent:exchange -->
 ###
 <!--
-Is CI not running on our current branch?
----
 Move JB `Copy Session Diagnostics` outside the numeric shortcuts.
 ---
 I don't have a good track on the lifecycle logic that starts panes, kills panes, edge cases, etc.
@@ -73,7 +91,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#codexresumegitdir] #agent-doc-bug: Managed Codex writable-root proof is still insufficient for reused/resumed actors. Monster Rod Holders shipping-rule turn could edit `src/boost-client/src/monsterrodholders-dev` but could not update local `.git/modules/...` metadata, so it committed from a temporary clone and left the local checkout dirty. Agent-doc must prove the live actor generation has the exact gitdir/superproject writable roots before dispatch, and fresh-start instead of `codex exec resume` when roots are missing because resume strips `--add-dir`. Plan: tasks/agent-doc/plan-codex-resume-writable-root-contract.md
 - [ ] [#va0j] [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.113, then re-test Clear Session Context against the stale-busy Codex status-only pane.
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
@@ -197,4 +214,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#jbrestartretest] 2026-05-12 [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.112, then re-test Clear Session Context against a protected alive-busy pane and confirm the typed Refresh/Interrupt/Status/Copy warning appears.
 - 2026-05-12 [#4w5x] [recommended] Evaluate extending dispatch-only prompt gating beyond startup-window reroutes after collecting ready-actor accepted-but-unproven Codex route logs; current fix gates startup/latest-run and starting-authoritative actor paths only.
 - 2026-05-12 [#tmuxroutesync] #next-steps: Implement the current tmux route/sync plan: typed actor_binding protocol, current-generation ready-prompt barrier before dispatch, safe-passive sync burst coalescing/cache, and deterministic plus real-tmux route/sync coverage. Plan: tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md
+- 2026-05-12 [#codexresumegitdir] #agent-doc-bug: Managed Codex writable-root proof is still insufficient for reused/resumed actors. Monster Rod Holders shipping-rule turn could edit `src/boost-client/src/monsterrodholders-dev` but could not update local `.git/modules/...` metadata, so it committed from a temporary clone and left the local checkout dirty. Agent-doc must prove the live actor generation has the exact gitdir/superproject writable roots before dispatch, and fresh-start instead of `codex exec resume` when roots are missing because resume strips `--add-dir`. Plan: tasks/agent-doc/plan-codex-resume-writable-root-contract.md
 <!-- /agent:done -->

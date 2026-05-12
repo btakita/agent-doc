@@ -5206,10 +5206,13 @@ fn attempt_opencode_busy_interrupt_recovery(
 
     let _ = tmux.send_keys_raw(pane, "Escape");
     std::thread::sleep(Duration::from_millis(200));
-    let _ = tmux.send_keys_raw(pane, "Escape");
-    std::thread::sleep(Duration::from_millis(100));
-
-    let ready = wait_for_agent_ready_outcome(tmux, pane, fresh_route_start_ack_timeout(), harness);
+    let mut ready =
+        wait_for_agent_ready_outcome(tmux, pane, fresh_route_start_ack_timeout(), harness);
+    if !ready.is_ready() {
+        let _ = tmux.send_keys_raw(pane, "Escape");
+        std::thread::sleep(Duration::from_millis(100));
+        ready = wait_for_agent_ready_outcome(tmux, pane, fresh_route_start_ack_timeout(), harness);
+    }
     let recovered = ready.is_ready();
     crate::ops_log::log_op(
         file,
@@ -10160,11 +10163,11 @@ Body\n\
         let after = wait_for_pane_contains(
             &iso,
             &pane,
-            "GOT:agent-doc ",
+            "GOT:/agent-doc ",
             std::time::Duration::from_secs(5),
         );
         assert!(
-            after.contains("GOT:agent-doc "),
+            after.contains("GOT:/agent-doc "),
             "route should dispatch the reopen after the Escape interrupt recovery: {after}"
         );
         ipc.stop();
@@ -12034,7 +12037,6 @@ Body\n\
         use std::sync::{Arc, Mutex};
 
         for (actor_state, reason) in [
-            ("starting", "the authoritative actor is still starting"),
             ("blocked", "the authoritative actor is blocked"),
             ("closed", "the authoritative actor is closed"),
         ] {

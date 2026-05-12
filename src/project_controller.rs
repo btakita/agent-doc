@@ -1595,6 +1595,41 @@ pub fn mark_lifecycle(
     project_root: &Path,
     request: LifecycleRequest,
 ) -> Result<crate::session_actor::ActorRecord> {
+    #[cfg(test)]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        return handle_mark_lifecycle(
+            &bootstrap,
+            ControllerRequest {
+                command: "mark_lifecycle".to_string(),
+                file: Some(request.file),
+                session_id: Some(request.session_id),
+                pane_id: Some(request.pane_id),
+                window_id: None,
+                generation: Some(request.generation),
+                state: Some(request.state.as_str().to_string()),
+                caller: Some(request.caller),
+                reason: Some(request.reason),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        );
+    }
+
+    #[cfg(not(test))]
     request_controller(
         project_root,
         ControllerRequest {
@@ -3905,8 +3940,15 @@ mod tests {
         .unwrap();
         let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
-        assert!(envelope.ok, "same-pane stale generation should succeed: {:?}", envelope.error);
-        assert_eq!(envelope.data.unwrap().state, crate::session_actor::ActorState::Ready);
+        assert!(
+            envelope.ok,
+            "same-pane stale generation should succeed: {:?}",
+            envelope.error
+        );
+        assert_eq!(
+            envelope.data.unwrap().state,
+            crate::session_actor::ActorState::Ready
+        );
     }
 
     #[test]
@@ -4303,7 +4345,10 @@ mod tests {
         let envelope: ControllerEnvelope<crate::session_actor::ActorRecord> =
             serde_json::from_str(&response).unwrap();
         assert!(envelope.ok, "mark_lifecycle with relative path failed");
-        assert_eq!(envelope.data.unwrap().state, crate::session_actor::ActorState::Ready);
+        assert_eq!(
+            envelope.data.unwrap().state,
+            crate::session_actor::ActorState::Ready
+        );
     }
 
     #[test]

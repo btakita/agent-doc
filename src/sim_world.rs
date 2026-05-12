@@ -79,6 +79,8 @@ enum SimCommand {
     ObserveMissingPane,
     DriftProjection,
     RepairProjection,
+    PromoteStartingPromptReady,
+    BusyInterruptRecoveryReady,
     SyncProtectedGrowthManual,
     SyncProtectedGrowthPassive,
     SyncProtectedGrowthFocusVisible,
@@ -260,6 +262,8 @@ struct Coverage {
     supervisor_lifecycle_updates: usize,
     route_dispatch_acceptances: usize,
     route_dispatch_proofs: usize,
+    starting_prompt_promotions: usize,
+    busy_interrupt_recoveries: usize,
     stale_generation_blocks: usize,
     stale_pane_blocks: usize,
     missing_pane_blocks: usize,
@@ -319,6 +323,8 @@ impl Coverage {
         self.supervisor_lifecycle_updates += other.supervisor_lifecycle_updates;
         self.route_dispatch_acceptances += other.route_dispatch_acceptances;
         self.route_dispatch_proofs += other.route_dispatch_proofs;
+        self.starting_prompt_promotions += other.starting_prompt_promotions;
+        self.busy_interrupt_recoveries += other.busy_interrupt_recoveries;
         self.stale_generation_blocks += other.stale_generation_blocks;
         self.stale_pane_blocks += other.stale_pane_blocks;
         self.missing_pane_blocks += other.missing_pane_blocks;
@@ -369,7 +375,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(38) {
+            let command = match rng.next_usize(40) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -397,11 +403,13 @@ impl SimWorld {
                 29 => SimCommand::ObserveMissingPane,
                 30 => SimCommand::DriftProjection,
                 31 => SimCommand::RepairProjection,
-                32 => SimCommand::SyncProtectedGrowthManual,
-                33 => SimCommand::SyncProtectedGrowthPassive,
-                34 => SimCommand::SyncProtectedGrowthFocusVisible,
-                35 => SimCommand::SyncDetachableReplaceManual,
-                36 => SimCommand::SyncDetachableReplacePassive,
+                32 => SimCommand::PromoteStartingPromptReady,
+                33 => SimCommand::BusyInterruptRecoveryReady,
+                34 => SimCommand::SyncProtectedGrowthManual,
+                35 => SimCommand::SyncProtectedGrowthPassive,
+                36 => SimCommand::SyncProtectedGrowthFocusVisible,
+                37 => SimCommand::SyncDetachableReplaceManual,
+                38 => SimCommand::SyncDetachableReplacePassive,
                 _ => SimCommand::SyncVisibleFocusPreserve,
             };
             world.apply(command)?;
@@ -569,6 +577,16 @@ impl SimWorld {
                 self.route.projection = self.route.durable.clone();
                 self.coverage.projection_repairs += 1;
             }
+            SimCommand::PromoteStartingPromptReady => {
+                if let Err(err) = self.promote_starting_prompt_ready() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::BusyInterruptRecoveryReady => {
+                if let Err(err) = self.recover_busy_interrupt_to_ready() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
             SimCommand::SyncProtectedGrowthManual => {
                 self.apply_sync_protected_growth(SyncMode::Full);
             }
@@ -700,6 +718,41 @@ impl SimWorld {
         });
         self.coverage.route_dispatch_acceptances += 1;
         Ok(())
+    }
+
+    fn promote_starting_prompt_ready(&mut self) -> Result<()> {
+        self.current_dispatch_pane()?;
+        if self.route.durable.lifecycle != SupervisorLifecycle::Starting {
+            bail!(
+                "starting prompt promotion requires Starting lifecycle; found {:?}; seed={} trace={:?}",
+                self.route.durable.lifecycle,
+                self.seed,
+                self.trace
+            );
+        }
+        self.transition_supervisor(self.route.durable.generation, SupervisorLifecycle::Ready)?;
+        self.coverage.starting_prompt_promotions += 1;
+        Ok(())
+    }
+
+    fn recover_busy_interrupt_to_ready(&mut self) -> Result<()> {
+        self.current_dispatch_pane()?;
+        match self.route.durable.lifecycle {
+            SupervisorLifecycle::WaitingInput | SupervisorLifecycle::Blocked => {
+                self.transition_supervisor(
+                    self.route.durable.generation,
+                    SupervisorLifecycle::Ready,
+                )?;
+                self.coverage.busy_interrupt_recoveries += 1;
+                Ok(())
+            }
+            lifecycle => bail!(
+                "busy interrupt recovery requires WaitingInput or Blocked lifecycle; found {:?}; seed={} trace={:?}",
+                lifecycle,
+                self.seed,
+                self.trace
+            ),
+        }
     }
 
     fn prove_dispatch_accepted(&mut self) -> Result<()> {
@@ -1390,6 +1443,39 @@ fn route_sim_accepts_dispatch_only_after_current_supervisor_ready() {
     world.apply(SimCommand::DispatchRoutePrompt).unwrap();
     world.apply(SimCommand::ProveDispatchAccepted).unwrap();
 
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn route_sim_promotes_starting_prompt_ready_before_dispatch() {
+    let mut world = SimWorld::new(2_004);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+
+    world.apply(SimCommand::PromoteStartingPromptReady).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+
+    assert_eq!(world.coverage.starting_prompt_promotions, 1);
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn route_sim_recovers_busy_interrupt_to_ready_once() {
+    let mut world = SimWorld::new(2_005);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorWaitingInput).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+
+    world.apply(SimCommand::BusyInterruptRecoveryReady).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+
+    assert_eq!(world.coverage.busy_interrupt_recoveries, 1);
     assert_eq!(world.coverage.route_dispatch_acceptances, 1);
     assert_eq!(world.coverage.route_dispatch_proofs, 1);
 }

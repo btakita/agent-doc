@@ -36,6 +36,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 - **MCP auth / OAuth steps are sub-steps, not closeout boundaries** — after auth/browser approval, resume and still finish through `finalize` / `write --commit` plus `session-check`.
 - **Manual repo commits keep the session document on the finalize path** — stage and commit only the intended non-session repo files first, stop on any stage failure, verify the staged diff still matches the intended path set, then let `finalize` / `write --commit` own the session document.
 - **Dispatch proof language must preserve scope** — when reading route diagnostics, `proof=accepted proof_scope=accepted_only` means pane-input acceptance only. Do not describe Claude Code/OpenCode dispatch-only routes as consumed/submitted unless logs show dispatch-start proof.
+- **Starting actor reroutes are prompt-gated** — if route diagnostics mention a `starting` authoritative actor, treat dispatch as valid only after the live pane shows a harness-specific dispatch-ready prompt; otherwise the route path must fail closed before input.
 - **Rare routing / tmux / startup-miss invariants live in runbooks** — consult [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/commit.md](runbooks/commit.md), and [runbooks/code-enforced-directives.md](runbooks/code-enforced-directives.md) for route/start/sync/session-check or sibling `src/tmux-router` work.
 - Preserve user edits; let `agent-doc write --stream` merge. Stream useful console status.
 
@@ -104,6 +105,8 @@ Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent
 Complete requested implementation, verification, build/install, and local inspection **before** this step. The response persistence command is the final document-mutation boundary for the cycle, not an intermediate progress checkpoint.
 
 **Agent harnesses own full-suite verification:** if you changed code, tests, build logic, or instruction surfaces, run the full project verification suite explicitly after edits and before `finalize` / `write --commit`. Do not rely on a pre-commit hook. Do not waive red suites as "unrelated" or "flaky".
+
+**Tmux CI review for test-bearing turns:** when the cycle runs tests or changes test, build, or instruction surfaces, inspect the latest CI tmux-test result for this repo. If the tmux leg is red, run `make tmux-ci` locally, fix the failure, and add or update deterministic SimWorld coverage for the regression class when the behavior can be modeled without live tmux. Record CI and local tmux evidence in closeout.
 
 **Session document staging rule:** for ordinary repo `commit + push`, keep the session document out of that manual git commit. Resolve the exact intended non-session path set first, stage only that set, stop on any stage failure, verify `git diff --cached --name-only` still matches the intended set, commit only that validated set, then let `finalize` / `write --commit` close the session document before push.
 

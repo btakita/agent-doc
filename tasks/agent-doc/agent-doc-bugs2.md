@@ -29,55 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-183231.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-190412.md`*
 
 Compacted content:
-- Archived 3 response topic(s): Sync Tmux Layout repair; dispatch-only startup reroute gating; tmux doctor sync repair
+- Archived 2 response topic(s): dispatch-only Codex proof gating; tmux route and sync next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#4w5x]. spec-test-build-install-commit-push
-### Re: dispatch-only Codex proof gating — gpt-5
-
-Completed `#4w5x`.
-
-I verified the live log class the backlog item asked about: recent `agent-doc-bugs2.md` routes include `route_dispatch_only_submit_unproven` for hook-visible Codex acceptance without routed submission proof, and later successful routes show `proof=consumed proof_scope=dispatch_start`. The implementation already had the guard in the shared dispatch-only submit helper, so it applies to ready authoritative actor/direct-pane reroutes as well as startup-window reroutes.
-
-I made that invariant explicit and test-backed:
-- Added non-tmux regressions in `src/agent-doc/src/route.rs` proving hook-visible Codex accepted-only dispatch-only submits fail closed, while Claude accepted-only and hook-proven Codex submits still pass.
-- Clarified `README.md`, `SPEC.md`, and `specs/07-session-tmux-commands.md` so the proof gate is not scoped only to startup-window routes.
-- Added an Unreleased note closing `#4w5x`.
-
-Verification passed:
-- `cargo test dispatch_only`
-- `make check`
-- `make tmux-ci`
-- `make build`
-- `make install` and `agent-doc --version` -> `agent-doc 0.33.16`
-
-Committed and pushed:
-- `src/agent-doc` branch `20260422/codex-agent-backend`: `57762e9 fix: gate dispatch-only codex proof`
-- parent `agent-loop` `main`: `e83844868 agent-doc: gate dispatch-only codex proof`
-
-I left unrelated local work untouched: untracked `mail`, dirty `src/session-share`, and this session document closeout.
-❯ Please analyze recent logs and plan #next-steps to fix agent-doc issues with tmux.
-### Re: tmux route and sync next steps — gpt-5
-
-I analyzed the current May 12 logs and created a concrete next-step plan at `tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md`.
-
-The strongest current evidence is:
-- `actor_binding` repeatedly returns `{"data":null,"ok":true}`, which leaves route/sync callers in an ambiguous controller state.
-- `ron-berkes.md` generation 8 hit repeated `route_authoritative_actor_starting_not_ready` timeouts around 9s, then still reached a direct pane submit while the actor was `busy`, followed by `route_dispatch_only_starting_pane_not_ready`.
-- same-day sync evidence still includes `sync_lock_wait` spikes around 3s and repeated `controller_actor_lookup` budget overruns, even though the latest tail is healthier.
-
-The plan orders the fix as:
-1. make `actor_binding` a typed fail-closed controller protocol,
-2. replace fixed startup waits with a current-generation ready-prompt barrier,
-3. coalesce editor sync bursts and cache stable actor facts,
-4. add one deterministic route/sync schedule plus one real-tmux smoke for the prompt barrier.
-
-I committed the plan file separately as `58a1c4007 agent-doc: plan tmux route sync next steps`, then added the implementation follow-up to this document backlog as `#tmuxroutesync`.
-
-No test suite was run because this cycle only added a planning document and backlog item.
-<!-- agent:boundary:b47278dc -->
+<!-- agent:boundary:5a019df5 -->
 <!-- /agent:exchange -->
 ###
 <!--

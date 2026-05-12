@@ -54,7 +54,28 @@ Verification passed locally:
 Commits prepared before session closeout:
 - `src/agent-doc` submodule: `d86823d fix: prove codex writable root contract`
 - parent repo: `52bba3eb3 ci: add agent-doc tmux workflow`
-<!-- agent:boundary:54e9db28 -->
+### Re: CI Follow-up — gpt-5
+
+Completed the follow-up after the initial closeout. The PR branch now has CI via `.github/workflows/agent-doc.yml`, and the latest GitHub Actions run on `main` is green with recent tmux evidence: run `25766036191` passed `check` in 5m6s and `tmux-ci` in 7m49s.
+
+What changed after the first response:
+
+- Added and repaired the Agent Doc workflow so it checks out only the required submodules instead of recursively cloning unrelated/private submodules.
+- Fixed Rust stable clippy failures in `src/component.rs`, `src/template.rs`, `src/agent/codex.rs`, and `src/write.rs`.
+- Stabilized the tmux CI prompt tests by using ASCII mock prompts where GitHub's terminal rendering differs.
+- Stabilized the retained dead-pane diagnostic test so it still proves pane-tail capture and no-kill retention, while tolerating tmux versions that do not expose `pane_dead_status` for retained panes.
+- Updated the parent repo's `src/agent-doc` pointer through `67f038b` and pushed the parent commit `23b87fe0e`.
+
+Verification completed locally before the final push:
+
+- `make check`
+- `make tmux-ci` with 222 passing ignored tmux tests
+- `cargo run --quiet -- audit-docs`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+The earlier red CI runs were useful diagnostics: first checkout/submodule scope, then stable clippy, then the retained-pane tmux status race. The current branch now has a green CI run with visible tmux results.
+<!-- agent:boundary:ed042ac9 -->
 <!-- /agent:exchange -->
 ###
 <!--

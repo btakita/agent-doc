@@ -183,6 +183,13 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   run, but `prune_stash_windows` and `prune_stash_panes` are skipped subphases
   so the router can detach extra visible panes before orphaned stash scans spend
   the safe-passive budget.
+- Editor plugins may deduplicate repeated automatic selection/layout states, but
+  a real markdown selection event must still reach the safe-passive
+  reconciliation path even when its visible/focused signature matches the last
+  applied state. The immediate `agent-doc focus` fast path cannot create a
+  missing actor/supervisor; the follow-up `sync --no-autostart` pass owns that
+  safe cold-start so later `session clear`/status commands do not fail with
+  `stage=missing_actor` after simply navigating to the document.
 - Safe-passive editor sync should not prove whether live unregistered agent
   panes in stash are still owned. Live agent-pane ownership proof and
   kill-or-preserve decisions belong to full sync/repair paths.

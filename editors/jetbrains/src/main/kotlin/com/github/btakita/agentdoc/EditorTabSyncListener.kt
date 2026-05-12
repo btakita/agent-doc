@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.AtomicLong
  * Guards against rapid-fire events:
  * - 100ms debounce so only the final burst state is acted upon
  * - Concurrency guard: a newer request replays immediately after the running command finishes
+ * - Real markdown selection events force one guarded reconciliation pass so
+ *   missing actors/supervisors can be cold-started even after exact-state dedup
  *
  * Registered in plugin.xml as a projectListener on FileEditorManagerListener.
  */
@@ -65,6 +67,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         val visibleMdFiles: List<String>,
         val editorLayout: EditorLayout?,
         val visibleSignature: String,
+        val forceReconcile: Boolean = false,
     )
 
     internal data class AutomaticCommandResult(
@@ -113,10 +116,15 @@ class EditorTabSyncListener : FileEditorManagerListener {
             focusedFile: String,
             previousVisibleSignature: String?,
             previousFocusedFile: String?,
+            forceReconcile: Boolean = false,
         ): AutomaticCommandPlan? {
             if (visibleMdFiles.isEmpty()) return null
 
-            if (visibleSignature == previousVisibleSignature && focusedFile == previousFocusedFile) {
+            if (
+                !forceReconcile &&
+                visibleSignature == previousVisibleSignature &&
+                focusedFile == previousFocusedFile
+            ) {
                 return null
             }
 
@@ -291,6 +299,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 visibleMdFiles,
                 absoluteEditorLayout,
             ),
+            forceReconcile = preferredMarkdownFile != null,
         )
     }
 
@@ -301,6 +310,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
             focusedFile = snapshot.activeFile,
             previousVisibleSignature = lastVisibleSignature,
             previousFocusedFile = lastFocusedFile,
+            forceReconcile = snapshot.forceReconcile,
         ) ?: return null
 
         val (projectRoot, cmd) = when (plan.kind) {

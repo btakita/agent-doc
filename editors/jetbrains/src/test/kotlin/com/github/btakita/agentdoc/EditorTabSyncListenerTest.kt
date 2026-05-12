@@ -103,6 +103,23 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `real markdown selection event still reconciles exact state so missing actors can start`() {
+        val visibleMdFiles = listOf("/repo/tasks/software/corky.md")
+        val visibleSignature = visibleSignature(visibleMdFiles)
+
+        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
+            visibleMdFiles = visibleMdFiles,
+            visibleSignature = visibleSignature,
+            focusedFile = "/repo/tasks/software/corky.md",
+            previousVisibleSignature = visibleSignature,
+            previousFocusedFile = "/repo/tasks/software/corky.md",
+            forceReconcile = true,
+        )
+
+        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+    }
+
+    @Test
     fun `opposite pane selection still dispatches sync when visible split is unchanged`() {
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",

@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Dispatch-only proof scope is explicit across harnesses.** `route --dispatch-only` now logs both `proof` and `proof_scope` so Claude Code and OpenCode accepted pane delivery is labeled as accepted-only instead of being mistaken for Codex-style consumed/submitted dispatch-start proof. Codex keeps its hook-backed dispatch-start proof behavior when hooks are visible. Added route regressions and updated the session tmux spec. This closes `#clauderouteproof` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **JetBrains real markdown navigation now always validates the actor/supervisor path.** A true `selectionChanged` event still runs the guarded background `sync --no-autostart` reconciliation even when the visible/focused signature was already marked synchronized. The immediate focus fast path remains best-effort for existing panes, while the background sync owns the safe cold-start when a document like `tasks/software/corky.md` has no actor, preventing later `Clear Session Context` from surfacing `stage=missing_actor`. Bumped the JetBrains plugin build version to `0.2.110`.
 
 - **JetBrains Clear Session Context now surfaces protected busy panes as a typed running-session result.** The CLI still fails closed when direct live-pane evidence says the pane is `alive-busy`, but the JetBrains plugin now parses that refusal and shows a warning with the pane id, current command, and latest pane tail plus Retry clear, Show status, and Copy details actions instead of a raw `agent-doc command failed` notification. Updated editor specs and added parser/message regressions.

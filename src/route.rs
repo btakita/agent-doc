@@ -265,6 +265,23 @@ impl RoutedDispatchStartProof {
         }
     }
 
+    fn proof_scope_label(self) -> &'static str {
+        match self {
+            Self::CommandAcceptedOnly => "accepted_only",
+            Self::HookPromptMatched | Self::HookStateAdvanced => "dispatch_start",
+        }
+    }
+
+    fn proof_scope_description(self) -> &'static str {
+        match self {
+            Self::CommandAcceptedOnly => {
+                "accepted-only; no harness dispatch-start proof was available"
+            }
+            Self::HookPromptMatched => "dispatch-start proof matched the routed prompt",
+            Self::HookStateAdvanced => "dispatch-start proof observed newer harness prompt state",
+        }
+    }
+
     fn startup_miss_label(self) -> &'static str {
         match self {
             Self::CommandAcceptedOnly => "acceptance",
@@ -1002,8 +1019,7 @@ fn reapply_capability_contract_before_reuse(
         harness,
         fresh_route_start_ack_timeout(),
     )? {
-        ManagedCapabilityProofStatus::NotRequired
-        | ManagedCapabilityProofStatus::Proven => {}
+        ManagedCapabilityProofStatus::NotRequired | ManagedCapabilityProofStatus::Proven => {}
         ManagedCapabilityProofStatus::Pending => anyhow::bail!(
             "{} for {}, and the fresh recovery session in pane {} did not finish capability proof within {}s. Prompt dispatch remains gated until the proof succeeds",
             reason,
@@ -1779,28 +1795,25 @@ fn dispatch_only_send_reopen(
         delivery,
         dispatch_start,
     )?;
-    let delivery_label = dispatch_only_delivery_label(delivery);
-    let submit_mode = dispatch_only_reopen_submit_mode(delivery);
     crate::ops_log::log_op(
         file,
-        &format!(
-            "route_dispatch_only_sent file={} pane={} harness={} delivery={} submit_mode={} proof={}",
-            file.display(),
-            dispatch_pane,
-            harness.binary,
-            delivery_label,
-            submit_mode,
-            dispatch_start.dispatch_stage_label()
+        &route_dispatch_only_sent_log_message(
+            file,
+            &dispatch_pane,
+            harness,
+            delivery,
+            dispatch_start,
         ),
     );
     eprintln!(
-        "[route] dispatch-only {} reopen for {} was sent to pane {} via {} ({}) with {} proof",
-        harness.binary,
-        file.display(),
-        dispatch_pane,
-        delivery_label,
-        submit_mode,
-        dispatch_start.dispatch_stage_label()
+        "{}",
+        route_dispatch_only_sent_console_message(
+            file,
+            &dispatch_pane,
+            harness,
+            delivery,
+            dispatch_start,
+        )
     );
     Ok(dispatch_pane)
 }
@@ -1849,6 +1862,44 @@ fn require_dispatch_only_codex_submit_proof(
     );
 }
 
+fn route_dispatch_only_sent_log_message(
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    delivery: DispatchOnlyReopenDelivery,
+    dispatch_start: RoutedDispatchStartProof,
+) -> String {
+    format!(
+        "route_dispatch_only_sent file={} pane={} harness={} delivery={} submit_mode={} proof={} proof_scope={}",
+        file.display(),
+        pane,
+        harness.binary,
+        dispatch_only_delivery_label(delivery),
+        dispatch_only_reopen_submit_mode(delivery),
+        dispatch_start.dispatch_stage_label(),
+        dispatch_start.proof_scope_label()
+    )
+}
+
+fn route_dispatch_only_sent_console_message(
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    delivery: DispatchOnlyReopenDelivery,
+    dispatch_start: RoutedDispatchStartProof,
+) -> String {
+    format!(
+        "[route] dispatch-only {} reopen for {} was sent to pane {} via {} ({}) with {} proof ({})",
+        harness.binary,
+        file.display(),
+        pane,
+        dispatch_only_delivery_label(delivery),
+        dispatch_only_reopen_submit_mode(delivery),
+        dispatch_start.dispatch_stage_label(),
+        dispatch_start.proof_scope_description()
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn dispatch_only_reopen_existing_pane(
     tmux: &Tmux,
@@ -1878,8 +1929,7 @@ fn dispatch_only_reopen_existing_pane(
             harness,
             fresh_route_start_ack_timeout(),
         )? {
-            ManagedCapabilityProofStatus::NotRequired
-            | ManagedCapabilityProofStatus::Proven => {}
+            ManagedCapabilityProofStatus::NotRequired | ManagedCapabilityProofStatus::Proven => {}
             ManagedCapabilityProofStatus::Pending => anyhow::bail!(
                 "dispatch-only {} reopen for {} on pane {} is gated because managed capability proof is still pending after waiting {}s",
                 harness.binary,
@@ -2246,8 +2296,7 @@ fn load_authoritative_actor_binding(
             harness,
             fresh_route_start_ack_timeout(),
         )? {
-            ManagedCapabilityProofStatus::NotRequired
-            | ManagedCapabilityProofStatus::Proven => {}
+            ManagedCapabilityProofStatus::NotRequired | ManagedCapabilityProofStatus::Proven => {}
             ManagedCapabilityProofStatus::Pending => {
                 anyhow::bail!(
                     "managed {} capability proof for {} on pane {} is still pending after waiting {}s; prompt dispatch remains gated until the proof succeeds",
@@ -6957,8 +7006,7 @@ mod tests {
         );
 
         assert_eq!(
-            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex())
-                .unwrap(),
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
             ManagedCapabilityProofStatus::Pending
         );
 
@@ -6968,8 +7016,7 @@ mod tests {
             "codex_capability_proof status=failed error=\"dns\"",
         );
         assert_eq!(
-            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex())
-                .unwrap(),
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
             ManagedCapabilityProofStatus::Failed
         );
     }
@@ -6986,8 +7033,7 @@ mod tests {
         );
 
         assert_eq!(
-            managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode())
-                .unwrap(),
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode()).unwrap(),
             ManagedCapabilityProofStatus::Pending
         );
 
@@ -6997,8 +7043,7 @@ mod tests {
             "opencode_capability_proof status=failed error=\"ssh\"",
         );
         assert_eq!(
-            managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode())
-                .unwrap(),
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode()).unwrap(),
             ManagedCapabilityProofStatus::Failed
         );
     }
@@ -8518,6 +8563,51 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
 
     #[test]
+    fn dispatch_only_sent_log_marks_claude_accepted_only_scope() {
+        let message = route_dispatch_only_sent_log_message(
+            Path::new("/tmp/robert-ross.md"),
+            "%7",
+            &HarnessConfig::claude(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        );
+
+        assert!(message.contains("harness=claude"), "{message}");
+        assert!(message.contains("proof=accepted"), "{message}");
+        assert!(message.contains("proof_scope=accepted_only"), "{message}");
+    }
+
+    #[test]
+    fn dispatch_only_sent_log_marks_opencode_accepted_only_scope() {
+        let message = route_dispatch_only_sent_log_message(
+            Path::new("/tmp/monsterrodholders.md"),
+            "%13",
+            &HarnessConfig::opencode(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        );
+
+        assert!(message.contains("harness=opencode"), "{message}");
+        assert!(message.contains("proof=accepted"), "{message}");
+        assert!(message.contains("proof_scope=accepted_only"), "{message}");
+    }
+
+    #[test]
+    fn dispatch_only_sent_log_marks_codex_hook_proof_scope() {
+        let message = route_dispatch_only_sent_log_message(
+            Path::new("/tmp/agent-doc-bugs2.md"),
+            "%1",
+            &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::HookPromptMatched,
+        );
+
+        assert!(message.contains("harness=codex"), "{message}");
+        assert!(message.contains("proof=consumed"), "{message}");
+        assert!(message.contains("proof_scope=dispatch_start"), "{message}");
+    }
+
+    #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
         use std::sync::{Arc, Mutex};
@@ -10011,8 +10101,12 @@ Body\n\
             &pane,
             &format!("exec {} {}", busy_agent.display(), doc.display()),
         );
-        let content =
-            wait_for_pane_contains(&iso, &pane, "esc interrupt", std::time::Duration::from_secs(5));
+        let content = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "esc interrupt",
+            std::time::Duration::from_secs(5),
+        );
         assert!(
             content.contains("esc interrupt"),
             "busy OpenCode mock should be active in pane: {content}"
@@ -15496,8 +15590,8 @@ Body\n\
             session_id,
             "opencode_capability_proof status=failed error=\"dns\"",
         );
-        let status = managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode())
-            .unwrap();
+        let status =
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::opencode()).unwrap();
         assert_eq!(status, ManagedCapabilityProofStatus::Failed);
     }
 
@@ -15574,9 +15668,7 @@ Body\n\
     fn dispatch_only_can_use_degraded_authoritative_actor_returns_false_when_none_provided() {
         let actor = test_degraded_actor("%42");
         assert!(!dispatch_only_can_use_degraded_authoritative_actor(
-            &actor,
-            None,
-            None,
+            &actor, None, None,
         ));
     }
 

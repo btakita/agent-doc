@@ -1307,7 +1307,8 @@ opencode debug               debugging and troubleshooting tools
     #[test]
     fn claude_help_screen_not_detected() {
         let h = HarnessConfig::claude();
-        let help_output = "opencode [project]           start opencode tui\nopencode run\nopencode debug\n";
+        let help_output =
+            "opencode [project]           start opencode tui\nopencode run\nopencode debug\n";
         assert!(!h.is_help_screen_output(help_output));
     }
 }

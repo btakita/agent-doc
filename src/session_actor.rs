@@ -403,10 +403,7 @@ pub(crate) fn transition_state_in(
     reason: &str,
 ) -> Result<ActorRecord> {
     let Some(current) = load_record_in(base_dir, document_id)? else {
-        anyhow::bail!(
-            "missing authoritative actor record for {}",
-            document_id
-        );
+        anyhow::bail!("missing authoritative actor record for {}", document_id);
     };
     if current.session_id != session_id {
         anyhow::bail!(

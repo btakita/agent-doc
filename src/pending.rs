@@ -2588,7 +2588,9 @@ mod tests {
         .unwrap();
         assert_eq!(id, "nopatchbackopencode");
         assert!(
-            new_body.contains("- [ ] [#nopatchbackopencode] 2026-05-11 OpenCode agent-doc turn completed"),
+            new_body.contains(
+                "- [ ] [#nopatchbackopencode] 2026-05-11 OpenCode agent-doc turn completed"
+            ),
             "got: {}",
             new_body
         );
@@ -2640,13 +2642,8 @@ mod tests {
 
     #[test]
     fn op_add_inline_tag_ignores_invalid_tag() {
-        let (new_body, id) = op_add(
-            "",
-            "see [#not-a-valid tag] because spaces",
-            DOC_ID,
-            false,
-        )
-        .unwrap();
+        let (new_body, id) =
+            op_add("", "see [#not-a-valid tag] because spaces", DOC_ID, false).unwrap();
         assert_ne!(id, "not-a-valid");
         assert!(
             new_body.contains("see [#not-a-valid tag] because spaces"),
@@ -2657,13 +2654,8 @@ mod tests {
 
     #[test]
     fn op_add_leading_prefix_takes_precedence_over_inline() {
-        let (new_body, id) = op_add(
-            "",
-            "[#myid] text with [#other] inline",
-            DOC_ID,
-            false,
-        )
-        .unwrap();
+        let (new_body, id) =
+            op_add("", "[#myid] text with [#other] inline", DOC_ID, false).unwrap();
         assert_eq!(id, "myid");
         assert!(
             new_body.contains("- [ ] [#myid] text with [#other] inline"),

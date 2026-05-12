@@ -3426,9 +3426,7 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
     let deduped_openers = {
         let mut result = lifted;
         while let Some(merged) = crate::template::repair_duplicate_exchange_opener(&result)? {
-            eprintln!(
-                "[write] normalize_template_structure: merged duplicate exchange opener"
-            );
+            eprintln!("[write] normalize_template_structure: merged duplicate exchange opener");
             result = merged;
         }
         result
@@ -5194,8 +5192,7 @@ pub(crate) fn cleanup_fallback_patch_files(file: &Path) {
     let patch_file = patches_dir.join(format!("{hash}.json"));
     if patch_file.exists() {
         if let Ok(stale_content) = std::fs::read_to_string(&patch_file)
-            && let Ok(stale_json) =
-                serde_json::from_str::<serde_json::Value>(&stale_content)
+            && let Ok(stale_json) = serde_json::from_str::<serde_json::Value>(&stale_content)
             && let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str())
         {
             write_claimed_patch_sentinel(&project_root, patch_id);
@@ -5216,9 +5213,7 @@ pub(crate) fn cleanup_fallback_patch_files(file: &Path) {
 /// Returns `Some(cycle_id)` if committed, `None` if no cycle or cycle is open.
 fn cycle_already_committed(file: &Path) -> Option<String> {
     match crate::cycle_state::load(file) {
-        Ok(Some(state))
-            if state.phase == crate::cycle_state::CyclePhase::Committed =>
-        {
+        Ok(Some(state)) if state.phase == crate::cycle_state::CyclePhase::Committed => {
             Some(state.cycle_id)
         }
         _ => None,
@@ -7161,7 +7156,9 @@ mod tests {
 
     #[test]
     fn sanitize_unmatched_escapes_exchange_markers_in_response() {
-        let mut unmatched = "### Re: deploy\n\nDone.\n\n<!-- agent:exchange -->\nExtra\n<!-- /agent:exchange -->\n".to_string();
+        let mut unmatched =
+            "### Re: deploy\n\nDone.\n\n<!-- agent:exchange -->\nExtra\n<!-- /agent:exchange -->\n"
+                .to_string();
         sanitize_unmatched(&mut unmatched);
         assert!(
             !unmatched.contains("<!-- agent:exchange -->"),
@@ -11796,8 +11793,7 @@ mod late_fallback_patch_guard_tests {
             None,
         )
         .unwrap();
-        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content))
-            .unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
         crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
 
         let result = cycle_already_committed(&doc);
@@ -11818,10 +11814,8 @@ mod late_fallback_patch_guard_tests {
     #[test]
     fn cleanup_fallback_patch_files_removes_patch_and_writes_sentinel() {
         let tmp = TempDir::new().unwrap();
-        let doc = doc_in_agent_doc_project(
-            &tmp,
-            "---\nagent_doc_session: test\n---\n\n## Exchange\n",
-        );
+        let doc =
+            doc_in_agent_doc_project(&tmp, "---\nagent_doc_session: test\n---\n\n## Exchange\n");
         let hash = crate::snapshot::doc_hash(&doc).unwrap();
         let patch_path = tmp
             .path()
@@ -11831,12 +11825,19 @@ mod late_fallback_patch_guard_tests {
             "patch_id": "test-patch-123",
             "type": "patch",
         });
-        fs::write(&patch_path, serde_json::to_string_pretty(&patch_content).unwrap()).unwrap();
+        fs::write(
+            &patch_path,
+            serde_json::to_string_pretty(&patch_content).unwrap(),
+        )
+        .unwrap();
         assert!(patch_path.exists());
 
         cleanup_fallback_patch_files(&doc);
 
-        assert!(!patch_path.exists(), "fallback patch file should be removed");
+        assert!(
+            !patch_path.exists(),
+            "fallback patch file should be removed"
+        );
         let sentinel = tmp
             .path()
             .join(".agent-doc/claimed-patches")
@@ -11847,10 +11848,8 @@ mod late_fallback_patch_guard_tests {
     #[test]
     fn cleanup_fallback_patch_files_noop_when_no_patch() {
         let tmp = TempDir::new().unwrap();
-        let doc = doc_in_agent_doc_project(
-            &tmp,
-            "---\nagent_doc_session: test\n---\n\n## Exchange\n",
-        );
+        let doc =
+            doc_in_agent_doc_project(&tmp, "---\nagent_doc_session: test\n---\n\n## Exchange\n");
         cleanup_fallback_patch_files(&doc);
     }
 }

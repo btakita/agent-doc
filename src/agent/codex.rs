@@ -430,9 +430,9 @@ fn wait_with_timeout(
     let started = Instant::now();
     loop {
         if child.try_wait()?.is_some() {
-            return child
-                .wait_with_output()
-                .map_err(|e| anyhow::anyhow!("failed to collect {harness} child probe output: {e}"));
+            return child.wait_with_output().map_err(|e| {
+                anyhow::anyhow!("failed to collect {harness} child probe output: {e}")
+            });
         }
         if started.elapsed() >= timeout {
             let _ = child.kill();
@@ -449,7 +449,11 @@ fn wait_with_timeout(
     }
 }
 
-fn validate_codex_child_network_probe_output(stdout: &str, stderr: &str, harness: &str) -> Result<()> {
+fn validate_codex_child_network_probe_output(
+    stdout: &str,
+    stderr: &str,
+    harness: &str,
+) -> Result<()> {
     let mut saw_command_execution = false;
     let mut failure_detail: Option<String> = None;
 
@@ -588,7 +592,11 @@ fn classify_child_writable_root_probe_failure(detail: &str, harness: &str) -> St
     }
 }
 
-fn validate_codex_child_writable_root_probe_output(stdout: &str, stderr: &str, harness: &str) -> Result<()> {
+fn validate_codex_child_writable_root_probe_output(
+    stdout: &str,
+    stderr: &str,
+    harness: &str,
+) -> Result<()> {
     let mut saw_command_execution = false;
     let mut failure_detail: Option<String> = None;
 
@@ -630,7 +638,9 @@ fn validate_codex_child_writable_root_probe_output(stdout: &str, stderr: &str, h
 
     let detail = failure_detail.unwrap_or_else(|| {
         if saw_command_execution {
-            format!("{harness} command execution did not emit the writable-root probe success marker")
+            format!(
+                "{harness} command execution did not emit the writable-root probe success marker"
+            )
         } else {
             format!(
                 "{harness} child did not run a command_execution event; stderr={}",
@@ -667,7 +677,12 @@ fn prove_codex_child_writable_roots(
     }
     child.stdin.take();
 
-    let output = wait_with_timeout(child, CODEX_CHILD_NETWORK_PROBE_TIMEOUT, "writable-root", harness)?;
+    let output = wait_with_timeout(
+        child,
+        CODEX_CHILD_NETWORK_PROBE_TIMEOUT,
+        "writable-root",
+        harness,
+    )?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr);
         let classification = classify_child_writable_root_probe_failure(&detail, harness);
@@ -2180,17 +2195,47 @@ mod tests {
     fn managed_capability_contract_requires_network_ssh_or_writable_roots() {
         let config = crate::config::Config::default();
         let mut fm = Frontmatter::default();
-        assert!(!managed_capability_contract_required(&[], &fm, &config, "codex"));
-        assert!(!managed_capability_contract_required(&[], &fm, &config, "opencode"));
+        assert!(!managed_capability_contract_required(
+            &[],
+            &fm,
+            &config,
+            "codex"
+        ));
+        assert!(!managed_capability_contract_required(
+            &[],
+            &fm,
+            &config,
+            "opencode"
+        ));
 
         fm.codex_network_access = Some(CodexNetworkAccess::Enabled);
-        assert!(managed_capability_contract_required(&[], &fm, &config, "codex"));
-        assert!(!managed_capability_contract_required(&[], &fm, &config, "opencode"));
+        assert!(managed_capability_contract_required(
+            &[],
+            &fm,
+            &config,
+            "codex"
+        ));
+        assert!(!managed_capability_contract_required(
+            &[],
+            &fm,
+            &config,
+            "opencode"
+        ));
 
         fm.codex_network_access = None;
         fm.required_ssh_targets = vec!["example-host".to_string()];
-        assert!(managed_capability_contract_required(&[], &fm, &config, "codex"));
-        assert!(!managed_capability_contract_required(&[], &fm, &config, "opencode"));
+        assert!(managed_capability_contract_required(
+            &[],
+            &fm,
+            &config,
+            "codex"
+        ));
+        assert!(!managed_capability_contract_required(
+            &[],
+            &fm,
+            &config,
+            "opencode"
+        ));
 
         fm.required_ssh_targets.clear();
         assert!(managed_capability_contract_required(

@@ -1382,12 +1382,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         super::install_opencode_command_file(Some(dir.path())).unwrap();
-        let first = std::fs::read_to_string(dir.path().join(".opencode/commands/agent-doc.md"))
-            .unwrap();
+        let first =
+            std::fs::read_to_string(dir.path().join(".opencode/commands/agent-doc.md")).unwrap();
 
         super::install_opencode_command_file(Some(dir.path())).unwrap();
-        let second = std::fs::read_to_string(dir.path().join(".opencode/commands/agent-doc.md"))
-            .unwrap();
+        let second =
+            std::fs::read_to_string(dir.path().join(".opencode/commands/agent-doc.md")).unwrap();
 
         assert_eq!(first, second);
     }

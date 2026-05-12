@@ -29,63 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-001246.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-003206.md`*
 
 Compacted content:
-- Archived 3 response topic(s): prior session running state; `#routereap`; route-owned reap purpose
+- Archived 2 response topic(s): tmux pane autostart restart; Clear Session Context closed generation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ On the tmux pane autostart, agent-doc immediately restarts the process. The started pane should not restart. spec-test-build-install-commit-push
-### Re: tmux pane autostart restart — gpt-5
-
-Implemented the route-owned autostart fix. `agent-doc start --route-owned` now uses the local restart/quit prompt on clean child exits instead of applying Codex/OpenCode's normal auto-resume policy, so a freshly autostarted tmux pane will not immediately spawn another child process after the first child exits.
-
-Updated the session/tmux command spec and added regressions covering Codex, OpenCode, and the preserved non-route-owned Codex auto-resume behavior.
-
-Verification completed:
-- `cargo check`
-- `cargo test route_owned_start_prompts`
-- `cargo test non_route_owned_start_preserves_codex_auto_resume_policy`
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Committed and pushed:
-- `src/agent-doc`: `7f7736f fix: stop route-owned clean-exit autorestart`
-- parent `agent-loop`: `ff71571c2 agent-doc: update route-owned restart fix`
-
-Unrelated dirty work remains in `src/agent-doc` internals, `src/boost-client`, and `src/session-share`; I left those unstaged.
-❯ JB `Clear Session Context` had an error:
-```
-agent-doc command failed (exit 1): Error: project controller command `operator_command` failed: operator command `session_clear` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 141 is closed
-```
-❯ spec-test-build-install-commit-push
-### Re: Clear Session Context closed generation — gpt-5
-
-Fixed the JetBrains `Clear Session Context` closed-generation failure.
-
-Root cause: the project controller rejected all operator commands for `Closed` actor records before `agent-doc session clear <FILE>` could reach the live pane or supervisor submit path. That made an explicit clear fail with `generation ... is closed`, even though closed should only block duplicate reopen dispatch, not an operator-requested `/clear` before the next run.
-
-Implemented:
-- `session_clear` now records an `operator_closed` controller acceptance for closed actors.
-- `blocked` actors and non-clear commands against closed actors still fail closed.
-- Added a regression covering closed-generation clear acceptance and restart rejection.
-- Updated the session tmux command spec and `VERSIONS.md`.
-
-Verification completed:
-- `cargo fmt`
-- `cargo test controller_session_clear_accepts_closed_actor_generation`
-- `cargo check`
-- `cargo test`
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Committed and pushed:
-- `src/agent-doc`: `4798eb4 fix: allow clear on closed actor generation`
-- parent `agent-loop`: `17ecdaf75 agent-doc: update clear closed actor fix`
-
-No follow-up backlog items were created; the requested fix is complete. Existing unrelated dirty work remains unstaged.
-<!-- agent:boundary:df0b22d6 -->
+<!-- agent:boundary:71ed108e -->
 <!-- /agent:exchange -->
 ###
 <!--

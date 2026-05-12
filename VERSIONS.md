@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Dispatch-only Codex proof gating now explicitly covers ready actor reroutes.** The hook-visible Codex accepted-but-unproven guard already lives in the shared dispatch-only submit helper, so ready authoritative actors and startup-window reroutes both fail closed when pane acceptance never becomes routed submission proof. Added a non-tmux regression for the accepted-only gate and clarified the README/session specs. This closes `#4w5x` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **JetBrains Clear Session Context now recognizes wrapped protected-busy failures.** The plugin parser accepts the exact `agent-doc command failed (exit 1): Error: session_clear refused ... alive-busy` notification shape and less predictable pane-tail text, so the IDE shows the typed running-session warning with Refresh/Interrupt/Status/Copy actions instead of falling back to the generic command-failed error. Bumped the JetBrains plugin build version to `0.2.112`.
 
 - **Base-index layout repair now runs during the active preflight.** When the pre-diff layout check finds the current tmux session missing window index `0`, preflight now removes the stale deferred-repair counter, runs `repair_layout` immediately, and rechecks layout before emitting JSON. If automatic repair cannot run, stderr names the explicit `agent-doc session doctor <FILE> --repair` action instead of silently waiting for a second detection. This closes `#baseindexrepair` in `tasks/agent-doc/agent-doc-bugs2.md`.

@@ -61,6 +61,9 @@
 //!   live-pane submit instead of a one-shot supervisor IPC inject. Startup-window reroutes,
 //!   including tracked Codex/OpenCode `/clear` restarts, remain prompt-gated and fail closed
 //!   before sending input while the harness is redrawing or busy.
+//!   Hook-visible Codex dispatch-only reroutes still require routed submit proof after the
+//!   pane accepts the reopen; acceptance without hook-backed dispatch-start proof is terminal
+//!   for ready actors as well as startup-window reroutes.
 //! - **`await_idle(file, debounce)`**: Polls file mtime every 100ms until `debounce` has
 //!   elapsed since last modification, or until `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
@@ -8109,6 +8112,63 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
             should_print_dispatch_only_unproven_progress(&doc, &HarnessConfig::claude()),
             "non-Codex reroutes still may report command-accepted fallback progress"
         );
+    }
+
+    #[test]
+    fn dispatch_only_codex_with_visible_hooks_rejects_accepted_only_submit() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
+
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        let err = require_dispatch_only_codex_submit_proof(
+            &doc,
+            "%4",
+            &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        )
+        .expect_err("hook-visible Codex dispatch-only acceptance must require routed submit proof");
+
+        assert!(
+            err.to_string()
+                .contains("never recorded a routed submission proof"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn dispatch_only_submit_proof_gate_allows_non_codex_and_hook_proven_codex() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("tasks/agent-doc/agent-doc-bugs2.md");
+
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        require_dispatch_only_codex_submit_proof(
+            &doc,
+            "%4",
+            &HarnessConfig::claude(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        )
+        .expect("Claude currently has accepted-only semantics");
+
+        require_dispatch_only_codex_submit_proof(
+            &doc,
+            "%4",
+            &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::HookPromptMatched,
+        )
+        .expect("hook-proven Codex dispatch-only submit should pass");
     }
 
     #[test]

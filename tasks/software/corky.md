@@ -92,7 +92,26 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): tokenstore-delete-preservation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:1ee99753 -->
+❯ do [#watch-gmail-history-notify]. spec-test-build-install-commit-push
+### Re: watch-gmail-history-notify — gpt-5
+
+Implemented and pushed `#watch-gmail-history-notify` in Corky.
+
+Change summary:
+- `corky watch` now snapshots both IMAP `last_uid` cursors and Gmail API `last_history_id` cursors before/after each poll.
+- Gmail API history-id advances now contribute to the existing `new_count` gate, so mailbox sync and desktop notifications fire for `gmail-api` accounts too.
+- Added focused watch tests for Gmail API cursor snapshotting, history-id increases/decreases, and new Gmail API labels.
+- Updated `SPEC.md`, reference specs, watch guide, and README wording for IMAP + Gmail API watch behavior.
+
+Verification:
+- `cargo test watch::tests`
+- `make check`
+- `cargo install --path .`
+- `corky audit-docs`
+
+Committed and pushed to `btakita/corky` branch `20260413/corky-gsc`:
+- `a33da70 fix: notify watch on gmail api sync`
+<!-- agent:boundary:32775aa8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,7 +120,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#watch-gmail-history-notify] [recommended] Teach watch to count Gmail API last_history_id movement and fire mailbox sync and desktop notifications for gmail-api accounts
 - [ ] [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange
 <!-- /agent:backlog -->
 
@@ -109,4 +127,5 @@ Compacted content:
 
 <!-- agent:done -->
 - 2026-05-12 [#tokenstore-delete-preservation] [recommended] Make TokenStore saves deletion-safe so stale writers cannot restore tokens cleared by another process
+- 2026-05-12 [#watch-gmail-history-notify] [recommended] Teach watch to count Gmail API last_history_id movement and fire mailbox sync and desktop notifications for gmail-api accounts
 <!-- /agent:done -->

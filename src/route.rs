@@ -873,11 +873,24 @@ fn managed_capability_proof_status(
         return Ok(ManagedCapabilityProofStatus::NotRequired);
     }
     let prefix = format!("{}_capability_proof status=", harness.binary);
-    if crate::startup_miss::session_log_has_event_after_latest_start(
-        file,
-        session_id,
-        &format!("{}proven", prefix),
-    )? {
+    let expected_writable_contract =
+        crate::agent::codex::managed_writable_root_contract_id_for_doc(file, &fm, &global_config);
+    let proven_prefix = format!("{}proven", prefix);
+    let proven = if let Some(contract) = expected_writable_contract.as_deref() {
+        crate::startup_miss::session_log_has_event_after_latest_start_containing(
+            file,
+            session_id,
+            &proven_prefix,
+            &format!("writable_root_contract={contract}"),
+        )?
+    } else {
+        crate::startup_miss::session_log_has_event_after_latest_start(
+            file,
+            session_id,
+            &proven_prefix,
+        )?
+    };
+    if proven {
         return Ok(ManagedCapabilityProofStatus::Proven);
     }
     if crate::startup_miss::session_log_has_event_after_latest_start(
@@ -6931,6 +6944,39 @@ mod tests {
         doc
     }
 
+    fn write_codex_writable_proof_status_fixture(
+        dir: &std::path::Path,
+        session_id: &str,
+        event: &str,
+    ) -> (std::path::PathBuf, String) {
+        std::fs::create_dir_all(dir.join(".agent-doc/logs")).unwrap();
+        let writable = dir.join("writable-root");
+        std::fs::create_dir_all(&writable).unwrap();
+        let writable = writable.canonicalize().unwrap();
+        let doc = dir.join("session.md");
+        std::fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: route-proof-status\nagent: codex\ncodex_args: \"--add-dir {}\"\n---\n",
+                writable.display()
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(".agent-doc/logs")
+                .join(format!("{session_id}.log")),
+            format!(
+                "[1] session_start file={} pane=%1 session={}\n[2] {}\n",
+                doc.display(),
+                session_id,
+                event
+            ),
+        )
+        .unwrap();
+        let contract = crate::agent::codex::writable_root_contract_id(&[writable]).unwrap();
+        (doc, contract)
+    }
+
     #[test]
     fn managed_capability_proof_status_tracks_pending_and_failed() {
         let dir = tempfile::tempdir().unwrap();
@@ -6955,6 +7001,35 @@ mod tests {
         assert_eq!(
             managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
             ManagedCapabilityProofStatus::Failed
+        );
+    }
+
+    #[test]
+    fn managed_capability_proof_status_requires_matching_writable_root_contract() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let session_id = "route-writable-proof-status";
+        let (doc, contract) = write_codex_writable_proof_status_fixture(
+            dir.path(),
+            session_id,
+            "codex_capability_proof status=proven network=not_required network_probe=not_required ssh_targets=0 writable_roots=1",
+        );
+
+        assert_eq!(
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
+            ManagedCapabilityProofStatus::Missing
+        );
+
+        let (doc, _) = write_codex_writable_proof_status_fixture(
+            dir.path(),
+            session_id,
+            &format!(
+                "codex_capability_proof status=proven network=not_required network_probe=not_required ssh_targets=0 writable_roots=1 writable_root_contract={contract}"
+            ),
+        );
+        assert_eq!(
+            managed_capability_proof_status(&doc, session_id, &HarnessConfig::codex()).unwrap(),
+            ManagedCapabilityProofStatus::Proven
         );
     }
 

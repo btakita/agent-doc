@@ -1202,14 +1202,36 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
     ) {
         return "not_required".to_string();
     }
-    if let Err(err) = crate::startup_miss::session_log_has_event_after_latest_start(
+    let expected_writable_contract = crate::agent::codex::managed_writable_root_contract_id_for_doc(
         &ctx.canonical_file,
-        &ctx.session_id,
-        &format!("{}_capability_proof status=proven", ctx.harness),
-    ) {
+        &fm,
+        &global_config,
+    );
+    let proven_prefix = format!("{}_capability_proof status=proven", ctx.harness);
+    let proven_result = if let Some(contract) = expected_writable_contract.as_deref() {
+        crate::startup_miss::session_log_has_event_after_latest_start_containing(
+            &ctx.canonical_file,
+            &ctx.session_id,
+            &proven_prefix,
+            &format!("writable_root_contract={contract}"),
+        )
+    } else {
+        crate::startup_miss::session_log_has_event_after_latest_start(
+            &ctx.canonical_file,
+            &ctx.session_id,
+            &proven_prefix,
+        )
+    };
+    if let Err(err) = proven_result {
         return format!("unknown ({err})");
     }
+    if matches!(proven_result, Ok(true)) {
+        return "proven".to_string();
+    }
     for status in ["proven", "failed", "pending"] {
+        if status == "proven" && expected_writable_contract.is_some() {
+            continue;
+        }
         match crate::startup_miss::session_log_has_event_after_latest_start(
             &ctx.canonical_file,
             &ctx.session_id,

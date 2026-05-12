@@ -50,7 +50,7 @@
 //! - send_fork_args: verifies fork (resume --last) command
 
 use anyhow::Result;
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::io::BufRead;
 use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
@@ -311,6 +311,55 @@ fn add_dirs_from_args(args: &[String]) -> Vec<PathBuf> {
         }
     }
     dirs
+}
+
+fn resolved_codex_agent_args_for_contract(
+    fm: &Frontmatter,
+    global_config: &crate::config::Config,
+) -> Option<String> {
+    fm.agent_args
+        .clone()
+        .or_else(|| fm.codex_args.clone())
+        .or_else(|| global_config.agent_args.clone())
+        .or_else(|| global_config.codex_args.clone())
+}
+
+fn normalized_writable_root_strings(roots: &[PathBuf]) -> Vec<String> {
+    let mut normalized = BTreeSet::new();
+    for root in roots {
+        let path = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        normalized.insert(path.to_string_lossy().into_owned());
+    }
+    normalized.into_iter().collect()
+}
+
+pub(crate) fn writable_root_contract_id(roots: &[PathBuf]) -> Option<String> {
+    let normalized = normalized_writable_root_strings(roots);
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(crate::snapshot::doc_hash_from_str(&normalized.join("\n")))
+}
+
+pub(crate) fn managed_writable_roots_for_doc(
+    file: &Path,
+    fm: &Frontmatter,
+    global_config: &crate::config::Config,
+) -> Vec<PathBuf> {
+    let mut args = Vec::new();
+    if let Some(raw_args) = resolved_codex_agent_args_for_contract(fm, global_config) {
+        args.extend(raw_args.split_whitespace().map(String::from));
+    }
+    crate::agent::append_workspace_access_args("codex", &mut args, file);
+    add_dirs_from_args(&args)
+}
+
+pub(crate) fn managed_writable_root_contract_id_for_doc(
+    file: &Path,
+    fm: &Frontmatter,
+    global_config: &crate::config::Config,
+) -> Option<String> {
+    writable_root_contract_id(&managed_writable_roots_for_doc(file, fm, global_config))
 }
 
 fn proof_status_label(required: bool, proven: bool) -> &'static str {
@@ -831,6 +880,7 @@ pub(crate) fn prove_managed_session_capabilities(
     }
 
     let writable_roots = add_dirs_from_args(args);
+    let writable_root_contract = writable_root_contract_id(&writable_roots);
     let phase_start = Instant::now();
     for root in &writable_roots {
         prove_writable_root(root)?;
@@ -846,7 +896,7 @@ pub(crate) fn prove_managed_session_capabilities(
     timings.total = total_start.elapsed();
 
     Ok(Some(format!(
-        "{}_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={} {}",
+        "{}_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={}{} {}",
         harness,
         proof_status_label(network_required, network_required),
         if network_required {
@@ -855,7 +905,10 @@ pub(crate) fn prove_managed_session_capabilities(
             "not_required"
         },
         fm.required_ssh_targets.len(),
-        writable_roots.len(),
+        normalized_writable_root_strings(&writable_roots).len(),
+        writable_root_contract
+            .map(|contract| format!(" writable_root_contract={contract}"))
+            .unwrap_or_default(),
         timings.event_fields()
     )))
 }
@@ -984,6 +1037,19 @@ impl Codex {
         self.apply_env_overrides(&mut cmd);
 
         cmd
+    }
+
+    fn should_fresh_start_resume_for_writable_roots(&self, session_id: Option<&str>) -> bool {
+        session_id.is_some() && !add_dirs_from_args(&self.base_args).is_empty()
+    }
+
+    fn log_writable_root_resume_fresh_start(&self) {
+        let count = normalized_writable_root_strings(&add_dirs_from_args(&self.base_args)).len();
+        eprintln!(
+            "[agent] codex resume session cannot accept the current writable-root contract ({} root{}); starting a fresh `codex exec` session with the full --add-dir set",
+            count,
+            if count == 1 { "" } else { "s" }
+        );
     }
 
     fn run_ssh_probe(&self, args: &[String]) -> Result<SshProbeOutcome> {
@@ -1366,8 +1432,21 @@ impl Agent for Codex {
             .as_ref()
             .map(|capability| capability.match_terms.as_slice())
             .unwrap_or(&[]);
-        let mut parsed = self.send_once(prompt, session_id, model, required_ssh_match_terms)?;
+        let effective_session_id = if self.should_fresh_start_resume_for_writable_roots(session_id)
+        {
+            self.log_writable_root_resume_fresh_start();
+            None
+        } else {
+            session_id
+        };
+        let mut parsed = self.send_once(
+            prompt,
+            effective_session_id,
+            model,
+            required_ssh_match_terms,
+        )?;
         if session_id.is_some()
+            && effective_session_id.is_some()
             && (parsed.saw_resume_capability_drift || parsed.required_ssh_failure.is_some())
         {
             if parsed.saw_resume_capability_drift {
@@ -1410,7 +1489,14 @@ impl StreamingAgent for Codex {
     ) -> Result<Box<dyn Iterator<Item = Result<StreamChunk>>>> {
         let _ = fork;
         let required_ssh = self.prove_required_ssh_capability()?;
-        let process = self.spawn_stream_process(prompt, session_id, model)?;
+        let effective_session_id = if self.should_fresh_start_resume_for_writable_roots(session_id)
+        {
+            self.log_writable_root_resume_fresh_start();
+            None
+        } else {
+            session_id
+        };
+        let process = self.spawn_stream_process(prompt, effective_session_id, model)?;
 
         Ok(Box::new(CodexStreamIterator {
             lines: process.lines,
@@ -1422,12 +1508,12 @@ impl StreamingAgent for Codex {
             backend: self.clone(),
             prompt: prompt.to_string(),
             model: model.map(|m| m.to_string()),
-            allow_resume_capability_retry: session_id.is_some(),
+            allow_resume_capability_retry: effective_session_id.is_some(),
             retried_fresh: false,
             yielded_agent_content: false,
             saw_final_chunk: false,
             buffered_chunks: VecDeque::new(),
-            buffer_required_ssh_chunks: session_id.is_some() && required_ssh.is_some(),
+            buffer_required_ssh_chunks: effective_session_id.is_some() && required_ssh.is_some(),
             required_ssh_match_terms: required_ssh
                 .map(|capability| capability.match_terms)
                 .unwrap_or_default(),
@@ -2299,6 +2385,79 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
         assert!(event.contains("timings_ms="), "{event}");
         assert!(event.contains("writable_launcher:"), "{event}");
         assert!(event.contains("writable_child:"), "{event}");
+    }
+
+    #[test]
+    fn managed_capability_proof_records_writable_root_contract() {
+        let dir = TempDir::new().unwrap();
+        let (_script_dir, script) = write_fake_codex_script(&format!(
+            r#"#!/bin/sh
+cat >/dev/null
+printf '%s\n' '{{"type":"thread.started","thread_id":"probe-thread"}}'
+printf '%s\n' '{{"type":"item.completed","item":{{"type":"command_execution","command":"sh -lc probe","aggregated_output":"{}\n","exit_code":0}}}}'
+printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
+"#,
+            CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER
+        ));
+        let root = dir.path().canonicalize().unwrap();
+        let args = vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "--add-dir".to_string(),
+            root.to_string_lossy().into_owned(),
+        ];
+        let fm = Frontmatter::default();
+        let env = std::collections::HashMap::new();
+        let expected_contract = writable_root_contract_id(&[root]).unwrap();
+
+        let event = prove_managed_session_capabilities(
+            &script,
+            &args,
+            &env,
+            &fm,
+            &crate::config::Config::default(),
+            "codex",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(
+            event.contains(&format!("writable_root_contract={expected_contract}")),
+            "{event}"
+        );
+    }
+
+    #[test]
+    fn send_fresh_exec_when_resume_has_writable_add_dirs() {
+        let dir = TempDir::new().unwrap();
+        let (_script_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+if [ "${2:-}" = "resume" ]; then
+  printf '%s\n' 'resume path must not be used when --add-dir roots are required' >&2
+  exit 44
+fi
+cat >/dev/null
+printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"fresh response"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{}}'
+"#,
+        );
+        let codex = Codex::new(
+            Some(script),
+            Some(vec![
+                "exec".to_string(),
+                "--json".to_string(),
+                "--add-dir".to_string(),
+                dir.path().to_string_lossy().into_owned(),
+            ]),
+        );
+
+        let response = codex
+            .send("prompt", Some("resume-123"), false, None)
+            .unwrap();
+
+        assert_eq!(response.text, "fresh response");
+        assert_eq!(response.session_id.as_deref(), Some("fresh-thread"));
     }
 
     #[test]

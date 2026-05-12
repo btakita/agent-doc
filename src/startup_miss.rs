@@ -387,6 +387,26 @@ pub fn session_log_has_event_after_latest_start(
     session_id: &str,
     event_prefix: &str,
 ) -> Result<bool> {
+    session_log_has_event_after_latest_start_matching(file, session_id, event_prefix, |_| true)
+}
+
+pub fn session_log_has_event_after_latest_start_containing(
+    file: &Path,
+    session_id: &str,
+    event_prefix: &str,
+    required_fragment: &str,
+) -> Result<bool> {
+    session_log_has_event_after_latest_start_matching(file, session_id, event_prefix, |event| {
+        event.contains(required_fragment)
+    })
+}
+
+fn session_log_has_event_after_latest_start_matching(
+    file: &Path,
+    session_id: &str,
+    event_prefix: &str,
+    matches_event: impl Fn(&str) -> bool,
+) -> Result<bool> {
     let Some(path) = log_path(file, session_id)? else {
         return Ok(false);
     };
@@ -408,7 +428,7 @@ pub fn session_log_has_event_after_latest_start(
             found_after_latest_start = false;
             continue;
         }
-        if event.starts_with(event_prefix) {
+        if event.starts_with(event_prefix) && matches_event(event) {
             found_after_latest_start = true;
         }
     }

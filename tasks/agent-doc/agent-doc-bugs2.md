@@ -29,64 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-054123.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-062109.md`*
 
 Compacted content:
-- Archived 4 response topic(s): JB Clear Session Context busy warning; jbclearbusyactions; log review next steps; 1 more
+- Archived 2 response topic(s): base-index repair; JetBrains Clear Session Context busy failure
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#baseindexrepair]. spec-test-build-install-commit-push
-### Re: base-index repair — gpt-5
-
-Implemented `#baseindexrepair`.
-
-Preflight no longer writes `.agent-doc/state/base-index-repair.count` and waits for a second detection. When `check_layout()` reports missing tmux window index `0`, preflight now clears any stale deferred-repair counter, runs `repair_layout` immediately in the active tmux session, and re-runs the layout check so the emitted `layout_issues` describe the post-repair state. If automatic repair cannot run, stderr names the explicit `agent-doc session doctor <FILE> --repair` action.
-
-Updated specs/docs/changelog for the new preflight behavior and added regression coverage for stale counter cleanup outside tmux.
-
-Verification:
-
-- `cargo test maybe_auto_repair_base_index`
-- `cargo test preflight_output_includes_layout_issues`
-- `make check`
-- `cargo build --release`
-- `cargo install --path . --force`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits pushed:
-
-- `src/agent-doc`: `557aee1 fix: repair base index during preflight`
-- parent `agent-loop`: `b642f2120 chore: update agent-doc base-index repair`
-
-I left the pre-existing unrelated dirty files in `src/agent-doc` unstaged.
-❯ Seeing an error when calling JB `Clear Session Context`:
-```
-agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %13 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="● Tip Override global tool settings per agent configuration"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
-```
-❯ spec-test-build-install-commit-push
-### Re: JetBrains Clear Session Context busy failure — gpt-5
-
-Fixed the JetBrains parser path for this repro. The plugin now recognizes the wrapped failure shape:
-
-```text
-agent-doc command failed (exit 1): Error: session_clear refused ... alive-busy
-```
-
-and still parses it as the protected busy-pane result, so Clear Session Context should show the typed running-session warning with Refresh and retry, Interrupt and clear, Show status, and Copy details instead of the generic command-failed error. I also made the tail parser tolerate quoted and parenthesized pane output.
-
-Committed and pushed:
-
-- `src/agent-doc`: `0db5667 fix: parse wrapped JetBrains busy clear failures`
-- parent `agent-loop`: `0a7f57d24 chore: update agent-doc JetBrains clear fix`
-
-Verification completed:
-
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test`
-- `make check`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew buildPlugin signPlugin`
-- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.112-signed.zip` to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`
-
-The install reported that IntelliJ needs a restart to activate the plugin, so I added a recommended follow-up to restart and live-retest the busy-pane warning path after activation. I left the pre-existing unrelated dirty files in `src/agent-doc`, `src/boost-client`, `src/corky`, `src/session-share`, and `mail` untouched.
-<!-- agent:boundary:9e25f651 -->
+<!-- agent:boundary:09a822be -->
 <!-- /agent:exchange -->
 ###
 <!--

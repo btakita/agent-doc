@@ -118,7 +118,37 @@ Commits:
 
 - Corky: `d12daf4` (`fix: decode oauth callback params`) pushed to `origin/20260413/corky-gsc`.
 - Parent `agent-loop`: `b6c4d8f7c` (`corky: decode oauth callback params`) records the `src/corky` submodule pointer; parent push follows this mandatory document closeout.
-<!-- agent:boundary:5d917f47 -->
+❯ release + publish
+### Re: release + publish — gpt-5
+
+Released Corky `v0.28.2` and pushed the release work.
+
+What shipped:
+- Published `corky v0.28.2` to crates.io.
+- Pushed Corky `main` through `a3925b00d55e06cc5f95f50970ef0319fa0dcd4d`.
+- Pushed tag `v0.28.2` at `946eab499f41f54c8311fcd194574325f324ddae`.
+- GitHub release is live: `https://github.com/btakita/corky/releases/tag/v0.28.2`.
+- Local install completed with GPU support: `Installed with GPU support (transcribe-cuda).`
+- Updated and pushed the parent `agent-loop` submodule pointer through `066a4e342 corky: update PyPI workflow repair`.
+
+I first published `v0.28.1`, but its GitHub CI/release surfaced two release-path defects: a Clippy warning in OAuth callback parsing and a Windows release build failure from a Unix-only permissions value. I superseded it with `v0.28.2`; `v0.28.1` remains on crates.io but should be treated as superseded.
+
+Verification completed for `v0.28.2`:
+- `cargo fmt`
+- `cargo clippy --features vendored-openssl -- -D warnings`
+- `cargo test --test test_social_auth`
+- `make precommit`
+- `cargo publish --dry-run`
+- `make release`
+- `make install`
+- `cargo publish`
+- GitHub CI run `25722755708`: success
+- GitHub Release run `25722756156`: success, including Windows and CUDA Linux artifacts
+
+PyPI status: not published. I repaired the wheel workflow enough that the full PyPI wheel matrix succeeded for Linux, macOS arm64, macOS x86_64, Windows, and sdist in run `25724471526`, but the final publish job failed at PyPI trusted publishing. PyPI rejected the OIDC claim for `repo:btakita/corky:environment:pypi` with `invalid-publisher`, using workflow ref `btakita/corky/.github/workflows/pypi.yml@refs/heads/main`. The current PyPI index still reports latest `corky` as `0.27.0`.
+
+The remaining PyPI blocker is external configuration, not a build failure: configure the PyPI trusted publisher for repository `btakita/corky`, workflow `.github/workflows/pypi.yml`, environment `pypi` or provide an upload token/secret path, then rerun the PyPI workflow. I left the workflow fixes on `main` so the next authorized publish attempt can reuse the now-green build matrix.
+<!-- agent:boundary:a7510156 -->
 <!-- /agent:exchange -->
 ###
 <!--

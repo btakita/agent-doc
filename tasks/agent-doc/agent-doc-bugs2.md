@@ -146,14 +146,43 @@ Commits pushed:
 - parent commit `ef715a6a9` (`chore: update agent-doc busy clear UX`) to `main`
 
 No new follow-up items came out of this fix.
-<!-- agent:boundary:86407113 -->
-<!-- /agent:exchange -->
-<!--
 A JB command on corky.md had an error. Navigating to corky.md should autostart agent-doc session actor + supervisor.
 ```
 agent-doc command failed (exit 1): Error: project controller command `operator_command` failed: operator command `session_clear` rejected for /home/brian/work/btakita/agent-loop/tasks/software/corky.md: stage=missing_actor
 ```
 spec-test-build-install-commit-push
+### Re: JetBrains corky navigation missing actor — gpt-5
+
+Implemented the JetBrains navigation/autostart fix for the `corky.md` `missing_actor` failure.
+
+Root cause: the JetBrains tab-sync planner deduped an exact visible/focused markdown state before running the guarded background reconciliation. A later `agent-doc focus` can only select an existing pane; it cannot cold-start the missing session actor/supervisor. That let `Clear Session Context` hit `stage=missing_actor` after navigating to a markdown file that looked unchanged to the planner.
+
+The plugin now marks real markdown selection events as `forceReconcile`, so they still run the safe-passive background sync even when the visible/focused state is otherwise identical. The sync remains non-disruptive, but it can perform the expected safe cold-start path for a missing actor/supervisor before IDE commands need that session.
+
+Updated JetBrains/shared specs, README, version notes, and bumped the JetBrains plugin to `0.2.110`. Added regression coverage for exact-state markdown navigation still reconciling missing actors.
+
+Verification passed:
+- `./gradlew test --tests com.github.btakita.agentdoc.EditorTabSyncListenerTest`
+- `./gradlew test buildPlugin signPlugin`
+- `git -C src/agent-doc diff --check`
+- `make plugin-version-check`
+- `cargo build`
+- `make check`
+- `make install`
+- `printf '18\\n' | agent-doc plugin install --local jetbrains`
+
+Commits pushed:
+- `src/agent-doc` commit `c60eb73` (`fix: reconcile JetBrains markdown navigation`) to `20260422/codex-agent-backend`
+- parent commit `d848f8541` (`chore: update JetBrains navigation sync`) to `main`
+
+No new follow-up items came out of this fix.
+<!-- agent:boundary:2a41f75c -->
+<!-- /agent:exchange -->
+<!--
+Error with JB `Clear Session Context`
+```
+Session is still running for tasks/root.md. Pane %2 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop/src/session-share · Context 9% used
+```
 ---
 Seeing an error when calling JB `Clear Session Context`:
 ```

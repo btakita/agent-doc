@@ -29,76 +29,17 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260511-224836.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-001246.md`*
 
 Compacted content:
-- Archived 5 response topic(s): tmux window missing; #next-steps; do [#idprefix]; 2 more
+- Archived 3 response topic(s): prior session running state; `#routereap`; route-owned reap purpose
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB Plugin `Run Agent Doc` had an error after running `/clear` on root.md:
-```
-resync: stash pane %11 is registered in its own project root — skipping kill
-resync: stash pane %7 is registered in its own project root — skipping kill
-[route] target tmux session: 1
-Error: authoritative actor generation 22 for tasks/root.md owns pane %12 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
-```
-❯ spec-test-build-install-commit-push
-### Re: prior session running state — gpt-5.5
-
-Short answer: the second previous session by live start order, `src/boost-client/tasks/monsterrodholders.md`, does **not** appear to still be running a turn. Its OpenCode/agent-doc process and tmux pane are still alive, but pane `%39` is sitting at the OpenCode prompt after reporting the deploy/cache-purge turn complete.
-
-The adjacent `src/session-share/tasks/root.md` session is different: its Claude process is still alive, and pane `%35` still shows an in-progress turn with child exploration work visible. So if you meant `root.md`, yes, that one appears to still be mid-turn; if you meant the older MonsterRodHolders session, no, it is alive but idle.
-
-I captured this as a bug because the current tooling makes "session still exists" too easy to confuse with "turn still running." Plan: `tasks/agent-doc/plan-incorrect-close-running-turn-status.md`.
-❯ Please complete:
-❯ JB Plugin `Run Agent Doc` had an error after running `/clear` on root.md:
-```
-resync: stash pane %11 is registered in its own project root — skipping kill
-resync: stash pane %7 is registered in its own project root — skipping kill
-[route] target tmux session: 1
-Error: authoritative actor generation 22 for tasks/root.md owns pane %12 but route will not inject a new trigger because the authoritative actor is still starting. Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/root.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/root.md`.
-```
-❯ spec-test-build-install-commit-push
-❯ do [#routereap]. spec-test-build-install-commit-push
-### Re: `#routereap` — gpt-5
-
-Implemented `#routereap` in `src/agent-doc` and marked it done.
-
-The route-owned completion thread now makes an explicit reap decision after a committed cycle. In auto mode it keeps the pane alive when the document still has live backlog items, queued prompts, dirty post-commit edits, or an unresolved exchange-tail prompt; otherwise it preserves the one-shot reap behavior. The decision is logged to both the session log and ops log with policy, decision, reason, cycle, and event provenance.
-
-I also added a hidden `agent-doc start --route-owned-reap-policy <auto|reap-after-commit|keep-alive>` control for explicit overrides, plus regression coverage for live backlog, queue, dirty document, one-shot empty document, explicit reap override, and exchange-tail prompt detection.
-
-Verification/build/install completed:
-- `cargo test --bin agent-doc start::tests::route_owned`
-- `make check`
-- `make build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits:
-- `src/agent-doc`: `f41aeb7` (`fix: keep route-owned sessions alive`) pushed to `origin/20260422/codex-agent-backend`
-- superproject gitlink: `29a144df2` (`agent-doc: keep route-owned sessions alive`)
-
-I left the pre-existing unrelated dirty files in `src/agent-doc`, `src/boost-client`, and the active session document outside the manual implementation commit.
-❯ What is the purpose of having a reap in finalize?
-### Re: route-owned reap purpose — gpt-5
-
-The reap exists to clean up a **route-owned, one-shot pane** after its document cycle has actually crossed the durable closeout boundary.
-
-More concretely: `finalize` writes the response, commits the session document, and records the cycle as `Committed`. A route-owned `agent-doc start --route-owned` supervisor watches that cycle state. When it sees a new committed cycle, it can stop the child harness and kill the tmux pane that was created only to service that route.
-
-The purpose is not to remove backlog work. It is pane/session cleanup:
-
-- avoid leaving cold-started route panes idle forever;
-- avoid stale authoritative actor records pointing at a pane whose only job is done;
-- avoid future routes dispatching into the wrong leftover pane;
-- keep failed startup panes from accumulating when a route attempt never becomes a real session.
-
-The bug in `#routereap` was that this behavior was too blunt for multi-turn interactive documents. A session with live backlog, queued prompts, dirty post-commit edits, or an unresolved exchange-tail prompt is not really done just because one response committed. In those cases the route-owned pane should stay alive. The corrected model is: reap is still useful for true one-shot route panes, but `auto` reap must first check for session-liveness signals.
-<!-- agent:boundary:f68500f6 -->
+<!-- agent:boundary:de7c8d38 -->
 <!-- /agent:exchange -->
 ###
 <!--
-On the tmux pane autostart, agent-doc immediately restarts the process. The restart
+I don't have a good track on the lifecycle logic that starts panes, kills panes, edge cases, etc.
+Can we make a nested list and diagram of the lifecycle logic?
 ---
 JB `Clear Session Context` had an error:
 ```

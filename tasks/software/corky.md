@@ -92,7 +92,24 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): Corky OAuth auth and token lifetime
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:e1c0bc63 -->
+❯ do [#tokenstore-delete-preservation]. spec-test-build-install-commit-push
+### Re: tokenstore-delete-preservation — gpt-5
+
+Implemented and pushed `#tokenstore-delete-preservation`.
+
+Corky now keeps baseline/dirty/deleted key metadata inside `TokenStore`, so a stale writer that loaded an old `tokens.json` can save an unrelated token without restoring a token another process cleared. Explicit upserts still re-add a token intentionally, and explicit removals stay deletion-aware. The spec notes the new deletion-safe merge behavior.
+
+Commit: `b1e4c5a fix: preserve token deletions across stale saves`, pushed to `origin/20260413/corky-gsc`.
+
+Verification completed:
+- `cargo test token_store`
+- `cargo fmt --check`
+- `make precommit`
+- `make build`
+- `make install` (installed with `transcribe-cuda`)
+
+`make precommit` initially failed only because `audit-docs` detected instruction-file mtimes older than the changed source. I refreshed the audited instruction surfaces using the project’s documented staleness-touch repair path, then reran `make precommit` successfully.
+<!-- agent:boundary:e174ba78 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,7 +118,12 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tokenstore-delete-preservation] [recommended] Make TokenStore saves deletion-safe so stale writers cannot restore tokens cleared by another process
 - [ ] [#watch-gmail-history-notify] [recommended] Teach watch to count Gmail API last_history_id movement and fire mailbox sync and desktop notifications for gmail-api accounts
 - [ ] [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange
 <!-- /agent:backlog -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-05-12 [#tokenstore-delete-preservation] [recommended] Make TokenStore saves deletion-safe so stale writers cannot restore tokens cleared by another process
+<!-- /agent:done -->

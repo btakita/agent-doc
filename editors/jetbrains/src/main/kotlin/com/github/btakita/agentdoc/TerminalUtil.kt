@@ -19,6 +19,10 @@ object TerminalUtil {
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
     internal const val STARTING_ACTOR_ROUTE_MAX_ATTEMPTS = 4
     private val STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
+    private val BUSY_CLEAR_REFUSAL_REGEX = Regex(
+        """session_clear refused for (.+?) because pane (\S+) is alive-busy \(source=([^,]+), current_command=([^,]+), tail=(?:"([^"]*)"|([^)]*))\)""",
+        RegexOption.DOT_MATCHES_ALL,
+    )
 
     internal interface InFlightRouteHandle {
         fun isAlive(): Boolean
@@ -100,6 +104,14 @@ object TerminalUtil {
             }
         }
     }
+
+    internal data class BusySessionClearRefusal(
+        val file: String,
+        val pane: String,
+        val source: String,
+        val currentCommand: String,
+        val tail: String,
+    )
 
     internal val inFlightRouteRegistry = InFlightRouteRegistry()
 
@@ -414,6 +426,17 @@ object TerminalUtil {
             onSuccess = { relativePath, output ->
                 showHint(project, output.ifBlank { "Cleared session context for $relativePath" })
             },
+            onFailure = { relativePath, exitCode, output ->
+                val busyRefusal = parseBusySessionClearRefusal(output)
+                if (busyRefusal != null) {
+                    notifyBusySessionClearBlocked(project, file, relativePath, busyRefusal, output)
+                } else {
+                    notifyError(
+                        project,
+                        "agent-doc command failed (exit $exitCode):\n$output",
+                    )
+                }
+            },
             onComplete = onComplete,
         )
     }
@@ -438,6 +461,7 @@ object TerminalUtil {
         args: List<String>,
         startedMessage: String,
         onSuccess: (String, String) -> Unit,
+        onFailure: ((String, Int, String) -> Unit)? = null,
         onComplete: (() -> Unit)? = null,
     ) {
         val (cwd, relativePath) = resolveProject(project, file)
@@ -449,6 +473,7 @@ object TerminalUtil {
             command = cmd,
             startedMessage = startedMessage,
             onSuccess = onSuccess,
+            onFailure = onFailure,
             onComplete = onComplete,
         )
     }
@@ -459,6 +484,7 @@ object TerminalUtil {
         command: List<String>,
         startedMessage: String,
         onSuccess: (String, String) -> Unit,
+        onFailure: ((String, Int, String) -> Unit)? = null,
         onComplete: (() -> Unit)? = null,
     ) {
         val (cwd, relativePath) = resolveProject(project, file)
@@ -475,10 +501,11 @@ object TerminalUtil {
                     val output = process.inputStream.bufferedReader().readText().trim()
                     val exitCode = process.waitFor()
                     if (exitCode != 0) {
-                        notifyError(
-                            project,
-                            "agent-doc command failed (exit $exitCode):\n$output",
-                        )
+                        onFailure?.invoke(relativePath, exitCode, output)
+                            ?: notifyError(
+                                project,
+                                "agent-doc command failed (exit $exitCode):\n$output",
+                            )
                     } else {
                         onSuccess(relativePath, output)
                     }
@@ -535,6 +562,20 @@ object TerminalUtil {
     internal fun sessionStatusSuccessMessage(relativePath: String, output: String): String =
         output.ifBlank { "Loaded session status for $relativePath" }
 
+    internal fun parseBusySessionClearRefusal(output: String): BusySessionClearRefusal? {
+        val match = BUSY_CLEAR_REFUSAL_REGEX.find(output) ?: return null
+        val tail = match.groupValues.getOrNull(5)
+            ?.takeIf { it.isNotBlank() }
+            ?: match.groupValues.getOrNull(6).orEmpty()
+        return BusySessionClearRefusal(
+            file = match.groupValues[1],
+            pane = match.groupValues[2],
+            source = match.groupValues[3],
+            currentCommand = match.groupValues[4],
+            tail = tail,
+        )
+    }
+
     internal fun isStartingActorRouteFailure(output: String): Boolean {
         return output.contains("authoritative actor generation") &&
             output.contains("route will not inject a new trigger") &&
@@ -572,6 +613,56 @@ object TerminalUtil {
 
     fun notifyWarning(project: Project, content: String) {
         notify(project, content, NotificationType.WARNING)
+    }
+
+    private fun notifyBusySessionClearBlocked(
+        project: Project,
+        file: VirtualFile,
+        relativePath: String,
+        refusal: BusySessionClearRefusal,
+        rawOutput: String,
+    ) {
+        val summary = buildBusySessionClearBlockedMessage(relativePath, refusal)
+        try {
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(summary, NotificationType.WARNING)
+            notification.isImportant = true
+            notification.addAction(NotificationAction.createSimple("Retry clear") {
+                clearSessionContext(project, file)
+            })
+            notification.addAction(NotificationAction.createSimple("Show status") {
+                showSessionStatus(project, file)
+            })
+            notification.addAction(NotificationAction.createSimple("Copy details") {
+                CopyPasteManager.getInstance().setContents(StringSelection(rawOutput))
+                showHint(project, "Copied busy session details for $relativePath")
+            })
+            notification.notify(project)
+        } catch (_: Exception) {
+            System.err.println("[agent-doc] $summary")
+        }
+    }
+
+    internal fun buildBusySessionClearBlockedMessage(
+        relativePath: String,
+        refusal: BusySessionClearRefusal,
+    ): String = buildString {
+        append("Session is still running for ")
+        append(relativePath)
+        append(".\nPane ")
+        append(refusal.pane)
+        append(" is busy")
+        if (refusal.currentCommand.isNotBlank() && refusal.currentCommand != "unknown") {
+            append(" (")
+            append(refusal.currentCommand)
+            append(")")
+        }
+        append(". Wait for the turn to finish, then retry Clear Session Context.")
+        if (refusal.tail.isNotBlank() && refusal.tail != "unknown") {
+            append("\nLatest pane output: ")
+            append(refusal.tail)
+        }
     }
 
     private fun notify(project: Project, content: String, type: NotificationType) {

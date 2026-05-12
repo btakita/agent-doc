@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains Clear Session Context now surfaces protected busy panes as a typed running-session result.** The CLI still fails closed when direct live-pane evidence says the pane is `alive-busy`, but the JetBrains plugin now parses that refusal and shows a warning with the pane id, current command, and latest pane tail plus Retry clear, Show status, and Copy details actions instead of a raw `agent-doc command failed` notification. Updated editor specs and added parser/message regressions.
+
 - **Stale prompt-bearing preflight cycles are abandoned, not placeholder-closed.** If a pane dies after `preflight_started` before any response capture exists, and the live document still has an unresolved prompt target, `repair` now abandons the stale empty cycle after the bounded timeout instead of forcing a manual placeholder response. The prompt remains in the working document, so the next `preflight` opens a fresh cycle and handles it normally; recent empty cycles still fail closed to avoid stealing a live concurrent turn. Added cycle-state, repair, and preflight regressions. This closes `#preflight-started-recovery` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Prompt+response exchange drift now fails closed.** `session-check` now treats an uncommitted appended exchange chunk containing both a user prompt and a new assistant `### Re:` / `## Assistant` marker as uncommitted response drift instead of ignoring it as prompt-bearing local drift. Prompt-only tails still route through the prompt-tail guard. Added a regression for the SessionShare root `#rspcmt7` shape where the visible response closeout landed in `tasks/root.md` but the owning repo stayed dirty.

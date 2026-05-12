@@ -61,7 +61,7 @@ Two strategies for detecting the file's position in the editor split:
 
 - `Show Session Status` runs `agent-doc session status <relative-path>` and surfaces the exact output in an IDE notification instead of re-deriving status inside the plugin. A successful status response deletes the saved route-error file for that document because the old failure is no longer the latest observed state.
 - `Restart Supervisor Process` runs `agent-doc session restart-supervisor <relative-path>` and keeps restart ownership in the binary/supervisor path.
-- `Clear Session Context` runs `agent-doc session clear <relative-path>` so Codex/Claude clear semantics stay aligned with the binary-owned clear command path while leaving the next `Run Agent Doc` dispatch-only reroute on the same live session.
+- `Clear Session Context` runs `agent-doc session clear <relative-path>` so Codex/Claude clear semantics stay aligned with the binary-owned clear command path while leaving the next `Run Agent Doc` dispatch-only reroute on the same live session. If the binary refuses clear because the resolved pane is `alive-busy`, JetBrains parses the protected busy-pane result and shows a warning with the pane id/current command/latest tail plus Retry clear, Show status, and Copy details actions instead of surfacing the raw `agent-doc command failed` text.
 - `Copy Session Diagnostics` runs `agent-doc session doctor <relative-path>`, copies the exact output, and keeps the binary-owned diagnostics text available for bug reports.
 - Plugin verification must cover exact session-status display, `session clear` command wiring, and persistent route-failure retention for stage-specific dispatch diagnostics.
 

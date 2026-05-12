@@ -185,6 +185,41 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `busy clear refusal parses protected pane details`() {
+        val output = """
+            Error: session_clear refused for /repo/tasks/agent-doc/agent-doc-bugs2.md because pane %1 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="gpt-5.5 high - ~/work/btakita/agent-loop - Context 15% used"). Run `agent-doc session status /repo/tasks/agent-doc/agent-doc-bugs2.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
+        """.trimIndent()
+
+        val refusal = TerminalUtil.parseBusySessionClearRefusal(output)
+
+        assertNotNull(refusal)
+        assertEquals("/repo/tasks/agent-doc/agent-doc-bugs2.md", refusal!!.file)
+        assertEquals("%1", refusal.pane)
+        assertEquals("authoritative_actor", refusal.source)
+        assertEquals("agent-doc", refusal.currentCommand)
+        assertEquals("gpt-5.5 high - ~/work/btakita/agent-loop - Context 15% used", refusal.tail)
+    }
+
+    @Test
+    fun `busy clear refusal message avoids generic command failure text`() {
+        val message = TerminalUtil.buildBusySessionClearBlockedMessage(
+            relativePath = "tasks/agent-doc/agent-doc-bugs2.md",
+            refusal = TerminalUtil.BusySessionClearRefusal(
+                file = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                pane = "%1",
+                source = "authoritative_actor",
+                currentCommand = "agent-doc",
+                tail = "gpt-5.5 high - ~/work/btakita/agent-loop - Context 15% used",
+            ),
+        )
+
+        assertTrue(message.contains("Session is still running"))
+        assertTrue(message.contains("Pane %1 is busy (agent-doc)"))
+        assertTrue(message.contains("retry Clear Session Context"))
+        assertFalse(message.contains("agent-doc command failed"))
+    }
+
+    @Test
     fun `restart supervisor uses explicit supervisor session command`() {
         assertEquals(
             listOf(

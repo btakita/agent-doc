@@ -83,7 +83,24 @@ Planned `#next-steps` into backlog:
 - Claude routing is functioning, but its recent robert-ross routes only record accepted direct submit proof, not the stronger Codex-style consumed/start proof. I captured that as recommended proof-parity work rather than a blocker because I did not see a Claude failure in the current tail.
 
 I also closed `#nextstepscapture`; this cycle did what that item was tracking by adding concrete backlog entries instead of leaving `#next-steps` only in prose. I did not run the full suite because this cycle changed only the session document/backlog, not product code.
-<!-- agent:boundary:03f74151 -->
+❯ do [#clauderouteproof]. Also apply to opencode? spec-test-build-install-commit-push
+### Re: clauderouteproof — gpt-5
+
+Implemented `#clauderouteproof` by making dispatch-only proof scope explicit across harnesses.
+
+`route --dispatch-only` now logs both `proof` and `proof_scope`. Codex keeps the stronger hook-backed `dispatch_start` scope when prompt-submit tracking proves `consumed` or `submitted`; Claude Code and OpenCode are now clearly labeled `proof=accepted proof_scope=accepted_only` unless/until they gain a comparable dispatch-start hook. That answers the OpenCode question: yes, the accepted-only semantics apply to OpenCode as well as Claude Code.
+
+Updated the route tests, session tmux spec, top-level docs, bundled skill text, generated harness instruction surfaces, and changelog. Committed and pushed `src/agent-doc` as `81265e5` (`fix: label dispatch-only proof scope`), then committed and pushed the superproject submodule/instruction-surface update as `e3adf474e` (`chore: refresh dispatch proof surfaces`). I left pre-existing unrelated dirty work in `src/agent-doc`, `src/corky`, `src/session-share`, and `mail` untouched.
+
+Verification and install completed:
+- `cargo fmt --check`
+- `cargo test dispatch_only_sent_log_marks`
+- `make check` (run twice; both passed)
+- `make build-release` (run twice; both passed)
+- `make install` (run twice; installed `agent-doc v0.33.16` and `libagent_doc-0.33.16.so`)
+- `cargo run --quiet -- audit-docs`
+- `make plugin-version-check`
+<!-- agent:boundary:6e3260a0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -123,7 +140,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#clauderouteproof] [recommended] #next-steps: Add Claude dispatch proof parity or explicit accepted-only semantics; current robert-ross Claude routes record direct_pane_submit proof=accepted without dispatch_start_proof, so operator success is weaker than Codex consumed-proof routing. Plan: add a focused route proof check or document accepted-only as a deliberate harness limit.
 - [ ] [#baseindexrepair] [recommended] #next-steps: Make base-index layout repair deterministic for the active preflight or surface an immediate action; current preflight detected window index 0 missing in session 0, wrote state/base-index-repair.count=1, and deferred repair until the next detection.
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
@@ -242,4 +258,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#jbclearbusyux] #agent-doc-bug: JetBrains Clear Session Context surfaces the raw session_clear refused error for protected alive-busy panes; keep the fail-closed guard but add typed IDE UX plus explicit interrupt/wait flows. Plan: tasks/agent-doc/plan-jb-clear-session-busy-pane-ux.md
 - 2026-05-12 [#jbclearbusyactions] #agent-doc-bug: JetBrains Clear Session Context protected busy warning still leaves no refresh-and-retry or intentional interrupt-and-clear action, and current tasks/root.md evidence shows live pane idle while supervisor/controller projection remains busy. Plan: tasks/agent-doc/plan-jb-clear-session-busy-actions.md
 - 2026-05-12 [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
+- 2026-05-12 [#clauderouteproof] [recommended] #next-steps: Add Claude dispatch proof parity or explicit accepted-only semantics; current robert-ross Claude routes record direct_pane_submit proof=accepted without dispatch_start_proof, so operator success is weaker than Codex consumed-proof routing. Plan: add a focused route proof check or document accepted-only as a deliberate harness limit.
 <!-- /agent:done -->

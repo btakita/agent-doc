@@ -103,13 +103,13 @@ Committed locally:
 - parent `agent-loop`: `b525e1bbf agent-doc: update clear status-only pane fix`
 
 Push will run after this binary-owned session document closeout. Unrelated dirty entries left untouched: `mail`, `src/boost-client`, and `src/session-share`.
-❯ Ran `JB Clear Context`.
+Ran `JB Clear Context`.
 ```
 Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 67% used
 ```
-❯ Refresh and retry did not work.
-❯ spec-test-build-install-commit-push
-### Re: JetBrains Clear Context busy bypass — gpt-5 (HEAD)
+Refresh and retry did not work.
+spec-test-build-install-commit-push
+### Re: JetBrains Clear Context busy bypass — gpt-5
 
 Implemented the follow-up Clear Session Context fix.
 
@@ -142,7 +142,7 @@ Committed locally:
 - parent `agent-loop`: `830fc1d5d agent-doc: update clear busy bypass fix`
 
 Push will run after this binary-owned session document closeout. Unrelated dirty entries left untouched: `mail`, `src/boost-client`, `tasks/agent-doc/plan-codex-resume-writable-root-contract.md`, and this session document until write --commit owns it.
-<!-- agent:boundary:72cfca50 -->
+<!-- agent:boundary:5ae6ca93 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -181,7 +181,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#codexresumegitdir] #agent-doc-bug: Managed Codex writable-root proof is still insufficient for reused/resumed actors. Monster Rod Holders shipping-rule turn could edit `src/boost-client/src/monsterrodholders-dev` but could not update local `.git/modules/...` metadata, so it committed from a temporary clone and left the local checkout dirty. Agent-doc must prove the live actor generation has the exact gitdir/superproject writable roots before dispatch, and fresh-start instead of `codex exec resume` when roots are missing because resume strips `--add-dir`. Plan: tasks/agent-doc/plan-codex-resume-writable-root-contract.md
 - [ ] [#va0j] [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.113, then re-test Clear Session Context against the stale-busy Codex status-only pane.
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md

@@ -1254,7 +1254,10 @@ fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> {
     }
     let prompt_marker = detect_unstarted_prompt_bearing_diff(file)?;
     let detail = match prompt_marker {
-        Some(marker) => format!("uncommitted working tree drift beyond snapshot with exchange changes; {}", marker),
+        Some(marker) => format!(
+            "uncommitted working tree drift beyond snapshot with exchange changes; {}",
+            marker
+        ),
         None => "uncommitted working tree drift beyond snapshot with exchange changes".to_string(),
     };
     Ok(Some(detail))
@@ -1281,7 +1284,17 @@ fn exchange_has_new_appended_content(snapshot: &str, current: &str) -> bool {
         }
     }
     let appended: String = current_lines[snapshot_lines.len()..].join("\n");
-    if appended.lines().any(crate::diff::text_line_looks_like_prompt_target) {
+    if appended
+        .lines()
+        .map(str::trim)
+        .any(is_exchange_response_heading)
+    {
+        return true;
+    }
+    if appended
+        .lines()
+        .any(crate::diff::text_line_looks_like_prompt_target)
+    {
         return false;
     }
     true
@@ -4463,6 +4476,73 @@ Body\n\
                 );
             }
             other => panic!("expected interrupted status for #rspcmt6, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn uncommitted_exchange_drift_detects_prompt_plus_response_append() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ previous deploy\n",
+            "### Re: previous deploy — gpt-5\n\n",
+            "Previous deploy completed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ previous deploy\n",
+            "### Re: previous deploy — gpt-5\n\n",
+            "Previous deploy completed.\n",
+            "❯ do [#rspcmt7]. spec-test-build-install-commit-push\n",
+            "### Re: SessionShare root closeout — gpt-5\n\n",
+            "BuildParty demo deployed from commit `2336083`.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, current).unwrap();
+
+        let drift = detect_uncommitted_exchange_drift(&doc)
+            .unwrap()
+            .expect("prompt+response append should count as exchange drift");
+        assert!(
+            drift.contains("uncommitted working tree drift"),
+            "unexpected drift detail: {drift}"
+        );
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    message.contains("uncommitted exchange changes")
+                        || message.contains("uncommitted working tree drift")
+                        || message.contains("direct response patchback"),
+                    "message should mention uncommitted exchange drift: {message}"
+                );
+                assert!(
+                    message.contains("agent-doc finalize")
+                        || message.contains("agent-doc write --commit"),
+                    "message should prescribe a closeout recovery command: {message}"
+                );
+            }
+            other => panic!("expected interrupted status for prompt+response drift, got {other:?}"),
         }
     }
 

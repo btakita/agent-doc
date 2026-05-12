@@ -113,7 +113,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 `agent-doc session-check <FILE>`
 
 - Verifies that the latest response cycle reached a terminal committed state and that no likely direct assistant patchback bypassed the binary-owned write path.
-- Fails on open cycle states, uncommitted visible `### Re:` / `## Assistant` patchbacks, or hidden `snapshot != HEAD` closeout drift.
+- Fails on open cycle states, uncommitted visible `### Re:` / `## Assistant` patchbacks, hidden `snapshot != HEAD` closeout drift, or committed-cycle exchange drift that appends a prompt+response pair or other new assistant response content.
 - Fails when a committed submodule document snapshot still leaves the parent repository submodule pointer uncommitted, naming the submodule path and prescribing `agent-doc commit <FILE>` recovery.
 - Fails after a committed closeout when the working tree still contains prompt-bearing user edits that were added concurrently with the write and therefore are absent from the committed snapshot.
 - Fails after a closed cycle when the live `agent:exchange` tail ends with a prompt-looking block and no later assistant response, even if the prompt already matches the committed snapshot. This prevents direct/manual implementation commits from counting as closeout when the response patchback was skipped.

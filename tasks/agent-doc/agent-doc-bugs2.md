@@ -79,10 +79,27 @@ Commits:
 - superproject gitlink: `29a144df2` (`agent-doc: keep route-owned sessions alive`)
 
 I left the pre-existing unrelated dirty files in `src/agent-doc`, `src/boost-client`, and the active session document outside the manual implementation commit.
-<!-- agent:boundary:389fa70f -->
+❯ What is the purpose of having a reap in finalize?
+### Re: route-owned reap purpose — gpt-5
+
+The reap exists to clean up a **route-owned, one-shot pane** after its document cycle has actually crossed the durable closeout boundary.
+
+More concretely: `finalize` writes the response, commits the session document, and records the cycle as `Committed`. A route-owned `agent-doc start --route-owned` supervisor watches that cycle state. When it sees a new committed cycle, it can stop the child harness and kill the tmux pane that was created only to service that route.
+
+The purpose is not to remove backlog work. It is pane/session cleanup:
+
+- avoid leaving cold-started route panes idle forever;
+- avoid stale authoritative actor records pointing at a pane whose only job is done;
+- avoid future routes dispatching into the wrong leftover pane;
+- keep failed startup panes from accumulating when a route attempt never becomes a real session.
+
+The bug in `#routereap` was that this behavior was too blunt for multi-turn interactive documents. A session with live backlog, queued prompts, dirty post-commit edits, or an unresolved exchange-tail prompt is not really done just because one response committed. In those cases the route-owned pane should stay alive. The corrected model is: reap is still useful for true one-shot route panes, but `auto` reap must first check for session-liveness signals.
+<!-- agent:boundary:f68500f6 -->
 <!-- /agent:exchange -->
 ###
 <!--
+On the tmux pane autostart, agent-doc immediately restarts the process. The restart
+---
 JB `Clear Session Context` had an error:
 ```
 agent-doc command failed (exit 1): Error: project controller command `operator_command` failed: operator command `session_clear` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 141 is closed

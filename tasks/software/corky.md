@@ -87,31 +87,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260512-071218.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260512-072202.md`*
 
 Compacted content:
-- Archived 1 response topic(s): tokenstore-delete-preservation
+- Archived 1 response topic(s): watch-gmail-history-notify
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ do [#watch-gmail-history-notify]. spec-test-build-install-commit-push
-### Re: watch-gmail-history-notify — gpt-5
-
-Implemented and pushed `#watch-gmail-history-notify` in Corky.
-
-Change summary:
-- `corky watch` now snapshots both IMAP `last_uid` cursors and Gmail API `last_history_id` cursors before/after each poll.
-- Gmail API history-id advances now contribute to the existing `new_count` gate, so mailbox sync and desktop notifications fire for `gmail-api` accounts too.
-- Added focused watch tests for Gmail API cursor snapshotting, history-id increases/decreases, and new Gmail API labels.
-- Updated `SPEC.md`, reference specs, watch guide, and README wording for IMAP + Gmail API watch behavior.
-
-Verification:
-- `cargo test watch::tests`
-- `make check`
-- `cargo install --path .`
-- `corky audit-docs`
-
-Committed and pushed to `btakita/corky` branch `20260413/corky-gsc`:
-- `a33da70 fix: notify watch on gmail api sync`
-<!-- agent:boundary:32775aa8 -->
+<!-- agent:boundary:2300743f -->
 <!-- /agent:exchange -->
 ###
 <!--

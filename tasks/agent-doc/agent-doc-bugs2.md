@@ -119,7 +119,34 @@ I added a plan for that follow-up and captured it in the backlog:
 - `tasks/agent-doc/plan-jb-clear-session-busy-pane-ux.md`
 
 No code changed in this cycle, so I did not run the full Rust/test suite.
-<!-- agent:boundary:fd4266f2 -->
+❯ JB `Clear Session Context` had an error:
+```
+agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because pane %1 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="gpt-5.5 high · ~/work/btakita/agent-loop · Context 15% used"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
+```
+❯ spec-test-build-install-commit-push
+### Re: JetBrains Clear Session Context busy pane UX — gpt-5.5
+
+Implemented `#jbclearbusyux`.
+
+The CLI still fails closed when direct live-pane evidence says a session pane is `alive-busy`, but JetBrains no longer surfaces that protected state as a generic command crash. `Clear Session Context` now parses the `session_clear refused ... alive-busy` result into a typed busy-session result and shows a warning with the pane id, current command, and latest pane tail. The notification includes `Retry clear`, `Show status`, and `Copy details` actions.
+
+Updated the shared editor specs, JetBrains spec, version notes, and bumped the JetBrains plugin patch version to `0.2.109`. Added unit coverage for parsing the protected busy-pane refusal and for the user-facing message avoiding the raw `agent-doc command failed` text.
+
+Verification passed:
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `./gradlew buildPlugin signPlugin`
+- `git -C src/agent-doc diff --check`
+- `make plugin-version-check`
+- `make check`
+- `cargo build`
+- `make install`
+
+Commits pushed:
+- `src/agent-doc` commit `110bbcf` (`fix: soften JetBrains busy clear failures`) to `20260422/codex-agent-backend`
+- parent commit `ef715a6a9` (`chore: update agent-doc busy clear UX`) to `main`
+
+No new follow-up items came out of this fix.
+<!-- agent:boundary:86407113 -->
 <!-- /agent:exchange -->
 <!--
 A JB command on corky.md had an error. Navigating to corky.md should autostart agent-doc session actor + supervisor.
@@ -164,7 +191,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbclearbusyux] #agent-doc-bug: JetBrains Clear Session Context surfaces the raw session_clear refused error for protected alive-busy panes; keep the fail-closed guard but add typed IDE UX plus explicit interrupt/wait flows. Plan: tasks/agent-doc/plan-jb-clear-session-busy-pane-ux.md
 - [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->
@@ -278,4 +304,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#incorrect-close-running-turn] #agent-doc-bug: incorrect close/supersede handling across adjacent managed code sessions makes it unclear whether a prior pane is alive-idle or still running; add live pane evidence to status/closeout/reap decisions and fail closed before clearing busy panes. Plan: tasks/agent-doc/plan-incorrect-close-running-turn-status.md
 - 2026-05-11 [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
 - 2026-05-11 [#preflight-started-recovery] #agent-doc-bug: pane reaped during preflight_started cycle — recovery writes dead-end placeholder instead of abandoning the stuck cycle and letting the next preflight handle the unresolved prompt. Plan: tasks/agent-doc/plan-preflight-started-recovery-placeholder.md
+- 2026-05-11 [#jbclearbusyux] #agent-doc-bug: JetBrains Clear Session Context surfaces the raw session_clear refused error for protected alive-busy panes; keep the fail-closed guard but add typed IDE UX plus explicit interrupt/wait flows. Plan: tasks/agent-doc/plan-jb-clear-session-busy-pane-ux.md
 <!-- /agent:done -->

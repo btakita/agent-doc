@@ -16,8 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Checkout agent-doc submodules
+        run: |
+          git -c url.https://github.com/.insteadOf=git@github.com: \
+            submodule update --init src/agent-doc src/agent-kit src/tmux-router
       - uses: dtolnay/rust-toolchain@stable
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y tmux
@@ -30,8 +32,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Checkout agent-doc submodules
+        run: |
+          git -c url.https://github.com/.insteadOf=git@github.com: \
+            submodule update --init src/agent-doc src/agent-kit src/tmux-router
       - uses: dtolnay/rust-toolchain@stable
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y tmux

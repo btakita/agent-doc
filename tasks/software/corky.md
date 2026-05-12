@@ -92,7 +92,33 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): watch-gmail-history-notify
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:2300743f -->
+❯ do [#oauth-callback-url-decode]. spec-test-build-install-commit-push
+### Re: oauth callback URL decode — gpt-5
+
+Implemented `#oauth-callback-url-decode`.
+
+What changed:
+
+- `src/social/auth.rs` now parses OAuth callback query strings with `application/x-www-form-urlencoded` decoding, so percent-encoded authorization codes, states, and error descriptions are decoded before CSRF state comparison and token exchange.
+- Added regression coverage in `tests/test_social_auth.rs` for encoded `code`/`state` values and encoded OAuth error descriptions.
+- Updated `SPEC.md` OAuth flow and auth test matrix to require URL-decoded callback params.
+- Added `form_urlencoded` as a direct dependency in `Cargo.toml`/`Cargo.lock`.
+
+Verification:
+
+- `cargo test --test test_social_auth` passed.
+- `make precommit` passed after refreshing audit-docs mtimes: clippy, full test suite, and `audit-docs` green.
+- `make release` passed and installed `.bin/corky -> target/release/corky`.
+- `make install` passed with GPU support (`transcribe-cuda`).
+- `cargo clippy --features vendored-openssl -- -D warnings` passed.
+- `cargo test --features vendored-openssl` passed.
+- Latest GitHub Actions `CI` run for Corky is from 2026-05-01 and is red on the vendored OpenSSL clippy step, not a tmux leg; that CI path is green locally now. Corky has no `tmux-ci` target.
+
+Commits:
+
+- Corky: `d12daf4` (`fix: decode oauth callback params`) pushed to `origin/20260413/corky-gsc`.
+- Parent `agent-loop`: `b6c4d8f7c` (`corky: decode oauth callback params`) records the `src/corky` submodule pointer; parent push follows this mandatory document closeout.
+<!-- agent:boundary:5d917f47 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,7 +127,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange
 <!-- /agent:backlog -->
 
 ## Completed / Reaped
@@ -109,4 +134,5 @@ Compacted content:
 <!-- agent:done -->
 - 2026-05-12 [#tokenstore-delete-preservation] [recommended] Make TokenStore saves deletion-safe so stale writers cannot restore tokens cleared by another process
 - 2026-05-12 [#watch-gmail-history-notify] [recommended] Teach watch to count Gmail API last_history_id movement and fire mailbox sync and desktop notifications for gmail-api accounts
+- 2026-05-12 [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange
 <!-- /agent:done -->

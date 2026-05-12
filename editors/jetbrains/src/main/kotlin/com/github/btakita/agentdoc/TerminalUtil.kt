@@ -20,10 +20,12 @@ object TerminalUtil {
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
     internal const val STARTING_ACTOR_ROUTE_MAX_ATTEMPTS = 4
     private val STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
-    private val BUSY_CLEAR_REFUSAL_REGEX = Regex(
-        """session_clear refused for (.+?) because pane (\S+) is alive-busy \(source=([^,]+), current_command=([^,]+), tail=(?:"([^"]*)"|([^)]*))\)""",
+    private val BUSY_CLEAR_REFUSAL_HEADER_REGEX = Regex(
+        """session_clear refused for (.+?) because pane (\S+) is alive-busy""",
         RegexOption.DOT_MATCHES_ALL,
     )
+    private val BUSY_CLEAR_SOURCE_REGEX = Regex("""source=([^,)]+)""")
+    private val BUSY_CLEAR_COMMAND_REGEX = Regex("""current_command=([^,)]+)""")
 
     internal interface InFlightRouteHandle {
         fun isAlive(): Boolean
@@ -621,17 +623,36 @@ object TerminalUtil {
         }
 
     internal fun parseBusySessionClearRefusal(output: String): BusySessionClearRefusal? {
-        val match = BUSY_CLEAR_REFUSAL_REGEX.find(output) ?: return null
-        val tail = match.groupValues.getOrNull(5)
-            ?.takeIf { it.isNotBlank() }
-            ?: match.groupValues.getOrNull(6).orEmpty()
+        val match = BUSY_CLEAR_REFUSAL_HEADER_REGEX.find(output) ?: return null
+        val detail = output.substring(match.range.last + 1)
+        val source = BUSY_CLEAR_SOURCE_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
+        val currentCommand = BUSY_CLEAR_COMMAND_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
         return BusySessionClearRefusal(
             file = match.groupValues[1],
             pane = match.groupValues[2],
-            source = match.groupValues[3],
-            currentCommand = match.groupValues[4],
-            tail = tail,
+            source = source.ifBlank { "unknown" },
+            currentCommand = currentCommand.ifBlank { "unknown" },
+            tail = extractBusyClearTail(detail),
         )
+    }
+
+    private fun extractBusyClearTail(detail: String): String {
+        val marker = "tail="
+        val start = detail.indexOf(marker)
+        if (start < 0) {
+            return ""
+        }
+        val rawTail = detail.substring(start + marker.length)
+            .substringBefore("). Run `agent-doc session status")
+            .substringBefore("). Run agent-doc session status")
+            .trim()
+            .removeSuffix(").")
+            .removeSuffix(")")
+            .trim()
+        return rawTail
+            .removeSurrounding("\"")
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
     }
 
     internal fun isStartingActorRouteFailure(output: String): Boolean {

@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains Clear Session Context now recognizes wrapped protected-busy failures.** The plugin parser accepts the exact `agent-doc command failed (exit 1): Error: session_clear refused ... alive-busy` notification shape and less predictable pane-tail text, so the IDE shows the typed running-session warning with Refresh/Interrupt/Status/Copy actions instead of falling back to the generic command-failed error. Bumped the JetBrains plugin build version to `0.2.112`.
+
 - **Base-index layout repair now runs during the active preflight.** When the pre-diff layout check finds the current tmux session missing window index `0`, preflight now removes the stale deferred-repair counter, runs `repair_layout` immediately, and rechecks layout before emitting JSON. If automatic repair cannot run, stderr names the explicit `agent-doc session doctor <FILE> --repair` action instead of silently waiting for a second detection. This closes `#baseindexrepair` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Dispatch-only proof scope is explicit across harnesses.** `route --dispatch-only` now logs both `proof` and `proof_scope` so Claude Code and OpenCode accepted pane delivery is labeled as accepted-only instead of being mistaken for Codex-style consumed/submitted dispatch-start proof. Codex keeps its hook-backed dispatch-start proof behavior when hooks are visible. Added route regressions and updated the session tmux spec. This closes `#clauderouteproof` in `tasks/agent-doc/agent-doc-bugs2.md`.

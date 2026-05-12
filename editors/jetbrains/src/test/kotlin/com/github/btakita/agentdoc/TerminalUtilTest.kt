@@ -218,6 +218,34 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `busy clear refusal parses generic command wrapper output`() {
+        val output = """
+            agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %13 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="● Tip Override global tool settings per agent configuration"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
+        """.trimIndent()
+
+        val refusal = TerminalUtil.parseBusySessionClearRefusal(output)
+
+        assertNotNull(refusal)
+        assertEquals("/home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md", refusal!!.file)
+        assertEquals("%13", refusal.pane)
+        assertEquals("authoritative_actor", refusal.source)
+        assertEquals("agent-doc", refusal.currentCommand)
+        assertEquals("● Tip Override global tool settings per agent configuration", refusal.tail)
+    }
+
+    @Test
+    fun `busy clear refusal keeps quoted or parenthesized pane tail text`() {
+        val output = """
+            Error: session_clear refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="Tip says \"Override\" settings (per agent)"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt.
+        """.trimIndent()
+
+        val refusal = TerminalUtil.parseBusySessionClearRefusal(output)
+
+        assertNotNull(refusal)
+        assertEquals("Tip says \"Override\" settings (per agent)", refusal!!.tail)
+    }
+
+    @Test
     fun `busy clear refusal message avoids generic command failure text`() {
         val message = TerminalUtil.buildBusySessionClearBlockedMessage(
             relativePath = "tasks/agent-doc/agent-doc-bugs2.md",

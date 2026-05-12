@@ -6,7 +6,7 @@ The core workflow (preflight, respond, persist the response) is identical across
 ## Harness-Native Entrypoints
 
 - A harness-native `agent-doc` invocation is an executable workflow entry, not a generic request to edit the markdown file by hand.
-- Claude Code `/agent-doc <FILE>`, Codex `agent-doc <FILE>`, OpenCode `agent-doc <FILE>`, and equivalent direct-entry forms all start the same binary-owned response cycle.
+- Claude Code `/agent-doc <FILE>`, Codex `agent-doc <FILE>`, OpenCode `/agent-doc <FILE>`, and equivalent direct-entry forms all start the same binary-owned response cycle.
 - Do **not** treat that turn as successful until the response crosses `agent-doc finalize <FILE>` for the normal path or `agent-doc write --commit <FILE>` for a repair path.
 - Do **not** end a normal harness-native `agent-doc` turn with "not committed" or equivalent wording unless the user explicitly asked to leave the response uncommitted.
 - MCP auth / OAuth steps are part of that same turn. If a tool pauses for authentication or browser approval, resume the managed response afterward and still finish with `finalize` / `write --commit` plus `session-check`; the auth step is not the success boundary.
@@ -17,6 +17,7 @@ The core workflow (preflight, respond, persist the response) is identical across
 - `do #qj5w now`, `fix this`, `run tests`, `build + install`, `commit + push`, and similar document edits authorize the same underlying repo work they would authorize in chat.
 - If that work includes an ordinary repo `commit + push`, the manual repo commit must exclude the active session document. Resolve the intended non-session path set first, run stage commands only for that set, stop immediately on any stage failure, verify the staged diff still matches the intended set, then commit only that validated set. `agent-doc finalize` / `write --commit` still owns the session-document closeout commit, and the push happens after that closeout so the response commit is included.
 - The agent should either perform that work before `finalize` / `write --commit`, or stop on a concrete blocker. Do **not** emit status-only progress prose while doing neither.
+- **Direct-chat preset write-back:** when a session-document preset (for example `#commit-push`, `#spec-test-build-install-commit-push`) triggers repo work through a direct chat turn rather than through `agent-doc finalize`, the turn is not complete until the response is written into the session document with `agent-doc write --commit <FILE>` and `agent-doc session-check <FILE>` passes. Completing side-effect repo work (commit, push) in chat without writing the response patchback is the same closeout violation as skipping `finalize`. The Codex Stop hook cannot auto-close a plain-text response that lacks `<!-- patch:exchange -->` blocks, so the agent must explicitly write back before reporting success.
 
 ## Post-Preflight Planning
 
@@ -75,11 +76,12 @@ Identify your harness from your environment:
 
 ## OpenCode
 
-- **Invocation:** Direct prompt injection or user instruction referencing the document, using `agent-doc <FILE>` as a normal message.
+- **Invocation:** User types `/agent-doc <FILE>` which triggers the installed OpenCode command. The command template emits `agent-doc <FILE>` as the prompt, which the agent recognizes and loads the skill.
 - **Entry semantics:** once that message is accepted, the turn is inside the binary-owned response cycle. Do **not** downgrade it into a manual document-editing task or report a useful-but-uncommitted success state.
-- **Slash commands:** OpenCode does not use the Claude Code `/agent-doc` skill command. If preflight returns `slash_commands`, skip them. If `builtin_commands`, write a document note.
-- **Write-back:** Execute `agent-doc finalize` directly for the normal response cycle.
-- **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file; use `agent-doc write --commit <FILE>` once the prompt already exists.
+- **Slash commands:** The `/agent-doc` command is an OpenCode custom command installed by `agent-doc skill install --harness opencode` into `.opencode/commands/agent-doc.md`. If preflight returns `slash_commands`, skip them (OpenCode handles them natively). If `builtin_commands`, write a document note.
+- **Write-back:** Execute `agent-doc finalize` directly for the normal response cycle, then immediately run `agent-doc session-check <FILE>`. Do **not** output the response to the CLI without piping it through `agent-doc finalize` — response text visible in the console but absent from the session document is the same closeout violation as skipping finalize entirely.
+- **Fail closed:** If `agent-doc session-check <FILE>` exits nonzero after write-back, the cycle is still open or the document still has prompt-bearing user edits with no newer cycle start. Do **not** report success or stop; continue recovery instead.
+- **Manual repair / missed patchback:** Use the shared default above. Do **not** patch the assistant response directly into the file; use `agent-doc write --commit <FILE>` once the prompt already exists. After `agent-doc write --commit <FILE>`, run the same `agent-doc session-check <FILE>` guard before ending the turn. That repair write-back should also be the last substantial action of the turn.
 
 ## Cursor / Generic
 

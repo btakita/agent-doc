@@ -28,10 +28,11 @@
 //!   column identity. When `window` is omitted, sync still scopes the run to the
 //!   current tmux session's `agent-doc` window instead of inheriting the
 //!   currently focused window (which may itself be `stash`). Full sync first runs
-//!   the explicit layout repair for the inferred session, then prunes stale sessions,
-//!   auto-starts missing panes, delegates to `tmux_router::sync`, and registers
-//!   synced file→pane assignments. Passive `--no-autostart` editor sync skips the
-//!   repair step and remains non-destructive around layout drift.
+//!   the file-scoped doctor repair path for a focused/session document when one is
+//!   available, then prunes stale sessions, auto-starts missing panes, delegates
+//!   to `tmux_router::sync`, and registers synced file→pane assignments. Passive
+//!   `--no-autostart` editor sync skips the repair step and remains non-destructive
+//!   around layout drift.
 //! - `run_layout_only(col_args, window, focus)` keeps the non-destructive
 //!   editor-sync contract: it still refuses to replace or override live /
 //!   ambiguous owners, but it may cold-start a pane after sync proves there is
@@ -50,6 +51,8 @@
 //!
 //!   Phases 1 and 2 are skipped when the layout is already correct (target exists,
 //!   single stash). Phase 3 always runs.
+//! - `repair_file_state_with_tmux` is the tmux-layout portion of the doctor repair
+//!   path used by both `agent-doc session doctor <FILE> --repair` and full sync.
 //! - The `resolve_file` closure reads each file's frontmatter session UUID and
 //!   produces a `FileResolution::Registered` (or `Unmanaged` when no UUID is present).
 //!   Files with session UUIDs are always treated as registered, even if the registry
@@ -1632,14 +1635,18 @@ fn repair_missing_registered_pane(
 
 pub(crate) fn repair_file_state(file: &Path) -> Result<Vec<String>> {
     let tmux = Tmux::default_server();
+    repair_file_state_with_tmux(&tmux, file)
+}
+
+pub(crate) fn repair_file_state_with_tmux(tmux: &Tmux, file: &Path) -> Result<Vec<String>> {
     let canonical = file
         .canonicalize()
         .unwrap_or_else(|_| crate::git::resolve_absolute_file_path(file));
     let mut actions = Vec::new();
 
     let columns = vec![canonical.to_string_lossy().to_string()];
-    if let Some(session_name) = resolve_sync_target_session(&tmux, None, &columns, None) {
-        repair_layout(&tmux, &session_name, "agent-doc")?;
+    if let Some(session_name) = resolve_sync_target_session(tmux, None, &columns, None) {
+        repair_layout(tmux, &session_name, "agent-doc")?;
         actions.push(format!(
             "Repaired `agent-doc`/`stash` layout in tmux session `{session_name}`."
         ));
@@ -1660,7 +1667,7 @@ pub(crate) fn repair_file_state(file: &Path) -> Result<Vec<String>> {
     }
 
     let repair = repair_missing_registered_pane(
-        &tmux,
+        tmux,
         &canonical,
         &session_id,
         &entry.pane,
@@ -2438,6 +2445,17 @@ fn sync_candidate_files(col_args: &[String], focus: Option<&str>) -> Vec<PathBuf
     files
 }
 
+fn sync_doctor_repair_candidate(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> {
+    sync_candidate_files(col_args, focus)
+        .into_iter()
+        .find_map(|path| {
+            if !path.exists() || frontmatter::read_session_id(&path).is_none() {
+                return None;
+            }
+            Some(path.canonicalize().unwrap_or(path))
+        })
+}
+
 fn canonical_sync_candidate_files(col_args: &[String], focus: Option<&str>) -> Vec<PathBuf> {
     sync_candidate_files(col_args, focus)
         .into_iter()
@@ -2907,13 +2925,30 @@ fn run_with_options(
         .collect();
     let proof_cache = SyncProofCache::default();
 
-    // Resolve the target session/window. Full/manual sync repairs the inferred
-    // session layout first; passive editor sync keeps layout repair explicit.
+    // Resolve the target session/window. Full/manual sync delegates repair to
+    // the same file-scoped doctor path that operators can run explicitly;
+    // passive editor sync keeps layout repair explicit.
     let window_resolution_start = Instant::now();
     let target_session = resolve_sync_target_session(tmux, window, &col_args, focus);
-    let windowless_full_sync = matches!(auto_start_mode, AutoStartMode::Full) && window.is_none();
-    if windowless_full_sync && let Some(session_name) = target_session.as_deref() {
-        repair_layout(tmux, session_name, "agent-doc")?;
+    let full_sync = matches!(auto_start_mode, AutoStartMode::Full);
+    let doctor_repair_candidate = if full_sync {
+        sync_doctor_repair_candidate(&col_args, focus)
+    } else {
+        None
+    };
+    if full_sync {
+        if let Some(file) = doctor_repair_candidate.as_deref() {
+            let notes = repair_file_state_with_tmux(tmux, file)?;
+            for note in notes {
+                let message = format!("[sync] doctor repair: {note}");
+                eprintln!("{message}");
+                sync_log(&message);
+            }
+        } else if window.is_none()
+            && let Some(session_name) = target_session.as_deref()
+        {
+            repair_layout(tmux, session_name, "agent-doc")?;
+        }
     }
     let mut effective_window = match (window, target_session.as_deref()) {
         (Some(w), _) => Some(w.to_string()),
@@ -4142,8 +4177,19 @@ fn run_with_options(
     if let Err(e) = resync::run(false, None, None) {
         eprintln!("[sync] warning: post-sync resync failed: {}", e);
     }
-    if windowless_full_sync && let Some(session_name) = target_session.as_deref() {
-        repair_layout(tmux, session_name, "agent-doc")?;
+    if full_sync {
+        if let Some(file) = doctor_repair_candidate.as_deref() {
+            let notes = repair_file_state_with_tmux(tmux, file)?;
+            for note in notes {
+                let message = format!("[sync] post-sync doctor repair: {note}");
+                eprintln!("{message}");
+                sync_log(&message);
+            }
+        } else if window.is_none()
+            && let Some(session_name) = target_session.as_deref()
+        {
+            repair_layout(tmux, session_name, "agent-doc")?;
+        }
     }
 
     if matches!(auto_start_mode, AutoStartMode::SafePassive) {
@@ -7181,6 +7227,74 @@ mod tests {
                 .iter()
                 .any(|(_, name)| name.starts_with("stash-")),
             "full sync should normalize stash aliases during repair"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn full_sync_calls_doctor_repair_for_explicit_stash_window() {
+        let iso = IsolatedTmux::new("sync-full-doctor-repairs-stash-window");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let doc = root.join("tasks/full-sync-doctor-repair.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: full-sync-doctor-repair\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+        init_git_repo(root, &doc);
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let pane0 = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "stash"]);
+        let stash_window = iso.pane_window(&pane0).unwrap();
+        sessions::register_full_with_cwd(
+            "full-sync-doctor-repair",
+            &pane0,
+            &doc_str,
+            pane_pid_from_tmux(&iso, &pane0).unwrap(),
+            &stash_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "stash", "-d"]);
+
+        run_with_options(
+            &[doc_str.clone()],
+            Some("test:0"),
+            Some(doc_str.as_str()),
+            AutoStartMode::Full,
+            &iso,
+        )
+        .unwrap();
+
+        let windows_after = list_windows(&iso, "test");
+        assert_eq!(
+            windows_after
+                .iter()
+                .find(|(_, name)| name == "agent-doc")
+                .unwrap()
+                .0,
+            "0",
+            "full sync should let the doctor repair path recreate 0:agent-doc"
+        );
+        assert_eq!(
+            windows_after
+                .iter()
+                .find(|(_, name)| name == "stash")
+                .unwrap()
+                .0,
+            "1",
+            "full sync should leave the repaired stash window at 1:stash"
         );
     }
 

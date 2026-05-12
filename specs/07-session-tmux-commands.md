@@ -225,7 +225,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 ## repair_layout
 
-`repair_layout` is an explicit repair primitive, not a normal sync side effect.
+`repair_layout` is the low-level primitive behind explicit doctor repair.
 
 - `agent-doc session doctor <FILE> --repair` and other repair-oriented commands
   may call it to consolidate duplicate stash windows, recreate the `agent-doc`
@@ -239,8 +239,14 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   compliance case after the pre-diff layout check reports missing window index
   `0`; preflight rechecks layout afterward so its JSON describes the remaining
   state instead of the pre-repair state.
+- Full/manual `agent-doc sync` must call the same file-scoped doctor repair
+  path used by `agent-doc session doctor <FILE> --repair` before tmux-router
+  reconciliation when a focused/session document is available. This includes
+  editor invocations scoped to a currently selected `stash` window: sync repairs
+  the session back to `0:agent-doc`, `1:stash`, ... first, then resolves the
+  repaired `agent-doc` window for layout reconciliation.
 - Passive `agent-doc sync --no-autostart` resolves the target session/window
-  without invoking `repair_layout`; if stash/window drift is detected, sync
+  without invoking doctor repair; if stash/window drift is detected, sync
   warns and leaves the destructive or heuristic layout repair for an explicit
   repair command.
 

@@ -68,7 +68,22 @@ Verification and install completed:
 - `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.111.zip` to `IntelliJIdea2026.1`
 - `make plugin-version-check`
 - `cargo run --quiet -- audit-docs`
-<!-- agent:boundary:4e9a19dd -->
+❯ Please look at the Codex, Claude, Opencode session logs + agent-doc logs. Plan #next-steps for unfixed issues.
+### Re: log review next steps — gpt-5
+
+I reviewed the current root `.agent-doc` logs plus the active Codex, Claude, and OpenCode session logs.
+
+Current live state: `agent-doc-bugs2.md` is back to a ready Codex actor on `%1`, and recent Codex dispatch proof is `consumed`. The remaining unfixed surfaces are in the failure trail, not the current pane state.
+
+Planned `#next-steps` into backlog:
+
+- OpenCode startup/capability proof is still not healthy. The OpenCode child proof exits through the `opencode` help screen, routes continue into busy/starting panes, direct submit hit an over-budget 5.17s path, and auto-trigger later timed out or failed via `pty_write`.
+- Codex response-body recovery still loops. The same document has fresh `prior_patchback_without_response_body`, `out_of_band_write`, and `post_commit_local_drift` entries after committed cycles, which is exactly the class that leads to empty repair writes or surprise child dispatch.
+- Base-index repair is still deferred. This preflight detected `window index 0 missing in session '0'`, but only incremented `.agent-doc/state/base-index-repair.count` to `1` and left repair for the next detection.
+- Claude routing is functioning, but its recent robert-ross routes only record accepted direct submit proof, not the stronger Codex-style consumed/start proof. I captured that as recommended proof-parity work rather than a blocker because I did not see a Claude failure in the current tail.
+
+I also closed `#nextstepscapture`; this cycle did what that item was tracking by adding concrete backlog entries instead of leaving `#next-steps` only in prose. I did not run the full suite because this cycle changed only the session document/backlog, not product code.
+<!-- agent:boundary:03f74151 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -108,7 +123,10 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
+- [ ] [#clauderouteproof] [recommended] #next-steps: Add Claude dispatch proof parity or explicit accepted-only semantics; current robert-ross Claude routes record direct_pane_submit proof=accepted without dispatch_start_proof, so operator success is weaker than Codex consumed-proof routing. Plan: add a focused route proof check or document accepted-only as a deliberate harness limit.
+- [ ] [#baseindexrepair] [recommended] #next-steps: Make base-index layout repair deterministic for the active preflight or surface an immediate action; current preflight detected window index 0 missing in session 0, wrote state/base-index-repair.count=1, and deferred repair until the next detection.
+- [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
+- [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->
 
@@ -223,4 +241,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#preflight-started-recovery] #agent-doc-bug: pane reaped during preflight_started cycle — recovery writes dead-end placeholder instead of abandoning the stuck cycle and letting the next preflight handle the unresolved prompt. Plan: tasks/agent-doc/plan-preflight-started-recovery-placeholder.md
 - 2026-05-11 [#jbclearbusyux] #agent-doc-bug: JetBrains Clear Session Context surfaces the raw session_clear refused error for protected alive-busy panes; keep the fail-closed guard but add typed IDE UX plus explicit interrupt/wait flows. Plan: tasks/agent-doc/plan-jb-clear-session-busy-pane-ux.md
 - 2026-05-12 [#jbclearbusyactions] #agent-doc-bug: JetBrains Clear Session Context protected busy warning still leaves no refresh-and-retry or intentional interrupt-and-clear action, and current tasks/root.md evidence shows live pane idle while supervisor/controller projection remains busy. Plan: tasks/agent-doc/plan-jb-clear-session-busy-actions.md
+- 2026-05-12 [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 <!-- /agent:done -->

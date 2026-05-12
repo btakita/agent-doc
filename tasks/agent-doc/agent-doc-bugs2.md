@@ -34,7 +34,28 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): tmux pane autostart restart; Clear Session Context closed generation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:71ed108e -->
+❯ do [#incorrect-close-running-turn]. spec-test-build-install-commit-push
+### Re: incorrect close running turn — gpt-5
+Implemented `#incorrect-close-running-turn`.
+
+The fix adds direct live-pane evidence to `agent-doc session status <FILE>`: it now reports the resolved pane source, current command, prompt readiness, recent output tail, and an `alive-idle` / `alive-busy` / `closed-clean` / `projection-stale` classification. File-scoped `session clear` and `session restart-supervisor` now fail closed when direct tmux evidence says the pane is `alive-busy`, so projected actor state cannot hide a still-running turn.
+
+Route-owned completion also now refuses to reap a freshly-routed pane after a committed cycle until the child output has returned to an idle harness prompt. If the child is still printing or doing subtask work, the supervisor logs `live_pane_busy_no_idle_prompt` and keeps the pane alive instead of clearing it.
+
+Updated specs/docs in `SPEC.md`, `README.md`, and `specs/07-session-tmux-commands.md`. Added focused regressions for live-pane prompt classification and route-owned busy-pane reap blocking.
+
+Verification passed:
+- `cargo test route_owned_live_pane_busy`
+- `cargo test live_pane_prompt_ready`
+- `cargo test last_meaningful_pane_line`
+- `make check`
+- `cargo build`
+- `make install`
+
+Commits created before this document closeout:
+- `src/agent-doc` commit `2227c09` (`fix: guard live busy session panes`)
+- parent commit `8b072d446` (`chore: update agent-doc session pane guard`)
+<!-- agent:boundary:ba5dd724 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,7 +90,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#incorrect-close-running-turn] #agent-doc-bug: incorrect close/supersede handling across adjacent managed code sessions makes it unclear whether a prior pane is alive-idle or still running; add live pane evidence to status/closeout/reap decisions and fail closed before clearing busy panes. Plan: tasks/agent-doc/plan-incorrect-close-running-turn-status.md
 - [ ] [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
 - [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
@@ -181,4 +201,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#routestartingrace] Route fails on freshly started actor — 5s wait timeout too short for OpenCode harness boot. Plan: tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - 2026-05-11 [#idprefix] Backlog item [#2fha] uses internal ID instead of declared tag [#nopatchbackopencode]. Plan: tasks/agent-doc/plan-id-prefix-mismatch-backlog.md
 - 2026-05-11 [#routereap] #agent-doc-bug: route-owned pane reaped after successful finalize commit — completion thread in start.rs unconditionally kills the pane after detecting a committed cycle, even when the session document has an active backlog and ongoing exchange (multi-turn session). Should check session liveness signals before reaping. Plan: tasks/agent-doc/plan-route-owned-post-commit-pane-reap.md
+- 2026-05-11 [#incorrect-close-running-turn] #agent-doc-bug: incorrect close/supersede handling across adjacent managed code sessions makes it unclear whether a prior pane is alive-idle or still running; add live pane evidence to status/closeout/reap decisions and fail closed before clearing busy panes. Plan: tasks/agent-doc/plan-incorrect-close-running-turn-status.md
 <!-- /agent:done -->

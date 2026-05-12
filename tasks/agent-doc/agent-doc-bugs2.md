@@ -58,15 +58,38 @@ Commits pushed:
 - parent `agent-loop`: `b642f2120 chore: update agent-doc base-index repair`
 
 I left the pre-existing unrelated dirty files in `src/agent-doc` unstaged.
-<!-- agent:boundary:89155d7a -->
-<!-- /agent:exchange -->
-###
-<!--
-Seeing an error when calling JB `Clear Session Context`:
+❯ Seeing an error when calling JB `Clear Session Context`:
 ```
 agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %13 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="● Tip Override global tool settings per agent configuration"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
 ```
----
+❯ spec-test-build-install-commit-push
+### Re: JetBrains Clear Session Context busy failure — gpt-5
+
+Fixed the JetBrains parser path for this repro. The plugin now recognizes the wrapped failure shape:
+
+```text
+agent-doc command failed (exit 1): Error: session_clear refused ... alive-busy
+```
+
+and still parses it as the protected busy-pane result, so Clear Session Context should show the typed running-session warning with Refresh and retry, Interrupt and clear, Show status, and Copy details instead of the generic command-failed error. I also made the tail parser tolerate quoted and parenthesized pane output.
+
+Committed and pushed:
+
+- `src/agent-doc`: `0db5667 fix: parse wrapped JetBrains busy clear failures`
+- parent `agent-loop`: `0a7f57d24 chore: update agent-doc JetBrains clear fix`
+
+Verification completed:
+
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test`
+- `make check`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew buildPlugin signPlugin`
+- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.112-signed.zip` to `/home/brian/.config/JetBrains/IntelliJIdea2026.1`
+
+The install reported that IntelliJ needs a restart to activate the plugin, so I added a recommended follow-up to restart and live-retest the busy-pane warning path after activation. I left the pre-existing unrelated dirty files in `src/agent-doc`, `src/boost-client`, `src/corky`, `src/session-share`, and `mail` untouched.
+<!-- agent:boundary:9e25f651 -->
+<!-- /agent:exchange -->
+###
+<!--
 I don't have a good track on the lifecycle logic that starts panes, kills panes, edge cases, etc.
 Can we make a nested list and diagram of the lifecycle logic?
 ---
@@ -98,6 +121,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbrestartretest] 2026-05-12 [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.112, then re-test Clear Session Context against a protected alive-busy pane and confirm the typed Refresh/Interrupt/Status/Copy warning appears.
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.

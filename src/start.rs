@@ -486,6 +486,16 @@ fn clean_exit_resolution(harness: &crate::harness::HarnessConfig) -> CleanExitRe
     }
 }
 
+fn clean_exit_resolution_for_start(
+    harness: &crate::harness::HarnessConfig,
+    route_owned: bool,
+) -> CleanExitResolution {
+    if route_owned {
+        return CleanExitResolution::PromptUser;
+    }
+    clean_exit_resolution(harness)
+}
+
 fn restart_continue_exit_strategy(
     ctrl_c_forwarded_interrupt: bool,
     failed_resume: bool,
@@ -2753,7 +2763,7 @@ pub(crate) fn run_with_reap_policy(
 
         match action {
             RestartAction::PromptUser => {
-                match clean_exit_resolution(&harness) {
+                match clean_exit_resolution_for_start(&harness, route_owned) {
                     CleanExitResolution::PromptUser => {
                         shared.transition_actor_state(
                             crate::session_actor::ActorState::WaitingInput,
@@ -3816,6 +3826,32 @@ mod tests {
     fn clean_exit_resolution_auto_restarts_for_opencode() {
         assert_eq!(
             clean_exit_resolution(&crate::harness::HarnessConfig::opencode()),
+            CleanExitResolution::RestartContinue
+        );
+    }
+
+    #[test]
+    fn route_owned_start_prompts_instead_of_auto_restarting_codex() {
+        assert_eq!(
+            clean_exit_resolution_for_start(&crate::harness::HarnessConfig::codex(), true),
+            CleanExitResolution::PromptUser,
+            "route-owned tmux autostart panes must not immediately restart a cleanly exited child"
+        );
+    }
+
+    #[test]
+    fn route_owned_start_prompts_instead_of_auto_restarting_opencode() {
+        assert_eq!(
+            clean_exit_resolution_for_start(&crate::harness::HarnessConfig::opencode(), true),
+            CleanExitResolution::PromptUser,
+            "route-owned tmux autostart panes must not immediately restart a cleanly exited child"
+        );
+    }
+
+    #[test]
+    fn non_route_owned_start_preserves_codex_auto_resume_policy() {
+        assert_eq!(
+            clean_exit_resolution_for_start(&crate::harness::HarnessConfig::codex(), false),
             CleanExitResolution::RestartContinue
         );
     }

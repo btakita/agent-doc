@@ -27,9 +27,11 @@
 //!   plugins represent a non-markdown sibling split without losing left/right
 //!   column identity. When `window` is omitted, sync still scopes the run to the
 //!   current tmux session's `agent-doc` window instead of inheriting the
-//!   currently focused window (which may itself be `stash`). It repairs layout
-//!   before and after reconcile, prunes stale sessions, auto-starts missing panes,
-//!   delegates to `tmux_router::sync`, then registers synced file→pane assignments.
+//!   currently focused window (which may itself be `stash`). Full sync first runs
+//!   the explicit layout repair for the inferred session, then prunes stale sessions,
+//!   auto-starts missing panes, delegates to `tmux_router::sync`, and registers
+//!   synced file→pane assignments. Passive `--no-autostart` editor sync skips the
+//!   repair step and remains non-destructive around layout drift.
 //! - `run_layout_only(col_args, window, focus)` keeps the non-destructive
 //!   editor-sync contract: it still refuses to replace or override live /
 //!   ambiguous owners, but it may cold-start a pane after sync proves there is
@@ -37,12 +39,14 @@
 //! - `run_with_tmux(col_args, window, focus, tmux)` injects a custom `Tmux` instance
 //!   (test hook); auto-start is enabled.
 //! - `repair_layout(tmux, session_name, target_window_name)` runs three phases:
-//!   1. **Stash consolidation** — merges all `stash-*` and duplicate `stash` windows
-//!      into a single primary stash window via `join-pane`.
+//!   1. **Stash consolidation** — merges `stash-*` and duplicate `stash` panes into
+//!      the primary stash window via `join-pane` while preserving any overflow
+//!      windows that cannot be joined.
 //!   2. **Target window rescue** — if the target window is missing, breaks a live
 //!      registered pane out of the stash and renames the new window.
 //!   3. **Index normalisation** — moves or swaps the target window to index 0,
-//!      using `swap-window` when index 0 is occupied to avoid data loss.
+//!      using `swap-window` when index 0 is occupied to avoid data loss, then
+//!      renames and packs stash windows as `1:stash`, `2:stash`, and so on.
 //!
 //!   Phases 1 and 2 are skipped when the layout is already correct (target exists,
 //!   single stash). Phase 3 always runs.
@@ -139,7 +143,8 @@
 //! - repair_layout_swaps_when_index_0_occupied: agent-doc at index 2 with a different
 //!   window at index 0 → repair swaps the two windows, both windows preserved.
 //! - repair_layout_consolidates_multiple_stash_windows: multiple `stash`/`stash-*`
-//!   windows → repair merges all panes into one stash window.
+//!   windows → repair merges joinable panes into `1:stash` and leaves only
+//!   overflow stash windows at adjacent indices.
 //! - repair_layout_rescues_pane_from_stash: no agent-doc window, pane in stash →
 //!   repair does not error; stashed pane remains alive.
 //! - sync_does_not_write_tmux_session_to_frontmatter: after sync, the document file
@@ -2076,11 +2081,15 @@ fn rescue_missing_agent_doc_window_from_candidates(
 /// Normalize the tmux layout by consolidating stash windows and ensuring
 /// the agent-doc window exists.
 ///
-/// Phase 1: Stash consolidation — merge all `stash-*` and extra `stash` windows
-/// into a single primary stash window.
+/// Phase 1: Stash consolidation — merge all joinable `stash-*` and extra
+/// `stash` panes into the primary stash window. Any panes that cannot be joined
+/// stay alive in overflow stash windows.
 ///
 /// Phase 2: Ensure the target window exists — if missing, break a registered
 /// alive pane out of the stash to recreate it.
+///
+/// Phase 3: Window index normalization — keep `agent-doc` at `0`, then pack
+/// stash windows as `1:stash`, `2:stash`, and so on.
 pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) -> Result<()> {
     tracing::debug!(
         session_name,
@@ -2133,8 +2142,9 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
         .iter()
         .filter(|w| is_stash_window_name(&w.name))
         .count();
-    // Check if Phase 1+2 can be skipped (target exists, single stash)
-    let skip_phase_1_2 = has_target && stash_count <= 1;
+    let has_exact_stash = windows.iter().any(|w| w.name == "stash");
+    // Check if Phase 1+2 can be skipped (target exists, exactly one canonical stash)
+    let skip_phase_1_2 = has_target && stash_count == 1 && has_exact_stash;
     if skip_phase_1_2 {
         // Target exists and stash is consolidated. Skip Phases 1+2,
         // but still run Phase 3 (index normalization) below.
@@ -2161,6 +2171,16 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                 seen_primary = true;
             } else if is_stash_window_name(&w.name) {
                 secondary_stash_ids.push(w.id.clone());
+            }
+        }
+
+        if stash_count == 0 {
+            match tmux.ensure_stash_window(session_name) {
+                Ok(id) => eprintln!("[repair] created missing stash window {}", id),
+                Err(e) => {
+                    eprintln!("[repair] failed to create stash window: {}", e);
+                    return Ok(());
+                }
             }
         }
 
@@ -2238,12 +2258,19 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
 
                 // After moving all panes, the empty window should auto-delete.
                 // If it still exists (e.g. join failed for some panes), kill it only
-                // if it has no panes left.
+                // if it has no panes left; otherwise keep it as an overflow stash.
                 let remaining = tmux.list_window_panes(sec_id).unwrap_or_default();
                 if remaining.is_empty() {
                     // Window should have auto-deleted, but try to kill just in case
                     let _ = tmux.raw_cmd(&["kill-window", "-t", sec_id]);
                     eprintln!("[repair] killed empty stash window {}", sec_id);
+                } else {
+                    normalize_stash_window_name(tmux, sec_id);
+                    eprintln!(
+                        "[repair] preserving overflow stash window {} with {} pane(s)",
+                        sec_id,
+                        remaining.len()
+                    );
                 }
             }
         }
@@ -2321,22 +2348,32 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
         normalize_window_to_index(tmux, session_name, &target_window_id, 0, "repair");
     }
 
-    let stash_window_ids: Vec<String> = list_session_windows(tmux, session_name)
-        .into_iter()
-        .filter(|(_, _, name)| is_stash_window_name(name))
-        .map(|(_, id, _)| id)
-        .collect();
-    for (offset, stash_window_id) in stash_window_ids.iter().enumerate() {
+    let stash_index_plan = planned_stash_window_indices(&list_session_windows(tmux, session_name));
+    for (stash_window_id, desired_index) in stash_index_plan {
+        normalize_stash_window_name(tmux, &stash_window_id);
         normalize_window_to_index(
             tmux,
             session_name,
-            stash_window_id,
-            offset + 1,
+            &stash_window_id,
+            desired_index,
             "repair_stash",
         );
     }
 
     Ok(())
+}
+
+fn planned_stash_window_indices(windows: &[(String, String, String)]) -> Vec<(String, usize)> {
+    windows
+        .iter()
+        .filter(|(_, _, name)| is_stash_window_name(name))
+        .enumerate()
+        .map(|(offset, (_, id, _))| (id.clone(), offset + 1))
+        .collect()
+}
+
+fn normalize_stash_window_name(tmux: &Tmux, window_id: &str) {
+    let _ = tmux.raw_cmd(&["rename-window", "-t", window_id, "stash"]);
 }
 
 fn sync_log(msg: &str) {
@@ -2870,10 +2907,14 @@ fn run_with_options(
         .collect();
     let proof_cache = SyncProofCache::default();
 
-    // Resolve the target session/window without mutating stash/layout state.
-    // Phase-7 keeps layout rescue on explicit repair surfaces only.
+    // Resolve the target session/window. Full/manual sync repairs the inferred
+    // session layout first; passive editor sync keeps layout repair explicit.
     let window_resolution_start = Instant::now();
     let target_session = resolve_sync_target_session(tmux, window, &col_args, focus);
+    let windowless_full_sync = matches!(auto_start_mode, AutoStartMode::Full) && window.is_none();
+    if windowless_full_sync && let Some(session_name) = target_session.as_deref() {
+        repair_layout(tmux, session_name, "agent-doc")?;
+    }
     let mut effective_window = match (window, target_session.as_deref()) {
         (Some(w), _) => Some(w.to_string()),
         (None, Some(session_name)) => Some(format!("{session_name}:agent-doc")),
@@ -4100,6 +4141,9 @@ fn run_with_options(
     // cross-session panes — resync --fix would kill them (lesson: context_session override).
     if let Err(e) = resync::run(false, None, None) {
         eprintln!("[sync] warning: post-sync resync failed: {}", e);
+    }
+    if windowless_full_sync && let Some(session_name) = target_session.as_deref() {
+        repair_layout(tmux, session_name, "agent-doc")?;
     }
 
     if matches!(auto_start_mode, AutoStartMode::SafePassive) {
@@ -5500,6 +5544,22 @@ mod tests {
                 Some((idx, name))
             })
             .collect()
+    }
+
+    #[test]
+    fn planned_stash_window_indices_packs_overflow_after_agent_doc() {
+        let windows = vec![
+            ("0".to_string(), "@10".to_string(), "agent-doc".to_string()),
+            ("3".to_string(), "@11".to_string(), "stash".to_string()),
+            ("7".to_string(), "@12".to_string(), "stash-2".to_string()),
+            ("8".to_string(), "@13".to_string(), "work".to_string()),
+        ];
+
+        assert_eq!(
+            planned_stash_window_indices(&windows),
+            vec![("@11".to_string(), 1), ("@12".to_string(), 2)],
+            "repair_layout must keep overflow stash windows adjacent after agent-doc"
+        );
     }
 
     fn candidate(
@@ -7004,6 +7064,128 @@ mod tests {
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn repair_layout_normalizes_stash_alias_to_index_1() {
+        let iso = IsolatedTmux::new("sync-repair-stash-alias-index");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let _pane0 = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "corky", "-d"]);
+        let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "stash-2", "-d"]);
+
+        let windows_before = list_windows(&iso, "test");
+        assert!(
+            windows_before
+                .iter()
+                .any(|(index, name)| index == "2" && name == "stash-2"),
+            "stash alias should start away from index 1 for this repro"
+        );
+
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+
+        let windows_after = list_windows(&iso, "test");
+        assert_eq!(
+            windows_after
+                .iter()
+                .find(|(_, name)| name == "agent-doc")
+                .unwrap()
+                .0,
+            "0"
+        );
+        assert_eq!(
+            windows_after
+                .iter()
+                .find(|(_, name)| name == "stash")
+                .unwrap()
+                .0,
+            "1",
+            "the first stash window should be normalized to 1:stash"
+        );
+        assert!(
+            !windows_after
+                .iter()
+                .any(|(_, name)| name.starts_with("stash-")),
+            "repair should rename stash overflow aliases back to stash"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn full_sync_repairs_window_order_before_reconcile() {
+        let iso = IsolatedTmux::new("sync-full-repairs-window-order");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd = ScopedCurrentDir::set(root);
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            "tmux_session = \"test\"\n",
+        )
+        .unwrap();
+
+        let doc = root.join("tasks/full-sync-repair.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: full-sync-repair\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+        init_git_repo(root, &doc);
+        let doc_str = doc.to_string_lossy().to_string();
+
+        let pane0 = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let agent_doc_window = iso.pane_window(&pane0).unwrap();
+        sessions::register_full_with_cwd(
+            "full-sync-repair",
+            &pane0,
+            &doc_str,
+            pane_pid_from_tmux(&iso, &pane0).unwrap(),
+            &agent_doc_window,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
+        let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "corky", "-d"]);
+        let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "stash-2", "-d"]);
+
+        run_with_options(
+            &[doc_str.clone()],
+            None,
+            Some(doc_str.as_str()),
+            AutoStartMode::Full,
+            &iso,
+        )
+        .unwrap();
+
+        let windows_after = list_windows(&iso, "test");
+        assert_eq!(
+            windows_after
+                .iter()
+                .find(|(_, name)| name == "agent-doc")
+                .unwrap()
+                .0,
+            "0",
+            "full sync should repair the agent-doc window to index 0"
+        );
+        assert_eq!(
+            windows_after
+                .iter()
+                .find(|(_, name)| name == "stash")
+                .unwrap()
+                .0,
+            "1",
+            "full sync should repair the primary stash window to 1:stash"
+        );
+        assert!(
+            !windows_after
+                .iter()
+                .any(|(_, name)| name.starts_with("stash-")),
+            "full sync should normalize stash aliases during repair"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn repair_layout_rescues_pane_from_stash() {
         let iso = IsolatedTmux::new("sync-repair-rescue-stash");
         let tmp = tempfile::TempDir::new().unwrap();
@@ -7111,17 +7293,23 @@ mod tests {
 
         repair_layout(&iso, "test", "agent-doc").unwrap();
 
-        // After repair, should have at most 1 stash window
+        // After repair, joinable panes should be consolidated into 1:stash.
+        // If tmux refuses a join, overflow windows must remain adjacent as
+        // 2:stash, 3:stash, etc. This repro normally consolidates fully.
         let windows_after = list_windows(&iso, "test");
-        let stash_count_after = windows_after
+        let stash_windows_after: Vec<_> = windows_after
             .iter()
             .filter(|(_, n)| n == "stash" || n.starts_with("stash-"))
-            .count();
+            .collect();
         assert!(
-            stash_count_after <= 1,
+            stash_windows_after.len() <= 1,
             "should have at most 1 stash window after consolidation, got {}",
-            stash_count_after
+            stash_windows_after.len()
         );
+        if let Some((index, name)) = stash_windows_after.first() {
+            assert_eq!(name.as_str(), "stash", "stash aliases must be renamed");
+            assert_eq!(index.as_str(), "1", "primary stash should be 1:stash");
+        }
 
         // agent-doc should still be at index 0
         let ad = windows_after.iter().find(|(_, n)| n == "agent-doc");

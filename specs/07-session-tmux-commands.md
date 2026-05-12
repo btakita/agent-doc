@@ -123,6 +123,13 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - If two visible files point at the same pane, sync must either find one decisive owner or drop the duplicate from the synthetic registry so tmux-router cannot alias both files onto one pane.
 - Once a live pane is reserved for one file during the pass, later files in the same pass must treat it as unavailable.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
+- Manual/full sync is also the operator repair surface behind editor
+  `Sync Tmux Layout`: before reconciliation it runs `repair_layout` for the
+  inferred target session, so the visible layout is repaired to `0:agent-doc`,
+  `1:stash`, and adjacent overflow stash windows before panes are reconciled.
+- Passive `sync --no-autostart` keeps layout repair explicit and does not run
+  `repair_layout`; automatic editor sync should not rename/move stash windows
+  while it is only trying to follow a selection event.
 - If an editor supplies `--window W`, `W` must already be an `agent-doc` window for the target tmux session. When the named session has no visible `agent-doc` window, normal sync must fail closed and preserve layout instead of reconciling remembered docs onto an arbitrary non-`agent-doc` window.
 - Post-sync registry updates must fail closed if tmux-router reports a
   geometry-only pane assignment that disagrees with a still-live authoritative
@@ -224,13 +231,18 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   may call it to consolidate duplicate stash windows, recreate the `agent-doc`
   window from stash when needed, and normalize window indices so `agent-doc`
   remains window `0` with stash windows immediately after it.
+- The durable repaired window shape is `0:agent-doc`, `1:stash`, and, only when
+  stash panes cannot be joined into the primary stash window, `2:stash`,
+  `3:stash`, etc. All `stash-*` aliases are treated as stash windows for
+  discovery but must be renamed back to `stash` during repair.
 - `agent-doc preflight <FILE>` may also call it for the narrow base-index
   compliance case after the pre-diff layout check reports missing window index
   `0`; preflight rechecks layout afterward so its JSON describes the remaining
   state instead of the pre-repair state.
-- Ordinary `agent-doc sync` resolves the target session/window without invoking
-  `repair_layout`; if stash/window drift is detected, sync warns and leaves the
-  destructive or heuristic layout repair for an explicit repair command.
+- Passive `agent-doc sync --no-autostart` resolves the target session/window
+  without invoking `repair_layout`; if stash/window drift is detected, sync
+  warns and leaves the destructive or heuristic layout repair for an explicit
+  repair command.
 
 ## session
 

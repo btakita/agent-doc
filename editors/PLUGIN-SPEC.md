@@ -101,6 +101,10 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
   2. Detect 2D columnar layout (which files are stacked vertically vs. side-by-side).
   3. Run `agent-doc sync --col <absolute-files,...> [--col <absolute-files,...>] --focus <absolute-active-file>`.
      Preserve empty `--col` placeholders when a sibling editor split has no markdown file so the binary can keep left/right column identity. If the visible split spans the workspace root and a nested submodule, keep every visible markdown path in the reported layout instead of dropping the out-of-root file, and execute the sync from the workspace root `.agent-doc/` instead of the focused file's nested root so remembered column state survives unmanaged markdown focus changes. Plugins report layout only; window scoping, passive autostart, ambiguity handling, and cross-root owner resolution are all owned by the Rust binary.
+     Manual layout sync intentionally omits `--no-autostart`; the binary uses
+     that full sync path to repair window order to `0:agent-doc`, `1:stash`,
+     and adjacent overflow `N:stash` windows before reconciliation. Automatic
+     tab sync uses `--no-autostart` and must not perform that repair step.
      The binary must protect open-cycle panes from DETACH, but it must still attach/focus a different requested document immediately around that protected owner instead of deferring sync to preserve pane cardinality.
   4. Show inline hint with layout summary on manual trigger when sync applies. If output from an older binary exits `0` with preserve-layout output, show the preserve-layout warning visibly so the user can tell the tmux layout was intentionally left unchanged. Silent on automatic trigger.
 

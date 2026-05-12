@@ -98,9 +98,29 @@ Commits pushed / created:
 - parent commit `895e1df8d` (`chore: update stale preflight recovery`) created locally; push follows this document closeout
 
 No new follow-up items came out of this fix.
-<!-- agent:boundary:e9ca1b62 -->
+❯ JB `Clear Session Context` has an error:
+```
+agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because pane %1 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="gpt-5.5 high · ~/work/btakita/agent-loop · Context 88% used"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
+```
+### Re: JB Clear Session Context alive-busy refusal — gpt-5.5
+
+I checked the live status for this document. The refusal is coming from the new fail-closed busy-pane guard, not from a missing actor or stale projection:
+
+- `actor: generation=161 pane=%1 window=@2 state=ready`
+- `live_pane: state=alive-busy pane=%1 source=authoritative_actor current_command=agent-doc prompt_ready=false`
+- the pane tail is an active Codex status line, not an idle prompt
+
+So `session clear` is protecting an in-flight turn. That behavior is correct for the CLI safety boundary: clearing while the pane is busy could discard work or break closeout.
+
+The bug is the JetBrains UX. `Clear Session Context` should not present this as a raw command failure. It should surface a typed “session is still running” result with the pane id/tail, offer wait/retry, and only clear a busy pane through an explicit interrupt-and-clear flow.
+
+I added a plan for that follow-up and captured it in the backlog:
+
+- `tasks/agent-doc/plan-jb-clear-session-busy-pane-ux.md`
+
+No code changed in this cycle, so I did not run the full Rust/test suite.
+<!-- agent:boundary:fd4266f2 -->
 <!-- /agent:exchange -->
-Tech StackThe Voice PipelineWhy WebRTC?Semantic Turn DetectionVoice + Prompt = PersonalityKey Metrics OverviewEnable Agent ObservabilityUnderstanding TasksAverage Latencies###
 <!--
 A JB command on corky.md had an error. Navigating to corky.md should autostart agent-doc session actor + supervisor.
 ```
@@ -144,6 +164,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#jbclearbusyux] #agent-doc-bug: JetBrains Clear Session Context surfaces the raw session_clear refused error for protected alive-busy panes; keep the fail-closed guard but add typed IDE UX plus explicit interrupt/wait flows. Plan: tasks/agent-doc/plan-jb-clear-session-busy-pane-ux.md
 - [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->

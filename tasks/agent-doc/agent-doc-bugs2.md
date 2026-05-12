@@ -75,10 +75,39 @@ Commits pushed:
 - parent commit `355efb27d` (`chore: update prompt response closeout guard`)
 
 No new follow-up items came out of this fix.
-<!-- agent:boundary:2b978b5e -->
+❯ do [#preflight-started-recovery]. spec-test-build-install-commit-push
+### Re: preflight-started-recovery — gpt-5
+
+Implemented `#preflight-started-recovery`.
+
+A stale empty `preflight_started` cycle with no response capture now becomes a terminal `abandoned` cycle after the bounded stale timeout when the live document still contains an unresolved prompt target. That avoids writing a placeholder response; the prompt stays visible in the document, and the next preflight opens a fresh cycle to handle it normally. Recent empty prompt-bearing cycles still fail closed so active concurrent work is not stolen.
+
+Updated the cycle-state model, repair/preflight recovery path, diagnostics labels, specs, README, and version notes. Added regressions for the abandoned terminal state, stale prompt-bearing abandon, fresh-cycle preflight carryover, and recent-cycle fail-closed guard.
+
+Verification passed:
+- `cargo test recover_abandons_stale_empty_preflight_started_cycle_with_prompt_drift`
+- `cargo test preflight_abandons_stale_empty_preflight_started_prompt_drift_without_capture`
+- `cargo test recover_fails_closed_on_recent_empty_preflight_started_cycle_with_prompt_drift`
+- `cargo test mark_abandoned_closes_cycle_without_commit`
+- `make check`
+- `cargo build`
+- `make install`
+
+Commits pushed / created:
+- `src/agent-doc` commit `c420cf0` (`fix: abandon stale empty preflight cycles`) pushed to `20260422/codex-agent-backend`
+- parent commit `895e1df8d` (`chore: update stale preflight recovery`) created locally; push follows this document closeout
+
+No new follow-up items came out of this fix.
+<!-- agent:boundary:e9ca1b62 -->
 <!-- /agent:exchange -->
-###
+Tech StackThe Voice PipelineWhy WebRTC?Semantic Turn DetectionVoice + Prompt = PersonalityKey Metrics OverviewEnable Agent ObservabilityUnderstanding TasksAverage Latencies###
 <!--
+A JB command on corky.md had an error. Navigating to corky.md should autostart agent-doc session actor + supervisor.
+```
+agent-doc command failed (exit 1): Error: project controller command `operator_command` failed: operator command `session_clear` rejected for /home/brian/work/btakita/agent-loop/tasks/software/corky.md: stage=missing_actor
+```
+spec-test-build-install-commit-push
+---
 Seeing an error when calling JB `Clear Session Context`:
 ```
 agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %13 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="● Tip Override global tool settings per agent configuration"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
@@ -115,7 +144,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#preflight-started-recovery] #agent-doc-bug: pane reaped during preflight_started cycle — recovery writes dead-end placeholder instead of abandoning the stuck cycle and letting the next preflight handle the unresolved prompt. Plan: tasks/agent-doc/plan-preflight-started-recovery-placeholder.md
 - [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->
@@ -228,4 +256,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#routereap] #agent-doc-bug: route-owned pane reaped after successful finalize commit — completion thread in start.rs unconditionally kills the pane after detecting a committed cycle, even when the session document has an active backlog and ongoing exchange (multi-turn session). Should check session liveness signals before reaping. Plan: tasks/agent-doc/plan-route-owned-post-commit-pane-reap.md
 - 2026-05-11 [#incorrect-close-running-turn] #agent-doc-bug: incorrect close/supersede handling across adjacent managed code sessions makes it unclear whether a prior pane is alive-idle or still running; add live pane evidence to status/closeout/reap decisions and fail closed before clearing busy panes. Plan: tasks/agent-doc/plan-incorrect-close-running-turn-status.md
 - 2026-05-11 [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
+- 2026-05-11 [#preflight-started-recovery] #agent-doc-bug: pane reaped during preflight_started cycle — recovery writes dead-end placeholder instead of abandoning the stuck cycle and letting the next preflight handle the unresolved prompt. Plan: tasks/agent-doc/plan-preflight-started-recovery-placeholder.md
 <!-- /agent:done -->

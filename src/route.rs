@@ -2546,6 +2546,27 @@ fn route_via_authoritative_actor(
         dispatch_pane = actor.record.pane_id.clone();
         actor_state = actor.actor_state();
     }
+    if dispatch_only
+        && actor_state == crate::session_actor::ActorState::Busy
+        && let Some(refreshed) =
+            wait_for_authoritative_actor_ready(tmux, file, session_id, file_path, harness, &actor)?
+    {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_busy_actor_refreshed_ready file={} old_pane={} new_pane={} harness={} old_generation={} new_generation={}",
+                file.display(),
+                actor.record.pane_id,
+                refreshed.record.pane_id,
+                harness.binary,
+                actor.record.generation,
+                refreshed.record.generation
+            ),
+        );
+        actor = refreshed;
+        dispatch_pane = actor.record.pane_id.clone();
+        actor_state = actor.actor_state();
+    }
 
     if lookup_dispatch_registration(file_path, session_id)?.as_deref()
         != Some(dispatch_pane.as_str())
@@ -2591,7 +2612,7 @@ fn route_via_authoritative_actor(
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_dispatch_only_actor_state_direct_pane_submit file={} pane={} harness={} generation={} actor_state={}",
+                    "route_dispatch_only_authoritative_actor_busy_not_ready file={} pane={} harness={} generation={} actor_state={}",
                     file.display(),
                     dispatch_pane,
                     harness.binary,
@@ -2599,33 +2620,14 @@ fn route_via_authoritative_actor(
                     actor_state.as_str()
                 ),
             );
-            eprintln!(
-                "[route] authoritative actor generation {} for {} still reports {} on pane {} — keeping dispatch-only reroutes on the live pane submit path instead of queueing through supervisor IPC",
+            anyhow::bail!(
+                "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",
                 actor.record.generation,
                 file.display(),
-                actor_state.as_str(),
-                dispatch_pane
-            );
-            let _authorization = authorize_controller_dispatch(
-                file,
-                session_id,
-                file_path,
-                &actor,
-                "dispatch_only_reopen",
-                &format!(
-                    "submit=direct_pane actor_state={} harness={}",
-                    actor_state.as_str(),
-                    harness.binary
-                ),
-            )?;
-            return dispatch_only_send_reopen(
-                tmux,
-                file,
-                session_id,
-                &dispatch_pane,
-                file_path,
-                harness,
-                DispatchOnlyReopenDelivery::DirectPaneSubmit,
+                dispatch_pane,
+                reason,
+                dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
+                authoritative_actor_dispatch_recovery_hint(actor_state, file)
             );
         }
         if dispatch_only && authoritative_actor_dispatch_waiting_input_recoverable(actor_state) {

@@ -254,6 +254,20 @@ pub struct SessionOperatorStatus {
     pub projection_diagnostics: Vec<ProjectionDiagnosticStatus>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActorBindingStatus {
+    Bound,
+    NotFound,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActorBindingResponse {
+    pub status: ActorBindingStatus,
+    #[serde(default)]
+    pub record: Option<crate::session_actor::ActorRecord>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ControllerRequest {
     command: String,
@@ -1722,7 +1736,7 @@ pub fn authoritative_actor_binding(
 
     #[cfg(not(test))]
     {
-        request_controller(
+        let response: ActorBindingResponse = request_controller(
             project_root,
             ControllerRequest {
                 command: "actor_binding".to_string(),
@@ -1739,7 +1753,16 @@ pub fn authoritative_actor_binding(
                 command_kind: None,
                 diagnostic_payload: None,
             },
-        )
+        )?;
+        match response.status {
+            ActorBindingStatus::Bound => response.record.map(Some).with_context(|| {
+                format!(
+                    "project controller command `actor_binding` returned bound status without record for {}",
+                    file.display()
+                )
+            }),
+            ActorBindingStatus::NotFound => Ok(None),
+        }
     }
 }
 
@@ -2698,13 +2721,23 @@ fn handle_supervisor_heartbeat(
 fn handle_actor_binding(
     bootstrap: &ControllerBootstrap,
     request: ControllerRequest,
-) -> Result<Option<crate::session_actor::ActorRecord>> {
+) -> Result<ActorBindingResponse> {
     let file = request_file(&request)?;
     let document_id = crate::session_actor::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    load_actor_record(&bootstrap.project_root, &document_id)
+    let record = load_actor_record(&bootstrap.project_root, &document_id)?;
+    Ok(match record {
+        Some(record) => ActorBindingResponse {
+            status: ActorBindingStatus::Bound,
+            record: Some(record),
+        },
+        None => ActorBindingResponse {
+            status: ActorBindingStatus::NotFound,
+            record: None,
+        },
+    })
 }
 
 fn handle_dispatch(
@@ -3998,9 +4031,11 @@ mod tests {
             &mut should_stop,
         )
         .unwrap();
-        let envelope: ControllerEnvelope<Option<crate::session_actor::ActorRecord>> =
+        let envelope: ControllerEnvelope<ActorBindingResponse> =
             serde_json::from_str(&response).unwrap();
-        assert_eq!(envelope.data.unwrap().unwrap().pane_id, "%41");
+        let binding = envelope.data.unwrap();
+        assert_eq!(binding.status, ActorBindingStatus::Bound);
+        assert_eq!(binding.record.unwrap().pane_id, "%41");
 
         let dispatch = ControllerRequest {
             command: "dispatch".to_string(),
@@ -4060,6 +4095,52 @@ mod tests {
             .unwrap();
         assert_eq!(accepted, 1);
         assert_eq!(failed, 1);
+    }
+
+    #[test]
+    fn controller_actor_binding_absent_is_typed_not_found() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/no-binding.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-route\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let binding = ControllerRequest {
+            command: "actor_binding".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&binding).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ActorBindingResponse> =
+            serde_json::from_str(&response).unwrap();
+        assert!(
+            envelope.ok,
+            "actor_binding not_found should not be an error"
+        );
+        let binding = envelope.data.unwrap();
+        assert_eq!(binding.status, ActorBindingStatus::NotFound);
+        assert!(binding.record.is_none());
     }
 
     #[test]

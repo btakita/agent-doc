@@ -457,7 +457,7 @@ fn proc_has_fd_for_path(proc_dir: &Path, target: &Path) -> bool {
 
 fn safe_passive_lock_contention_message(elapsed: Duration, budget: Duration) -> String {
     format!(
-        "{} phase=sync_lock_wait elapsed_ms={} budget_ms={} status=over_budget action=retry",
+        "{} phase=sync_lock_wait elapsed_ms={} budget_ms={} status=over_budget coalesced=skipped_stale action=retry",
         SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER,
         elapsed.as_millis(),
         budget.as_millis()
@@ -8285,6 +8285,7 @@ mod tests {
         );
         assert!(message.contains("phase=sync_lock_wait"), "{message}");
         assert!(message.contains("status=over_budget"), "{message}");
+        assert!(message.contains("coalesced=skipped_stale"), "{message}");
         assert!(message.contains("action=retry"), "{message}");
     }
 

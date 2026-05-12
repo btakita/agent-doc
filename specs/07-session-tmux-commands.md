@@ -162,9 +162,11 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   later sync logs the contention and continues rather than starving selection,
   ownership proof, or auto-start handling behind an orphaned process. Sync
   latency logs must include the `sync_lock_wait` phase so contention is not
-  hidden inside the safe-passive total. When the lock is still held by stale
-  orphaned `agent-doc sync` processes for the same lock file, sync reaps those
-  lock owners and retries acquisition before reporting contention.
+  hidden inside the safe-passive total. Safe-passive contention diagnostics must
+  classify redundant editor selection churn with `coalesced=skipped_stale` while
+  preserving the retry marker consumed by editor plugins. When the lock is still
+  held by stale orphaned `agent-doc sync` processes for the same lock file, sync
+  reaps those lock owners and retries acquisition before reporting contention.
 - In safe-passive editor mode, `sync --no-autostart --focus <file>` must acquire
   the bounded `.agent-doc/sync.lock` before selecting a hidden controller actor
   pane for the focused document. If that lock is contended, sync returns the
@@ -363,6 +365,9 @@ Sync must measure controller actor-binding calls as `controller_actor_lookup`
 and any sessions.json projection update as `projection_refresh`; over-budget
 entries should point at the controller phase instead of only reporting broad
 ownership-proof latency.
+Controller actor-binding responses must distinguish `bound` from `not_found`;
+an absent actor is a typed no-op for safe-passive focus, while a malformed
+controller response is a protocol error with the raw envelope in diagnostics.
 Safe-passive post-lock focus must use the local actor projection when it is
 live, avoiding a controller RPC on the editor fast path. If it must fall back to
 the controller actor-binding call, that result must be stored in the per-sync

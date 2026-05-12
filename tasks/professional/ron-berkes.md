@@ -2,7 +2,18 @@
 agent_doc_session: 375061ae-6496-4ab9-a303-2f0b0da4f61a
 agent_doc_mode: template
 agent_doc_write: crdt
+agent: codex
+opencode_model: GLM-5.1
 claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
+codex_network_access: enabled
+agent_doc_model_tier: high
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
+  '#corky-bug': Please create a plan for corky to fix this issue. Add to the backlog of agent-loop/tasks/software/corky.md
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
+  '#spec-test-commit': update spec + tests. commit
+  '#spec-test-commit-push': update spec + tests. commit + push
 ---
 
 ## Summary
@@ -72,8 +83,25 @@ Ron is a contact (`mail/contacts/ron-berkes/`). Emails `rberkes@gmail.com` and `
 Compacted content:
 - Archived 3 response topic(s): Compact exchange + transcription requests; 4 calls transcribed with GPU diarization; transcribe + diarize
 - Prior summary/context: **Compacted.** 770 lines → structured summary preserving all decisions, outcomes, and technical details. --- ### Tran...
-<!-- agent:boundary:4888ec00 -->
+❯ Please transcribe + diarize /home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/phone_20260511-232017_6504368181.m4a
+### Re: transcribe + diarize May 11 Ron call — gpt-5
+
+Transcribed and diarized the May 11 phone call. Saved to `mail/contacts/ron-berkes/recordings/phone_20260511-232017_6504368181.md`.
+
+Details:
+- Duration: 11:16
+- Speakers: Brian Takita + Ron Berkes
+- Output: 189-line confidence-scored Corky transcript
+- Verification: Corky detected 2 speakers; I manually swapped the generated speaker names after checking the terminal line where Ron says "Thanks, Brian."
+- Commit: `mail` submodule commit `ef418d7` (`Add Ron Berkes May 11 transcript`)
+
+Key topics: reverting recent Monster Rod Holders site/template changes, Steve's traffic/order concerns, Shopify as a possible next-step platform, getting Brian paid/retained for ongoing work, and shipping table rules for rod holders/nets/anchors.
+<!-- agent:boundary:553c70c1 -->
 <!-- /agent:exchange -->
+###
+<!--
+/home/brian/work/btakita/agent-loop/mail/contacts/ron-berkes/recordings/
+-->
 
 <!-- agent:pending patch=replace -->
 - [ ] [#r16r] Start MRH WordPress optimization (admin access: vtac1)

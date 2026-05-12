@@ -103,7 +103,46 @@ Committed locally:
 - parent `agent-loop`: `b525e1bbf agent-doc: update clear status-only pane fix`
 
 Push will run after this binary-owned session document closeout. Unrelated dirty entries left untouched: `mail`, `src/boost-client`, and `src/session-share`.
-<!-- agent:boundary:226c8c3e -->
+Ran `JB Clear Context`.
+```
+Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 67% used
+```
+Refresh and retry did not work.
+spec-test-build-install-commit-push
+### Re: JetBrains Clear Context busy bypass — gpt-5
+
+Implemented the follow-up Clear Session Context fix.
+
+What changed:
+
+- `agent-doc session clear <FILE>` no longer refuses solely because direct live-pane evidence is classified `alive-busy`; after controller authorization it logs `session_clear_live_busy_guard_bypassed` and sends the harness-native clear through the resolved direct pane or supervisor path.
+- `session status` / route prompt detection now recognizes the current Codex idle placeholder `› Explain this codebase`, and the prompt scanner uses the latest `›` prompt candidate so shell command history containing older prompt glyphs does not mask the real prompt.
+- Updated `SPEC.md`, `specs/07-session-tmux-commands.md`, shared editor specs, JetBrains specs, and `VERSIONS.md` to document clear as the operator recovery action instead of a busy-refused action.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test codex_codebase_placeholder`
+- `cargo test live_pane_prompt_ready_accepts_codex_status_chrome_only_output`
+- `cargo test session_clear`
+- `cargo test last_prompt_candidate_uses_latest_codex_prompt_after_shell_command`
+- `cargo test wait_for_agent_ready_codex_prompt -- --ignored --test-threads=1`
+- `make check`
+- `make tmux-ci` initially caught `route::tests::wait_for_agent_ready_codex_prompt`; fixed the scanner regression and reran `make tmux-ci` successfully.
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` now reports `live_pane: state=alive-idle ... prompt_ready=true`.
+
+CI note: `gh run list --workflow CI --limit 5` still shows only old `main` failures from 2026-04-24, and there is no workflow named `tmux-test`; local `make tmux-ci` is the current tmux evidence.
+
+Committed locally:
+
+- `src/agent-doc`: `21fd7a8 fix: let session clear bypass stale busy state`
+- parent `agent-loop`: `830fc1d5d agent-doc: update clear busy bypass fix`
+
+Push will run after this binary-owned session document closeout. Unrelated dirty entries left untouched: `mail`, `src/boost-client`, `tasks/agent-doc/plan-codex-resume-writable-root-contract.md`, and this session document until write --commit owns it.
+<!-- agent:boundary:72cfca50 -->
 <!-- /agent:exchange -->
 ###
 <!--

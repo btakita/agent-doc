@@ -671,13 +671,44 @@ Delivery:
 I closed `#oauth-google-fixed-port`.
 
 Top remaining backlog item is `#tokenstore-delete-preservation`.
-<!-- agent:boundary:f529c001 -->
+❯ Add Google Sheets support. The solution should:
+❯ - read from a google sheet
+❯ - sync a CSV file into and from a document + tab
+❯ spec-test-build-install-commit-push
+### Re: Google Sheets support — gpt-5
+
+Implemented and pushed in `src/corky`.
+
+Google Sheets now has tab-level CSV sync commands:
+- `corky sheets pull <SHEET_URL_OR_ID> <TAB> <CSV_FILE> [--account EMAIL]` reads a named tab into a local CSV file.
+- `corky sheets push <SHEET_URL_OR_ID> <TAB> <CSV_FILE> [--account EMAIL]` creates the tab if missing, clears existing tab values, then writes the CSV from `A1` so stale cells do not survive a shorter sync.
+
+I kept the existing range-based commands intact (`sheets read` / `sheets write`) and refactored the Sheets implementation around shared value fetch/update helpers. CSV parsing now handles quoted fields, escaped quotes, embedded newlines, empty fields, and CRLF line endings. Tab names with spaces or punctuation are quoted as A1 notation and URL-encoded before API calls.
+
+Docs and instruction surfaces were updated for the new Sheets sync contract, including `SPEC.md`, `README.md`, `AGENTS.md`, the bundled Corky skill, and the precommit/prerelease audit runbooks. The generated `.claude/skills/*` files were refreshed to match their bundled sources and drop stale OAuth refresh marker comments.
+
+Verification passed end to end:
+- `make check` (318 library tests plus 30 CLI tests and the rest of the integration suite)
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (`transcribe-cuda` path)
+
+Delivery:
+- commit `17ca52f` — `feat: add google sheets csv tab sync`
+- pushed `20260413/corky-gsc` to `origin`
+
+Top remaining backlog item is `#tokenstore-delete-preservation`.
+
+<!-- agent:boundary:0da55f0f -->
 <!-- /agent:exchange -->
+###
+<!--
+-->
 
-## Pending / Not Built
+## Backlog
 
-<!-- agent:pending -->
+<!-- agent:backlog -->
 - [ ] [#tokenstore-delete-preservation] [recommended] Make TokenStore saves deletion-safe so stale writers cannot restore tokens cleared by another process
 - [ ] [#watch-gmail-history-notify] [recommended] Teach watch to count Gmail API last_history_id movement and fire mailbox sync and desktop notifications for gmail-api accounts
 - [ ] [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange
-<!-- /agent:pending -->
+<!-- /agent:backlog -->

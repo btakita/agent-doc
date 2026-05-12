@@ -2863,10 +2863,11 @@ fn handle_operator_command(
             file.display()
         );
     };
-    if matches!(
-        record.state,
-        crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
-    ) {
+    let clear_closed_actor =
+        command_kind == "session_clear" && record.state == crate::session_actor::ActorState::Closed;
+    if matches!(record.state, crate::session_actor::ActorState::Blocked)
+        || (record.state == crate::session_actor::ActorState::Closed && !clear_closed_actor)
+    {
         let failed_stage = record.state.as_str();
         let _ = insert_dispatch_attempt_record(
             &bootstrap.project_root,
@@ -4108,6 +4109,84 @@ mod tests {
                 .as_deref(),
             Some("operator_ready")
         );
+    }
+
+    #[test]
+    fn controller_session_clear_accepts_closed_actor_generation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/closed-clear.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-closed-clear\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        crate::session_actor::record_session_start_direct(
+            &doc,
+            "session-closed-clear",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        crate::session_actor::transition_state_direct(
+            &doc,
+            "session-closed-clear",
+            "%41",
+            Some(1),
+            crate::session_actor::ActorState::Closed,
+            "supervisor",
+            "cycle_committed",
+        )
+        .unwrap();
+
+        let clear = ControllerRequest {
+            command: "operator_command".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("session_clear".to_string()),
+            diagnostic_payload: Some("test clear closed actor".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&clear).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(
+            envelope.ok,
+            "session_clear should accept closed actors: {:?}",
+            envelope.error
+        );
+        assert_eq!(envelope.data.unwrap().accepted_stage, "operator_closed");
+
+        let restart = ControllerRequest {
+            command_kind: Some("session_restart".to_string()),
+            ..clear
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&restart).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(!envelope.ok);
+        assert!(envelope.error.unwrap().contains("generation 1 is closed"));
     }
 
     #[test]

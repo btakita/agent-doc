@@ -261,7 +261,10 @@ single-owner actor controls:
   otherwise it may fall back to supervisor IPC inject. For Codex, it still
   records the clear prompt state so the next reroute can reapply the original
   launch contract. Before contacting tmux or the supervisor, it must record a
-  controller operator-command acceptance or fail with the rejected stage.
+  controller operator-command acceptance or fail with the rejected stage. A
+  `closed` actor generation must still accept this explicit clear operator
+  command, because closed only blocks duplicate reopen dispatch; it must not
+  prevent clearing the live harness context before the next run.
 - Any tmux-bound command submit in this surface (`route --dispatch-only`,
   file-scoped `session clear`, queued slash-command dispatch, supervisor-owned
   reopen inject) must normalize trailing line endings once and use exactly one

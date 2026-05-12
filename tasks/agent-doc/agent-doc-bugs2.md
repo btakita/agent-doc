@@ -34,7 +34,31 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 4 response topic(s): JB Clear Session Context busy warning; jbclearbusyactions; log review next steps; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e42aa243 -->
+❯ do [#baseindexrepair]. spec-test-build-install-commit-push
+### Re: base-index repair — gpt-5
+
+Implemented `#baseindexrepair`.
+
+Preflight no longer writes `.agent-doc/state/base-index-repair.count` and waits for a second detection. When `check_layout()` reports missing tmux window index `0`, preflight now clears any stale deferred-repair counter, runs `repair_layout` immediately in the active tmux session, and re-runs the layout check so the emitted `layout_issues` describe the post-repair state. If automatic repair cannot run, stderr names the explicit `agent-doc session doctor <FILE> --repair` action.
+
+Updated specs/docs/changelog for the new preflight behavior and added regression coverage for stale counter cleanup outside tmux.
+
+Verification:
+
+- `cargo test maybe_auto_repair_base_index`
+- `cargo test preflight_output_includes_layout_issues`
+- `make check`
+- `cargo build --release`
+- `cargo install --path . --force`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits pushed:
+
+- `src/agent-doc`: `557aee1 fix: repair base index during preflight`
+- parent `agent-loop`: `b642f2120 chore: update agent-doc base-index repair`
+
+I left the pre-existing unrelated dirty files in `src/agent-doc` unstaged.
+<!-- agent:boundary:89155d7a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,7 +98,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#baseindexrepair] [recommended] #next-steps: Make base-index layout repair deterministic for the active preflight or surface an immediate action; current preflight detected window index 0 missing in session 0, wrote state/base-index-repair.count=1, and deferred repair until the next detection.
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
@@ -193,4 +216,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#jbclearbusyactions] #agent-doc-bug: JetBrains Clear Session Context protected busy warning still leaves no refresh-and-retry or intentional interrupt-and-clear action, and current tasks/root.md evidence shows live pane idle while supervisor/controller projection remains busy. Plan: tasks/agent-doc/plan-jb-clear-session-busy-actions.md
 - 2026-05-12 [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 - 2026-05-12 [#clauderouteproof] [recommended] #next-steps: Add Claude dispatch proof parity or explicit accepted-only semantics; current robert-ross Claude routes record direct_pane_submit proof=accepted without dispatch_start_proof, so operator success is weaker than Codex consumed-proof routing. Plan: add a focused route proof check or document accepted-only as a deliberate harness limit.
+- 2026-05-12 [#baseindexrepair] [recommended] #next-steps: Make base-index layout repair deterministic for the active preflight or surface an immediate action; current preflight detected window index 0 missing in session 0, wrote state/base-index-repair.count=1, and deferred repair until the next detection.
 <!-- /agent:done -->

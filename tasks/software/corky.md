@@ -87,29 +87,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260512-070017.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260512-071218.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Corky OAuth auth and token lifetime
+- Archived 1 response topic(s): tokenstore-delete-preservation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ do [#tokenstore-delete-preservation]. spec-test-build-install-commit-push
-### Re: tokenstore-delete-preservation — gpt-5
-
-Implemented and pushed `#tokenstore-delete-preservation`.
-
-Corky now keeps baseline/dirty/deleted key metadata inside `TokenStore`, so a stale writer that loaded an old `tokens.json` can save an unrelated token without restoring a token another process cleared. Explicit upserts still re-add a token intentionally, and explicit removals stay deletion-aware. The spec notes the new deletion-safe merge behavior.
-
-Commit: `b1e4c5a fix: preserve token deletions across stale saves`, pushed to `origin/20260413/corky-gsc`.
-
-Verification completed:
-- `cargo test token_store`
-- `cargo fmt --check`
-- `make precommit`
-- `make build`
-- `make install` (installed with `transcribe-cuda`)
-
-`make precommit` initially failed only because `audit-docs` detected instruction-file mtimes older than the changed source. I refreshed the audited instruction surfaces using the project’s documented staleness-touch repair path, then reran `make precommit` successfully.
-<!-- agent:boundary:e174ba78 -->
+<!-- agent:boundary:1ee99753 -->
 <!-- /agent:exchange -->
 ###
 <!--

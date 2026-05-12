@@ -1186,6 +1186,7 @@ fn phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
         crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
         crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
         crate::cycle_state::CyclePhase::Committed => "committed",
+        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
     }
 }
 
@@ -1364,6 +1365,7 @@ fn open_cycle_message(state: &crate::cycle_state::CycleState) -> String {
             "response write landed but no terminal commit followed"
         }
         crate::cycle_state::CyclePhase::Committed => "no terminal commit followed",
+        crate::cycle_state::CyclePhase::Abandoned => "cycle was abandoned",
     };
     format!(
         "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — {}",

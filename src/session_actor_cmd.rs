@@ -405,6 +405,9 @@ pub fn doctor(file: &Path, repair: bool) -> Result<()> {
                     crate::repair::RepairOutcome::StalePreflightLockRepaired => {
                         "closed a stale preflight-started cycle"
                     }
+                    crate::repair::RepairOutcome::StalePreflightCycleAbandoned => {
+                        "abandoned a stale empty preflight-started cycle"
+                    }
                     crate::repair::RepairOutcome::CommitBoundaryRecovered => {
                         "recovered a missing commit boundary"
                     }

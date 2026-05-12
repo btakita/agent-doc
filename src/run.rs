@@ -536,6 +536,7 @@ fn cycle_phase_label(phase: crate::cycle_state::CyclePhase) -> &'static str {
         crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
         crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
         crate::cycle_state::CyclePhase::Committed => "committed",
+        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
     }
 }
 

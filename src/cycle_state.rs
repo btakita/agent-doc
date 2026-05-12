@@ -4,6 +4,9 @@
 //! - Persists per-document cycle state under `.agent-doc/state/cycles/<doc-hash>.json`.
 //! - Tracks the exact phase of the current or most recent response cycle:
 //!   `preflight_started` → `response_captured` → `write_applied` → `committed`.
+//!   A stale `preflight_started` cycle with no response artifact may become
+//!   `abandoned` so a later preflight can start a fresh cycle for the same
+//!   unresolved prompt.
 //! - Stores cycle-scoped snapshot/file content hashes so callers can reason
 //!   about exact cycle state instead of inferring from file-size drift or only
 //!   the last `ops.log` line.
@@ -43,6 +46,7 @@ pub enum CyclePhase {
     ResponseCaptured,
     WriteApplied,
     Committed,
+    Abandoned,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -94,7 +98,7 @@ pub struct CycleState {
 
 impl CycleState {
     pub fn is_open(&self) -> bool {
-        self.phase != CyclePhase::Committed
+        !matches!(self.phase, CyclePhase::Committed | CyclePhase::Abandoned)
     }
 }
 
@@ -382,6 +386,30 @@ pub fn mark_committed(
     Ok(state)
 }
 
+pub fn mark_abandoned(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<CycleState> {
+    let mut state =
+        load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
+    state.phase = CyclePhase::Abandoned;
+    state.last_event = event.to_string();
+    state.updated_at = now_secs();
+    if let Some(snapshot) = snapshot_content {
+        state.snapshot_hash = Some(crate::ops_log::content_hash(snapshot));
+        state.normalized_snapshot_hash = Some(normalized_content_hash(snapshot));
+    }
+    if let Some(content) = file_content {
+        state.file_hash = Some(crate::ops_log::content_hash(content));
+        state.normalized_file_hash = Some(normalized_content_hash(content));
+    }
+    save(file, &state)?;
+    append_phase_event_to_session_log(file, &state);
+    Ok(state)
+}
+
 fn append_phase_event_to_session_log(file: &Path, state: &CycleState) {
     let Ok(content) = std::fs::read_to_string(file) else {
         return;
@@ -478,6 +506,7 @@ fn cycle_phase_label(phase: CyclePhase) -> &'static str {
         CyclePhase::ResponseCaptured => "response_captured",
         CyclePhase::WriteApplied => "write_applied",
         CyclePhase::Committed => "committed",
+        CyclePhase::Abandoned => "abandoned",
     }
 }
 
@@ -487,6 +516,7 @@ fn cycle_phase_rank(phase: CyclePhase) -> u8 {
         CyclePhase::ResponseCaptured => 1,
         CyclePhase::WriteApplied => 2,
         CyclePhase::Committed => 3,
+        CyclePhase::Abandoned => 4,
     }
 }
 
@@ -721,6 +751,20 @@ mod tests {
 
         let state = mark_committed(&doc, "commit", Some("new"), Some("new")).unwrap();
         assert_eq!(state.phase, CyclePhase::Committed);
+        assert!(!state.is_open());
+    }
+
+    #[test]
+    fn mark_abandoned_closes_cycle_without_commit() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let state =
+            mark_abandoned(&doc, "abandon_empty_preflight", Some("snap"), Some("body")).unwrap();
+        assert_eq!(state.phase, CyclePhase::Abandoned);
+        assert_eq!(state.last_event, "abandon_empty_preflight");
         assert!(!state.is_open());
     }
 

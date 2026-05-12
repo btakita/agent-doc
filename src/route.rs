@@ -5486,6 +5486,7 @@ fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
         crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
         crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
         crate::cycle_state::CyclePhase::Committed => "committed",
+        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
     }
 }
 
@@ -6531,6 +6532,7 @@ fn auto_start_in_session(
                             crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
                             crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
                             crate::cycle_state::CyclePhase::Committed => "committed",
+                            crate::cycle_state::CyclePhase::Abandoned => "abandoned",
                         },
                         ack_timeout.as_secs()
                     ),

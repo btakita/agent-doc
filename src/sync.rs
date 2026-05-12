@@ -695,6 +695,7 @@ fn cycle_phase_label(file: &Path) -> Option<String> {
         crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
         crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
         crate::cycle_state::CyclePhase::Committed => "committed",
+        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
     };
     Some(label.to_string())
 }
@@ -706,6 +707,9 @@ fn repair_outcome_label(outcome: crate::repair::RepairOutcome) -> &'static str {
         crate::repair::RepairOutcome::AlreadyApplied => "already_applied",
         crate::repair::RepairOutcome::ManualTailRemovalRespected => "manual_tail_removal_respected",
         crate::repair::RepairOutcome::StalePreflightLockRepaired => "stale_preflight_lock_repaired",
+        crate::repair::RepairOutcome::StalePreflightCycleAbandoned => {
+            "stale_preflight_cycle_abandoned"
+        }
         crate::repair::RepairOutcome::CommitBoundaryRecovered => "commit_boundary_recovered",
         crate::repair::RepairOutcome::TemplateNormalized => "template_normalized",
         crate::repair::RepairOutcome::CompletedBacklogReaped => "completed_backlog_reaped",
@@ -1274,7 +1278,9 @@ fn open_cycle_protected_file_state(file: &Path) -> Option<OpenCycleProtectedPane
         crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
         crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
         crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-        crate::cycle_state::CyclePhase::Committed => return None,
+        crate::cycle_state::CyclePhase::Committed | crate::cycle_state::CyclePhase::Abandoned => {
+            return None;
+        }
     };
     Some(OpenCycleProtectedPaneState {
         file: file.to_path_buf(),
@@ -1513,7 +1519,9 @@ fn pending_missing_pane_repair_phase(file: &Path) -> Option<&'static str> {
         crate::cycle_state::CyclePhase::PreflightStarted => Some("preflight_started"),
         crate::cycle_state::CyclePhase::ResponseCaptured => Some("response_captured"),
         crate::cycle_state::CyclePhase::WriteApplied => Some("write_applied"),
-        crate::cycle_state::CyclePhase::Committed => None,
+        crate::cycle_state::CyclePhase::Committed | crate::cycle_state::CyclePhase::Abandoned => {
+            None
+        }
     }
 }
 

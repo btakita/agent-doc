@@ -24,9 +24,11 @@
 //! - `repair(file)` — runs the same recovery logic as `run(file)` and, when recovery work happened
 //!   inside a git repo, immediately attempts `git::commit(file)` so the repaired response crosses
 //!   the normal commit boundary instead of waiting for a later `preflight`.
-//! - When there is no pending response/capture to replay and an open `preflight_started` cycle
-//!   contains unresolved prompt-bearing drift, `run(file)` fails closed with retry/restart
-//!   guidance instead of committing an empty cycle with no response body.
+//! - When there is no pending response/capture to replay and a stale open
+//!   `preflight_started` cycle contains unresolved prompt-bearing drift, `run(file)` abandons
+//!   that empty cycle without committing a placeholder response so the next preflight can start
+//!   a fresh cycle for the still-visible prompt. Recent empty cycles still fail closed so a
+//!   concurrent live preflight is not stolen.
 //! - When there is no pending response/capture to replay, `run(file)` also reaps stale completed
 //!   backlog items (`- [x] ...`) that should already have been removed, synchronizing the reap
 //!   into the snapshot and `agent:done` archive when present.
@@ -70,6 +72,7 @@ pub enum RepairOutcome {
     AlreadyApplied,
     ManualTailRemovalRespected,
     StalePreflightLockRepaired,
+    StalePreflightCycleAbandoned,
     CommitBoundaryRecovered,
     TemplateNormalized,
     CompletedBacklogReaped,
@@ -462,6 +465,7 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
     }
 
     let cycle_capture_exists = crate::capture::load_by_id(file, &state.cycle_id)?.is_some();
+    let age_secs = preflight_cycle_age_secs(&state);
     if !cycle_capture_exists
         && let Some(change) = crate::session_check::first_unstarted_prompt_bearing_change(file)?
         && !prompt_change_is_orchestration_handoff_marker(&change.text)
@@ -472,17 +476,42 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
             .find(|line| !line.trim().is_empty())
             .unwrap_or(change.text.as_str())
             .trim();
+        if age_secs >= STALE_EMPTY_PREFLIGHT_TTL_SECS {
+            crate::cycle_state::mark_abandoned(
+                file,
+                "repair_preflight_stale_prompt_cycle_abandoned",
+                snapshot_content.as_deref(),
+                Some(&file_content),
+            )?;
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "repair_preflight_stale_prompt_cycle_abandoned file={} cycle_id={} age_secs={} prompt_preview={}",
+                    file.display(),
+                    state.cycle_id,
+                    age_secs,
+                    preview
+                ),
+            );
+            eprintln!(
+                "[repair] abandoned stale empty preflight_started cycle {} for {} after {}s; unresolved prompt remains visible for the next preflight",
+                state.cycle_id,
+                file.display(),
+                age_secs
+            );
+            return Ok(RepairOutcome::StalePreflightCycleAbandoned);
+        }
         anyhow::bail!(
-            "{} for {}: previous cycle `{}` is still `preflight_started`, the live document has unresolved prompt_target: {preview}, and no response exists to replay. Restart the harness pane and rerun `agent-doc {}` (or use `agent-doc start {}` from a fresh pane) so the prompt is handled by a new response cycle.",
+            "{} for {}: previous cycle `{}` is still `preflight_started`, the live document has unresolved prompt_target: {preview}, and no response exists to replay. The cycle is only {}s old; wait until it is stale or restart the harness pane and rerun `agent-doc {}` (or use `agent-doc start {}` from a fresh pane) so the prompt is handled by a new response cycle.",
             EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR,
             file.display(),
             state.cycle_id,
+            age_secs,
             file.display(),
             file.display(),
         );
     }
 
-    let age_secs = preflight_cycle_age_secs(&state);
     if age_secs >= STALE_EMPTY_PREFLIGHT_TTL_SECS && !cycle_capture_exists {
         crate::cycle_state::mark_committed(
             file,
@@ -1287,7 +1316,10 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
 
 pub fn repair(file: &Path) -> Result<RepairOutcome> {
     let outcome = run(file)?;
-    if outcome.repaired() && crate::git::is_in_git_repo(file) {
+    if outcome.repaired()
+        && outcome != RepairOutcome::StalePreflightCycleAbandoned
+        && crate::git::is_in_git_repo(file)
+    {
         crate::write::complete_required_closeout(file)?;
     } else if !outcome.repaired()
         && let crate::session_check::SessionCheckStatus::Interrupted(message) =
@@ -2153,7 +2185,7 @@ mod tests {
     }
 
     #[test]
-    fn recover_fails_closed_on_stale_empty_preflight_started_cycle_with_prompt_drift() {
+    fn recover_abandons_stale_empty_preflight_started_cycle_with_prompt_drift() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("test.md");
@@ -2177,22 +2209,24 @@ mod tests {
         std::fs::write(&doc, &live).unwrap();
         age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
 
-        let err = run(&doc).unwrap_err();
-        let message = err.to_string();
-        assert!(message.contains(EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR));
-        assert!(message.contains(&state.cycle_id));
-        assert!(message.contains("prompt_target: do [#root-empty-preflight]"));
-        assert!(message.contains("no response exists to replay"));
-        assert!(message.contains("agent-doc start"));
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::StalePreflightCycleAbandoned);
 
         let after = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(after.phase, crate::cycle_state::CyclePhase::Abandoned);
+        assert_eq!(after.cycle_id, state.cycle_id);
         assert_eq!(
-            after.phase,
-            crate::cycle_state::CyclePhase::PreflightStarted
+            after.last_event,
+            "repair_preflight_stale_prompt_cycle_abandoned"
         );
-        assert_eq!(after.last_event, "preflight_started");
         assert_eq!(snapshot::load(&doc).unwrap().as_deref(), Some(base));
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), live);
+
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("repair_preflight_stale_prompt_cycle_abandoned file="),
+            "abandon event should be logged for diagnostics:\n{log}"
+        );
     }
 
     #[test]

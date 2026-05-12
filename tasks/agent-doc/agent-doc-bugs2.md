@@ -66,10 +66,49 @@ Commits pushed:
 - parent `agent-loop`: `9459d93fc agent-doc: update route actor binding fix`
 
 Unrelated dirty entries left untouched: `mail` and `src/session-share`.
-<!-- agent:boundary:d8c4ad4a -->
+❯ Ran JB `Clear Session Context`. The Codex terminal was idle but agent-doc blocked the clear. `Run Agent Doc` does seem to work. Remove the stateful busy guard.
+```
+Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+```
+❯ spec-test-build-install-commit-push
+### Re: JetBrains clear stale busy guard — gpt-5
+
+Implemented the Clear Session Context stale-busy fix.
+
+What changed:
+
+- `agent-doc session status <FILE>` and `agent-doc session clear <FILE>` now treat Codex output that contains only the model/cwd/context status chrome as direct `alive-idle` evidence, so a stale actor/supervisor busy projection does not block clear when the pane is visibly idle.
+- Route dispatch still requires a real dispatch-ready prompt before injecting a reopen, so this relaxes only operator status/clear, not reroute safety.
+- Removed the unused JetBrains response-status busy FFI bindings and documented that `Clear Session Context` must always ask the binary instead of blocking on plugin-local busy state.
+- Updated the shared specs, JetBrains specs, session tmux spec, and release notes. Bumped the JetBrains plugin build to `0.2.113`.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test chrome_only`
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `make check`
+- `make tmux-ci`
+- `make build`
+- `./gradlew test buildPlugin`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `agent-doc plugin install --local jetbrains` -> installed `agent-doc-jetbrains-0.2.113` into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+
+CI note: the latest listed GitHub `CI` runs on `main` are old failures from 2026-04-24, so there was no fresh remote tmux leg to consume; local `make tmux-ci` passed.
+
+Committed locally:
+
+- `src/agent-doc`: `f281737 fix: clear codex status-only panes`
+- parent `agent-loop`: `b525e1bbf agent-doc: update clear status-only pane fix`
+
+Push will run after this binary-owned session document closeout. Unrelated dirty entries left untouched: `mail`, `src/boost-client`, and `src/session-share`.
+<!-- agent:boundary:226c8c3e -->
 <!-- /agent:exchange -->
 ###
 <!--
+Is CI not running on our current branch?
+---
 Move JB `Copy Session Diagnostics` outside the numeric shortcuts.
 ---
 I don't have a good track on the lifecycle logic that starts panes, kills panes, edge cases, etc.
@@ -103,6 +142,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#va0j] [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.113, then re-test Clear Session Context against the stale-busy Codex status-only pane.
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.

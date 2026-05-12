@@ -468,6 +468,10 @@ fn codex_idle_placeholder_prompt(trimmed: &str) -> Option<String> {
     }
 
     let normalized = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized == "Explain this codebase" {
+        return Some(format!("› {}", normalized));
+    }
+
     let words = normalized.split_whitespace().collect::<Vec<_>>();
     if words.len() < 4 || words.len() > 8 {
         return None;
@@ -532,8 +536,11 @@ fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
         .join(" ");
     let normalized = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
 
-    if let Some(index) = normalized.find('›') {
+    if let Some(index) = normalized.rfind('›') {
         let candidate = normalized[index..].trim();
+        if candidate == "›" {
+            return Some(candidate.to_string());
+        }
         return codex_idle_placeholder_prompt(candidate);
     }
 
@@ -848,6 +855,19 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    fn last_prompt_candidate_uses_latest_codex_prompt_after_shell_command() {
+        let h = HarnessConfig::codex();
+        let output = r#"
+$ exec /bin/sh -c 'printf "Starting codex...\n"; printf "› \n"'
+Starting codex...
+›
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
+"#;
+
+        assert_eq!(h.last_prompt_candidate(output).as_deref(), Some("›"));
+    }
+
+    #[test]
     fn idle_chrome_only_output_accepts_codex_status_footer_without_prompt() {
         let h = HarnessConfig::codex();
         let output = "\
@@ -923,6 +943,20 @@ gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    fn last_prompt_candidate_detects_codex_codebase_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Explain this codebase
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 27% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Explain this codebase")
+        );
+        assert!(h.is_dispatch_ready_prompt_line("› Explain this codebase"));
+    }
+
+    #[test]
     fn last_prompt_candidate_rejects_codex_drafted_filename_text() {
         let h = HarnessConfig::codex();
         let output = "\
@@ -980,6 +1014,16 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
         let output = "\
 › Explain this module in @filename
 gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(h.protected_prompt_input_reason(output), None);
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_codebase_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Explain this codebase
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 27% used
 ";
         assert_eq!(h.protected_prompt_input_reason(output), None);
     }

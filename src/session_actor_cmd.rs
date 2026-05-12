@@ -271,7 +271,7 @@ pub fn clear(file: &Path) -> Result<()> {
         &ctx.canonical_file,
         "session_clear",
     )?;
-    guard_destructive_operator_on_live_busy_pane(&ctx, "session_clear")?;
+    reconcile_idle_projection_before_clear(&ctx)?;
     ensure_supervisor_socket(&ctx)?;
     let tmux = Tmux::default_server();
     if let Some((pane, pane_source)) = resolve_direct_submit_pane(&ctx, &tmux) {
@@ -328,6 +328,27 @@ pub fn clear(file: &Path) -> Result<()> {
         ctx.canonical_file.display(),
         authorization.accepted_stage
     );
+    Ok(())
+}
+
+fn reconcile_idle_projection_before_clear(ctx: &SessionContext) -> Result<()> {
+    let tmux = Tmux::default_server();
+    let evidence = live_pane_evidence(ctx, &tmux);
+    if evidence.state == LivePaneState::AliveIdle {
+        reconcile_idle_projection_from_evidence(ctx, &evidence)?;
+    } else if evidence.state == LivePaneState::AliveBusy {
+        crate::ops_log::log_op(
+            &ctx.canonical_file,
+            &format!(
+                "session_clear_live_busy_guard_bypassed file={} pane={} source={} current_command={} tail={:?}",
+                ctx.canonical_file.display(),
+                evidence.pane_id.as_deref().unwrap_or("unknown"),
+                evidence.source,
+                evidence.current_command.as_deref().unwrap_or("unknown"),
+                evidence.tail.as_deref().unwrap_or("unknown")
+            ),
+        );
+    }
     Ok(())
 }
 

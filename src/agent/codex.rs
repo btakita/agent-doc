@@ -1089,11 +1089,7 @@ impl Codex {
                 "hostname" => host = Some(value),
                 "user" => user = Some(value),
                 "port" => port = Some(value),
-                "identityfile" => {
-                    if identity_file.is_none() {
-                        identity_file = Some(value);
-                    }
-                }
+                "identityfile" if identity_file.is_none() => identity_file = Some(value),
                 _ => {}
             }
         }

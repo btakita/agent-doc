@@ -1993,7 +1993,7 @@ fn serialize_template_response(patches: &[template::PatchBlock], unmatched: &str
         out.push_str(&patch.name);
         if !patch.attrs.is_empty() {
             let mut attrs: Vec<_> = patch.attrs.iter().collect();
-            attrs.sort_by(|(left, _), (right, _)| left.cmp(right));
+            attrs.sort_by_key(|(left, _)| *left);
             for (key, value) in attrs {
                 out.push(' ');
                 out.push_str(key);

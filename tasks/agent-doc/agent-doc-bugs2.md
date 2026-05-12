@@ -29,78 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-043350.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-054123.md`*
 
 Compacted content:
-- Archived 6 response topic(s): incorrect close running turn; do [#rspcmt7]; preflight-started-recovery; 3 more
+- Archived 4 response topic(s): JB Clear Session Context busy warning; jbclearbusyactions; log review next steps; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Error with JB `Clear Session Context`
-```
-Session is still running for tasks/root.md. Pane %2 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop/src/session-share · Context 9% used
-```
-### Re: JB Clear Session Context busy warning — gpt-5
-
-This is now the typed protected-busy warning path, not the older raw `agent-doc command failed` leak. The fail-closed part is correct: `session clear` should refuse while the owning pane is actively running an `agent-doc` turn, because clearing there can discard work or break closeout.
-
-I checked the reported `src/session-share/tasks/root.md` session after the warning. Direct pane evidence now says `alive-idle` and `prompt_ready=true` for pane `%2`, while the supervisor/controller projection still reports `busy`. That split is the remaining bug surface: JetBrains needs a direct `Refresh and retry` path when the pane has already returned to idle, an explicit confirmed `Interrupt and clear` path when the user wants to discard the running turn, and backend reconciliation for stale busy projection when live pane evidence is idle.
-
-Created and committed the focused plan at `tasks/agent-doc/plan-jb-clear-session-busy-actions.md` (`607a553d9`) and added backlog item `#jbclearbusyactions`. I did not run the full suite because this cycle only added a plan/backlog capture, not product code.
-❯ do [#jbclearbusyactions]. spec-test-build-install-commit-push
-### Re: jbclearbusyactions — gpt-5
-
-Implemented `#jbclearbusyactions`.
-
-The JetBrains protected-busy warning now offers `Refresh and retry` and confirmed `Interrupt and clear` actions. Refresh runs `agent-doc session status` and immediately retries clear when direct pane evidence is already `alive-idle` with `prompt_ready=true`; interrupt-clear routes through a new binary-owned `agent-doc session interrupt-clear <FILE>` path that sends the harness-specific interrupt sequence, waits for idle or closed direct pane evidence, then retries normal clear.
-
-The Rust session operator path now also reconciles stale busy actor/supervisor/controller lease projection when direct pane evidence proves the owning pane is idle, so `session status` and clear no longer leave the operator stuck behind a stale `busy` projection.
-
-Committed code in `src/agent-doc` as `b13abbb` (`fix: add busy clear recovery actions`) and committed the superproject instruction-surface/submodule update as `51277cf0e` (`chore: refresh agent-doc surfaces`). Per the session closeout contract, push runs after this document closeout succeeds.
-
-Verification and install completed:
-- `cargo fmt --check`
-- `cargo test session_actor_cmd::tests::`
-- `cargo test project_controller::tests::controller_session_clear_accepts_closed_actor_generation`
-- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
-- `make check`
-- `./gradlew buildPlugin`
-- `make build-release`
-- `make install`
-- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.111.zip` to `IntelliJIdea2026.1`
-- `make plugin-version-check`
-- `cargo run --quiet -- audit-docs`
-❯ Please look at the Codex, Claude, Opencode session logs + agent-doc logs. Plan #next-steps for unfixed issues.
-### Re: log review next steps — gpt-5
-
-I reviewed the current root `.agent-doc` logs plus the active Codex, Claude, and OpenCode session logs.
-
-Current live state: `agent-doc-bugs2.md` is back to a ready Codex actor on `%1`, and recent Codex dispatch proof is `consumed`. The remaining unfixed surfaces are in the failure trail, not the current pane state.
-
-Planned `#next-steps` into backlog:
-
-- OpenCode startup/capability proof is still not healthy. The OpenCode child proof exits through the `opencode` help screen, routes continue into busy/starting panes, direct submit hit an over-budget 5.17s path, and auto-trigger later timed out or failed via `pty_write`.
-- Codex response-body recovery still loops. The same document has fresh `prior_patchback_without_response_body`, `out_of_band_write`, and `post_commit_local_drift` entries after committed cycles, which is exactly the class that leads to empty repair writes or surprise child dispatch.
-- Base-index repair is still deferred. This preflight detected `window index 0 missing in session '0'`, but only incremented `.agent-doc/state/base-index-repair.count` to `1` and left repair for the next detection.
-- Claude routing is functioning, but its recent robert-ross routes only record accepted direct submit proof, not the stronger Codex-style consumed/start proof. I captured that as recommended proof-parity work rather than a blocker because I did not see a Claude failure in the current tail.
-
-I also closed `#nextstepscapture`; this cycle did what that item was tracking by adding concrete backlog entries instead of leaving `#next-steps` only in prose. I did not run the full suite because this cycle changed only the session document/backlog, not product code.
-❯ do [#clauderouteproof]. Also apply to opencode? spec-test-build-install-commit-push
-### Re: clauderouteproof — gpt-5
-
-Implemented `#clauderouteproof` by making dispatch-only proof scope explicit across harnesses.
-
-`route --dispatch-only` now logs both `proof` and `proof_scope`. Codex keeps the stronger hook-backed `dispatch_start` scope when prompt-submit tracking proves `consumed` or `submitted`; Claude Code and OpenCode are now clearly labeled `proof=accepted proof_scope=accepted_only` unless/until they gain a comparable dispatch-start hook. That answers the OpenCode question: yes, the accepted-only semantics apply to OpenCode as well as Claude Code.
-
-Updated the route tests, session tmux spec, top-level docs, bundled skill text, generated harness instruction surfaces, and changelog. Committed and pushed `src/agent-doc` as `81265e5` (`fix: label dispatch-only proof scope`), then committed and pushed the superproject submodule/instruction-surface update as `e3adf474e` (`chore: refresh dispatch proof surfaces`). I left pre-existing unrelated dirty work in `src/agent-doc`, `src/corky`, `src/session-share`, and `mail` untouched.
-
-Verification and install completed:
-- `cargo fmt --check`
-- `cargo test dispatch_only_sent_log_marks`
-- `make check` (run twice; both passed)
-- `make build-release` (run twice; both passed)
-- `make install` (run twice; installed `agent-doc v0.33.16` and `libagent_doc-0.33.16.so`)
-- `cargo run --quiet -- audit-docs`
-- `make plugin-version-check`
-<!-- agent:boundary:6e3260a0 -->
+<!-- agent:boundary:e42aa243 -->
 <!-- /agent:exchange -->
 ###
 <!--

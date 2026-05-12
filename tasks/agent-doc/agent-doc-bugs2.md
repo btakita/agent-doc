@@ -34,7 +34,31 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 3 response topic(s): Sync Tmux Layout repair; dispatch-only startup reroute gating; tmux doctor sync repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:65bd7a8d -->
+❯ do [#4w5x]. spec-test-build-install-commit-push
+### Re: dispatch-only Codex proof gating — gpt-5
+
+Completed `#4w5x`.
+
+I verified the live log class the backlog item asked about: recent `agent-doc-bugs2.md` routes include `route_dispatch_only_submit_unproven` for hook-visible Codex acceptance without routed submission proof, and later successful routes show `proof=consumed proof_scope=dispatch_start`. The implementation already had the guard in the shared dispatch-only submit helper, so it applies to ready authoritative actor/direct-pane reroutes as well as startup-window reroutes.
+
+I made that invariant explicit and test-backed:
+- Added non-tmux regressions in `src/agent-doc/src/route.rs` proving hook-visible Codex accepted-only dispatch-only submits fail closed, while Claude accepted-only and hook-proven Codex submits still pass.
+- Clarified `README.md`, `SPEC.md`, and `specs/07-session-tmux-commands.md` so the proof gate is not scoped only to startup-window routes.
+- Added an Unreleased note closing `#4w5x`.
+
+Verification passed:
+- `cargo test dispatch_only`
+- `make check`
+- `make tmux-ci`
+- `make build`
+- `make install` and `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+- `src/agent-doc` branch `20260422/codex-agent-backend`: `57762e9 fix: gate dispatch-only codex proof`
+- parent `agent-loop` `main`: `e83844868 agent-doc: gate dispatch-only codex proof`
+
+I left unrelated local work untouched: untracked `mail`, dirty `src/session-share`, and this session document closeout.
+<!-- agent:boundary:a2384464 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,7 +95,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#4w5x] [recommended] Evaluate extending dispatch-only prompt gating beyond startup-window reroutes after collecting ready-actor accepted-but-unproven Codex route logs; current fix gates startup/latest-run and starting-authoritative actor paths only.
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
@@ -192,4 +215,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#clauderouteproof] [recommended] #next-steps: Add Claude dispatch proof parity or explicit accepted-only semantics; current robert-ross Claude routes record direct_pane_submit proof=accepted without dispatch_start_proof, so operator success is weaker than Codex consumed-proof routing. Plan: add a focused route proof check or document accepted-only as a deliberate harness limit.
 - 2026-05-12 [#baseindexrepair] [recommended] #next-steps: Make base-index layout repair deterministic for the active preflight or surface an immediate action; current preflight detected window index 0 missing in session 0, wrote state/base-index-repair.count=1, and deferred repair until the next detection.
 - 2026-05-12 [#jbrestartretest] 2026-05-12 [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.112, then re-test Clear Session Context against a protected alive-busy pane and confirm the typed Refresh/Interrupt/Status/Copy warning appears.
+- 2026-05-12 [#4w5x] [recommended] Evaluate extending dispatch-only prompt gating beyond startup-window reroutes after collecting ready-actor accepted-but-unproven Codex route logs; current fix gates startup/latest-run and starting-authoritative actor paths only.
 <!-- /agent:done -->

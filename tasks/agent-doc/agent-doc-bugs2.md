@@ -55,10 +55,35 @@ Verification passed:
 Commits created before this document closeout:
 - `src/agent-doc` commit `2227c09` (`fix: guard live busy session panes`)
 - parent commit `8b072d446` (`chore: update agent-doc session pane guard`)
-<!-- agent:boundary:ba5dd724 -->
+❯ do [#rspcmt7]. spec-test-build-install-commit-push
+### Re: do [#rspcmt7] — gpt-5
+
+Implemented `#rspcmt7`.
+
+The fix tightens the harness-agnostic closeout drift guard in `session_check.rs`: if a committed cycle's exchange later has an appended chunk containing both a prompt line and a new assistant response marker (`### Re:` / `## Assistant`), `session-check` now treats it as uncommitted response drift instead of dismissing the chunk because it contains prompt-looking text. Prompt-only tails still route through the existing prompt-tail guard.
+
+Updated docs/specs in `README.md`, `SPEC.md`, `specs/07-closeout-commands.md`, `VERSIONS.md`, and the `#rspcmt7` plan note. Added regression coverage with `uncommitted_exchange_drift_detects_prompt_plus_response_append`.
+
+Verification passed:
+- `cargo test uncommitted_exchange_drift_detects_prompt_plus_response_append`
+- `make check`
+- `cargo build`
+- `make install`
+
+Commits pushed:
+- `src/agent-doc` commit `1f6ae41` (`fix: catch prompt response closeout drift`)
+- parent commit `355efb27d` (`chore: update prompt response closeout guard`)
+
+No new follow-up items came out of this fix.
+<!-- agent:boundary:2b978b5e -->
 <!-- /agent:exchange -->
 ###
 <!--
+Seeing an error when calling JB `Clear Session Context`:
+```
+agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md because pane %13 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="● Tip Override global tool settings per agent configuration"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
+```
+---
 I don't have a good track on the lifecycle logic that starts panes, kills panes, edge cases, etc.
 Can we make a nested list and diagram of the lifecycle logic?
 ---
@@ -90,7 +115,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
+- [ ] [#preflight-started-recovery] #agent-doc-bug: pane reaped during preflight_started cycle — recovery writes dead-end placeholder instead of abandoning the stuck cycle and letting the next preflight handle the unresolved prompt. Plan: tasks/agent-doc/plan-preflight-started-recovery-placeholder.md
 - [ ] [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->
@@ -202,4 +227,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-11 [#idprefix] Backlog item [#2fha] uses internal ID instead of declared tag [#nopatchbackopencode]. Plan: tasks/agent-doc/plan-id-prefix-mismatch-backlog.md
 - 2026-05-11 [#routereap] #agent-doc-bug: route-owned pane reaped after successful finalize commit — completion thread in start.rs unconditionally kills the pane after detecting a committed cycle, even when the session document has an active backlog and ongoing exchange (multi-turn session). Should check session liveness signals before reaping. Plan: tasks/agent-doc/plan-route-owned-post-commit-pane-reap.md
 - 2026-05-11 [#incorrect-close-running-turn] #agent-doc-bug: incorrect close/supersede handling across adjacent managed code sessions makes it unclear whether a prior pane is alive-idle or still running; add live pane evidence to status/closeout/reap decisions and fail closed before clearing busy panes. Plan: tasks/agent-doc/plan-incorrect-close-running-turn-status.md
+- 2026-05-11 [#rspcmt7] Current SessionShare root response patchback was written but left uncommitted: `src/session-share/tasks/root.md` contains the BuildParty pause-regression closeout for `2336083`, yet the submodule remains dirty with `M tasks/root.md`. Plan: tasks/agent-doc/plan-session-share-root-response-uncommitted-current.md
 <!-- /agent:done -->

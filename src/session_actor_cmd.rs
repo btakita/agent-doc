@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::session_actor::{ActorRecord, ActorState};
 use crate::sessions::{SessionEntry, SessionRegistry, Tmux};
@@ -124,7 +125,11 @@ struct LivePaneEvidence {
 }
 
 pub fn status(file: &Path) -> Result<()> {
-    let ctx = build_context(file)?;
+    let mut ctx = build_context(file)?;
+    let tmux = Tmux::default_server();
+    if reconcile_idle_projection_from_live_pane(&ctx, &tmux)? {
+        ctx = build_context(file)?;
+    }
     print_status_summary(&ctx);
     Ok(())
 }
@@ -326,6 +331,54 @@ pub fn clear(file: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn interrupt_clear(file: &Path) -> Result<()> {
+    let ctx = build_context(file)?;
+    crate::project_controller::authorize_operator_command(
+        &ctx.base_dir,
+        &ctx.canonical_file,
+        "session_interrupt_clear",
+    )?;
+    let tmux = Tmux::default_server();
+    let evidence = live_pane_evidence(&ctx, &tmux);
+    let pane = evidence
+        .pane_id
+        .as_deref()
+        .with_context(|| format!("no live pane evidence for {}", ctx.canonical_file.display()))?;
+    if !tmux.pane_alive(pane) {
+        crate::ops_log::log_op(
+            &ctx.canonical_file,
+            &format!(
+                "session_interrupt_clear_skip_interrupt file={} pane={} reason=already_closed",
+                ctx.canonical_file.display(),
+                pane
+            ),
+        );
+        return clear(file);
+    }
+
+    send_operator_interrupt_sequence(&tmux, pane, &ctx.harness)?;
+    let outcome = wait_for_interrupt_clear_settle(&ctx, &tmux, pane, Duration::from_secs(10));
+    crate::ops_log::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "session_interrupt_clear_settled file={} pane={} harness={} outcome={}",
+            ctx.canonical_file.display(),
+            pane,
+            ctx.harness,
+            outcome.as_str()
+        ),
+    );
+    match outcome {
+        InterruptClearSettleOutcome::Idle | InterruptClearSettleOutcome::Closed => clear(file),
+        InterruptClearSettleOutcome::TimedOut => anyhow::bail!(
+            "session_interrupt_clear timed out for {} because pane {} stayed busy after interrupt. Run `agent-doc session status {}` before retrying.",
+            ctx.canonical_file.display(),
+            pane,
+            ctx.canonical_file.display()
+        ),
+    }
+}
+
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path) -> Result<()> {
     crate::sessions::send_submitted_text(tmux, pane, "/clear").with_context(|| {
         format!(
@@ -334,6 +387,67 @@ fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path) -> Result<()> {
             file.display()
         )
     })
+}
+
+fn send_operator_interrupt_sequence(tmux: &Tmux, pane: &str, harness: &str) -> Result<()> {
+    match harness {
+        "opencode" => {
+            tmux.send_keys_raw(pane, "Escape")?;
+            std::thread::sleep(Duration::from_millis(200));
+            tmux.send_keys_raw(pane, "Escape")?;
+        }
+        "codex" => {
+            tmux.send_keys_raw(pane, "C-g")?;
+            std::thread::sleep(Duration::from_millis(100));
+            tmux.send_keys_raw(pane, "Escape")?;
+            std::thread::sleep(Duration::from_millis(100));
+            tmux.send_keys_raw(pane, "C-c")?;
+        }
+        _ => {
+            tmux.send_keys_raw(pane, "C-c")?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InterruptClearSettleOutcome {
+    Idle,
+    Closed,
+    TimedOut,
+}
+
+impl InterruptClearSettleOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Closed => "closed",
+            Self::TimedOut => "timed_out",
+        }
+    }
+}
+
+fn wait_for_interrupt_clear_settle(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    pane: &str,
+    timeout: Duration,
+) -> InterruptClearSettleOutcome {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if !tmux.pane_alive(pane) {
+            return InterruptClearSettleOutcome::Closed;
+        }
+        let evidence = live_pane_evidence(ctx, tmux);
+        if evidence.state == LivePaneState::AliveIdle {
+            let _ = reconcile_idle_projection_from_evidence(ctx, &evidence);
+            return InterruptClearSettleOutcome::Idle;
+        }
+        if Instant::now() >= deadline {
+            return InterruptClearSettleOutcome::TimedOut;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
 }
 
 fn resolve_direct_submit_pane(
@@ -380,7 +494,96 @@ fn guard_destructive_operator_on_live_busy_pane(ctx: &SessionContext, action: &s
             ctx.canonical_file.display()
         );
     }
+    if evidence.state == LivePaneState::AliveIdle {
+        reconcile_idle_projection_from_evidence(ctx, &evidence)?;
+    }
     Ok(())
+}
+
+fn reconcile_idle_projection_from_live_pane(ctx: &SessionContext, tmux: &Tmux) -> Result<bool> {
+    let evidence = live_pane_evidence(ctx, tmux);
+    if evidence.state != LivePaneState::AliveIdle {
+        return Ok(false);
+    }
+    reconcile_idle_projection_from_evidence(ctx, &evidence)
+}
+
+fn reconcile_idle_projection_from_evidence(
+    ctx: &SessionContext,
+    evidence: &LivePaneEvidence,
+) -> Result<bool> {
+    if !idle_projection_needs_reconciliation(ctx, evidence) {
+        return Ok(false);
+    }
+    let Some(record) = ctx.actor_record.as_ref() else {
+        return Ok(false);
+    };
+    crate::project_controller::mark_lifecycle(
+        &ctx.base_dir,
+        crate::project_controller::LifecycleRequest {
+            file: ctx.canonical_file.clone(),
+            session_id: record.session_id.clone(),
+            pane_id: record.pane_id.clone(),
+            generation: record.generation,
+            state: ActorState::Ready,
+            caller: "session_operator".to_string(),
+            reason: "live_pane_idle".to_string(),
+        },
+    )?;
+    if let Some(lease) = ctx.operator_status.supervisor_lease.as_ref() {
+        crate::project_controller::refresh_supervisor_lease(
+            &ctx.base_dir,
+            crate::project_controller::SupervisorHeartbeatRequest {
+                file: ctx.canonical_file.clone(),
+                session_id: record.session_id.clone(),
+                pane_id: record.pane_id.clone(),
+                generation: record.generation,
+                supervisor_pid: lease.supervisor_pid,
+                supervisor_socket: lease.supervisor_socket.clone(),
+                runtime_state: ActorState::Ready.as_str().to_string(),
+            },
+        )?;
+    }
+    crate::ops_log::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "session_operator_reconciled_idle_projection file={} pane={} source={} prior_actor_state={} prior_supervisor_state={} prior_lease_state={}",
+            ctx.canonical_file.display(),
+            record.pane_id,
+            evidence.source,
+            record.state.as_str(),
+            ctx.supervisor_runtime
+                .actor_state
+                .map(|state| state.as_str())
+                .unwrap_or("unknown"),
+            ctx.operator_status
+                .supervisor_lease
+                .as_ref()
+                .and_then(|lease| lease.runtime_state.as_deref())
+                .unwrap_or("unknown")
+        ),
+    );
+    Ok(true)
+}
+
+fn idle_projection_needs_reconciliation(ctx: &SessionContext, evidence: &LivePaneEvidence) -> bool {
+    if evidence.state != LivePaneState::AliveIdle || evidence.prompt_ready != Some(true) {
+        return false;
+    }
+    let Some(record) = ctx.actor_record.as_ref() else {
+        return false;
+    };
+    if evidence.pane_id.as_deref() != Some(record.pane_id.as_str()) {
+        return false;
+    }
+    record.state == ActorState::Busy
+        || ctx.supervisor_runtime.actor_state == Some(ActorState::Busy)
+        || ctx
+            .operator_status
+            .supervisor_lease
+            .as_ref()
+            .and_then(|lease| lease.runtime_state.as_deref())
+            == Some("busy")
 }
 
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
@@ -1114,6 +1317,79 @@ mod tests {
             last_meaningful_pane_line("\x1b[32mworking\x1b[0m\n\n").as_deref(),
             Some("working")
         );
+    }
+
+    #[test]
+    fn idle_direct_pane_evidence_supersedes_stale_busy_projection() {
+        let record = crate::session_actor::ActorRecord {
+            document_id: "/tmp/doc.md".to_string(),
+            session_id: "session-1".to_string(),
+            generation: 7,
+            pane_id: "%7".to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state: ActorState::Busy,
+            last_transition: crate::session_actor::ActorLastTransition {
+                caller: "supervisor".to_string(),
+                reason: "work_started".to_string(),
+                timestamp: 1,
+                prior_generation: 7,
+                new_generation: 7,
+            },
+        };
+        let ctx = SessionContext {
+            canonical_file: PathBuf::from("/tmp/doc.md"),
+            base_dir: PathBuf::from("/tmp"),
+            session_id: "session-1".to_string(),
+            harness: "codex".to_string(),
+            actor_record: Some(record.clone()),
+            operator_status: crate::project_controller::SessionOperatorStatus {
+                record: Some(record),
+                transitions: Vec::new(),
+                supervisor_lease: Some(crate::project_controller::SupervisorLeaseStatus {
+                    generation: 7,
+                    supervisor_pid: Some(100),
+                    supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
+                    last_heartbeat: Some(1),
+                    runtime_state: Some("busy".to_string()),
+                }),
+                dispatch_attempts: Vec::new(),
+                projection_diagnostics: Vec::new(),
+            },
+            registry_entry: None,
+            startup_miss: None,
+            log_status: None,
+            supervisor_runtime: SupervisorRuntime {
+                health: SupervisorHealth::Healthy,
+                actor_state: Some(ActorState::Busy),
+                actor_session_id: Some("session-1".to_string()),
+                actor_pane_id: Some("%7".to_string()),
+                actor_generation: Some(7),
+                supervisor_state: Some("healthy".to_string()),
+                restart_count: 0,
+                supervisor_pid: Some(100),
+                supervisor_instance_id: Some("sup-1".to_string()),
+                child_pid: Some(101),
+                cwd_source: Some("config".to_string()),
+            },
+            supervisor_socket: PathBuf::from("/tmp/supervisor.sock"),
+        };
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveIdle,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(true),
+            tail: Some(">".to_string()),
+        };
+
+        assert!(idle_projection_needs_reconciliation(&ctx, &evidence));
+        let busy_evidence = LivePaneEvidence {
+            state: LivePaneState::AliveBusy,
+            prompt_ready: Some(false),
+            ..evidence
+        };
+        assert!(!idle_projection_needs_reconciliation(&ctx, &busy_evidence));
     }
 
     #[test]

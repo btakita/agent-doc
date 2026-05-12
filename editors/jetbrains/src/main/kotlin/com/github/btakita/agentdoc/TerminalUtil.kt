@@ -9,6 +9,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import java.awt.datatransfer.StringSelection
@@ -441,6 +442,56 @@ object TerminalUtil {
         )
     }
 
+    fun refreshAndRetryClearSessionContext(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        runSessionCommand(
+            project = project,
+            file = file,
+            args = listOf("status"),
+            startedMessage = "Refreshing session status for ${file.name}",
+            onSuccess = { relativePath, output ->
+                val (cwd, _) = resolveProject(project, file)
+                clearPersistedRouteFailureOutput(cwd, relativePath)
+                if (sessionStatusShowsIdleDirectPane(output)) {
+                    clearSessionContext(project, file, onComplete)
+                } else {
+                    notifyInfo(project, sessionStatusSuccessMessage(relativePath, output))
+                    onComplete?.invoke()
+                }
+            },
+            onFailure = { _, exitCode, output ->
+                notifyError(project, "agent-doc command failed (exit $exitCode):\n$output")
+                onComplete?.invoke()
+            },
+        )
+    }
+
+    fun interruptAndClearSessionContext(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
+        ApplicationManager.getApplication().invokeLater {
+            val decision = Messages.showYesNoDialog(
+                project,
+                "Interrupt the running agent-doc turn and clear its session context? Unsaved work in the terminal session may be discarded.",
+                "Interrupt and Clear Session Context",
+                "Interrupt and clear",
+                "Cancel",
+                Messages.getWarningIcon(),
+            )
+            if (decision != Messages.YES) {
+                onComplete?.invoke()
+                return@invokeLater
+            }
+            runSessionCommand(
+                project = project,
+                file = file,
+                args = listOf("interrupt-clear"),
+                startedMessage = "Interrupting and clearing session context for ${file.name}",
+                onSuccess = { relativePath, output ->
+                    showHint(project, output.ifBlank { "Interrupted and cleared session context for $relativePath" })
+                },
+                onComplete = onComplete,
+            )
+        }
+    }
+
     fun copySessionDiagnostics(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
         runSessionCommand(
             project = project,
@@ -562,6 +613,13 @@ object TerminalUtil {
     internal fun sessionStatusSuccessMessage(relativePath: String, output: String): String =
         output.ifBlank { "Loaded session status for $relativePath" }
 
+    internal fun sessionStatusShowsIdleDirectPane(output: String): Boolean =
+        output.lineSequence().any { line ->
+            line.startsWith("live_pane:") &&
+                line.contains("state=alive-idle") &&
+                line.contains("prompt_ready=true")
+        }
+
     internal fun parseBusySessionClearRefusal(output: String): BusySessionClearRefusal? {
         val match = BUSY_CLEAR_REFUSAL_REGEX.find(output) ?: return null
         val tail = match.groupValues.getOrNull(5)
@@ -628,8 +686,11 @@ object TerminalUtil {
                 .getNotificationGroup("Agent Doc")
                 .createNotification(summary, NotificationType.WARNING)
             notification.isImportant = true
-            notification.addAction(NotificationAction.createSimple("Retry clear") {
-                clearSessionContext(project, file)
+            notification.addAction(NotificationAction.createSimple("Refresh and retry") {
+                refreshAndRetryClearSessionContext(project, file)
+            })
+            notification.addAction(NotificationAction.createSimple("Interrupt and clear") {
+                interruptAndClearSessionContext(project, file)
             })
             notification.addAction(NotificationAction.createSimple("Show status") {
                 showSessionStatus(project, file)
@@ -659,6 +720,7 @@ object TerminalUtil {
             append(")")
         }
         append(". Wait for the turn to finish, then retry Clear Session Context.")
+        append(" Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn.")
         if (refusal.tail.isNotBlank() && refusal.tail != "unknown") {
             append("\nLatest pane output: ")
             append(refusal.tail)

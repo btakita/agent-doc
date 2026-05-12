@@ -1250,6 +1250,12 @@ enum SessionAction {
         /// Optional path to the session document
         file: Option<PathBuf>,
     },
+    /// Intentionally interrupt a live bound harness session, then clear it
+    #[command(name = "interrupt-clear")]
+    InterruptClear {
+        /// Path to the session document
+        file: PathBuf,
+    },
     /// Diagnose actor/registry/supervisor drift for a document
     Doctor {
         /// Path to the session document
@@ -1935,6 +1941,9 @@ fn main() -> anyhow::Result<()> {
             ),
             Some(SessionAction::Clear { file: Some(file) }) => session_actor_cmd::clear(&file),
             Some(SessionAction::Clear { file: None }) => session_cmd::clear(),
+            Some(SessionAction::InterruptClear { file }) => {
+                session_actor_cmd::interrupt_clear(&file)
+            }
             Some(SessionAction::Doctor { file, repair }) => {
                 session_actor_cmd::doctor(&file, repair)
             }

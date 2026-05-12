@@ -2863,8 +2863,10 @@ fn handle_operator_command(
             file.display()
         );
     };
-    let clear_closed_actor =
-        command_kind == "session_clear" && record.state == crate::session_actor::ActorState::Closed;
+    let clear_closed_actor = matches!(
+        command_kind.as_str(),
+        "session_clear" | "session_interrupt_clear"
+    ) && record.state == crate::session_actor::ActorState::Closed;
     if matches!(record.state, crate::session_actor::ActorState::Blocked)
         || (record.state == crate::session_actor::ActorState::Closed && !clear_closed_actor)
     {

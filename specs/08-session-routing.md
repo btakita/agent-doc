@@ -94,6 +94,7 @@ The stash system preserves running Claude sessions when the user switches editor
 - The stash window is resized to 200 rows before join operations to prevent minimum-size failures
 - Focus never leaves window `@0` during stash operations (`-d` flags are always set)
 - Successful route replacements do not kill older stash panes unless the cleanup path has explicit provenance that the older pane is a throwaway artifact from the current recovery attempt
+- Dispatch-only startup-window tmux submits are allowed only after the target pane shows a harness-specific dispatch-ready prompt. Codex model/context footers are UI chrome, not proof that the prompt can consume a routed reopen.
 - Normal route/start/sync/preflight/finalize flows must not kill tmux panes. Pane-kill cleanup is reserved for explicit repair surfaces after the operator has decided which pane is expendable.
 - Scoped `agent-doc fix <FILE>` may kill redundant unregistered stash panes for that document, but only after it has already rebound the file to a unique provable winner
 

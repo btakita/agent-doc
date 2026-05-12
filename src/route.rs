@@ -57,12 +57,10 @@
 //!   bare harness trigger directly through the resolved live pane so it shares the same terminal
 //!   submit boundary as `session clear`.
 //! - **Dispatch-only editor reroutes** still bypass the managed acceptance/cycle-ack loop on
-//!   purpose, and for existing managed sessions they now send the same bare reopen through direct
-//!   live-pane submit instead of a one-shot supervisor IPC inject. After a tracked Codex/OpenCode
-//!   `/clear`, a still-starting authoritative actor uses this same direct submit path so editor
-//!   `Run Agent Doc` does not fail closed while the harness is redrawing. They fail closed up
-//!   front when the pane is visibly stuck in an interactive shell blocker such as
-//!   `reverse-i-search`.
+//!   purpose, and for existing managed sessions they send the bare reopen through direct
+//!   live-pane submit instead of a one-shot supervisor IPC inject. Startup-window reroutes,
+//!   including tracked Codex/OpenCode `/clear` restarts, remain prompt-gated and fail closed
+//!   before sending input while the harness is redrawing or busy.
 //! - **`await_idle(file, debounce)`**: Polls file mtime every 100ms until `debounce` has
 //!   elapsed since last modification, or until `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
@@ -783,13 +781,6 @@ fn tracked_harness_clear_requires_fresh_restart(
 ) -> bool {
     matches!(harness.binary.as_str(), "codex" | "opencode")
         && latest_prompt.is_some_and(crate::codex_hook::prompt_requests_clear)
-}
-
-fn dispatch_only_starting_actor_can_use_clear_submit_path(
-    harness: &HarnessConfig,
-    latest_prompt: Option<&str>,
-) -> bool {
-    tracked_harness_clear_requires_fresh_restart(harness, latest_prompt)
 }
 
 fn reapply_harness_launch_contract_after_clear(
@@ -1643,24 +1634,7 @@ fn dispatch_only_send_reopen(
     let mut recovery_attempts = 0usize;
     let requires_ready_probe =
         dispatch_only_requires_ready_probe(log_status.as_ref(), &dispatch_pane, harness);
-    if requires_ready_probe && matches!(delivery, DispatchOnlyReopenDelivery::DirectPaneSubmit) {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "route_dispatch_only_starting_direct_submit_without_ready_probe file={} pane={} harness={}",
-                file.display(),
-                dispatch_pane,
-                harness.binary
-            ),
-        );
-        eprintln!(
-            "[route] dispatch-only {} reopen for {} is staying on the same live tmux submit path as `session clear` even though pane {} is still in the startup window",
-            harness.binary,
-            file.display(),
-            dispatch_pane
-        );
-    }
-    if requires_ready_probe && matches!(delivery, DispatchOnlyReopenDelivery::SupervisorIpcOnce) {
+    if requires_ready_probe {
         loop {
             let ready_outcome = wait_for_agent_ready_outcome(
                 tmux,
@@ -2637,51 +2611,6 @@ fn route_via_authoritative_actor(
                 "dispatch_only_reopen",
                 &format!(
                     "submit=direct_pane actor_state={} harness={}",
-                    actor_state.as_str(),
-                    harness.binary
-                ),
-            )?;
-            return dispatch_only_send_reopen(
-                tmux,
-                file,
-                session_id,
-                &dispatch_pane,
-                file_path,
-                harness,
-                DispatchOnlyReopenDelivery::DirectPaneSubmit,
-            );
-        }
-        if dispatch_only
-            && actor_state == crate::session_actor::ActorState::Starting
-            && dispatch_only_starting_actor_can_use_clear_submit_path(
-                harness,
-                crate::codex_hook::load_latest_prompt_for_file(file)?.as_deref(),
-            )
-        {
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "route_dispatch_only_starting_actor_after_clear_direct_pane_submit file={} pane={} harness={} generation={}",
-                    file.display(),
-                    dispatch_pane,
-                    harness.binary,
-                    actor.record.generation
-                ),
-            );
-            eprintln!(
-                "[route] authoritative actor generation {} for {} is still starting after `/clear` on pane {} — sending the dispatch-only reopen through the same direct pane submit path",
-                actor.record.generation,
-                file.display(),
-                dispatch_pane
-            );
-            let _authorization = authorize_controller_dispatch(
-                file,
-                session_id,
-                file_path,
-                &actor,
-                "dispatch_only_reopen",
-                &format!(
-                    "submit=direct_pane actor_state={} harness={} latest_prompt=/clear",
                     actor_state.as_str(),
                     harness.binary
                 ),
@@ -8003,6 +7932,18 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
     }
 
     #[test]
+    fn ready_prompt_candidate_rejects_codex_footer_without_prompt() {
+        let harness = HarnessConfig::codex();
+        let content = "\
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
+";
+        assert!(
+            ready_prompt_candidate(content, &harness).is_none(),
+            "a Codex status/footer line alone is not a dispatch-ready prompt"
+        );
+    }
+
+    #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_rejects_codex_prompt_with_real_drafted_text() {
         let _tmux_guard = tmux_start_lock();
@@ -9053,26 +8994,6 @@ Body\n\
     }
 
     #[test]
-    fn dispatch_only_starting_actor_clear_submit_path_matches_clear_tracking() {
-        assert!(dispatch_only_starting_actor_can_use_clear_submit_path(
-            &HarnessConfig::codex(),
-            Some("/clear")
-        ));
-        assert!(dispatch_only_starting_actor_can_use_clear_submit_path(
-            &HarnessConfig::opencode(),
-            Some("  /clear  ")
-        ));
-        assert!(!dispatch_only_starting_actor_can_use_clear_submit_path(
-            &HarnessConfig::claude(),
-            Some("/clear")
-        ));
-        assert!(!dispatch_only_starting_actor_can_use_clear_submit_path(
-            &HarnessConfig::codex(),
-            Some("agent-doc tasks/bugs.md")
-        ));
-    }
-
-    #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_records_optimistic_fresh_restart_retry_in_original_pane() {
         use std::sync::{
@@ -9497,7 +9418,7 @@ Body\n\
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_or_create_pane_dispatch_only_submits_while_latest_run_is_still_starting() {
+    fn resolve_or_create_pane_dispatch_only_refuses_while_latest_run_is_still_starting() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
@@ -9549,7 +9470,7 @@ Body\n\
             "busy mock session should be active in pane: {content}"
         );
 
-        let resolved = resolve_or_create_pane_dispatch_only(
+        let err = resolve_or_create_pane_dispatch_only(
             &iso,
             &doc,
             None,
@@ -9560,20 +9481,16 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect(
-            "dispatch-only route should stay on the same direct tmux submit path as session clear during the fresh-start boot window",
-        );
-        assert_eq!(resolved, pane);
-
-        let after = wait_for_pane_contains(
-            &iso,
-            &pane,
-            "EARLY:agent-doc ",
-            std::time::Duration::from_secs(3),
-        );
+        .expect_err("dispatch-only route must wait for a dispatch-ready prompt during the fresh-start boot window");
         assert!(
-            after.contains("EARLY:agent-doc "),
-            "dispatch-only route should submit through the live pane even before the startup prompt is visible: {after}"
+            err.to_string()
+                .contains("never reached a dispatch-ready prompt"),
+            "unexpected startup-window refusal: {err:#}"
+        );
+        let after = sessions::capture_pane(&iso, &pane).unwrap_or_default();
+        assert!(
+            !after.contains("EARLY:agent-doc "),
+            "dispatch-only route must not submit through the live pane before the startup prompt is visible: {after}"
         );
     }
 
@@ -12534,7 +12451,7 @@ Body\n\
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn route_dispatch_only_submits_to_starting_authoritative_actor_after_tracked_clear() {
+    fn route_dispatch_only_refuses_starting_authoritative_actor_after_tracked_clear_until_ready() {
         use std::sync::{Arc, Mutex};
 
         let dir = tempfile::tempdir().unwrap();
@@ -12622,7 +12539,7 @@ Body\n\
         })
         .unwrap();
 
-        let resolved = resolve_or_create_pane_dispatch_only(
+        let err = resolve_or_create_pane_dispatch_only(
             &iso,
             &doc,
             None,
@@ -12633,22 +12550,23 @@ Body\n\
             &HarnessConfig::codex(),
             &mut Vec::new(),
         )
-        .expect("dispatch-only reroute after /clear should reuse direct pane submit even while actor is starting");
-        assert_eq!(resolved, actor_pane);
+        .expect_err("dispatch-only reroute after /clear must wait for a dispatch-ready prompt before direct pane submit");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("the authoritative actor is still starting")
+                || message.contains("never reached a dispatch-ready prompt")
+                || message.contains("never showed a dispatch-ready prompt"),
+            "starting actor after /clear should fail before input when no prompt is visible: {message}"
+        );
         assert!(
             injects.lock().unwrap().is_empty(),
             "dispatch-only reroute after /clear should not queue through supervisor IPC"
         );
 
-        let actor_after = wait_for_pane_contains(
-            &iso,
-            &actor_pane,
-            &HarnessConfig::codex().trigger_command(&file_path),
-            std::time::Duration::from_secs(3),
-        );
+        let actor_after = sessions::capture_pane(&iso, &actor_pane).unwrap_or_default();
         assert!(
-            actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
-            "dispatch-only reroute after /clear should submit the reopen to the starting actor pane: {actor_after}"
+            !actor_after.contains(&HarnessConfig::codex().trigger_command(&file_path)),
+            "dispatch-only reroute after /clear must not submit to a pane before it is dispatch-ready: {actor_after}"
         );
         let stale_after = sessions::capture_pane(&iso, &stale_pane).unwrap_or_default();
         assert!(

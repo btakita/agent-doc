@@ -1,0 +1,40 @@
+name: Agent Doc
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - "20*/**"
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: make check
+        working-directory: src/agent-doc
+        run: make check
+
+  tmux-ci:
+    name: tmux-ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: make tmux-ci
+        working-directory: src/agent-doc
+        run: make tmux-ci

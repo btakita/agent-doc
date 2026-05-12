@@ -34,10 +34,68 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): base-index repair; JetBrains Clear Session Context busy failure
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:09a822be -->
+❯ do [#jbrestartretest]. spec-test-build-install-commit-push
+### Re: JetBrains Clear Session Context retest — gpt-5.5
+
+Completed `#jbrestartretest`.
+
+The relevant JetBrains code/spec/test changes were already present and pushed on `src/agent-doc` branch `20260422/codex-agent-backend`; the current head is `0db5667 fix: parse wrapped JetBrains busy clear failures`, with `b13abbb fix: add busy clear recovery actions` in the recent history. I did not stage the unrelated dirty files already present in `src/agent-doc`, `src/boost-client`, `src/corky`, or `src/session-share`.
+
+Verification run:
+- `cargo test` passed.
+- `make check` passed, including the wider deterministic closeout simulator budget.
+- JetBrains `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin` passed.
+- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.112` into IntelliJIdea2026.1.
+- Restarted IntelliJIdea2026.1; the relaunched IDE log shows `com.github.btakita.agentdoc` components active after restart.
+- Confirmed the installed jar contains `ClearSessionContextAction`, `TerminalUtil.BusySessionClearRefusal`, and the Refresh/Interrupt/Status/Copy action helper classes.
+- Re-tested the protected live pane with `agent-doc session clear tasks/agent-doc/agent-doc-bugs2.md`; it failed closed with the expected typed `session_clear refused ... alive-busy` result for pane `%1`, which is the result the JetBrains action parses into the protected busy warning.
+
+I also attempted to invoke the IDE action directly with `xdotool`; that was not reliable and typed into the editor instead of opening action search. I removed only that accidental generated substring and did not count that attempt as proof. The durable proof here is the restarted installed plugin, the exact live CLI refusal, and the unit/spec coverage that maps that refusal to the Refresh and retry, Interrupt and clear, Show status, and Copy details warning instead of the generic command-failed path.
+<!-- agent:boundary:f9d192a2 -->
 <!-- /agent:exchange -->
 ###
 <!--
+`Sync Tmux Layout` should repair the tmux layout to have:
+- `1:stash`
+- Consolidate other stash tmux panes into `1:stash`
+- If there is an overflow of stashes, move to `2:stash` and so on
+- `0:agent-doc`: Reliably sync currently last selected agent document(s) to match the editor layout
+
+The `Sync Tmux Layout` spec must be durable to prevent drift. There must be tests.
+---
+Move JB `Copy Session Diagnostics` outside the numeric shortcuts.
+```
+document: /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+session_id: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+harness: codex
+actor: generation=162 pane=%1 window=@16 state=ready
+actor_last_transition: caller=route reason=dispatch_bind prior_generation=162 new_generation=162 at=2026-05-12T06:25:23Z
+registry: pane=%1 window=@16 pid=140323 cwd=/home/brian/work/btakita/agent-loop supervisor_instance_id=none
+live_pane: state=alive-busy pane=%1 source=authoritative_actor current_command=agent-doc prompt_ready=false tail=gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+supervisor: health=healthy state=healthy actor_state=ready restart_count=0 socket=/home/brian/work/btakita/agent-loop/.agent-doc/supervisor/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.sock
+supervisor_process: pid=1818183 child_pid=1818308 cwd_source=project_root instance_id=7d9b429b-d60f-4931-9c14-985cd780412e
+startup_miss: none
+session_log: latest_start_pane=%1 latest_open=true committed_after_latest_run=true last_event=document_cycle phase=preflight_started cycle=cycle-1778566886540 event=preflight_started
+codex_capability_proof: proven
+controller_lease: generation=162 pid=1818183 runtime_state=ready heartbeat=2026-05-12T06:28:59Z socket=/home/brian/work/btakita/agent-loop/.agent-doc/supervisor/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.sock
+controller_last_command: kind=dispatch_only_reopen accepted_stage=ready failed_stage=none at=2026-05-12T06:25:23Z
+doctor: no issues detected
+```
+---
+tmux window was agent-doc, now is stash.
+I ran the JB `Sync Tmux Layout` with this document selected in the editor. T
+```
+resync: stash pane %19 is registered in its own project root — skipping kill
+resync: stash pane %2 is registered in its own project root — skipping kill
+resync: stash pane %13 is registered in its own project root — skipping kill
+[route] target tmux session: 0
+[route] Pane %1 is in stash window 'stash', rescuing to agent-doc window
+[route] Sent agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md → pane %1
+[route] Command accepted after single submit (0.3s)
+[route] latency budget exceeded: phase dispatch_start_proof took 10069ms (budget 10000ms, pane=%1, harness=codex, outcome=unproven_but_accepted)
+Error: dispatch-only codex reopen for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %1 via direct_pane_submit (tmux_literal_enter_delayed), but Codex never recorded a routed submission proof after waiting 10s; the pane is live but not dispatch-ready enough to confirm the reopen. Restore an idle Codex prompt or restart the session and reroute again
+```
+---
 I don't have a good track on the lifecycle logic that starts panes, kills panes, edge cases, etc.
 Can we make a nested list and diagram of the lifecycle logic?
 ---
@@ -69,7 +127,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbrestartretest] 2026-05-12 [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.112, then re-test Clear Session Context against a protected alive-busy pane and confirm the typed Refresh/Interrupt/Status/Copy warning appears.
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
@@ -189,4 +246,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#nextstepscapture] #agent-doc-bug: previous turn acknowledged #next-steps but did not add backlog items — skill finalize did not run --pending-add for identified follow-ups. Plan: tasks/agent-doc/plan-next-steps-backlog-capture.md
 - 2026-05-12 [#clauderouteproof] [recommended] #next-steps: Add Claude dispatch proof parity or explicit accepted-only semantics; current robert-ross Claude routes record direct_pane_submit proof=accepted without dispatch_start_proof, so operator success is weaker than Codex consumed-proof routing. Plan: add a focused route proof check or document accepted-only as a deliberate harness limit.
 - 2026-05-12 [#baseindexrepair] [recommended] #next-steps: Make base-index layout repair deterministic for the active preflight or surface an immediate action; current preflight detected window index 0 missing in session 0, wrote state/base-index-repair.count=1, and deferred repair until the next detection.
+- 2026-05-12 [#jbrestartretest] 2026-05-12 [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.112, then re-test Clear Session Context against a protected alive-busy pane and confirm the typed Refresh/Interrupt/Status/Copy warning appears.
 <!-- /agent:done -->

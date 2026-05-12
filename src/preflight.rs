@@ -52,8 +52,8 @@
 //!   callers must not parse stderr.
 //! - `no_changes=true` in the output means the SKILL workflow should skip
 //!   sending to the agent; `diff` will be `null` in this case.
-//! - `layout_issues` is informational: the SKILL workflow may surface issues
-//!   to the user but `run` always completes the remaining steps regardless.
+//! - `layout_issues` reports structural tmux issues that remain after any
+//!   immediate pre-diff layout repair has run.
 //! - The claims log is consumed (truncated) exactly once per `preflight` call;
 //!   a second call in the same cycle will return empty claims.
 //! - Recovery (`recovered=true`) means the document was modified before the
@@ -107,7 +107,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::component::{is_backlog_component, is_tracked_work_component};
-use crate::{config, diff, frontmatter, git, repair, resync, sessions, snapshot};
+use crate::{config, diff, frontmatter, git, repair, resync, sessions, snapshot, sync};
 
 /// A change detected in a related document since the last cycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -491,6 +491,81 @@ fn maybe_auto_resync_on_drift(file: &std::path::Path, layout_issues: &[String]) 
             next
         );
     }
+}
+
+fn clear_base_index_repair_counter(file: &std::path::Path) {
+    let Ok(canonical) = file.canonicalize() else {
+        return;
+    };
+    let Some(project_root) = snapshot::find_project_root(&canonical) else {
+        return;
+    };
+    let counter_path = project_root.join(".agent-doc/state/base-index-repair.count");
+    if counter_path.exists() {
+        let _ = std::fs::remove_file(counter_path);
+    }
+}
+
+fn current_tmux_session_name() -> Option<String> {
+    let out = Command::new("tmux")
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+fn maybe_auto_repair_base_index(file: &std::path::Path, layout_issues: &[String]) -> bool {
+    let has_base_index_issue = layout_issues
+        .iter()
+        .any(|i| i.contains("window index 0 missing"));
+
+    if !has_base_index_issue {
+        clear_base_index_repair_counter(file);
+        return false;
+    }
+
+    // Older builds used a consecutive-detection counter before repairing.
+    // Once the issue is visible in preflight, leaving it for the next turn makes
+    // the active response cycle nondeterministic, so clean the stale marker and
+    // repair immediately.
+    clear_base_index_repair_counter(file);
+
+    if !sessions::in_tmux() {
+        eprintln!(
+            "[preflight] window index 0 missing but no tmux context is available; run `agent-doc session doctor {} --repair` from the target tmux session",
+            file.display()
+        );
+        return false;
+    }
+
+    let Some(name) = current_tmux_session_name() else {
+        eprintln!(
+            "[preflight] window index 0 missing but tmux session lookup failed; run `agent-doc session doctor {} --repair`",
+            file.display()
+        );
+        return false;
+    };
+
+    eprintln!("[preflight] window index 0 missing — running repair_layout immediately");
+    crate::ops_log::log_op(
+        file,
+        &format!("auto_repair_base_index immediate session={}", name),
+    );
+    let tmux = sessions::Tmux::default_server();
+    if let Err(e) = sync::repair_layout(&tmux, &name, "agent-doc") {
+        eprintln!(
+            "[preflight] auto repair_layout failed: {}; run `agent-doc session doctor {} --repair`",
+            e,
+            file.display()
+        );
+        return false;
+    }
+
+    true
 }
 
 /// Check tmux layout health for the current session.
@@ -891,7 +966,7 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Step 0: Check tmux layout health.
     eprintln!("[preflight] step 0: layout check");
-    let layout_issues = check_layout();
+    let mut layout_issues = check_layout();
     for issue in &layout_issues {
         eprintln!("[preflight] layout issue: {}", issue);
     }
@@ -901,6 +976,20 @@ pub fn run(file: &Path) -> Result<()> {
     // State lives in `.agent-doc/state/drift.count` so we only auto-fix after
     // the second consecutive detection (one false positive is tolerated).
     maybe_auto_resync_on_drift(file, &layout_issues);
+
+    // Step 0c: Auto-repair base-index compliance — when window index 0 is
+    // missing, run repair_layout immediately so this preflight reports the
+    // post-repair layout state.
+    if maybe_auto_repair_base_index(file, &layout_issues) {
+        layout_issues = check_layout();
+        if layout_issues.is_empty() {
+            eprintln!("[preflight] layout repair cleared base-index issues");
+        } else {
+            for issue in &layout_issues {
+                eprintln!("[preflight] layout issue after repair: {}", issue);
+            }
+        }
+    }
 
     // Step 1: Recover orphaned pending responses.
     eprintln!("[preflight] step 1: repair");
@@ -4227,6 +4316,48 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["layout_issues"].as_array().unwrap().len(), 1);
         assert_eq!(parsed["layout_issues"][0], "window index 0 missing");
+    }
+
+    #[test]
+    fn maybe_auto_repair_base_index_removes_stale_counter_without_tmux() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("state")).unwrap();
+        let counter_path = agent_doc_dir.join("state/base-index-repair.count");
+        std::fs::write(&counter_path, "1").unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\n---\n").unwrap();
+        let issues =
+            vec!["window index 0 missing in session '0' (base-index compliance)".to_string()];
+
+        let saved_tmux = std::env::var("TMUX").ok();
+        // SAFETY: this test restores the process env before returning.
+        unsafe { std::env::remove_var("TMUX") };
+        let repaired = maybe_auto_repair_base_index(&file, &issues);
+        if let Some(val) = saved_tmux {
+            unsafe { std::env::set_var("TMUX", val) };
+        }
+        assert!(!repaired, "outside tmux no repair should run");
+        assert!(
+            !counter_path.exists(),
+            "stale deferred-repair counter should be removed"
+        );
+    }
+
+    #[test]
+    fn maybe_auto_repair_base_index_noop_without_issue() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("state")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\n---\n").unwrap();
+        let issues: Vec<String> = vec![];
+        maybe_auto_repair_base_index(&file, &issues);
+        let counter_path = agent_doc_dir.join("state/base-index-repair.count");
+        assert!(
+            !counter_path.exists(),
+            "no counter file should be created when no base-index issue"
+        );
     }
 
     #[test]

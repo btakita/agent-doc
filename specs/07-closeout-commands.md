@@ -100,6 +100,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 
 - Runs interrupted-cycle recovery, repair, commit, claims-log drain, linked-doc inspection, diff computation, and HEAD read in one binary-owned step.
 - Before diffing, preflight must not auto-compact the exchange. Legacy `auto_compact` frontmatter is ignored for compatibility, and session-accretion heuristics remain advisory only.
+- If the pre-diff tmux layout check detects missing window index `0`, preflight attempts the base-index repair immediately in the active tmux session, re-runs the layout check after a successful repair, and reports only remaining layout issues. It must not defer this repair behind a consecutive-detection counter; when automatic repair cannot run, stderr must name the explicit repair command.
 - Planning must not convert advisory session-accretion signals, including repeated no-op closeout churn, into a `compact` handoff unless the prompt or document explicitly requests compaction.
 - Open cycle states are `preflight_started`, `response_captured`, and `write_applied`; `committed` and `abandoned` are terminal.
 - Boundary-only / `(HEAD)`-only churn is normalized back to `no_changes`.

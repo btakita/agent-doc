@@ -224,6 +224,10 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   may call it to consolidate duplicate stash windows, recreate the `agent-doc`
   window from stash when needed, and normalize window indices so `agent-doc`
   remains window `0` with stash windows immediately after it.
+- `agent-doc preflight <FILE>` may also call it for the narrow base-index
+  compliance case after the pre-diff layout check reports missing window index
+  `0`; preflight rechecks layout afterward so its JSON describes the remaining
+  state instead of the pre-repair state.
 - Ordinary `agent-doc sync` resolves the target session/window without invoking
   `repair_layout`; if stash/window drift is detected, sync warns and leaves the
   destructive or heuristic layout repair for an explicit repair command.

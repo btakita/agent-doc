@@ -112,7 +112,6 @@ Verification:
 Commits:
 - Corky: `e7b5b23` (`feat: notify OAuth prompts cross-platform`) pushed to `origin/20260413/corky-gsc`
 - Agent-loop pointer: `cceca07a9` (`chore: update corky OAuth notifications`)
-<!-- agent:boundary:28acf1a9 -->
 <!-- /agent:exchange -->
 ###
 <!--

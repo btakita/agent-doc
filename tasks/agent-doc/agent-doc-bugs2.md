@@ -34,39 +34,45 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): JetBrains Clear Session Context retest; tmux CI test policy and ignored tmux failures
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:89090095 -->
+❯ `Sync Tmux Layout` should repair the tmux layout to have:
+❯ - `1:stash`
+❯ - Consolidate other stash tmux panes into `1:stash`
+❯ - If there is an overflow of stashes, move to `2:stash` and so on
+❯ - `0:agent-doc`: Reliably sync currently last selected agent document(s) to match the editor layout
+
+❯ The `Sync Tmux Layout` spec must be durable to prevent drift. There must be tests.
+❯ spec-test-build-install-commit-push
+### Re: Sync Tmux Layout repair — gpt-5
+Implemented the manual `Sync Tmux Layout` repair contract in `src/agent-doc`.
+
+What changed:
+- Full/windowless `agent-doc sync` now runs `repair_layout` before reconciliation and again after post-sync cleanup, so the final manual-sync shape is `0:agent-doc`, `1:stash`, with overflow stash windows adjacent as `2:stash`, `3:stash`, etc.
+- `repair_layout` now treats `stash-*` aliases as repairable drift, renames them back to `stash`, creates a missing stash window, consolidates joinable stash panes into the primary stash, and preserves unjoinable panes as overflow stash windows instead of losing them.
+- Passive `sync --no-autostart` remains non-destructive and does not run the repair step, so automatic editor sync still follows selection/layout changes without heuristic window repair.
+- Updated the durable specs/instruction surfaces: `README.md`, `SPEC.md`, `CLAUDE.md`, `specs/07-session-tmux-commands.md`, and editor specs.
+
+Tests and verification passed:
+- `cargo test planned_stash_window_indices_packs_overflow_after_agent_doc`
+- live tmux repair regressions for stash index, alias normalization, consolidation, and full-sync final repair
+- `make check`
+- `make tmux-ci`
+- `cargo build`
+- `cargo install --path .`
+- `cargo run -- audit-docs`
+
+CI check: latest listed GitHub `CI` runs are older failing pushes from April 24, 2026; this turn did not trigger a new remote CI run before local verification.
+
+Committed:
+- `src/agent-doc`: `1d6edd9 fix: repair sync tmux stash layout`
+- parent repo submodule pointer: `d9c741fa4 chore: update agent-doc submodule`
+<!-- agent:boundary:fb076e17 -->
 <!-- /agent:exchange -->
 ###
 <!--
-`Sync Tmux Layout` should repair the tmux layout to have:
-- `1:stash`
-- Consolidate other stash tmux panes into `1:stash`
-- If there is an overflow of stashes, move to `2:stash` and so on
-- `0:agent-doc`: Reliably sync currently last selected agent document(s) to match the editor layout
-
-The `Sync Tmux Layout` spec must be durable to prevent drift. There must be tests.
----
 Move JB `Copy Session Diagnostics` outside the numeric shortcuts.
-```
-document: /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
-session_id: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-harness: codex
-actor: generation=162 pane=%1 window=@16 state=ready
-actor_last_transition: caller=route reason=dispatch_bind prior_generation=162 new_generation=162 at=2026-05-12T06:25:23Z
-registry: pane=%1 window=@16 pid=140323 cwd=/home/brian/work/btakita/agent-loop supervisor_instance_id=none
-live_pane: state=alive-busy pane=%1 source=authoritative_actor current_command=agent-doc prompt_ready=false tail=gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
-supervisor: health=healthy state=healthy actor_state=ready restart_count=0 socket=/home/brian/work/btakita/agent-loop/.agent-doc/supervisor/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.sock
-supervisor_process: pid=1818183 child_pid=1818308 cwd_source=project_root instance_id=7d9b429b-d60f-4931-9c14-985cd780412e
-startup_miss: none
-session_log: latest_start_pane=%1 latest_open=true committed_after_latest_run=true last_event=document_cycle phase=preflight_started cycle=cycle-1778566886540 event=preflight_started
-codex_capability_proof: proven
-controller_lease: generation=162 pid=1818183 runtime_state=ready heartbeat=2026-05-12T06:28:59Z socket=/home/brian/work/btakita/agent-loop/.agent-doc/supervisor/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.sock
-controller_last_command: kind=dispatch_only_reopen accepted_stage=ready failed_stage=none at=2026-05-12T06:25:23Z
-doctor: no issues detected
-```
 ---
 tmux window was agent-doc, now is stash.
-I ran the JB `Sync Tmux Layout` with this document selected in the editor. T
+I ran the JB `Sync Tmux Layout` with this document selected in the editor.
 ```
 resync: stash pane %19 is registered in its own project root — skipping kill
 resync: stash pane %2 is registered in its own project root — skipping kill

@@ -115,10 +115,7 @@ pub fn strip_backlog_patch_attr(doc: &str) -> String {
 
     for name in &[BACKLOG_COMPONENT, BACKLOG_ALIAS] {
         let prefix = format!("<!-- agent:{} ", name);
-        loop {
-            let Some(start) = result.find(&prefix) else {
-                break;
-            };
+        while let Some(start) = result.find(&prefix) {
             let tag_start = start;
             let rest = &result[start + prefix.len()..];
             let Some(end_rel) = rest.find("-->") else {

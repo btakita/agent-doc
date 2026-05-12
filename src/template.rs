@@ -1373,7 +1373,7 @@ pub fn apply_patches_with_overrides(
     }
 
     // Sort by position descending so replacements don't shift earlier offsets
-    ops.sort_by(|a, b| b.0.cmp(&a.0));
+    ops.sort_by_key(|op| std::cmp::Reverse(op.0));
 
     for (idx, patch) in &ops {
         let comp = &components[*idx];

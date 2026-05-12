@@ -6877,6 +6877,14 @@ mod tests {
             wait_for(Duration::from_secs(3), || iso.pane_dead(&pane)),
             "pane should be retained as dead for diagnostics"
         );
+        assert!(
+            wait_for(Duration::from_secs(3), || iso
+                .pane_dead_status(&pane)
+                .ok()
+                .flatten()
+                .is_some()),
+            "retained dead pane should expose its exit status before repair"
+        );
 
         let repair = repair_missing_registered_pane(
             &iso,

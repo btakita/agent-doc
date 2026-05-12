@@ -7678,7 +7678,7 @@ done
         let script = bin_dir.join("agent-doc-start");
         std::fs::write(
             &script,
-            "#!/bin/sh\nprintf 'Starting agent...\\n'\nprintf '❯ \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+            "#!/bin/sh\nprintf 'Starting agent...\\n'\nprintf '> \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
         )
         .unwrap();
         let mut perms = std::fs::metadata(&script).unwrap().permissions();
@@ -7696,7 +7696,7 @@ done
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nsleep {}\nprintf 'Starting agent...\\n'\nprintf '❯ \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+                "#!/bin/sh\nsleep {}\nprintf 'Starting agent...\\n'\nprintf '> \\n'\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
                 delay_secs
             ),
         )
@@ -7728,7 +7728,7 @@ done
         let launch_command = format!("exec {} {}", script.display(), file.display());
         let content = wait_for_mock_agent_prompt(iso, pane, &launch_command);
         assert!(
-            content.contains("❯ "),
+            content.lines().any(|line| line.trim() == ">"),
             "mock agent-doc session should present a prompt, got: {content}"
         );
     }
@@ -7745,20 +7745,20 @@ done
         let launch_command = format!("exec {}", script.display());
         let content = wait_for_mock_agent_prompt(iso, pane, &launch_command);
         assert!(
-            content.contains("❯ "),
+            content.lines().any(|line| line.trim() == ">"),
             "mock agent-doc session should present a prompt, got: {content}"
         );
     }
 
     fn wait_for_mock_agent_prompt(iso: &IsolatedTmux, pane: &str, launch_command: &str) -> String {
         let mut content =
-            wait_for_pane_contains(iso, pane, "❯ ", std::time::Duration::from_secs(10));
-        if content.contains("❯ ") || !content.contains(launch_command) {
+            wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(10));
+        if content.lines().any(|line| line.trim() == ">") || !content.contains(launch_command) {
             return content;
         }
 
         let _ = iso.send_keys_raw(pane, "Enter");
-        content = wait_for_pane_contains(iso, pane, "❯ ", std::time::Duration::from_secs(10));
+        content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(10));
         content
     }
 
@@ -12734,7 +12734,11 @@ Body\n\
             "-y",
             "40",
         ]);
-        send_keys_with_retry(&iso, &actor_pane, r#"printf '\033[2J\033[HREADYMARK\n›\n'"#);
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec sh -c 'printf "\033[2J\033[HREADYMARK\n>\n"; while IFS= read -r CMD; do printf "[run] Nothing changed\n"; done'"#,
+        );
         let ready_output = wait_for_pane_contains(
             &iso,
             &actor_pane,

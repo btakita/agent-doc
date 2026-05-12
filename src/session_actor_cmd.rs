@@ -909,9 +909,13 @@ fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) 
 }
 
 fn live_pane_prompt_ready(harness: &crate::harness::HarnessConfig, captured: &str) -> bool {
-    harness
+    if harness
         .last_prompt_candidate(captured)
         .is_some_and(|line| harness.is_dispatch_ready_prompt_line(&line))
+    {
+        return true;
+    }
+    harness.is_idle_chrome_only_output(captured)
 }
 
 fn last_meaningful_pane_line(captured: &str) -> Option<String> {
@@ -1299,6 +1303,16 @@ mod tests {
         let harness = crate::harness::HarnessConfig::opencode();
 
         assert!(live_pane_prompt_ready(&harness, "work complete\n>\n"));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_accepts_codex_status_chrome_only_output() {
+        let harness = crate::harness::HarnessConfig::codex();
+
+        assert!(live_pane_prompt_ready(
+            &harness,
+            "gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used\n"
+        ));
     }
 
     #[test]

@@ -301,7 +301,12 @@ single-owner actor controls:
   launch contract. Before contacting tmux or the supervisor, it must record a
   controller operator-command acceptance or fail with the rejected stage. If
   direct tmux evidence classifies the resolved pane as `alive-busy`, clear must
-  fail closed before mutating the session. A
+  fail closed before mutating the session. For Codex panes, a capture that shows
+  only Codex status/footer chrome such as the model/cwd/context line, with no
+  prompt input or busy cue, is direct idle evidence for operator clear/status;
+  it must override stale actor/supervisor busy projection even though route
+  dispatch still requires a real dispatch-ready prompt before injecting a
+  reopen. A
   `closed` actor generation must still accept this explicit clear operator
   command, because closed only blocks duplicate reopen dispatch; it must not
   prevent clearing the live harness context before the next run.

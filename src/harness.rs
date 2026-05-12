@@ -209,6 +209,31 @@ impl HarnessConfig {
         self.binary == "codex" && trimmed.contains("·") && trimmed.contains("Context ")
     }
 
+    /// Return true when the visible Codex pane contains only status/footer UI
+    /// chrome and no busy cue or prompt input. This is not enough for route
+    /// dispatch, but it is enough for operator status/clear to avoid trusting a
+    /// stale projected busy state over a visibly idle terminal.
+    pub fn is_idle_chrome_only_output(&self, output: &str) -> bool {
+        if self.binary != "codex" || self.has_busy_cue(output) {
+            return false;
+        }
+
+        let mut saw_status = false;
+        for line in output.lines().map(crate::prompt::strip_ansi) {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if !self.is_ignorable_output_line(trimmed) {
+                return false;
+            }
+            if trimmed.contains("Context ") {
+                saw_status = true;
+            }
+        }
+        saw_status
+    }
+
     /// Return true when recent pane output indicates the harness is present but
     /// not actually idle for a routed trigger yet.
     pub fn has_busy_cue(&self, output: &str) -> bool {
@@ -820,6 +845,27 @@ mod tests {
 gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
 ";
         assert_eq!(h.last_prompt_candidate(output).as_deref(), Some("›"));
+    }
+
+    #[test]
+    fn idle_chrome_only_output_accepts_codex_status_footer_without_prompt() {
+        let h = HarnessConfig::codex();
+        let output = "\
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+";
+
+        assert!(h.is_idle_chrome_only_output(output));
+    }
+
+    #[test]
+    fn idle_chrome_only_output_rejects_codex_status_with_busy_output() {
+        let h = HarnessConfig::codex();
+        let output = "\
+exploring repository
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+";
+
+        assert!(!h.is_idle_chrome_only_output(output));
     }
 
     #[test]

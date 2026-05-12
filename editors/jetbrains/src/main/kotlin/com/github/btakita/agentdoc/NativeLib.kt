@@ -150,15 +150,6 @@ interface AgentDocLib : Library {
     /** Return the number of files tracked in the debounce state. */
     fun agent_doc_tracked_count(): Int
 
-    /** Set response status for a file. Values: "generating", "writing", "routing", "idle". */
-    fun agent_doc_set_status(file_path: String, status: String)
-
-    /** Get response status for a file. Returns "generating", "writing", "routing", or "idle". Caller must free result. */
-    fun agent_doc_get_status(file_path: String): Pointer?
-
-    /** Check if any operation is in progress. Returns true if status != "idle". */
-    fun agent_doc_is_busy(file_path: String): Boolean
-
     /** Try to acquire the sync lock. Returns true if acquired. */
     fun agent_doc_sync_try_lock(): Boolean
 

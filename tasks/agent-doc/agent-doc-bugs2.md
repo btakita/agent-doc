@@ -109,7 +109,41 @@ CI review: latest GitHub Actions `CI` runs for `agent-doc` are older failed `mai
 Committed and pushed:
 - `src/agent-doc`: `b109bf8 fix: gate startup dispatch-only reroutes`
 - parent repo: `d3c6a07e4 agent-doc: gate startup dispatch-only reroutes`
-<!-- agent:boundary:ed8cbdfa -->
+❯ Look at the current state of the tmux window. Please make the doctor operation, which the sync operation should call, to fix the tmux window state. Do not manually fix the tmux window state. The doctor operation should fix the tmux window state...as a final test.
+❯ spec-test-build-install-commit-push
+### Re: tmux doctor sync repair — gpt-5
+
+Implemented the `Sync Tmux Layout` repair change in `src/agent-doc`.
+
+What changed:
+- Full/manual `agent-doc sync` now delegates focused session-document layout repair to the same file-scoped doctor repair helper used by `agent-doc session doctor <FILE> --repair`.
+- That doctor-backed sync repair runs even when the editor supplies a stale explicit `stash` window target, then sync resolves the repaired `agent-doc` window for tmux-router reconciliation.
+- Passive `sync --no-autostart` remains non-destructive and does not run doctor repair.
+- Added a live tmux regression for the exact stale `stash` window shape: no `agent-doc` window, a registered document pane in `stash`, and full sync scoped to that stale window.
+- Updated durable specs/instruction surfaces: `README.md`, `SPEC.md`, `CLAUDE.md`, `.claude/skills/agent-doc/SKILL.md`, and `specs/07-session-tmux-commands.md`.
+
+Live tmux state and final repair evidence:
+- Initial observed session `0` state was all `stash` windows with no `agent-doc` window.
+- Installed `agent-doc sync --col tasks/agent-doc/agent-doc-bugs2.md --focus tasks/agent-doc/agent-doc-bugs2.md` ran the doctor repair path and selected the repaired pane.
+- Final tmux check: `0:agent-doc` active with pane `%1`; `1:stash` contains the stashed panes.
+
+Verification passed after all edits:
+- `cargo test planned_stash_window_indices_packs_overflow_after_agent_doc`
+- `cargo test full_sync_calls_doctor_repair_for_explicit_stash_window -- --ignored`
+- `make check`
+- `make tmux-ci` final run: 222 ignored/live tmux tests passed
+- `cargo build`
+- `cargo install --path .`
+- `cargo run -- audit-docs`
+
+CI review: latest listed GitHub Actions `CI` runs for `agent-doc` are still older failed `main` pushes from April 24, 2026; the latest listed run is `24906567276`. Local `make tmux-ci` is green.
+
+Committed:
+- `src/agent-doc`: `0fb8544 fix: route sync repair through doctor`
+- parent repo: `e0bcd90f3 agent-doc: route sync repair through doctor`
+
+Submodule branch `20260422/codex-agent-backend` is pushed. Parent `main` push follows this session-document closeout so the document stays on the binary-owned finalize path.
+<!-- agent:boundary:b8830506 -->
 <!-- /agent:exchange -->
 ###
 <!--

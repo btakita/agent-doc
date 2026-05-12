@@ -72,23 +72,28 @@ Ron is a contact (`mail/contacts/ron-berkes/`). Emails `rberkes@gmail.com` and `
 Compacted content:
 - Archived 3 response topic(s): Compact exchange + transcription requests; 4 calls transcribed with GPU diarization; transcribe + diarize
 - Prior summary/context: **Compacted.** 770 lines → structured summary preserving all decisions, outcomes, and technical details. --- ### Tran...
-<!-- agent:boundary:7626d1fa -->
+<!-- agent:boundary:4888ec00 -->
 <!-- /agent:exchange -->
 
 <!-- agent:pending patch=replace -->
-- [ ] Start MRH WordPress optimization (admin access: vtac1)
-- [ ] Research Liquid Web dedicated WordPress hosting vs alternatives
-- [ ] Set up Cloudflare CDN for MonsterRodHolders.com
-- [ ] Reinstall Google Analytics JS on MRH site
-- [ ] Patent automation proposal for Ron (reduce Patricia's 15-30 min/patent)
-- [ ] Review Ron's patent spreadsheet (needs access -- share publicly or export CSV)
-- [ ] Corky Google Docs/Sheets support (added to tasks/software/corky.md)
-- [ ] Investigate RealWeeds.com / MonsterOutdoors.com acquisition opportunity
-- [ ] Wait for Steve to reach out directly
-- [ ] Draft Julian API integration proposal (factory reports, revenue share model)
-- [x] Transcribe phone_20260402-125728_6504368181.m4a with GPU diarization
-- [x] Transcribe phone_20260402-152955_6504368181.m4a with GPU diarization
-- [x] Transcribe phone_20260402-203929__16504368181.m4a with GPU diarization
-- [x] Transcribe phone_20260403-121627_6504368181.m4a with GPU diarization
+- [ ] [#r16r] Start MRH WordPress optimization (admin access: vtac1)
+- [ ] [#9g9d] Research Liquid Web dedicated WordPress hosting vs alternatives
+- [ ] [#d2p6] Set up Cloudflare CDN for MonsterRodHolders.com
+- [ ] [#qm7w] Reinstall Google Analytics JS on MRH site
+- [ ] [#ybna] Patent automation proposal for Ron (reduce Patricia's 15-30 min/patent)
+- [ ] [#twan] Review Ron's patent spreadsheet (needs access -- share publicly or export CSV)
+- [ ] [#8j1e] Corky Google Docs/Sheets support (added to tasks/software/corky.md)
+- [ ] [#d2qw] Investigate RealWeeds.com / MonsterOutdoors.com acquisition opportunity
+- [ ] [#tnz5] Wait for Steve to reach out directly
+- [ ] [#13fw] Draft Julian API integration proposal (factory reports, revenue share model)
 <!-- /agent:pending -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-05-12 [#kz7s] Transcribe phone_20260402-125728_6504368181.m4a with GPU diarization
+- 2026-05-12 [#tpw1] Transcribe phone_20260402-152955_6504368181.m4a with GPU diarization
+- 2026-05-12 [#rnw5] Transcribe phone_20260402-203929__16504368181.m4a with GPU diarization
+- 2026-05-12 [#c2rt] Transcribe phone_20260403-121627_6504368181.m4a with GPU diarization
+<!-- /agent:done -->
  

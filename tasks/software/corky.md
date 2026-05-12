@@ -92,7 +92,27 @@ prompt_presets:
 Compacted content:
 - Archived 27 response topic(s): sheets write insufficient scope; Codex Gmail support plan; Codex Gmail support plan; 24 more
 - Prior summary/context: Compacted. Covers CI fixes (v0.26.0 retags), dependency upgrades (agent-kit 0.4, instruction-files 0.2), and corky v0...
-<!-- agent:boundary:be2aea4b -->
+❯ When an Oauth login surfaces, use notify-desktop on linux and the equivalents on OSX + Windows.
+❯ spec-test-build-install-commit-push
+### Re: OAuth desktop notifications — gpt-5
+
+Implemented and pushed the OAuth desktop notification update.
+
+Corky now uses `notify-desktop` for Linux desktop notifications, keeps `osascript` for macOS, and adds a Windows PowerShell NotifyIcon balloon backend. The shared `notify_oauth` path already sits before the browser launch for Gmail, Calendar, Contacts, GSC, LinkedIn, and YouTube OAuth flows, so the browser-auth prompt surfaces through the platform backend before waiting on the loopback callback.
+
+Updated the spec, README, watch docs, changelog, and agent precommit runbook to document the Linux/macOS/Windows notification commands. Added a focused Linux regression test proving the notification backend targets `notify-desktop`.
+
+Verification:
+- `cargo fmt`
+- `make precommit` (clippy, full test suite, doc tests, `corky audit-docs`)
+- `make build`
+- `make install` (installed `corky 0.28.0` with `transcribe-cuda`)
+- `corky --version` -> `corky 0.28.0`
+
+Commits:
+- Corky: `e7b5b23` (`feat: notify OAuth prompts cross-platform`) pushed to `origin/20260413/corky-gsc`
+- Agent-loop pointer: `cceca07a9` (`chore: update corky OAuth notifications`)
+<!-- agent:boundary:28acf1a9 -->
 <!-- /agent:exchange -->
 ###
 <!--

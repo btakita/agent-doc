@@ -49,6 +49,16 @@ dirty working tree.
 - Simulate recovery after the response body is already visible; assert no
   duplicate exchange block or response heading is produced.
 
+## Implementation Note
+
+2026-05-12: The remaining guard gap was the appended prompt+response shape. The
+existing harness-agnostic exchange drift detector skipped appended chunks that
+contained any prompt-looking line, which meant a dirty exchange append containing
+both `❯ do ...` and a new `### Re:` response could be mistaken for ordinary
+prompt drift. The fix keeps prompt-only tails on the prompt-tail guard but fails
+closed when the appended exchange chunk contains a new assistant response
+heading.
+
 ## Non-goals
 
 - Do not change response text formatting.

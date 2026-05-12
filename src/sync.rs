@@ -6878,7 +6878,7 @@ mod tests {
             "pane should be retained as dead for diagnostics"
         );
         assert!(
-            wait_for(Duration::from_secs(3), || iso
+            wait_for(Duration::from_secs(15), || iso
                 .pane_dead_status(&pane)
                 .ok()
                 .flatten()

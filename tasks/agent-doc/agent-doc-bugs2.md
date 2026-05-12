@@ -54,18 +54,43 @@ Committed and pushed:
 - parent `agent-loop`: `ff71571c2 agent-doc: update route-owned restart fix`
 
 Unrelated dirty work remains in `src/agent-doc` internals, `src/boost-client`, and `src/session-share`; I left those unstaged.
-<!-- agent:boundary:85fa7eb6 -->
+❯ JB `Clear Session Context` had an error:
+```
+agent-doc command failed (exit 1): Error: project controller command `operator_command` failed: operator command `session_clear` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 141 is closed
+```
+❯ spec-test-build-install-commit-push
+### Re: Clear Session Context closed generation — gpt-5
+
+Fixed the JetBrains `Clear Session Context` closed-generation failure.
+
+Root cause: the project controller rejected all operator commands for `Closed` actor records before `agent-doc session clear <FILE>` could reach the live pane or supervisor submit path. That made an explicit clear fail with `generation ... is closed`, even though closed should only block duplicate reopen dispatch, not an operator-requested `/clear` before the next run.
+
+Implemented:
+- `session_clear` now records an `operator_closed` controller acceptance for closed actors.
+- `blocked` actors and non-clear commands against closed actors still fail closed.
+- Added a regression covering closed-generation clear acceptance and restart rejection.
+- Updated the session tmux command spec and `VERSIONS.md`.
+
+Verification completed:
+- `cargo fmt`
+- `cargo test controller_session_clear_accepts_closed_actor_generation`
+- `cargo check`
+- `cargo test`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Committed and pushed:
+- `src/agent-doc`: `4798eb4 fix: allow clear on closed actor generation`
+- parent `agent-loop`: `17ecdaf75 agent-doc: update clear closed actor fix`
+
+No follow-up backlog items were created; the requested fix is complete. Existing unrelated dirty work remains unstaged.
+<!-- agent:boundary:df0b22d6 -->
 <!-- /agent:exchange -->
 ###
 <!--
 I don't have a good track on the lifecycle logic that starts panes, kills panes, edge cases, etc.
 Can we make a nested list and diagram of the lifecycle logic?
----
-JB `Clear Session Context` had an error:
-```
-agent-doc command failed (exit 1): Error: project controller command `operator_command` failed: operator command `session_clear` rejected for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: generation 141 is closed
-```
-spec-test-build-install-commit-push
 ---
 Why is agent-doc starting a child Codex run?
 ```

@@ -162,6 +162,13 @@ struct RouteOwnedReapDecision {
     reason: String,
 }
 
+struct RouteOwnedCompletionConfig {
+    file: PathBuf,
+    baseline: Option<crate::cycle_state::CycleState>,
+    reap_policy: RouteOwnedReapPolicy,
+    harness: crate::harness::HarnessConfig,
+}
+
 /// Open (or create) the session log file at `.agent-doc/logs/<session-uuid>.log`.
 /// Returns a writable file handle in append mode, or None if the directory can't be created.
 fn open_session_log(file: &Path, session_id: &str) -> Option<std::fs::File> {
@@ -680,11 +687,25 @@ fn route_owned_reap_decision(
     }
 }
 
+fn route_owned_live_pane_busy_reason(
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+) -> Option<String> {
+    if !shared.running.load(Ordering::Relaxed) {
+        return None;
+    }
+    if current_child_prompt_visible(shared, harness) {
+        return None;
+    }
+    let tail = latest_prompt_candidate_line(shared, harness)
+        .map(|line| line.chars().take(80).collect::<String>())
+        .unwrap_or_else(|| "no_recent_output".to_string());
+    Some(format!("live_pane_busy_no_idle_prompt tail={tail:?}"))
+}
+
 fn spawn_route_owned_completion_thread(
     shared: Arc<SupervisorShared>,
-    file: PathBuf,
-    mut baseline: Option<crate::cycle_state::CycleState>,
-    reap_policy: RouteOwnedReapPolicy,
+    config: RouteOwnedCompletionConfig,
     completed: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     mut session_log: Option<std::fs::File>,
@@ -692,11 +713,27 @@ fn spawn_route_owned_completion_thread(
     std::thread::Builder::new()
         .name("route-owned-completion".into())
         .spawn(move || {
+            let RouteOwnedCompletionConfig {
+                file,
+                mut baseline,
+                reap_policy,
+                harness,
+            } = config;
+            let mut logged_busy_cycle: Option<String> = None;
             while !stop.load(Ordering::Relaxed) && !completed.load(Ordering::Relaxed) {
                 if let Ok(Some(state)) = crate::cycle_state::load(&file)
                     && route_owned_cycle_completed_after_start(&state, baseline.as_ref())
                 {
-                    let decision = route_owned_reap_decision(&file, &state, reap_policy);
+                    let decision = if let Some(reason) =
+                        route_owned_live_pane_busy_reason(&shared, &harness)
+                    {
+                        RouteOwnedReapDecision {
+                            reap: false,
+                            reason,
+                        }
+                    } else {
+                        route_owned_reap_decision(&file, &state, reap_policy)
+                    };
                     let event = format!(
                         "route_owned_reap_decision policy={} decision={} reason={} cycle={} event={}",
                         reap_policy.as_str(),
@@ -705,15 +742,23 @@ fn spawn_route_owned_completion_thread(
                         state.cycle_id,
                         state.last_event
                     );
-                    log_event(&mut session_log, &event);
-                    crate::ops_log::log_op(&file, &event);
+                    let busy_guard = decision.reason.starts_with("live_pane_busy_no_idle_prompt");
+                    if !busy_guard || logged_busy_cycle.as_deref() != Some(&state.cycle_id) {
+                        log_event(&mut session_log, &event);
+                        crate::ops_log::log_op(&file, &event);
+                    }
                     if decision.reap {
                         completed.store(true, Ordering::Relaxed);
                         shared.stop_requested.store(true, Ordering::Relaxed);
                         shared.kill_child();
                         return;
                     }
-                    baseline = Some(state);
+                    if busy_guard {
+                        logged_busy_cycle = Some(state.cycle_id.clone());
+                    } else {
+                        logged_busy_cycle = None;
+                        baseline = Some(state);
+                    }
                 }
                 if !sleep_with_stop(&stop, ROUTE_OWNED_COMPLETION_POLL_INTERVAL) {
                     return;
@@ -2465,9 +2510,12 @@ pub(crate) fn run_with_reap_policy(
         log_event(&mut session_log, "route_owned_start enabled=true");
         Some(spawn_route_owned_completion_thread(
             shared.clone(),
-            canonical.clone(),
-            route_owned_cycle_baseline,
-            route_owned_reap_policy,
+            RouteOwnedCompletionConfig {
+                file: canonical.clone(),
+                baseline: route_owned_cycle_baseline,
+                reap_policy: route_owned_reap_policy,
+                harness: harness.clone(),
+            },
             route_owned_completion.clone(),
             route_owned_completion_stop.clone(),
             session_log.as_ref().and_then(|f| f.try_clone().ok()),
@@ -4717,6 +4765,31 @@ Done.
             "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
         );
         assert!(!current_child_prompt_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn route_owned_live_pane_busy_requires_idle_prompt_before_reap() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        record_recent_output(&shared, b"exploring repository\n");
+
+        let reason = route_owned_live_pane_busy_reason(&shared, &harness)
+            .expect("running child without prompt should block route-owned reap");
+
+        assert!(reason.contains("live_pane_busy_no_idle_prompt"));
+        assert!(reason.contains("exploring repository"));
+    }
+
+    #[test]
+    fn route_owned_live_pane_busy_allows_idle_prompt_reap() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        record_recent_output(&shared, b"done\n");
+        record_recent_output(&shared, "›\n".as_bytes());
+
+        assert_eq!(route_owned_live_pane_busy_reason(&shared, &harness), None);
     }
 
     #[test]

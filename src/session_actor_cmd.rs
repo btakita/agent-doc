@@ -92,6 +92,37 @@ struct SessionContext {
     supervisor_socket: PathBuf,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LivePaneState {
+    AliveIdle,
+    AliveBusy,
+    ClosedClean,
+    ProjectionStale,
+    Unknown,
+}
+
+impl LivePaneState {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::AliveIdle => "alive-idle",
+            Self::AliveBusy => "alive-busy",
+            Self::ClosedClean => "closed-clean",
+            Self::ProjectionStale => "projection-stale",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LivePaneEvidence {
+    pane_id: Option<String>,
+    source: &'static str,
+    state: LivePaneState,
+    current_command: Option<String>,
+    prompt_ready: Option<bool>,
+    tail: Option<String>,
+}
+
 pub fn status(file: &Path) -> Result<()> {
     let ctx = build_context(file)?;
     print_status_summary(&ctx);
@@ -197,6 +228,7 @@ pub fn restart(file: &Path, mode: RestartMode) -> Result<()> {
         &ctx.canonical_file,
         "session_restart",
     )?;
+    guard_destructive_operator_on_live_busy_pane(&ctx, "session_restart")?;
     ensure_supervisor_socket(&ctx)?;
     let response = crate::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
@@ -234,6 +266,7 @@ pub fn clear(file: &Path) -> Result<()> {
         &ctx.canonical_file,
         "session_clear",
     )?;
+    guard_destructive_operator_on_live_busy_pane(&ctx, "session_clear")?;
     ensure_supervisor_socket(&ctx)?;
     let tmux = Tmux::default_server();
     if let Some((pane, pane_source)) = resolve_direct_submit_pane(&ctx, &tmux) {
@@ -327,6 +360,27 @@ fn resolve_direct_submit_pane(
         .map(|entry| entry.pane.as_str())
         .filter(|pane| tmux.pane_alive(pane))
         .map(|pane| (pane.to_string(), DirectSubmitPaneSource::Registry))
+}
+
+fn guard_destructive_operator_on_live_busy_pane(ctx: &SessionContext, action: &str) -> Result<()> {
+    let tmux = Tmux::default_server();
+    let evidence = live_pane_evidence(ctx, &tmux);
+    if evidence.state == LivePaneState::AliveBusy {
+        let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
+        let command = evidence.current_command.as_deref().unwrap_or("unknown");
+        let tail = evidence.tail.as_deref().unwrap_or("unknown");
+        anyhow::bail!(
+            "{} refused for {} because pane {} is alive-busy (source={}, current_command={}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.",
+            action,
+            ctx.canonical_file.display(),
+            pane,
+            evidence.source,
+            command,
+            tail,
+            ctx.canonical_file.display()
+        );
+    }
+    Ok(())
 }
 
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
@@ -577,6 +631,103 @@ fn query_supervisor_runtime(socket: &Path) -> SupervisorRuntime {
     }
 }
 
+fn live_pane_evidence(ctx: &SessionContext, tmux: &Tmux) -> LivePaneEvidence {
+    let (pane_id, source) = live_evidence_target(ctx);
+    let Some(pane_id) = pane_id else {
+        return LivePaneEvidence {
+            pane_id: None,
+            source,
+            state: if matches!(
+                ctx.supervisor_runtime.health,
+                SupervisorHealth::NoSocket | SupervisorHealth::Unreachable
+            ) {
+                LivePaneState::ClosedClean
+            } else {
+                LivePaneState::Unknown
+            },
+            current_command: None,
+            prompt_ready: None,
+            tail: None,
+        };
+    };
+
+    if !tmux.pane_alive(&pane_id) {
+        let projected_live = ctx.actor_record.is_some() || ctx.registry_entry.is_some();
+        return LivePaneEvidence {
+            pane_id: Some(pane_id),
+            source,
+            state: if projected_live {
+                LivePaneState::ProjectionStale
+            } else {
+                LivePaneState::ClosedClean
+            },
+            current_command: None,
+            prompt_ready: Some(false),
+            tail: None,
+        };
+    }
+
+    let harness = crate::harness::HarnessConfig::from_agent_name(&ctx.harness);
+    let captured = crate::sessions::capture_pane(tmux, &pane_id).unwrap_or_default();
+    let prompt_ready = live_pane_prompt_ready(&harness, &captured);
+    LivePaneEvidence {
+        pane_id: Some(pane_id.clone()),
+        source,
+        state: if prompt_ready {
+            LivePaneState::AliveIdle
+        } else {
+            LivePaneState::AliveBusy
+        },
+        current_command: pane_display_value(tmux, &pane_id, "#{pane_current_command}"),
+        prompt_ready: Some(prompt_ready),
+        tail: last_meaningful_pane_line(&captured),
+    }
+}
+
+fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) {
+    if let Some(record) = &ctx.actor_record {
+        return (Some(record.pane_id.clone()), "authoritative_actor");
+    }
+    if let Some(entry) = &ctx.registry_entry {
+        return (Some(entry.pane.clone()), "registry");
+    }
+    if let Some(pane) = ctx.log_status.as_ref().and_then(|status| {
+        status
+            .latest_session_open()
+            .then(|| status.latest_start_pane.clone())
+            .flatten()
+    }) {
+        return (Some(pane), "session_log");
+    }
+    (None, "none")
+}
+
+fn live_pane_prompt_ready(harness: &crate::harness::HarnessConfig, captured: &str) -> bool {
+    harness
+        .last_prompt_candidate(captured)
+        .is_some_and(|line| harness.is_dispatch_ready_prompt_line(&line))
+}
+
+fn last_meaningful_pane_line(captured: &str) -> Option<String> {
+    captured
+        .lines()
+        .rev()
+        .map(crate::prompt::strip_ansi)
+        .map(|line| line.trim().to_string())
+        .find(|line| !line.is_empty())
+        .map(|line| line.chars().take(160).collect())
+}
+
+fn pane_display_value(tmux: &Tmux, pane_id: &str, format: &str) -> Option<String> {
+    tmux.cmd()
+        .args(["display-message", "-t", pane_id, "-p", format])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn reconcile_controller_lease_with_supervisor_runtime(
     base_dir: &Path,
     canonical_file: &Path,
@@ -682,6 +833,20 @@ fn print_status_summary(ctx: &SessionContext) {
         }
         None => println!("registry: missing"),
     }
+    let tmux = Tmux::default_server();
+    let evidence = live_pane_evidence(ctx, &tmux);
+    println!(
+        "live_pane: state={} pane={} source={} current_command={} prompt_ready={} tail={}",
+        evidence.state.as_str(),
+        evidence.pane_id.as_deref().unwrap_or("none"),
+        evidence.source,
+        evidence.current_command.as_deref().unwrap_or("unknown"),
+        evidence
+            .prompt_ready
+            .map(|ready| ready.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        evidence.tail.as_deref().unwrap_or("none")
+    );
     println!(
         "supervisor: health={} state={} actor_state={} restart_count={} socket={}",
         ctx.supervisor_runtime.health.as_str(),
@@ -921,6 +1086,31 @@ mod tests {
             Some(ActorState::WaitingInput)
         );
         assert_eq!(parse_actor_state("unknown"), None);
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_detects_idle_opencode_prompt() {
+        let harness = crate::harness::HarnessConfig::opencode();
+
+        assert!(live_pane_prompt_ready(&harness, "work complete\n>\n"));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_rejects_active_output_after_prompt() {
+        let harness = crate::harness::HarnessConfig::codex();
+
+        assert!(!live_pane_prompt_ready(
+            &harness,
+            "›\nexploring repository\n"
+        ));
+    }
+
+    #[test]
+    fn last_meaningful_pane_line_trims_ansi_and_blank_lines() {
+        assert_eq!(
+            last_meaningful_pane_line("\x1b[32mworking\x1b[0m\n\n").as_deref(),
+            Some("working")
+        );
     }
 
     #[test]

@@ -239,7 +239,11 @@ single-owner actor controls:
   latest session-log summary for the document. It must fetch the actor record,
   supervisor lease, recent operator/dispatch attempt, and projection drift
   diagnostics from the project controller rather than treating
-  `session-actors.json` as an authority.
+  `session-actors.json` as an authority. It must also query tmux directly and
+  classify the resolved pane as `alive-idle`, `alive-busy`, `closed-clean`, or
+  `projection-stale`, including the pane current command and recent output tail
+  so operators can distinguish an idle live harness from a turn that is still
+  running.
 - `agent-doc session history <FILE>` prints the actor/session transition
   history from the controller's durable `actor_transitions` store. Legacy
   session-log filtering is only a compatibility fallback when no controller
@@ -252,7 +256,9 @@ single-owner actor controls:
 - `agent-doc session restart <FILE> [--fresh]` requests an actor-owned
   supervisor restart through IPC instead of relying on route-side restart
   heuristics. Before contacting the supervisor, it must record a controller
-  operator-command acceptance or fail with the rejected stage.
+  operator-command acceptance or fail with the rejected stage. If direct tmux
+  evidence classifies the resolved pane as `alive-busy`, restart must fail
+  closed before mutating the session.
 - `agent-doc session clear <FILE>` injects the harness-native `/clear`
   equivalent into the authoritative session through the same canonical
   single-line submit command used by routed reopen and queued slash-command
@@ -261,7 +267,9 @@ single-owner actor controls:
   otherwise it may fall back to supervisor IPC inject. For Codex, it still
   records the clear prompt state so the next reroute can reapply the original
   launch contract. Before contacting tmux or the supervisor, it must record a
-  controller operator-command acceptance or fail with the rejected stage. A
+  controller operator-command acceptance or fail with the rejected stage. If
+  direct tmux evidence classifies the resolved pane as `alive-busy`, clear must
+  fail closed before mutating the session. A
   `closed` actor generation must still accept this explicit clear operator
   command, because closed only blocks duplicate reopen dispatch; it must not
   prevent clearing the live harness context before the next run.

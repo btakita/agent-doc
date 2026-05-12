@@ -29,60 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-062109.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-075101.md`*
 
 Compacted content:
-- Archived 2 response topic(s): base-index repair; JetBrains Clear Session Context busy failure
+- Archived 2 response topic(s): JetBrains Clear Session Context retest; tmux CI test policy and ignored tmux failures
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#jbrestartretest]. spec-test-build-install-commit-push
-### Re: JetBrains Clear Session Context retest — gpt-5.5
-
-Completed `#jbrestartretest`.
-
-The relevant JetBrains code/spec/test changes were already present and pushed on `src/agent-doc` branch `20260422/codex-agent-backend`; the current head is `0db5667 fix: parse wrapped JetBrains busy clear failures`, with `b13abbb fix: add busy clear recovery actions` in the recent history. I did not stage the unrelated dirty files already present in `src/agent-doc`, `src/boost-client`, `src/corky`, or `src/session-share`.
-
-Verification run:
-- `cargo test` passed.
-- `make check` passed, including the wider deterministic closeout simulator budget.
-- JetBrains `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin` passed.
-- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.112` into IntelliJIdea2026.1.
-- Restarted IntelliJIdea2026.1; the relaunched IDE log shows `com.github.btakita.agentdoc` components active after restart.
-- Confirmed the installed jar contains `ClearSessionContextAction`, `TerminalUtil.BusySessionClearRefusal`, and the Refresh/Interrupt/Status/Copy action helper classes.
-- Re-tested the protected live pane with `agent-doc session clear tasks/agent-doc/agent-doc-bugs2.md`; it failed closed with the expected typed `session_clear refused ... alive-busy` result for pane `%1`, which is the result the JetBrains action parses into the protected busy warning.
-
-I also attempted to invoke the IDE action directly with `xdotool`; that was not reliable and typed into the editor instead of opening action search. I removed only that accidental generated substring and did not count that attempt as proof. The durable proof here is the restarted installed plugin, the exact live CLI refusal, and the unit/spec coverage that maps that refusal to the Refresh and retry, Interrupt and clear, Show status, and Copy details warning instead of the generic command-failed path.
-❯ Run the ignored tmux tests. If there are failures, fix issues and update the SimWorld tests so catch the regression next time.
-❯ Each turn with a test should review the tmux tests on CI. If there are failures, run the tests locally, fix, and update the SimWorld tests. Add these instructions to the src/agent-doc harness files.
-
-❯ spec-test-build-install-commit-push
-### Re: tmux CI test policy and ignored tmux failures — gpt-5.5
-
-Ran the CI review and local tmux work requested.
-
-CI review: the latest repository CI run I found was `24906567276` on `main` from 2026-04-24. It failed in clippy at `src/template.rs:621` before cargo test or the tmux leg ran, so there was no CI tmux failure log to reproduce from that run.
-
-Local ignored tmux suite initially failed in two route tests. I fixed the underlying issues and updated deterministic SimWorld coverage:
-
-- `src/project_controller.rs`: test-mode `mark_lifecycle` now uses the same in-process controller handler pattern as the other test-mode controller APIs, so route can promote a healthy starting actor without requiring a live controller socket.
-- `src/route.rs`: OpenCode busy-pane recovery now checks for readiness after the first Escape before sending another Escape, avoiding a second interrupt after the mock has already returned to an idle prompt. The OpenCode assertion now expects the OpenCode `/agent-doc` trigger.
-- `src/sim_world.rs`: added deterministic coverage for starting-prompt promotion and busy-interrupt recovery before dispatch.
-- Harness/source docs now require tmux CI review on test-bearing turns and document the prompt-gated starting-actor route contract. Generated harness mirrors were refreshed.
-
-Verification passed:
-
-- `make tmux-ci` passed: 219 ignored/live tmux tests, 0 failed.
-- `make check` passed after the final doc/surface edits.
-- `cargo build` passed.
-- `cargo install --path .` passed and replaced `/home/brian/.cargo/bin/agent-doc` with v0.33.16.
-- `cargo run -- audit-docs` passed.
-
-Committed non-session repo work before finalize:
-
-- `src/agent-doc`: `982aa0d fix: stabilize tmux route recovery`
-- parent repo: `77381d6ce fix: stabilize agent-doc tmux route recovery`
-
-I left the pre-existing unrelated dirty files unstaged.
-<!-- agent:boundary:ed5ec6d0 -->
+<!-- agent:boundary:89090095 -->
 <!-- /agent:exchange -->
 ###
 <!--

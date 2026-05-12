@@ -92,7 +92,45 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): OAuth desktop notifications
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:b6d903f1 -->
+❯ Can we run corky auth to a profile or email address so I can manually authenticate using oauth?
+
+Is there a way to increase the length of time for the Oauth token for the Corky app so I don't have to login using oauth every time?
+
+spec-test-build-install-commit-push
+### Re: Corky OAuth auth and token lifetime — gpt-5
+
+Yes. I added a manual Google OAuth entrypoint:
+
+```sh
+corky auth --email you@gmail.com --scope sync
+```
+
+That pre-authenticates Gmail API sync, passes `login_hint=you@gmail.com`, and stores the token under the same `gmail:<email>` key that `gmail-api` sync already uses. For Gmail API draft/send compose scope, use the configured account name plus the Google email:
+
+```sh
+corky auth --account my-gmail --email you@gmail.com --scope send
+```
+
+That stores the compose token under `gmail:<account>:send`, which matches the draft push/send lookup path. `corky filter auth --account you@gmail.com` also now treats an email-shaped account as a login hint for the browser flow. Social profile auth remains the existing profile path, e.g. `corky linkedin auth --profile NAME` or `corky youtube auth --profile NAME`.
+
+On token lifetime: Corky cannot increase Google's access-token lifetime. Google access tokens are short-lived by design, usually about an hour. The durable part is the refresh token. Corky already asks for offline access, and I fixed the repeated-login failure mode I found: refreshed Gmail tokens were being re-saved with filter-scope metadata, which could make sync/docs/sheets tokens look like they had insufficient scope after refresh and trigger OAuth again. Refresh now preserves the original token scopes, and stored multi-scope tokens are matched correctly.
+
+Implemented and pushed in Corky commit `087de2b` (`feat: add manual google auth`) on branch `20260413/corky-gsc`.
+
+Verification completed:
+
+```sh
+cargo test gmail_auth
+make check
+cargo run --quiet -- audit-docs
+make release
+make install
+corky --version
+corky auth --help
+```
+
+`make install` completed with GPU support (`transcribe-cuda`).
+<!-- agent:boundary:cc3b68e9 -->
 <!-- /agent:exchange -->
 ###
 <!--

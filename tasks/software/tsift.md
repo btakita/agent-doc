@@ -30,34 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-161041.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-162600.md`*
 
 Compacted content:
-- Archived 4 response topic(s): #frwr source-read rewrite; #ftok source-read token-savings fixture; tsift log effectiveness and next steps; 1 more
+- Archived 1 response topic(s): #sfpx failure meta prose
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#sfpx]. spec-test-build-install-commit-push
-### Re: #sfpx failure meta prose — gpt-5
-
-Completed `#sfpx` in `src/tsift`.
-
-What changed:
-- Added a `session-digest` classifier filter for assistant progress/assessment prose that discusses failure-classification false positives, unresolved failure groups, `--next-context`, or red/check CI-status commentary.
-- Added deterministic regressions for both `session-digest` and `session-review` proving those meta/progress lines do not become failure rows while real command/test failures remain covered by the existing anchored-failure tests.
-- Updated `SPEC.md` and `VERSIONS.md` to document the failure-meta/progress filtering contract.
-
-Verification/build/install:
-- `cargo test failure_meta_progress` passed.
-- `make check` passed: clippy plus 585 unit tests and 101 compiled CLI tests; the one wider SimWorld corpus remains intentionally ignored for CI.
-- `cargo build --release` passed.
-- `cargo install --path . --force` passed; installed `tsift 0.1.42`.
-- Latest GitHub Actions `CI` run for `btakita/tsift` was green: run `25811207221`, `success`, `2026-05-13T16:07:52Z`.
-- There is no `make tmux-ci` target in `src/tsift`; the applicable CI evidence is the green `CI` workflow above.
-
-Committed and pushed in the `tsift` repo:
-- `fd4bca5` `fix: filter session failure meta prose`
-
-I did not push the parent `agent-loop` repo because its `main` branch was already four commits ahead of `origin/main`; pushing it would have included earlier unrelated commits. The parent submodule pointer now reflects the pushed `src/tsift` commit locally.
-<!-- agent:boundary:e7652408 -->
+<!-- agent:boundary:20503d0e -->
 <!-- /agent:exchange -->
 ###
 <!--

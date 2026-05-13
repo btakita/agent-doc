@@ -7,6 +7,7 @@
 //! - `answer(file, option_index)` — navigates the prompt TUI to the target option using the prompt's axis (Claude Code: Up/Down, OpenCode: Tab/BackTab; 30 ms between presses) then sends Enter. OpenCode `Allow always` sends a second Enter to accept the follow-up confirmation prompt. Validates that a prompt is active and the index is in range before sending keys.
 //! - Claude prompt detection anchors on the footer pattern `"Esc to cancel"` (searched bottom-up), then scans upward for options in bracket format (`[N] label`) or numbered list format (`N. label`), then identifies the question as the first non-empty, non-option line above.
 //! - OpenCode prompt detection anchors on the horizontal control footer (`"select"` + `"enter confirm"`) and parses the `Allow once`, `Allow always`, and `Reject` options rendered on the same row.
+//! - OpenCode question extraction prefers explicit `← ...` prompt lines. If the pane only exposes the permission banner and horizontal controls, it reports the neutral `"Permission required"` label instead of reusing earlier shell command text.
 //! - ANSI escape codes are stripped before pattern matching; `strip_ansi` is `pub(crate)` for reuse.
 //! - `selected` is 0-based (reflecting TUI cursor position); `options[*].index` is 1-based (matching the TUI display).
 //! - Both bracket format (`[N] label`) and numbered list format (`N. label`) are detected as prompt options.
@@ -25,6 +26,7 @@
 //! - parse_yes_no_prompt: two-option prompt → active, 2 options
 //! - markdown_list_not_prompt: numbered markdown list above `Esc to cancel` → inactive (not detected as options)
 //! - parse_opencode_permission_prompt: horizontal OpenCode permission prompt → active, 3 options, selected=0
+//! - parse_opencode_permission_prompt_without_question_uses_default_label: horizontal controls with no `← ...` question → `"Permission required"` rather than prior shell command text
 //! - navigation_keys_for_opencode_permission_prompt: OpenCode prompt uses Tab/BackTab selector movement
 //! - opencode_allow_always_requires_confirmation: OpenCode `Allow always` is followed by a confirmation prompt
 //! - strip_ansi_basic: bold/reset escape sequence → plain text without escape codes
@@ -463,16 +465,6 @@ fn opencode_question(lines: &[String]) -> Option<String> {
         }
     }
 
-    for line in lines.iter().rev() {
-        let cleaned = strip_box_prefix(line).trim_start_matches('←').trim();
-        if cleaned.is_empty() || cleaned.eq_ignore_ascii_case("Permission required") {
-            continue;
-        }
-        if cleaned.contains("Permission required") {
-            continue;
-        }
-        return Some(cleaned.to_string());
-    }
     Some("Permission required".to_string())
 }
 
@@ -791,6 +783,24 @@ Bash command
         assert!(!opencode_option_requires_confirmation(&opts[0]));
         assert!(opencode_option_requires_confirmation(&opts[1]));
         assert!(!opencode_option_requires_confirmation(&opts[2]));
+    }
+
+    #[test]
+    fn parse_opencode_permission_prompt_without_question_uses_default_label() {
+        let content = "\
+bash mock-opencode-prompt.sh
+printf '\\033[48;2;245;167;66mAllow once\\033[0m Allow always Reject ⇆ select enter confirm'
+\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject ctrl+f fullscreen ⇆ select enter confirm
+";
+
+        let info = parse_prompt(content);
+        assert!(info.active);
+        assert_eq!(info.question.as_deref(), Some("Permission required"));
+        let opts = info.options.as_ref().unwrap();
+        assert_eq!(opts.len(), 3);
+        assert_eq!(opts[0].label, "Allow once");
+        assert_eq!(opts[1].label, "Allow always");
+        assert_eq!(opts[2].label, "Reject");
     }
 
     #[test]

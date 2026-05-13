@@ -34,7 +34,7 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 5. Prompt Polling
 
 - **Trigger:** After a Run action, poll `agent-doc prompt --all` every 1.5s.
-- **Behavior:** Detect numbered-option Claude Code permission prompts and OpenCode horizontal permission prompts. Display a bottom-anchored panel with buttons for each option. Support keyboard selection (Alt+1..9, Alt+Esc toggle, Esc dismiss).
+- **Behavior:** Detect numbered-option Claude Code permission prompts and OpenCode horizontal permission prompts. Display a bottom-anchored panel with buttons for each option. Support keyboard selection (Alt+1..9, Alt+Esc toggle, Esc dismiss). The prompt label comes from the CLI's normalized `question`; OpenCode horizontal prompts with controls but no explicit `← ...` question must display `Permission required`, never raw shell command text captured before the controls.
 - **Answer:** Call `agent-doc prompt --answer <N> <file>` from the prompt entry's owning cwd when user selects an option.
 - **Auto-save:** Save tracked files before each poll cycle to capture user edits.
 

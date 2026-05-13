@@ -93,7 +93,7 @@ Two strategies for detecting the file's position in the editor split:
 
 - `PluginLifecycleListener` handles `projectOpened`/`projectClosing`.
 - `disposeAll()` cleans up prompt panels and pollers on project close or plugin unload.
-- `PromptPoller` accepts the flat `agent-doc prompt --all` entry shape, including the owning `cwd` and optional 0-based `selected` field, and answers prompts from that cwd with the one-based option position expected by `agent-doc prompt --answer`.
+- `PromptPoller` accepts the flat `agent-doc prompt --all` entry shape, including the owning `cwd` and optional 0-based `selected` field, and answers prompts from that cwd with the one-based option position expected by `agent-doc prompt --answer`. It renders the CLI-normalized question verbatim; OpenCode horizontal prompts that lack an explicit question line must surface the CLI fallback `Permission required` rather than captured shell command text.
 
 ## Keybindings
 

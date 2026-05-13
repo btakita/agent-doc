@@ -13567,6 +13567,16 @@ Body\n\
 
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_agent_doc_without_file_arg(&iso, &pane, &mock_agent);
+        assert!(
+            wait_for_agent_ready_outcome(
+                &iso,
+                &pane,
+                Duration::from_secs(10),
+                &HarnessConfig::codex()
+            )
+            .is_ready(),
+            "mock agent prompt should be ready before route probes the recovered supervisor owner"
+        );
         let mock_agent_pid =
             wait_for_process_pid(&mock_agent.display().to_string(), Duration::from_secs(3));
         let injects = Arc::new(Mutex::new(Vec::<String>::new()));

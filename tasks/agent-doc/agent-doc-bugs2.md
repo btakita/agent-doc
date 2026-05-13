@@ -29,33 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-225324.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-232029.md`*
 
 Compacted content:
-- Archived 2 response topic(s): tmuxhybridpty; tmuxhybridpty
+- Archived 1 response topic(s): ownedpty
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#ownedpty]. Run ignored tmux tests in parallel. The tmux tests must pass in parallel. spec-test-build-install-commit-push
-### Re: ownedpty — gpt-5
-Implemented `#ownedpty`. Managed supervisors now keep an `alacritty_terminal` screen model for the owned child PTY, feed filtered child output into it, reset it on child spawn, and resize it with the PTY. Prompt/readiness/help/protected-input checks now prefer the current visible screen text and fall back to the raw byte ring only when the screen is empty, so cursor rewrites and line clears are interpreted as terminal state instead of append-only tmux scrollback.
-
-I also fixed the parallel tmux fixture that surfaced during validation: the mock registered `agent-doc` now ignores blank submitted lines, so prompt-confirmation Enter events do not hide the ready prompt as `GOT:` under parallel tmux execution. Specs and catalog docs were updated for the new owned-PTY screen invariant.
-
-Verification passed:
-- `cargo test supervisor::screen -- --test-threads=2`
-- `cargo test current_child_prompt_visible -- --test-threads=2`
-- `cargo test is_help_screen_visible -- --test-threads=2`
-- `make tmux-ci TMUX_TEST_THREADS=4` (226 ignored tmux tests passed in parallel)
-- `make check`
-- `make install`
-
-Latest GitHub CI for `main` was green (`25773430221`, 2026-05-13T01:55:57Z), but `gh run view` exposed only the standard `check` job, so the local `make tmux-ci TMUX_TEST_THREADS=4` run is the tmux-specific evidence for this turn.
-
-Commits prepared before this closeout:
-- `src/agent-doc` `f24da68a` (`feat: add owned pty screen model`)
-- superproject `01c62975c` (`chore: update agent-doc submodule`)
-
-Per the session-document closeout order, I will push those commits after this finalize step completes.
-<!-- agent:boundary:1ba14a8a -->
+<!-- agent:boundary:f0a67e73 -->
 <!-- /agent:exchange -->
 ###
 <!--

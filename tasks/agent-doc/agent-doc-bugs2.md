@@ -29,48 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-173609.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-175816.md`*
 
 Compacted content:
-- Archived 4 response topic(s): orphaned tmux pane cleanup; note; recover root tmux pane; 1 more
+- Archived 2 response topic(s): log review; ops log summary
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Review logs for agent-doc effectiveness and issues. #next-steps
-### Re: log review — gpt-5.5
-
-I reviewed the current `.agent-doc/logs/ops.log` tail plus the active cycle state for this document.
-
-Effectiveness is better than the backlog history suggests for the Codex path. Recent `agent-doc-bugs2.md` turns repeatedly show the good sequence: `route_dispatch_start_proven proof=consumed`, `ipc_write_consumed patches=1`, `commit_success`, then `transient_cleanup`. That means the current direct Codex route + IPC write + session-document commit path is mostly doing the thing we care about: the response crosses the document boundary and gets committed.
-
-The remaining problems in the logs are still worth treating as workflow risks:
-
-- `session_clear_live_busy_guard_bypassed` appears for this document at `[1778693812]`: the authoritative pane was still reported as running `agent-doc` with a live Codex tail, then `session_clear` was sent and the pane was rerouted. That may be an intentional operator bypass, but the log reads like a dangerous path unless there is explicit interrupt/confirm semantics and stronger idle proof.
-- Route proof quality is still harness-dependent. Codex routes now show `proof=consumed proof_scope=dispatch_start`; OpenCode still has `proof=accepted proof_scope=accepted_only`, which only proves pane input acceptance, not dispatch start. That is already captured in the backlog, but the latest logs confirm it is still the right distinction.
-- Some `post_commit_local_drift` entries are expected user follow-up edits, but the same event name also appears for `working_tree_edits`. The log stream needs a higher-level summary so expected follow-ups do not hide real redirty/patchback regressions.
-- Sync latency is mostly within budget in the recent tail, but there are still isolated over-budget phases: `postlock_actor_focus=358ms`, `controller_actor_lookup=360ms`, and `prune_stash_panes=309ms`. These are smaller than the earlier multi-second regressions, but still confirm the route/sync budget work remains relevant.
-- Another session still hit `route_authoritative_actor_starting_not_ready` for `tasks/software/tsift.md` after about 9s. That fits the existing stale-starting / route-starting backlog class rather than a new root cause.
-
-I added two recommended backlog items: one to make this kind of ops-log review a first-class summary command/report, and one to investigate the clear-while-busy bypass evidence.
-
-No code was changed and I did not run the test suite; this was a log review and backlog-capture turn.
-❯ do [#k89p]. spec-test-build-install-commit-push
-### Re: ops log summary — gpt-5
-
-Implemented `#k89p`.
-
-Added `agent-doc ops summary`, a read-only report over `.agent-doc/logs/ops.log` that groups the high-signal events from the backlog item by document/session: `ipc_write_consumed`, `commit_success`, `route_dispatch_start_proven`, `post_commit_local_drift`, `session_clear_live_busy_guard_bypassed`, `route_authoritative_actor_starting_not_ready`, accepted-only route proof lines, and sync over-budget lines. It supports `--project-root`, `--limit`, and `--json`.
-
-Updated the core command spec and command autocomplete list, added parser/report unit coverage, and added CLI integration coverage. Built and installed locally with `make install`.
-
-Verification:
-- `cargo test ops_summary --all-targets`
-- `make check`
-- `agent-doc ops summary --project-root /home/brian/work/btakita/agent-loop --limit 40`
-- Latest completed GitHub Actions run `25815747908`: `tmux-ci` job passed; the overall run failed in the separate `check` job.
-
-Commits:
-- `src/agent-doc`: `ca988766` (`feat: add ops log summary command`) pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `b6e0bb9a0` (`agent-doc: add ops summary command`) queued locally for push after this session closeout
-<!-- agent:boundary:c9c0ad7e -->
+<!-- agent:boundary:2c6cb5c1 -->
 <!-- /agent:exchange -->
 ###
 <!--

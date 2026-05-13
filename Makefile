@@ -1,6 +1,6 @@
 .PHONY: release check precommit update publish clean check-shared
 
-SUBMODULES = agent-doc corky
+SUBMODULES = src/agent-doc src/corky
 
 # Build release binaries for both projects
 release:
@@ -19,7 +19,7 @@ check: check-shared
 # Run clippy + tests for shared instruction-files crate
 check-shared:
 	@echo "=== instruction-files: clippy + test ==="
-	@cd instruction-files && cargo clippy -- -D warnings && cargo test
+	@cd src/instruction-files && cargo clippy -- -D warnings && cargo test
 
 # Pre-commit checks for both projects + workspace-level audit
 precommit: check-shared

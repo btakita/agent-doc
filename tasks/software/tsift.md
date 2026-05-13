@@ -35,7 +35,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): logs review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:77def4a9 -->
+❯ do [#xctx]. spec-test-build-install-commit-push
+### Re: xctx — gpt-5
+
+Implemented `#xctx` in `src/tsift`.
+
+The fix changes `session-review --next-context` so an agent-doc template document with a non-empty live exchange tail scopes the handoff to that tail even when the live instruction is freeform text rather than a formal `do [#id]` prompt. When the structured prompt extractor finds no prompt targets, next-context now uses the meaningful live tail text as the active prompt target and suppresses stale aggregate files/failures from older matched sessions.
+
+Updated:
+- `src/tsift/src/session_review.rs`
+- `src/tsift/tests/exit_code.rs`
+- `src/tsift/SPEC.md`
+
+Verification:
+- `cargo test session_review_next_context_scopes_freeform_live_exchange_tail`
+- `cargo test session_review_next_context_scopes_freeform_live_tail_over_stale_context`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- installed `tsift --version` reports `tsift 0.1.42`
+- live check: `tsift session-review --next-context --json tasks/software/tsift.md` now reports active prompt `do [#xctx]. spec-test-build-install-commit-push` with empty stale files/failures
+
+CI/tmux evidence: latest GitHub CI run `25816599122` for `btakita/tsift` was green (`clippy + test`). I did not find a separate tmux job in that workflow.
+
+Commits:
+- `src/tsift`: `acd2d0b fix: scope next-context freeform tails` pushed to `btakita/tsift main`
+- parent repo: `dad13b6f1 chore: update tsift submodule`
+<!-- agent:boundary:4b2b6846 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +70,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xctx] Fix session-review --next-context active-tail scoping after compaction/template boundaries: current tasks/software/tsift.md has a live user prompt, but next-context reports prompts:0 and carries historical files/failures from unrelated sessions.
 - [ ] [#xcst] Fix session-cost/log guardrail wording for agent-doc logs so restart_loop warnings are only emitted when restart churn is actually present; ops.log currently reports fresh_restart=0 auto_trigger_timeout=0 ctrl_d_restart_loop=0 while still warning restart churn detected.
 - [ ] [#xlog] Teach tsift log-digest to classify agent-doc runtime/churn/failure events as signals; current tsift-v0.1.log digest reports signals:0 even though session-digest finds claude_exit, auto_trigger_timeout, fresh_restart, ctrl_d_restart_loop, and closeout churn.
 <!-- /agent:backlog -->
@@ -83,4 +108,5 @@ Compacted content:
 - 2026-05-13 [#fref] Tighten codex-jsonl file-reference extraction so conversational fragments and shell syntax are not reported as touched files; the current session-digest surfaced false paths like 2>/dev/null, agent-doc/tsift, digest/session, progress/CI-status, and version/preflight.
 - 2026-05-13 [#scst] Calibrate session-review/session-cost aggregate token reporting so cached multi-session totals are separated from per-session cost; current review reports 57,615,403 total tokens and largest turn 186,897 across 12 matched sessions, while the latest single-session cost is 518,391 total with largest turn 67,644.
 - 2026-05-13 [#rwno] Make tsift rewrite unsupported-command outcomes explicit: commands with shell redirection or find predicates currently exit 1 with no explanation, so rewrite should either pass through safely or emit a bounded no-rewrite reason for agents.
+- 2026-05-13 [#xctx] Fix session-review --next-context active-tail scoping after compaction/template boundaries: current tasks/software/tsift.md has a live user prompt, but next-context reports prompts:0 and carries historical files/failures from unrelated sessions.
 <!-- /agent:done -->

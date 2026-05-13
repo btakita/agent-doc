@@ -52,7 +52,25 @@ The remaining problems in the logs are still worth treating as workflow risks:
 I added two recommended backlog items: one to make this kind of ops-log review a first-class summary command/report, and one to investigate the clear-while-busy bypass evidence.
 
 No code was changed and I did not run the test suite; this was a log review and backlog-capture turn.
-<!-- agent:boundary:d09e3405 -->
+❯ do [#k89p]. spec-test-build-install-commit-push
+### Re: ops log summary — gpt-5
+
+Implemented `#k89p`.
+
+Added `agent-doc ops summary`, a read-only report over `.agent-doc/logs/ops.log` that groups the high-signal events from the backlog item by document/session: `ipc_write_consumed`, `commit_success`, `route_dispatch_start_proven`, `post_commit_local_drift`, `session_clear_live_busy_guard_bypassed`, `route_authoritative_actor_starting_not_ready`, accepted-only route proof lines, and sync over-budget lines. It supports `--project-root`, `--limit`, and `--json`.
+
+Updated the core command spec and command autocomplete list, added parser/report unit coverage, and added CLI integration coverage. Built and installed locally with `make install`.
+
+Verification:
+- `cargo test ops_summary --all-targets`
+- `make check`
+- `agent-doc ops summary --project-root /home/brian/work/btakita/agent-loop --limit 40`
+- Latest completed GitHub Actions run `25815747908`: `tmux-ci` job passed; the overall run failed in the separate `check` job.
+
+Commits:
+- `src/agent-doc`: `ca988766` (`feat: add ops log summary command`) pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `b6e0bb9a0` (`agent-doc: add ops summary command`) queued locally for push after this session closeout
+<!-- agent:boundary:c9c0ad7e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,7 +146,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#k89p] [recommended] #next-steps: Add an ops-log effectiveness summary command/report that groups recent ipc_write_consumed + commit_success, route_dispatch_start_proven, post_commit_local_drift, session_clear_live_busy_guard_bypassed, route_authoritative_actor_starting_not_ready, accepted_only route proof, and sync over-budget events by document/session so log review produces signal without manual grep.
 - [ ] [#q97c] [recommended] #next-steps: Investigate session_clear_live_busy_guard_bypassed for authoritative actors still running agent-doc; current ops.log evidence for agent-doc-bugs2.md at [1778693812] clears pane %1 while the tail still reports gpt-5.5 high / Context 85% used, then immediately reroutes. Require explicit interrupt/confirm semantics or stronger idle proof before clear.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
@@ -261,4 +278,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-13 [#rspcmt9] #agent-doc-bug: Direct Codex chat answered a Monster Rod Holders session prompt but did not write the response to `src/boost-client/tasks/monsterrodholders.md`; manual `agent-doc write --commit` then committed the submodule response but initially failed the parent pointer closeout on root `.git/index.lock`, requiring `agent-doc commit <file>` recovery. Plan: tasks/agent-doc/plan-direct-chat-response-patchback-required.md
 - 2026-05-13 [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 - 2026-05-13 [#opencodepromptplugins] [recommended] Add editor-plugin prompt-answer coverage for JetBrains and VSCode: verify both prompt UIs pass the selected option index to agent-doc prompt --answer, handle flat agent-doc prompt --all JSON including selected, and include a live OpenCode permission prompt smoke after installing the plugin.
+- 2026-05-13 [#k89p] [recommended] #next-steps: Add an ops-log effectiveness summary command/report that groups recent ipc_write_consumed + commit_success, route_dispatch_start_proven, post_commit_local_drift, session_clear_live_busy_guard_bypassed, route_authoritative_actor_starting_not_ready, accepted_only route proof, and sync over-budget events by document/session so log review produces signal without manual grep.
 <!-- /agent:done -->

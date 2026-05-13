@@ -29,41 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-044404.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-050731.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Codex hook-review startup blocker
+- Archived 1 response topic(s): Managed capability proof status
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ The `[start] managed opencode capability proof` (same with all the other agents (Claude Code + Code rn)) should be a tmux status instead of directly in the pane...to avoid interfering with the session.
-```
-┃                                                                                                                       ┃  [start] managed opencode capability proof: opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:11407,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:11416
-```
-❯ spec-test-build-install-commit-push
-### Re: Managed capability proof status — gpt-5
-
-Implemented and installed the fix.
-
-The managed capability proof result no longer writes the `[start] managed ... capability proof` line into the agent pane transcript. `src/agent-doc/src/start.rs` now surfaces successful and failed proof summaries through tmux `display-message` targeted at the owned pane, while keeping the canonical `*_capability_proof ...` event in the session log. That applies through the shared managed proof path, so it covers Codex, OpenCode, and any other harness using the same proof gate.
-
-I also updated the OpenCode readiness regressions so the idle `context ... % used` footer is accepted without proof output being present in the pane, added a live tmux regression proving the status message does not appear in captured pane output, and aligned `README.md`, `SPEC.md`, `specs/05-agent-backend.md`, `CLAUDE.md`, `VERSIONS.md`, and the installed Claude skill surface with the new contract.
-
-Verification / build / install:
-- focused Rust regressions for the new status-message helper, OpenCode readiness without proof transcript output, and the live tmux display-message path
-- `make check` after code changes
-- latest parent `Agent Doc` GitHub Actions run `25778766588`: `check` and `tmux-ci` both passed
-- local `make tmux-ci` passed: 223 ignored tmux tests
-- `cargo run --quiet -- audit-docs`
-- `make check` again after instruction-surface updates
-- `make build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits:
-- `src/agent-doc`: `faad4d2d` (`fix: show capability proof in tmux status`), pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `1872aeefc` (`chore: update agent-doc submodule`), ready to push after this session closeout
-
-No new backlog item came out of this fix.
-<!-- agent:boundary:37636912 -->
+<!-- agent:boundary:a7eed1a5 -->
 <!-- /agent:exchange -->
 ###
 <!--

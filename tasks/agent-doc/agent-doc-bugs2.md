@@ -29,43 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-203018.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-210617.md`*
 
 Compacted content:
-- Archived 1 response topic(s): external `agent:done` archive attribute
+- Archived 1 response topic(s): OpenCode Enter submit
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Enter key in opencode does not submit prompts...enters a `\n` instead.
-```
-                       ┃                                                                                                                       ┃  agent-doc /home/brian/work/btakita/agent-loop/tasks/software/corky.md
-                       ┃                                                                                                                       ┃
-                       ┃                                                                                                                       ┃
-                       ┃ 
-```
-❯ spec-test-build-install-commit-push
-### Re: OpenCode Enter submit — gpt-5
-
-Implemented the OpenCode Enter-submit fix and pushed it.
-
-The routed tmux submit paths are now harness-aware. For OpenCode panes, `agent-doc` sends the prompt text literally, waits for the existing submit delay, then emits the Kitty keyboard protocol Return sequence (`ESC [ 13 u`) instead of tmux's named `Enter`, which avoids OpenCode interpreting the submit as `ctrl+j` newline input. The fix covers route dispatch, supervisor IPC injects, auto-trigger injects, and file-scoped `/clear` direct-pane submission.
-
-I also updated the session tmux command spec, added a live ignored tmux regression proving OpenCode receives `agent-doc plan.md\x1b[13u`, and added a shared `tmux-router` helper/test for the Kitty Return submit sequence.
-
-Verification completed:
-
-- `make check` in `src/agent-doc`: passed.
-- `make tmux-ci` in `src/agent-doc`: passed, including `sessions::tests::opencode_submit_uses_kitty_return_sequence`.
-- `cargo test opencode_submit_uses_kitty_return_sequence -- --ignored --test-threads=1` in `src/agent-doc`: passed.
-- `cargo test send_keys_kitty_return_uses_enhanced_return_sequence` in `src/tmux-router`: passed.
-- Latest GitHub CI for `src/agent-doc` was green (`CI`, run `25773430221`).
-- `make install` in `src/agent-doc`: completed and replaced the local `agent-doc` binary plus shared library.
-
-Pushed commits:
-
-- `src/tmux-router`: `5abba0a` (`fix: add opencode kitty return submit`)
-- `src/agent-doc`: `09763836` (`fix: submit opencode prompts with kitty return`)
-- root `agent-loop`: `0ac361ecf` (`fix: update opencode submit handling`)
-
-<!-- agent:boundary:589cbe3c -->
+<!-- agent:boundary:054e0bae -->
 <!-- /agent:exchange -->
 ###
 <!--

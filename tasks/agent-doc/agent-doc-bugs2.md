@@ -34,10 +34,51 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): Managed capability proof status
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a7eed1a5 -->
+❯ The corky.md pane is incorrectly popping up when I switch the editor away from corky.md
+❯ spec-test-build-install-commit-push
+### Re: corky.md pane popup — gpt-5
+
+Fixed the editor-sync path that could bring `tasks/software/corky.md` back into the tmux layout after switching away from it.
+
+Root cause: automatic editor tab sync sent a one-file `sync --no-autostart --col <focused>` command, and the Rust sync layer treated that as a focus-only event that could expand from remembered column state. If `corky.md` was still in `.agent-doc/last_layout.json`, that stale remembered sibling could be reintroduced even though the editor no longer showed it.
+
+Change made:
+- Added `agent-doc sync --exact-visible` for editor snapshots that already represent the full visible markdown projection.
+- JetBrains and VS Code automatic tab-sync now pass `--exact-visible` with `--no-autostart`.
+- Plain focus-only safe-passive sync keeps the old remembered-sibling behavior for integrations that cannot report the full visible projection.
+- Updated specs/docs and bumped the JetBrains plugin version to `0.2.115`.
+
+Verification:
+- `cargo test exact_visible_projection_does_not_expand_from_remembered_focus_only_layout -- --test-threads=1`
+- `./gradlew test --tests com.github.btakita.agentdoc.SyncLayoutActionTest`
+- `npm test -- --test-name-pattern "buildTabChangeCommand|buildSyncCommandArgs"`
+- `make check`
+- `git -C src/agent-doc diff --check`
+- Latest GitHub Actions CI run inspected: `25773430221` on `main` was green; the current workflow jobs expose `check` only, with no separate tmux leg to reproduce.
+
+Build/install:
+- `make install` installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so` locally.
+- Built JetBrains plugin `agent-doc-jetbrains-0.2.115.zip`.
+- Installed the local JetBrains plugin into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJIdea2026.1 to activate it.
+
+Commits:
+- `src/agent-doc`: `2cdf92c fix: keep exact editor sync projection`
+- parent repo: `26ac9b6d7 fix: update agent-doc exact editor sync`
+<!-- agent:boundary:bc6287a2 -->
 <!-- /agent:exchange -->
 ###
 <!--
+Please investigate + fix this issue. spec-test-build-install-commit-push
+```
+resync: stash pane %13 is registered in its own project root — skipping kill
+resync: stash pane %19 is registered in its own project root — skipping kill
+resync: stash pane %28 is registered in its own project root — skipping kill
+[route] target tmux session: 0
+[route] Pane %15 is in stash window 'stash', rescuing to agent-doc window
+[route] Rescued pane %15 via join-pane
+Error: authoritative actor generation 57 for tasks/software/corky.md owns pane %15 but route will not inject a new trigger because the authoritative actor is still starting (waited 15s for opencode startup). Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/software/corky.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/software/corky.md`.
+```
+---
 JB `Run Agent Doc` on root.md with `agent: claude` sends an incorrect command
 ```
 ❯ agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md

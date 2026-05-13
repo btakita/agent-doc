@@ -29,41 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-025652.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-032458.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #codexpatchbodyloop; #opencodecapfail
+- Archived 1 response topic(s): direct run prompt prefixes
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#directrunpfx]. spec-test-build-install-commit-push
-### Re: direct run prompt prefixes — gpt-5
-
-Implemented and shipped `#directrunpfx`.
-
-The direct `agent-doc <file>` path now normalizes raw prompt-bearing exchange additions before precommit, using the stored snapshot to add canonical `❯` prefixes to user prompt lines such as `Read the image.` and Markdown image lines. The template response write path also reuses that prompt-prefix normalization before structural validation, so direct-run patchback cannot leave the original unprefixed user prompt in the committed document.
-
-I also tightened the debounce timing regression that was red in the latest parent CI `check` job: the test now asserts the tracked-file behavior directly instead of depending on an exact wall-clock `>= 200ms` boundary.
-
-Commits pushed:
-
-- `2cf1aa01` in `btakita/agent-doc` on `20260422/codex-agent-backend`: `fix: normalize direct-run prompt prefixes`
-- `fb11b3d86` in `btakita/agent-loop` on `main`: `chore: update agent-doc submodule`
-
-Verification passed:
-
-- `cargo fmt`
-- `cargo test apply_template_response_prefixes_direct_run_prompt_with_image_line`
-- `cargo test direct_run`
-- `cargo test run_stops_before_child_dispatch_when_precommit_consumes_stale_repair_diff`
-- `cargo test await_idle_respects_tracked_state`
-- `cargo test -- --test-threads=1`
-- `cargo build`
-- `cargo install --path . --force`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- `make check`
-- GitHub Actions `Agent Doc` run `25776058679`: `check` passed in 5m24s and `tmux-ci` passed in 7m55s
-
-No follow-up work remains for this item.
-<!-- agent:boundary:36eb2d05 -->
+<!-- agent:boundary:fad9f538 -->
 <!-- /agent:exchange -->
 ###
 <!--

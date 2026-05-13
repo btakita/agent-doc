@@ -55,14 +55,38 @@ Verification:
 - Latest GitHub Actions CI run `25774327358` is green (`clippy + test`). This repo's CI workflow has no separate tmux-test job.
 
 I left unrelated dirty parent-repo entries untouched. The `src/tsift` submodule worktree itself is clean at the pushed commit.
-<!-- agent:boundary:b512dd89 -->
+❯ do [#v6y3]. spec-test-build-install-commit-push
+### Re: #v6y3 search scale guards — gpt-5
+
+Implemented and pushed `src/tsift` commit `fe2b60f` (`feat: guard broad search previews`) to `origin/main`.
+
+What changed:
+- Added `report.scale_guard` to budgeted search previews when result count or corpus size is broad enough to make agent fan-out risky.
+- The guard reports `high-hit` or `corpus-size`, includes preview/corpus/budget signals, and emits concrete `narrow_commands` before ordinary expansion follow-ups in envelope output.
+- Human budget output now prints the scale guard warning, signals, and narrowing commands.
+- Updated `SPEC.md` and generated `tsift init` Code Navigation text so harnesses know to run `narrow_commands` before dispatching parallel agents.
+- Added unit coverage for broad preview warnings and narrowing-command emission.
+
+Verification:
+- `cargo test` passed: 557 unit tests and 90 integration tests.
+- `make check` passed: `cargo clippy -- -D warnings` plus the full test suite.
+- `cargo build` passed.
+- `cargo install --path .` passed and replaced `/home/brian/.cargo/bin/tsift`.
+- Installed smoke check passed with `tsift --envelope search main --exact --path src --budget small --json --timeout 0`, emitting `report.scale_guard` and guard-first `follow_up`. The same broad exact search without `--timeout 0` hit the expected 30s timeout and printed the timeout/narrowing guidance.
+- GitHub Actions CI run `25775922451` is green (`clippy + test`). This repo's CI workflow has no separate tmux-test job.
+
+I left unrelated dirty parent-repo entries untouched. The `src/tsift` submodule worktree itself is clean at the pushed commit.
+<!-- agent:boundary:e28c3652 -->
 <!-- /agent:exchange -->
 ###
+<!--
+Please survey the logs to see the effectiveness of tsift. #next-steps
+Please find bugs from the logs. #next-steps
+-->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#v6y3] Add breadth/scale guards to search envelopes: high-hit warnings, corpus-size/tool-budget signals, and concrete next-narrowing commands before agents fan out too broadly.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -72,10 +96,11 @@ I left unrelated dirty parent-repo entries untouched. The `src/tsift` submodule 
 <!-- /agent:icebox -->
 
 ## Completed / Reaped
-
+k
 <!-- agent:done -->
 - 2026-05-12 [#686r] Add a DCI-style tsift benchmark: compare exact/chained rg, lexical BM25, and hybrid search on multi-hop code/repo tasks, tracking localization, tool calls, latency, and token budget.
 - 2026-05-12 [#s1k1] Add a composable search workflow surface or documented recipes that preserve result handles across search --exact, search, explain, summarize, and digest expansion steps.
+- 2026-05-12 [#v6y3] Add breadth/scale guards to search envelopes: high-hit warnings, corpus-size/tool-budget signals, and concrete next-narrowing commands before agents fan out too broadly.
 <!-- /agent:done -->
 
 ## Completed / Reaped

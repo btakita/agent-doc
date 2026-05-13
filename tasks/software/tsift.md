@@ -53,7 +53,30 @@ Secondary issue: `quit_after_eof` is grouped as restart churn. Some of those may
 Repository status also needs attention: `tsift status . --json` reports the index is stale with 8 stale files and no summary cache. That does not invalidate the log assessment, but it means search/graph/symbol enrichment is weaker until the index is refreshed.
 
 I added prioritized follow-up backlog items. Top backlog id: `#srgd`.
-<!-- agent:boundary:dcfe5929 -->
+❯ do [#srgd]. spec-test-build-install-commit-push
+### Re: session guardrails in next-context — gpt-5
+
+Implemented `#srgd` in `src/tsift`.
+
+`session-review --next-context` now carries aggregate session guardrails forward as `guardrail:<kind>` unresolved-failure action rows, so guardrail-only handoffs no longer look clean when the review already detected prompt-budget, cached-resend, restart-loop, or no-op closeout risk. I updated the spec and version notes, added unit coverage, and extended the compiled CLI regression to assert the new next-context guardrail row.
+
+Verification completed:
+
+- `cargo fmt`
+- `cargo test session_review_discovers_cross_harness_logs_for_doc_target`
+- `cargo test --test exit_code session_review_aggregates_cross_harness_logs`
+- `make check` passed: clippy, 589 unit tests passing with 1 ignored, and 107 compiled integration tests passing
+- `cargo build --release`
+- `cargo install --path .`
+- installed binary smoke check: `tsift session-review --next-context tasks/software/tsift.md --json` now reports `guardrail:prompt_budget`, `guardrail:cache_resend`, `guardrail:restart_loop`, and `guardrail:noop_closeout`
+
+CI status: latest GitHub Actions `CI` run for `btakita/tsift` is red because the job was not started due to account billing/spending-limit configuration, not because tests ran and failed. There is no local `tmux-ci` target in `src/tsift`'s Makefile.
+
+Commits created:
+
+- `src/tsift`: `caf6a02 fix: carry session guardrails into next context` and pushed to `origin/main`
+- parent repo: `bf644ad60 chore: update tsift submodule`; this parent push happens after the agent-doc response commit, per the session closeout boundary
+<!-- agent:boundary:95aa9469 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -62,7 +85,6 @@ I added prioritized follow-up backlog items. Top backlog id: `#srgd`.
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#srgd] Promote session-review/log guardrails into next-context unresolved failures or action items; current review/logs report restart/noop churn while next-context says unresolved_failures is empty.
 - [ ] [#qtoe] Tune agent-doc log-digest restart-churn classification to separate clean user quits/EOF from actual restart loops/timeouts, so quit_after_eof does not overstate risk.
 - [ ] [#idxf] Refresh stale tsift index state and add a lightweight status/context-pack reminder when the tsift repo index is stale; status currently reports 8 stale files and no summaries.
 <!-- /agent:backlog -->
@@ -78,4 +100,5 @@ I added prioritized follow-up backlog items. Top backlog id: `#srgd`.
 <!-- agent:done -->
 - 2026-05-13 [#xcst] Fix session-cost/log guardrail wording for agent-doc logs so restart_loop warnings are only emitted when restart churn is actually present; ops.log currently reports fresh_restart=0 auto_trigger_timeout=0 ctrl_d_restart_loop=0 while still warning restart churn detected.
 - 2026-05-13 [#xlog] Teach tsift log-digest to classify agent-doc runtime/churn/failure events as signals; current tsift-v0.1.log digest reports signals:0 even though session-digest finds claude_exit, auto_trigger_timeout, fresh_restart, ctrl_d_restart_loop, and closeout churn.
+- 2026-05-13 [#srgd] Promote session-review/log guardrails into next-context unresolved failures or action items; current review/logs report restart/noop churn while next-context says unresolved_failures is empty.
 <!-- /agent:done -->

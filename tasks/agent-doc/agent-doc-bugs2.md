@@ -34,11 +34,29 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): OpenCode permission arrows
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:33f95b32 -->
+❯ There seem to be orphaned tmux panes that are prompting JB with the permissions selection dialog.
+❯ How can we prevent this edge case within agent-doc? #next-steps
+❯ Please clean up the orphaned tmux panes.
+### Re: orphaned tmux pane cleanup — gpt-5.5
+
+Cleaned up the orphaned panes.
+
+Evidence:
+- `agent-doc resync --fix` deregistered stale stash records and purged 10 orphaned agent panes from non-stash windows.
+- Follow-up `agent-doc resync` reports `No session/process issues detected`.
+- Follow-up tmux pane listing now shows only one `agent-doc` pane in the managed session: `%1`, the current `agent-doc-bugs2.md` authoritative pane.
+
+The prevention change I would make in agent-doc is to separate "live pane exists" from "pane is allowed to surface editor prompts." A pane should only be eligible for JB/VSCode permission prompt UI when it is owned by the current document's controller lease, matches the current generation, and belongs to an open cycle. Completed idle panes in stash, or panes whose registry was deregistered but whose supervisor is still alive, should be shut down/reaped or hidden from prompt discovery.
+
+I added a backlog item for that prevention work: `#orphanpromptprune`.
+<!-- agent:boundary:2708fd0b -->
 <!-- /agent:exchange -->
 ###
 <!--
 The agent:done tag should support an attribute to link to a sepate "done" file (*.done.md) so the document does not become bloated. Plan so we agree on the attribute name.
+---
+The sandbox check tmux prompt should be terse and more "human readable" on a single line. Explain the status without the extra information.
+sp
 ---
 `--pending-only` should be renamed to `--backlog-only`.
 spec-test-build-install-commit-push

@@ -30,70 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-135837.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-161041.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #frpt repeated file-read diagnostics
+- Archived 4 response topic(s): #frwr source-read rewrite; #ftok source-read token-savings fixture; tsift log effectiveness and next steps; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#frwr]. spec-test-build-install-commit-push
-### Re: #frwr source-read rewrite — gpt-5
-
-Implemented `#frwr`.
-
-- `tsift rewrite` now routes large ordinary source reads in indexed tsift projects to `tsift --envelope source-read ...`: full-file `cat`/`bat` reads start with an 80-line bounded window, large `head` and `sed -n` windows preserve their start/range, and large `tail` windows preserve the tail anchor.
-- Small explicit source windows, non-source files, unindexed projects, shell-metacharacter commands, and session/transcript reads remain on their existing passthrough or session-digest paths.
-- Updated `SPEC.md`, direct rewrite tests, and deterministic SimWorld coverage for large indexed source reads and short-window passthrough.
-
-Verification passed: `cargo fmt --check`, `cargo test rewrite_`, `make check`, `cargo build`, `cargo install --path . --force`, `tsift --version`, and a live `tsift rewrite "cat src/main.rs"` check. Latest GitHub Actions CI run `25784555160` was already green (`clippy + test`, `Full CI suite` step succeeded); the tsift repo has no `tmux-ci`/`tmux-test` target to run locally.
-
-Commits: tsift submodule `894ee7c` pushed to `btakita/tsift`, and superproject submodule pointer commit `ccbd9c93b` is ready to push after this document closeout.
-❯ do [#ftok]. spec-test-build-install-commit-push
-### Re: #ftok source-read token-savings fixture — gpt-5
-
-Implemented `#ftok`.
-
-- Added `source_read_inputs` support to the `token-savings` fixture schema, including compact source-read envelope rows and fail-closed validation that every `required_line_anchors` entry remains inside the bounded window.
-- Extended `fixtures/real-session-token-savings.json` with a `source-read` case covering full-file `cat` and `bat`, plus oversized `sed`, `head`, and `tail` reads. The case has a 70% fail-under threshold and currently passes at 73.2% savings; the full real-session fixture now reports 83.1% savings overall, about 4,174 estimated tokens saved.
-- Updated unit and compiled CLI tests, `SPEC.md`, and `VERSIONS.md` so the source-read token-savings contract is documented and enforced.
-
-Verification passed: `cargo fmt --check`, focused `cargo test token_savings`, full `cargo test`, `make check`, `cargo build`, `cargo install --path . --force`, installed `tsift --version`, installed `tsift token-savings --fixture fixtures/real-session-token-savings.json --fail-under --json`, and live `tsift rewrite "cat src/main.rs"`. Latest GitHub Actions `CI` run `25804248849` was green; this repo has no `tmux-ci` or `tmux-test` target in its Makefile.
-
-Commits: tsift submodule `7aaee2e` (`test: cover source-read token savings`) pushed to `btakita/tsift`; superproject pointer commit `7f655229e` (`chore: update tsift source-read fixture`) is committed and will be pushed after this document closeout so the session commit is included.
-❯ Read through the logs to assess the effectiveness and find issues with tsift.
-❯ #next-steps
-### Re: tsift log effectiveness and next steps — gpt-5
-
-I reviewed the current `tsift-v0.1` and `ops` logs through tsift itself, plus the live token-savings fixture and rewrite/source-read behavior.
-
-Effectiveness is real but uneven:
-
-- `tsift token-savings --fixture fixtures/real-session-token-savings.json --fail-under --json` passes at 83.1% overall savings. The new source-read case passes at 73.2%, above its 70% floor.
-- `tsift source-read src/main.rs` returns a bounded 80-line window, stable handles, nearby symbols, and explicit expand commands instead of dumping the 18,472-line file.
-- `tsift log-digest --input .agent-doc/logs/ops.log` now finds 243 file-reference groups and 540 symbol-reference groups; that is a clear improvement over the older zero-file-anchor failure recorded in the completed backlog.
-- `tsift session-review tasks/software/tsift.md --next-context` scoped the active tail correctly: only `#next-steps`, no touched files, and no unresolved failures.
-
-The issues I found are mostly about precision and command rewriting:
-
-- Highest priority: `tsift rewrite` changes the meaning of file-listing commands. `rg --files src/tsift` rewrites to `tsift --envelope search "src/tsift" --exact ...`, and `rg --files .agent-doc logs src/tsift` rewrites to a search for `.agent-doc` under `logs`, dropping `src/tsift` and the listing semantics.
-- Failure extraction still has false positives. The current session digest classified my own progress sentence about noisy failures as a `failure`, and full `session-review` still includes assistant CI/status prose as failure groups, even though `--next-context` correctly reports no unresolved failures.
-- File-reference extraction in codex JSONL still admits non-path fragments. I saw `2>/dev/null`, `agent-doc/tsift`, `digest/session`, `progress/CI-status`, and `version/preflight` appear as touched files.
-- Cost reporting is directionally useful but still easy to misread. Full `session-review` reports 57,615,403 total tokens across 12 matched sessions with a largest turn of 186,897, while the latest single-session `session-cost` reports 518,391 total tokens and largest turn 67,644. The aggregate/cached/per-session distinction needs clearer output.
-- Unsupported rewrite cases are opaque: commands with shell redirection or `find` predicates can exit 1 without a pass-through command or no-rewrite explanation.
-
-I reordered the follow-up backlog by priority. Top backlog item: `#rgls`.
-❯ do [#rgls]. spec-test-build-install-commit-push
-### Re: #rgls file-listing rewrite passthrough — gpt-5
-
-Implemented `#rgls`.
-
-- `tsift rewrite` now keeps file-listing commands on the no-rewrite passthrough path instead of treating listing roots as exact search patterns. Covered forms include `rg --files ...`, `rg --type-list`, `rg --files-without-match`, and `find ...`.
-- Normal search rewrites still work; `rg authenticate src/` continues to emit `tsift --envelope search "authenticate" --exact --budget normal --path "src/"`.
-- Updated `SPEC.md`, `VERSIONS.md`, unit rewrite tests, compiled CLI rewrite tests, and deterministic SimWorld coverage.
-
-Verification passed: `cargo fmt --check`, focused `cargo test rewrite_`, focused `cargo test sim_world`, full `cargo test`, `make check`, `cargo build`, `cargo install --path . --force`, installed `tsift --version`, live `tsift rewrite "rg authenticate src/"`, live `tsift rewrite "rg --files src/tsift .agent-doc logs"` no-rewrite exit, live `tsift rewrite "find src/tsift .agent-doc -type f -name '*.rs'"` no-rewrite exit, and CI-equivalent `make ci-full` including ignored SimWorld coverage. Latest GitHub Actions CI run `25806252424` was green with `Full CI suite` successful; this tsift repo has no tmux-specific Makefile target or workflow entry.
-
-Commits: tsift submodule `e9b13f2` (`fix: pass through file listing rewrites`) pushed to `btakita/tsift`; superproject pointer commit `b5a906bb1` (`chore: update tsift file-listing rewrite`) is committed and will be pushed after this document closeout so the session commit is included.
-<!-- agent:boundary:56856902 -->
+<!-- agent:boundary:b25b5568 -->
 <!-- /agent:exchange -->
 ###
 <!--

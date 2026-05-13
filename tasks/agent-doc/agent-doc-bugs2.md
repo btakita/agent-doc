@@ -29,53 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260512-204825.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-012614.md`*
 
 Compacted content:
-- Archived 4 response topic(s): tmux route and sync implementation; JetBrains clear stale busy guard; JetBrains Clear Context busy bypass; 1 more
+- Archived 2 response topic(s): Codex Resume Writable Roots; CI Follow-up
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#codexresumegitdir]. spec-test-build-install-commit-push
-❯ Is CI not running on our current branch? Please ensure our PR branch has CI so we can see recent tmux test results on CI.
-### Re: Codex Resume Writable Roots — gpt-5
-
-Implemented `#codexresumegitdir`.
-
-The Codex capability proof now records a normalized `writable_root_contract` for required `--add-dir` roots, and route/session status only treat a proof as current when that contract matches the active document after the latest `session_start`. Direct `codex exec resume` turns with required writable roots now fresh-start instead of silently stripping `--add-dir` and resuming into an older root policy.
-
-I also added GitHub Actions at `.github/workflows/agent-doc.yml` with separate `make check` and `make tmux-ci` jobs for PRs to `main`, pushes to `main`, and `20*/**` branches. `gh pr status` showed no PR for the current `main` branch, and `gh workflow list` / `gh run list` showed no existing workflow/runs before this change.
-
-Verification passed locally:
-- focused Codex writable-root contract regressions
-- `make check`
-- `make tmux-ci` (222 live tmux tests)
-- `cargo run --quiet -- audit-docs`
-- `make install` (`agent-doc 0.33.16` installed)
-
-Commits prepared before session closeout:
-- `src/agent-doc` submodule: `d86823d fix: prove codex writable root contract`
-- parent repo: `52bba3eb3 ci: add agent-doc tmux workflow`
-### Re: CI Follow-up — gpt-5
-
-Completed the follow-up after the initial closeout. The PR branch now has CI via `.github/workflows/agent-doc.yml`, and the latest GitHub Actions run on `main` is green with recent tmux evidence: run `25766036191` passed `check` in 5m6s and `tmux-ci` in 7m49s.
-
-What changed after the first response:
-
-- Added and repaired the Agent Doc workflow so it checks out only the required submodules instead of recursively cloning unrelated/private submodules.
-- Fixed Rust stable clippy failures in `src/component.rs`, `src/template.rs`, `src/agent/codex.rs`, and `src/write.rs`.
-- Stabilized the tmux CI prompt tests by using ASCII mock prompts where GitHub's terminal rendering differs.
-- Stabilized the retained dead-pane diagnostic test so it still proves pane-tail capture and no-kill retention, while tolerating tmux versions that do not expose `pane_dead_status` for retained panes.
-- Updated the parent repo's `src/agent-doc` pointer through `67f038b` and pushed the parent commit `23b87fe0e`.
-
-Verification completed locally before the final push:
-
-- `make check`
-- `make tmux-ci` with 222 passing ignored tmux tests
-- `cargo run --quiet -- audit-docs`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-The earlier red CI runs were useful diagnostics: first checkout/submodule scope, then stable clippy, then the retained-pane tmux status race. The current branch now has a green CI run with visible tmux results.
-<!-- agent:boundary:ed042ac9 -->
+<!-- agent:boundary:8c7d454d -->
 <!-- /agent:exchange -->
 ###
 <!--

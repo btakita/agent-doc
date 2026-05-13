@@ -35,7 +35,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): rwno
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:71d00495 -->
+❯ Evaluate the logs for tsift effectiveness and bugs. #next-steps
+### Re: logs review — gpt-5
+
+I evaluated the current tsift-related logs with `tsift 0.1.42` using `session-review`, `session-review --next-context`, `log-digest`, `session-digest`, and `session-cost` against `tasks/software/tsift.md`, `.agent-doc/logs/tsift-v0.1.log`, `.agent-doc/logs/ops.log`, and the latest matching Codex session.
+
+The useful part: tsift is finding real operational signals. `session-digest` on `tsift-v0.1.log` grouped `claude_exit`, `auto_trigger_timeout`, `fresh_restart`, `ctrl_d_restart_loop`, and closeout churn. `ops.log` surfaced repeated `ipc_socket_sidecar_timeout` fallback paths with file anchors, including `tasks/software/tsift.md`. The current session cost view is also much less absurd than the older completed findings: the latest matching review reported `latest_total:162.5K`, and the current session-cost pass rose to `256.2K` after this evaluation work, with cache ratio visible instead of being hidden.
+
+The remaining bugs are still important. `session-review --next-context` missed the live prompt in this document: preflight saw `Evaluate the logs for tsift effectiveness and bugs. #next-steps`, but next-context reported `prompts:0`. It also pulled 12 files and 12 failures from historical related sessions, including unrelated task docs, so active-tail scoping is still not reliable after compact/template boundaries. Failure extraction is also still too eager: some groups are assistant prose or prior closeout status, such as a commit sentence, a JetBrains-guard explanation, and `make check is still running`, rather than actual failing commands or log events.
+
+`log-digest` is weaker than `session-digest` for these logs. On `tsift-v0.1.log`, it reported `signals:0` even though the same file contains the failures and churn listed above. For `ops.log`, it found route/start-miss errors and many file anchors, but most value came through repeated-line and symbol counts rather than event-classified diagnostics. That makes `log-digest` less effective as the first stop for agent-doc operational logs.
+
+I added prioritized follow-ups to the backlog. Top backlog item: `#xctx`.
+
+No repo code changed, so I did not run the tsift test suite.
+<!-- agent:boundary:b2c4edcd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,6 +58,9 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#xlog] Teach tsift log-digest to classify agent-doc runtime/churn/failure events as signals; current tsift-v0.1.log digest reports signals:0 even though session-digest finds claude_exit, auto_trigger_timeout, fresh_restart, ctrl_d_restart_loop, and closeout churn.
+- [ ] [#xcst] Fix session-cost/log guardrail wording for agent-doc logs so restart_loop warnings are only emitted when restart churn is actually present; ops.log currently reports fresh_restart=0 auto_trigger_timeout=0 ctrl_d_restart_loop=0 while still warning restart churn detected.
+- [ ] [#xctx] Fix session-review --next-context active-tail scoping after compaction/template boundaries: current tasks/software/tsift.md has a live user prompt, but next-context reports prompts:0 and carries historical files/failures from unrelated sessions.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

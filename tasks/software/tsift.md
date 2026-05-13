@@ -30,44 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-064250.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-070033.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #next-steps
+- Archived 1 response topic(s): #fwin bounded source windows
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#fwin]. spec-test-build-install-commit-push
-### Re: #fwin bounded source windows — gpt-5
-
-Implemented `#fwin` in `src/tsift`.
-
-What changed:
-- Added `tsift source-read <file>` with 1-based `--start` / `--lines` / `--end` bounded previews.
-- JSON/envelope output now emits stable `swin-*` window handles, line-numbered preview rows, explicit `before` / `after` / full-file expansion commands, and budget caps for preview text.
-- When an index is available, the command adds intersecting `ssym-*` symbol refs with `tsift --envelope explain ...` expansion commands.
-- When `.tsift/summaries.db` has cached rows for the file, it adds `sum-*` summary refs with `tsift summarize ...` expansion commands.
-- Missing index/summary stores do not block source inspection; enrichment failures are surfaced as warnings.
-- Updated `SPEC.md` and added integration coverage for handles, expansion commands, and cached summary refs.
-
-Commits pushed:
-- `btakita/tsift` `main`: `14799bc feat: add bounded source read`
-- parent `btakita/agent-loop` `main`: `385b88dd0 tsift: add bounded source read`
-
-Verification passed:
-- `cargo fmt --check`
-- `cargo test source_read --test exit_code`
-- `make check`
-- `make ci-full`
-- `cargo build`
-- `cargo install --path . --force`
-- `tsift --version` -> `tsift 0.1.42`
-- smoke: `tsift --envelope source-read src/main.rs --path . --start 1 --lines 5 --budget normal --json`
-
-CI/tmux evidence:
-- Latest `btakita/tsift` GitHub Actions `CI` run `25782061824` is green.
-- The tsift workflow has `CI` and `Release` only, and `CI` runs `make ci-full`; there is no tmux-test/tmux-ci leg for this repo to reproduce.
-
-No follow-up backlog item was added for this task.
-<!-- agent:boundary:8f24262c -->
+<!-- agent:boundary:ac73fe85 -->
 <!-- /agent:exchange -->
 ###
 <!--

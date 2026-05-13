@@ -102,7 +102,7 @@ Verification:
 Commits:
 - tsift: `f0da300` (`test: add deterministic sim world`), pushed to `origin/main`.
 - agent-loop: `41690431b` (`chore: update tsift submodule`), pushed to `origin/main`.
-<!-- agent:boundary:fda252b1 -->
+<!-- agent:boundary:26b50dbe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,7 +111,6 @@ Commits:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#t275] [recommended] Prototype a tsift-local deterministic SimWorld for session/rewrite/status state-machine coverage before extracting any shared simulation crate.
 - [ ] [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
 - [ ] [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
 <!-- /agent:backlog -->
@@ -130,6 +129,7 @@ k
 - 2026-05-12 [#v6y3] Add breadth/scale guards to search envelopes: high-hit warnings, corpus-size/tool-budget signals, and concrete next-narrowing commands before agents fan out too broadly.
 - 2026-05-12 [#sflt] Fix session-review/session-digest failure classification so successful test summaries and generic instruction text like `failures:` are not reported as unresolved failures; preserve real failing assertions/exits with command and session anchors.
 - 2026-05-12 [#sprm] Tighten `tsift session-review --next-context` prompt-target extraction so frontmatter prompt presets, examples, archived/resolved prompts, and repeated historical directives do not appear as active prompt targets.
+- 2026-05-13 [#t275] [recommended] Prototype a tsift-local deterministic SimWorld for session/rewrite/status state-machine coverage before extracting any shared simulation crate.
 <!-- /agent:done -->
 
 ## Completed / Reaped

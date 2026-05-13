@@ -2271,20 +2271,38 @@ fn load_authoritative_actor_binding(
             session_id
         );
     }
+    if !tmux.pane_alive(&record.pane_id) {
+        return Ok(None);
+    }
     let expected_harness = crate::session_actor::normalize_harness_name(&harness.binary);
     if !record.harness.trim().is_empty()
         && record.harness != "default"
         && record.harness != expected_harness
     {
+        let runtime = query_supervisor_runtime(file, session_id);
+        let effective_state = runtime.actor_state.unwrap_or(record.state);
+        if mismatched_authoritative_actor_can_be_replaced(&runtime, effective_state) {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_authoritative_actor_harness_mismatch_stale file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={}",
+                    file.display(),
+                    record.pane_id,
+                    record.harness,
+                    expected_harness,
+                    record.generation,
+                    supervisor_health_label(runtime.health),
+                    effective_state.as_str()
+                ),
+            );
+            return Ok(None);
+        }
         anyhow::bail!(
             "authoritative actor record for {} is bound to harness {}, not {}",
             file.display(),
             record.harness,
             expected_harness
         );
-    }
-    if !tmux.pane_alive(&record.pane_id) {
-        return Ok(None);
     }
     if enforce_capability_proof {
         match wait_for_managed_capability_proof(
@@ -2334,6 +2352,14 @@ fn load_authoritative_actor_binding(
         tmux, file, file_path, record, runtime, harness,
     );
     Ok(Some(AuthoritativeActorDispatchTarget { record, runtime }))
+}
+
+fn mismatched_authoritative_actor_can_be_replaced(
+    runtime: &SupervisorRuntime,
+    actor_state: crate::session_actor::ActorState,
+) -> bool {
+    runtime.health != SupervisorHealth::Healthy
+        || actor_state == crate::session_actor::ActorState::Closed
 }
 
 fn promote_starting_authoritative_actor_if_dispatch_ready(
@@ -15842,6 +15868,45 @@ Body\n\
             },
         };
         assert!(!authoritative_actor_dispatch_target_eligible(&no_state));
+    }
+
+    #[test]
+    fn mismatched_authoritative_actor_can_be_replaced_only_when_not_live_authority() {
+        let healthy_ready = SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(crate::session_actor::ActorState::Ready),
+        };
+        assert!(
+            !mismatched_authoritative_actor_can_be_replaced(
+                &healthy_ready,
+                crate::session_actor::ActorState::Ready,
+            ),
+            "a healthy ready actor from another harness is still authoritative and must block"
+        );
+
+        let healthy_closed = SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(crate::session_actor::ActorState::Closed),
+        };
+        assert!(
+            mismatched_authoritative_actor_can_be_replaced(
+                &healthy_closed,
+                crate::session_actor::ActorState::Closed,
+            ),
+            "a closed actor from another harness should not strand a fresh harness start"
+        );
+
+        let unreachable = SupervisorRuntime {
+            health: SupervisorHealth::Unreachable,
+            actor_state: None,
+        };
+        assert!(
+            mismatched_authoritative_actor_can_be_replaced(
+                &unreachable,
+                crate::session_actor::ActorState::Ready,
+            ),
+            "an unreachable supervisor cannot prove live cross-harness ownership"
+        );
     }
 
     #[test]

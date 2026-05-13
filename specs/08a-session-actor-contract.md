@@ -93,7 +93,9 @@ Later phases may refine caller values without changing the field names.
   `claude` normalizes to `claude-code`, `codex` stays `codex`, and empty values
   collapse to `default`. Normal-path route/start/sync checks must compare
   against that canonical identity so harness aliases do not strand a healthy
-  authoritative actor.
+  authoritative actor. A different canonical harness blocks only while the
+  existing record still has live, healthy, non-closed supervisor authority; stale
+  cross-harness records may be replaced by a fresh start.
 - Store updates must be monotonic and fail closed on generation regressions; a
   stale writer must not overwrite a newer generation.
 - Same-generation state transitions must also fail closed when the caller's

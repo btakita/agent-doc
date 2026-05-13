@@ -34,7 +34,38 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): stale cross-harness actor record
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f1a81ffd -->
+❯ JB `Run Agent Doc` on root.md is sending `/agent-doc ...`. It should send `agent-doc ...`.
+❯ spec-test-build-install-commit-push
+### Re: JetBrains Run Agent Doc plain trigger — gpt-5
+
+Implemented the JetBrains Run Agent Doc fix.
+
+What changed:
+- Added `agent-doc route --dispatch-only --plain-trigger` so editor-triggered reroutes send the plain `agent-doc <FILE>` prompt even when a document's normal harness template is slash-command based.
+- Updated JetBrains `Run Agent Doc` to pass `--plain-trigger` and added a Kotlin regression for the exact command vector.
+- Added a Rust regression proving the plain-trigger route override rewrites Claude/OpenCode route triggers to `agent-doc <FILE>`.
+- Updated editor specs, route/tmux spec, README, harness runbook, plugin metadata, and `VERSIONS.md`.
+- Bumped the JetBrains plugin build version to `0.2.114`.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml plain_trigger_override_uses_bare_agent_doc_reopen_for_route`
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `make check`
+- `make tmux-ci`
+- `./gradlew test buildPlugin`
+- `make install`
+- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.114.zip` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
+
+CI/tmux evidence:
+- Latest GitHub CI run `25773430221` was green.
+- Its job details did not expose the tmux step, so I ran `make tmux-ci` locally; 222 live tmux tests passed.
+
+Commits:
+- `src/agent-doc`: `9cfd351 fix: send plain editor route trigger`
+- parent `agent-loop`: `33fa11d51 agent-doc: update editor route trigger`
+
+Push is still pending until after this session-document closeout commit lands.
+<!-- agent:boundary:07d65a16 -->
 <!-- /agent:exchange -->
 ###
 <!--

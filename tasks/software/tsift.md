@@ -30,35 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260510-042213.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-015348.md`*
 
-Active backlog:
-- [ ] [#budg] Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
-
-Icebox:
-- [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
-- [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
-- [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
-❯ do [#budg]. spec-test-build-install-commit-push
-### Re: #budg response-budget follow-up commands — gpt-5
-
-Done. I tuned the budgeted next-context path so preview lists stay capped while follow-up digest commands have their own 4-command floor and are preserved verbatim. That prevents `small` previews from hiding or corrupting the resumable `session-review`, `diff-digest`, `test-digest`, and `log-digest` commands.
-
-Updated `src/tsift/src/main.rs`, `src/tsift/SPEC.md`, and `src/tsift/VERSIONS.md`. The spec now records the real-session token-savings measurement: 85.5% overall savings, about 3.4k estimated tokens saved, while retaining the follow-up command surface.
-
-Verification completed:
-
-- `cargo test` — 552 unit tests and 88 integration tests passed
-- `cargo build --release` — passed
-- `cargo install --path . --force` — installed `tsift 0.1.42`
-- `tsift --version` — `tsift 0.1.42`
-
-Committed and pushed in `src/tsift`:
-
-- `d3a12a1 fix: preserve budgeted follow-up commands`
-
-The parent workspace had unrelated dirty state and an already-dirty `src/tsift` gitlink before this cycle, so I left parent non-session files untouched.
-<!-- agent:boundary:eb7c55e3 -->
+Compacted content:
+- Archived 1 response topic(s): #budg response-budget follow-up commands
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
+<!-- agent:boundary:7d768574 -->
 <!-- /agent:exchange -->
 ###
 

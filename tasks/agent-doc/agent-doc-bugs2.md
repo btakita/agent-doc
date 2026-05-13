@@ -44,10 +44,44 @@ Changed the JetBrains and VS Code prompt UIs to pass `agent-doc prompt --answer`
 Verified with `npm test`, `./gradlew test`, `./gradlew buildPlugin`, `npm run package`, `make check`, `make tmux-ci`, `make install`, `agent-doc plugin install vscode --local`, and `agent-doc plugin install jetbrains --local`. I also ran a live OpenCode demo session in tmux, claimed it with agent-doc, triggered `/permission bash`, observed the active prompt JSON, answered `--answer 3`, and confirmed the prompt became inactive with OpenCode on the reject follow-up.
 
 Committed `src/agent-doc` as `97b4b026 fix: align editor prompt answer indices` and updated the parent repo gitlink as `85bbfe714 fix: align editor prompt plugins`. The parent branch push will run after this finalize commit so the session response commit is included. JetBrains reported install targets under IntelliJ IDEA 2026.1; restart the IDE to activate the updated plugin.
-<!-- agent:boundary:a776d544 -->
+❯ Left/Right buttons still don't work with agent-doc opencode. #next-steps 
+```
+┃
+┃   ^[[D
+┃
+┃  Build · GLM-5.1 Z.AI Coding Plan
+```
+❯ The JB prompt selection still does not submit the answer. #next-steps
+
+❯ Please test both using an integration test.
+### Re: editor prompt cwd and OpenCode prompt tests — gpt-5
+Fixed the prompt-answer path and added the requested integration coverage.
+
+`agent-doc prompt --all` now includes the owning session `cwd`. JetBrains and VS Code both use that cwd when running `agent-doc prompt --answer`, so editor prompt selections no longer assume the current IDE workspace root. Both editor integrations also clear the temporary "recently answered" suppression key if the answer command fails, so a still-active prompt can show again instead of disappearing after a failed submission.
+
+For OpenCode, I added a live tmux integration regression that drives `answer_with_tmux` against a synthetic OpenCode permission prompt and asserts the first navigation byte is Tab, not an arrow escape. That covers the `^[[D`/`^[[C` leak class directly. For JetBrains, I added process-level prompt-answer coverage proving the command is built with the one-based answer position and runs from the prompt entry's cwd.
+
+Updated the specs/docs and bumped local editor package versions to JetBrains `0.2.117` and VS Code `0.2.16`.
+
+Verification passed:
+
+- `npm test`
+- `npm run package`
+- `./gradlew test`
+- `./gradlew buildPlugin`
+- `cargo test prompt::tests:: -- --test-threads=1`
+- `cargo test answer_opencode_prompt_sends_tab_not_arrow_escape -- --ignored --test-threads=1`
+- `make check`
+- `make tmux-ci`
+
+Committed `src/agent-doc` as `54c2992a fix: answer prompts from owning cwd`, then committed the parent repo gitlink as `0fe48b052 fix: answer editor prompts from session cwd`. Existing unrelated parent worktree changes were left alone.
+<!-- agent:boundary:51f2b4be -->
 <!-- /agent:exchange -->
 ###
 <!--
+I'm seeing incorrect JB user prompts. spec-test-build-install-commit-push
+![img_8.png](img_8.png)
+---
 Please ensure the JB opencode fixes are propagated to the VSCode plugin. Ensure the specs are updated for all editor plugins. Should we implement in the ffi plugin?
 #next-steps
 ---

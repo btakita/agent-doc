@@ -29,56 +29,15 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-042726.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-044404.md`*
 
 Compacted content:
-- Archived 1 response topic(s): OpenCode proof-ready prompt chrome
+- Archived 1 response topic(s): Codex hook-review startup blocker
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Codex startup has a similar issue as opencode did, where it became inoperable...until Codex is restarted.
-```
-ORK_DISABLED off)
-Starting codex...
-╭────────────────────────────────────────────╮
-│ >_ OpenAI Codex (v0.130.0)                 │
-│                                            │
-│ model:     gpt-5.5 high   /model to change │
-│ directory: ~/work/btakita/agent-loop       │
-╰────────────────────────────────────────────╯
-
-  Tip: Use /feedback to send logs to the maintainers when something looks off.
-
-⚠ 1 hook needs review before it can run. Open /hooks to review it.
-
-
-› [start] managed codex capability proof: codex_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:9806,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:9815xt 0% used
-```
-❯ spec-test-build-install-commit-push
-### Re: Codex hook-review startup blocker — gpt-5.5
-
-Fixed the Codex startup hang class by treating Codex hook-review chrome as a hard dispatch blocker. If the pane says a hook needs review or asks to open `/hooks`, route/start readiness now refuses to inject routed input even when a later managed capability-proof line reports `status=proven`.
-
-Changed `src/agent-doc/src/harness.rs` and `src/agent-doc/src/route.rs`, with regressions for the exact startup transcript shape. Updated `src/agent-doc/specs/codex-support.md`, `src/agent-doc/specs/08-session-routing.md`, and `src/agent-doc/README.md` so the spec says hook-review warnings are blocking UI, not idle chrome.
-
-Verification passed:
-- `cargo test hook_review`
-- `make check`
-- latest GitHub Actions CI run `25773430221` on `main` was green; it has no tmux leg
-- `make tmux-ci`
-- `make install`, followed by `agent-doc --version` -> `agent-doc 0.33.16`
-
-Committed and pushed:
-- `src/agent-doc` submodule: `fc03bd8` (`fix: block codex hook-review startup`) pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `66ec592c1` (`agent-doc: block codex hook-review startup`) pushed to `origin/main`
-<!-- agent:boundary:6c93b91e -->
+<!-- agent:boundary:63f1bbe3 -->
 <!-- /agent:exchange -->
 ###
 <!--
-The `[start] managed opencode capability proof` should be a tmux status instead of directly in the pane...to avoid interfering with the session. 
-```
-┃                                                                                                                       ┃  [start] managed opencode capability proof: opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:11407,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:11416
-```
-spec-test-build-install-commit-push
----
 JB `Run Agent Doc` on root.md with `agent: claude` sends an incorrect command
 ```
 ❯ agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md

@@ -29,49 +29,15 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-201238.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-203018.md`*
 
 Compacted content:
 - Archived 1 response topic(s): external `agent:done` archive attribute
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#donearchiveattr]. spec-test-build-install-commit-push
-### Re: external `agent:done` archive attribute — gpt-5
-
-Implemented `agent:done archive=<repo-relative>.done.md` for completed-work externalization.
-
-What changed:
-- Reaped backlog/icebox entries now append to the external `.done.md` file when `agent:done` has `archive=...`.
-- Archive targets fail closed for absolute paths, parent-directory escapes, outside-repo resolution, empty attrs, and non-`.done.md` targets.
-- Missing archive files are created deterministically with a small markdown header.
-- Retry appends suppress duplicate date/id/text entries.
-- The local `agent:done` marker remains present and gets a small pointer comment instead of growing with completed entries.
-- Preflight and session-check now count IDs in the external archive as completed-history proof for dropped-backlog replay.
-
-Updated specs/docs: `SPEC.md`, `specs/pending-system.md`, `specs/07-closeout-commands.md`, `runbooks/pending-ops.md`, `README.md`, `VERSIONS.md`, and the implementation plan status.
-
-Verification:
-- `cargo fmt`
-- `make check` passed after final edits.
-- Latest GitHub `CI` run inspected: `25773430221`, success on 2026-05-13; no red tmux leg found.
-- `make install` completed after the final check.
-- `agent-doc --version` reports `agent-doc 0.33.16`.
-
-Commits pushed:
-- `btakita/agent-doc` `20260422/codex-agent-backend`: `a6647b66 feat: support external done archives`
-- `btakita/agent-loop` `main`: `d3ef94d47 feat: support external done archives`
-<!-- agent:boundary:8eeaee33 -->
+<!-- agent:boundary:ab587792 -->
 <!-- /agent:exchange -->
 ###
 <!--
-Enter key in opencode does not submit prompts...enters a `\n` instead.
-```
-                       ┃                                                                                                                       ┃  agent-doc /home/brian/work/btakita/agent-loop/tasks/software/corky.md
-                       ┃                                                                                                                       ┃
-                       ┃                                                                                                                       ┃
-                       ┃ 
-```
-spec-test-build-install-commit-push
----
 Autosync on editor file change + `Sync Tmux Layout` lands on a 1 tmux pane and 3 tmux pane layout with 2 editor panes.
 spec-test-build-install-commit-push
 ---
@@ -154,6 +120,6 @@ minor (v0.34.0) release + publish. merge into main
 
 ## Completed / Reaped
 
-<!-- agent:done -->
+<!-- agent:done archive=tasks/agent-doc-bugs2.done.md -->
 - 2026-05-13 [#donearchiveattr] Implement external completed-work archive support for agent:done using archive=<repo-relative>.done.md. Plan: tasks/agent-doc/plan-external-done-archive-attribute.md
 <!-- /agent:done -->

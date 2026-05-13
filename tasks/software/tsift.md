@@ -35,7 +35,29 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): #frwr source-read rewrite; #ftok source-read token-savings fixture; tsift log effectiveness and next steps; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:b25b5568 -->
+❯ do [#sfpx]. spec-test-build-install-commit-push
+### Re: #sfpx failure meta prose — gpt-5
+
+Completed `#sfpx` in `src/tsift`.
+
+What changed:
+- Added a `session-digest` classifier filter for assistant progress/assessment prose that discusses failure-classification false positives, unresolved failure groups, `--next-context`, or red/check CI-status commentary.
+- Added deterministic regressions for both `session-digest` and `session-review` proving those meta/progress lines do not become failure rows while real command/test failures remain covered by the existing anchored-failure tests.
+- Updated `SPEC.md` and `VERSIONS.md` to document the failure-meta/progress filtering contract.
+
+Verification/build/install:
+- `cargo test failure_meta_progress` passed.
+- `make check` passed: clippy plus 585 unit tests and 101 compiled CLI tests; the one wider SimWorld corpus remains intentionally ignored for CI.
+- `cargo build --release` passed.
+- `cargo install --path . --force` passed; installed `tsift 0.1.42`.
+- Latest GitHub Actions `CI` run for `btakita/tsift` was green: run `25811207221`, `success`, `2026-05-13T16:07:52Z`.
+- There is no `make tmux-ci` target in `src/tsift`; the applicable CI evidence is the green `CI` workflow above.
+
+Committed and pushed in the `tsift` repo:
+- `fd4bca5` `fix: filter session failure meta prose`
+
+I did not push the parent `agent-loop` repo because its `main` branch was already four commits ahead of `origin/main`; pushing it would have included earlier unrelated commits. The parent submodule pointer now reflects the pushed `src/tsift` commit locally.
+<!-- agent:boundary:e7652408 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +66,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sfpx] Add a deterministic session-digest/session-review regression for failure false positives from assistant progress or CI-status prose; the current rollout classified my assessment sentence and prior status updates mentioning failure/red/check as failure groups even though --next-context correctly reported zero unresolved failures.
 - [ ] [#fref] Tighten codex-jsonl file-reference extraction so conversational fragments and shell syntax are not reported as touched files; the current session-digest surfaced false paths like 2>/dev/null, agent-doc/tsift, digest/session, progress/CI-status, and version/preflight.
 - [ ] [#scst] Calibrate session-review/session-cost aggregate token reporting so cached multi-session totals are separated from per-session cost; current review reports 57,615,403 total tokens and largest turn 186,897 across 12 matched sessions, while the latest single-session cost is 518,391 total with largest turn 67,644.
 - [ ] [#rwno] Make tsift rewrite unsupported-command outcomes explicit: commands with shell redirection or find predicates currently exit 1 with no explanation, so rewrite should either pass through safely or emit a bounded no-rewrite reason for agents.
@@ -77,6 +98,7 @@ k
 - 2026-05-13 [#frwr] Teach tsift rewrite to intercept large ordinary source reads inside indexed repos and route them to the bounded source-read surface, while preserving small explicit windows and non-source files as passthrough.
 - 2026-05-13 [#ftok] Add a real-session token-savings fixture for repeated source-file reads, including full-file cat/bat, oversized sed/head/tail windows, and a fail-under threshold proving the bounded source-read workflow saves tokens without hiding required line anchors.
 - 2026-05-13 [#rgls] Fix tsift rewrite handling for file-listing commands such as rg --files and find: preserve listing semantics, multiple roots, and shell safety, or pass through with an explanatory no-rewrite result instead of rewriting rg --files src/tsift to exact text search.
+- 2026-05-13 [#sfpx] Add a deterministic session-digest/session-review regression for failure false positives from assistant progress or CI-status prose; the current rollout classified my assessment sentence and prior status updates mentioning failure/red/check as failure groups even though --next-context correctly reported zero unresolved failures.
 <!-- /agent:done -->
 
 ## Completed / Reaped

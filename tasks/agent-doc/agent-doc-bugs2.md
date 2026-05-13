@@ -137,7 +137,49 @@ Yes. The Kitty keyboard protocol is opt-in — terminals that don't support it (
 4. **tmux itself can remap sequences** — tmux has its own `terminal-features` and `extended-keys` settings that can strip, rewrite, or add escape sequences before the supervisor's PTY filter ever sees them. A non-Kitty terminal behind tmux with `extended-keys on` creates a third hybrid state.
 
 The `#opencodeinputdiag` logging would catch all of these — every key event logged with raw bytes, detected terminal protocol, and transform applied. Without that, non-Kitty regressions are silent until a user on GNOME Terminal or Alacritty hits them.
-<!-- agent:boundary:7c1abc7a -->
+❯ Should agent-doc have its own Rust-based terminal to be more reliable across different environments?
+### Re: Rust-based terminal for agent-doc — opus-4-6
+
+It's worth considering seriously. The core problem today is that agent-doc sits *between* two opaque systems (the user's terminal emulator and tmux) and has to infer state from byte patterns flowing through them. Owning the terminal eliminates one of those opaque layers.
+
+#### What "own terminal" means concretely
+
+Not a full terminal emulator like WezTerm or Alacritty — that's a multi-year project. Instead: a **Rust-native terminal multiplexer** that replaces tmux in agent-doc's architecture. The relevant Rust crates:
+
+- **portable-pty** (wezterm's PTY library) — cross-platform PTY allocation, already production-tested. Gives you direct file descriptors to child processes without tmux intermediation.
+- **vt100** / **alacritty_terminal** — terminal state parsers. You'd parse the child's output directly instead of scraping tmux pane content with `capture-pane`.
+- **crossterm** / **ratatui** — TUI rendering. You'd draw the pane layout yourself instead of relying on tmux's window/pane model.
+
+The stack would be: user's terminal emulator → agent-doc (owns PTY + layout + input routing) → child harnesses (OpenCode, Claude, Codex).
+
+#### What it fixes
+
+1. **Input reliability** — agent-doc writes directly to the child's PTY fd. No tmux `send-keys`, no fire-and-forget, no timing heuristics. You can even detect backpressure (child not reading stdin) and retry.
+2. **Output parsing** — instead of `tmux capture-pane` (which strips sequences and has timing issues), you parse the raw PTY output byte-for-byte. Permission prompt detection becomes a state machine over the actual terminal parser, not a regex over captured text.
+3. **Protocol awareness** — you control whether Kitty keyboard protocol is negotiated because you *are* the terminal. No more filter/preserve logic. You pass through exactly what the child requests and what the outer terminal supports.
+4. **Testability** — PTY interactions are deterministic file descriptor reads/writes. You can test the full input→child→output pipeline without a real tmux server.
+
+#### What it costs
+
+- **Layout management** — tmux's pane splitting, resizing, and rendering is non-trivial. You'd need to implement or adopt a tiled layout engine. ratatui has basic layout primitives but not tmux-level pane management.
+- **Session persistence** — tmux's detach/reattach model lets sessions survive terminal disconnects. A custom multiplexer would need its own daemon mode.
+- **User expectations** — tmux users expect `tmux attach`, scrollback, copy-mode, etc. You'd either reimplement these or run in a hybrid mode where tmux wraps agent-doc's managed panes.
+- **Scope creep** — "just replace tmux" can easily expand into building a full terminal multiplexer. The boundary must be clear: agent-doc owns the managed panes, tmux (or nothing) owns the outer session.
+
+#### Pragmatic middle path
+
+Rather than replacing tmux entirely, agent-doc could own the PTY for managed panes while keeping tmux for the outer session structure:
+
+- tmux runs the window/pane layout as it does today
+- For managed panes, instead of `tmux send-keys` / `tmux capture-pane`, agent-doc spawns the child process via `portable-pty`, renders through `alacritty_terminal`, and writes the rendered output to a tmux pane via a passthrough PTY
+- Input from tmux flows to agent-doc first (via the supervisor's existing stdin capture), then to the child PTY directly
+
+This keeps tmux's session/layout model but eliminates the `send-keys` / `capture-pane` reliability problems for managed children. The 785 tmux references don't all need to change — only the input injection and output capture paths for managed panes.
+
+#### Verdict
+
+Yes, but scoped as "own the managed PTY" rather than "replace tmux." The portable-pty + alacritty_terminal stack is proven and would eliminate the entire class of input/output heuristic bugs. The `#multiplexertrait` backlog item is the right first step — it creates the abstraction boundary needed to swap the managed-pane backend without touching layout/session code.
+<!-- agent:boundary:54231c87 -->
 <!-- /agent:exchange -->
 ###
 <!--

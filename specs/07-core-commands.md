@@ -100,7 +100,7 @@ Two modes:
 
 - Detects active permission prompts from Claude Code and OpenCode panes by scanning the captured pane footer.
 - Supports Claude Code bracketed legacy options, Claude Code numbered-list options, and OpenCode horizontal `Allow once` / `Allow always` / `Reject` permission rows.
-- `prompt --answer` uses Claude Code's vertical Up/Down movement for Claude prompts and OpenCode's horizontal Left/Right movement for OpenCode permission prompts. The OpenCode supervisor path preserves Kitty keyboard-mode negotiation so arrow keys and tab-style selection keys pass through to OpenTUI instead of leaking as literal escape text. Selecting OpenCode `Allow always` also sends the follow-up confirmation Enter because OpenCode opens a second `Always allow` confirmation prompt before persisting that choice.
+- `prompt --answer` uses Claude Code's vertical Up/Down movement for Claude prompts and OpenCode's Tab/BackTab selector movement for OpenCode permission prompts. OpenCode prompt detection captures panes with ANSI attributes so the currently highlighted option is read from the TUI state before navigation; plain-text captures are not sufficient because they lose the highlight. Selecting OpenCode `Allow always` also sends the follow-up confirmation Enter because OpenCode opens a second `Always allow` confirmation prompt before persisting that choice.
 - `--answer N` selects an option using the prompt's navigation contract and presses Enter.
 - `--all` polls every live session.
 

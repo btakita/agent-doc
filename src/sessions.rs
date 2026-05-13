@@ -35,7 +35,8 @@
 //!   `tmux display-message`.
 //! - `pane_window(pane_id)` returns the tmux window ID (`@N`) for a pane.
 //! - `capture_pane(tmux, pane_id)` returns visible pane content via
-//!   `tmux capture-pane -p`.
+//!   `tmux capture-pane -p`; `capture_pane_with_ansi` preserves attributes
+//!   for TUI prompt selection parsing.
 //! - `send_key(tmux, pane_id, key)` sends a single named key (e.g. `"Enter"`,
 //!   `"Up"`) — does NOT append a newline, unlike `Tmux::send_keys`.
 //! - `pane_by_position(position)` resolves a pane in the current window by
@@ -178,6 +179,25 @@ fn find_registry_key_by_session_id(registry: &SessionRegistry, session_id: &str)
 /// Capture the visible content of a tmux pane.
 pub fn capture_pane(tmux: &Tmux, pane_id: &str) -> Result<String> {
     tmux.capture_pane(pane_id, None)
+}
+
+/// Capture visible pane content while preserving ANSI attributes.
+///
+/// Prompt selection parsers need the highlighted option color; the normal
+/// tmux-router capture helper intentionally returns plain text.
+pub fn capture_pane_with_ansi(tmux: &Tmux, pane_id: &str) -> Result<String> {
+    let output = tmux
+        .cmd()
+        .args(["capture-pane", "-t", pane_id, "-p", "-e"])
+        .output()
+        .context("failed to run tmux capture-pane with ANSI")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux capture-pane failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Join `src` beside `dst` only if both belong to `expected_session`.

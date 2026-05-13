@@ -4,7 +4,7 @@
 //! - Detects active Claude Code and OpenCode permission/question prompts in a tmux pane and surfaces them as JSON.
 //! - `run(file)` — resolves the session's tmux pane from the document frontmatter, captures pane content, parses for prompt patterns, and prints a `PromptInfo` JSON object to stdout.
 //! - `run_all()` — iterates every entry in `sessions.json`, skips dead panes, and prints a JSON array of `PromptAllEntry` objects (one per live session with its prompt state).
-//! - `answer(file, option_index)` — navigates the prompt TUI to the target option using the prompt's axis (Claude Code: Up/Down, OpenCode: Left/Right; 30 ms between presses) then sends Enter. OpenCode `Allow always` sends a second Enter to accept the follow-up confirmation prompt. Validates that a prompt is active and the index is in range before sending keys.
+//! - `answer(file, option_index)` — navigates the prompt TUI to the target option using the prompt's axis (Claude Code: Up/Down, OpenCode: Tab/BackTab; 30 ms between presses) then sends Enter. OpenCode `Allow always` sends a second Enter to accept the follow-up confirmation prompt. Validates that a prompt is active and the index is in range before sending keys.
 //! - Claude prompt detection anchors on the footer pattern `"Esc to cancel"` (searched bottom-up), then scans upward for options in bracket format (`[N] label`) or numbered list format (`N. label`), then identifies the question as the first non-empty, non-option line above.
 //! - OpenCode prompt detection anchors on the horizontal control footer (`"select"` + `"enter confirm"`) and parses the `Allow once`, `Allow always`, and `Reject` options rendered on the same row.
 //! - ANSI escape codes are stripped before pattern matching; `strip_ansi` is `pub(crate)` for reuse.
@@ -25,7 +25,7 @@
 //! - parse_yes_no_prompt: two-option prompt → active, 2 options
 //! - markdown_list_not_prompt: numbered markdown list above `Esc to cancel` → inactive (not detected as options)
 //! - parse_opencode_permission_prompt: horizontal OpenCode permission prompt → active, 3 options, selected=0
-//! - navigation_keys_for_opencode_permission_prompt: OpenCode prompt uses horizontal Left/Right movement
+//! - navigation_keys_for_opencode_permission_prompt: OpenCode prompt uses Tab/BackTab selector movement
 //! - opencode_allow_always_requires_confirmation: OpenCode `Allow always` is followed by a confirmation prompt
 //! - strip_ansi_basic: bold/reset escape sequence → plain text without escape codes
 //! - parse_option_line_with_cursor: `❯ [2] label` → index=2, label extracted
@@ -114,7 +114,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
         return Ok(());
     }
 
-    let pane_content = sessions::capture_pane(tmux, &pane_id)?;
+    let pane_content = sessions::capture_pane_with_ansi(tmux, &pane_id)?;
     let info = parse_prompt(&pane_content);
     println!("{}", serde_json::to_string(&info)?);
     Ok(())
@@ -150,7 +150,7 @@ pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
             continue;
         }
 
-        let prompt = match sessions::capture_pane(tmux, &entry.pane) {
+        let prompt = match sessions::capture_pane_with_ansi(tmux, &entry.pane) {
             Ok(content) => {
                 if verbose {
                     // Log the last 5 non-empty lines for debugging prompt detection
@@ -214,7 +214,7 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
     }
 
     // Verify there's actually a prompt active
-    let pane_content = sessions::capture_pane(tmux, &pane_id)?;
+    let pane_content = sessions::capture_pane_with_ansi(tmux, &pane_id)?;
     let info = parse_prompt(&pane_content);
     if !info.active {
         anyhow::bail!("no active prompt detected");
@@ -226,9 +226,9 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
     }
 
     // Navigate to the selected option and press Enter. Claude Code uses a
-    // vertical menu. OpenCode's permission prompt is a horizontal OpenTUI
-    // widget, so use the semantic arrow keys and let the supervisor preserve
-    // OpenCode's keyboard-mode negotiation.
+    // vertical menu. OpenCode's permission prompt advertises the tab selector
+    // in its footer; real arrow keys can leak as literal ^[[C/^[[D text when
+    // the surrounding terminal does not honor OpenTUI's keyboard mode.
     let current = info.selected.unwrap_or(0);
     let target = option_index - 1; // convert to 0-based
     let keys = navigation_keys_for_prompt(&pane_content);
@@ -389,8 +389,8 @@ fn navigation_keys_for_prompt(content: &str) -> PromptNavigationKeys {
             next: "Down",
         },
         PromptNavigationAxis::Horizontal => PromptNavigationKeys {
-            prev: "Left",
-            next: "Right",
+            prev: "BTab",
+            next: "Tab",
         },
     }
 }
@@ -740,8 +740,8 @@ Bash command
         assert_eq!(
             navigation_keys_for_prompt(content),
             PromptNavigationKeys {
-                prev: "Left",
-                next: "Right"
+                prev: "BTab",
+                next: "Tab"
             }
         );
         assert!(!opencode_option_requires_confirmation(&opts[0]));

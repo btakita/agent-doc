@@ -2504,6 +2504,13 @@ fn dispatch_only_can_use_degraded_authoritative_actor(
     registered == Some(pane) || live_owner == Some(pane)
 }
 
+fn authoritative_actor_start_wait_terminal_state(state: crate::session_actor::ActorState) -> bool {
+    matches!(
+        state,
+        crate::session_actor::ActorState::Closed | crate::session_actor::ActorState::Blocked
+    )
+}
+
 fn wait_for_authoritative_actor_ready(
     tmux: &Tmux,
     file: &Path,
@@ -2540,6 +2547,22 @@ fn wait_for_authoritative_actor_ready(
                         last_pane,
                         harness.binary,
                         last_generation,
+                        elapsed_ms
+                    ),
+                );
+                return Ok(Some(refreshed));
+            }
+            if authoritative_actor_start_wait_terminal_state(refreshed_state) {
+                let elapsed_ms = start.elapsed().as_millis();
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "route_authoritative_actor_starting_terminal file={} pane={} harness={} generation={} actor_state={} elapsed_ms={}",
+                        file.display(),
+                        last_pane,
+                        harness.binary,
+                        last_generation,
+                        refreshed_state.as_str(),
                         elapsed_ms
                     ),
                 );
@@ -6935,6 +6958,28 @@ mod tests {
             hint.contains("agent-doc start /tmp/session.md"),
             "starting actor hint should name the owner restart recovery: {hint}"
         );
+    }
+
+    #[test]
+    fn authoritative_actor_start_wait_terminal_state_only_for_terminal_states() {
+        assert!(authoritative_actor_start_wait_terminal_state(
+            crate::session_actor::ActorState::Closed
+        ));
+        assert!(authoritative_actor_start_wait_terminal_state(
+            crate::session_actor::ActorState::Blocked
+        ));
+        assert!(!authoritative_actor_start_wait_terminal_state(
+            crate::session_actor::ActorState::Starting
+        ));
+        assert!(!authoritative_actor_start_wait_terminal_state(
+            crate::session_actor::ActorState::Busy
+        ));
+        assert!(!authoritative_actor_start_wait_terminal_state(
+            crate::session_actor::ActorState::WaitingInput
+        ));
+        assert!(!authoritative_actor_start_wait_terminal_state(
+            crate::session_actor::ActorState::Ready
+        ));
     }
 
     fn test_registry_entry(
@@ -12589,6 +12634,106 @@ Body\n\
         assert_eq!(
             sessions::lookup(session_id).unwrap().as_deref(),
             Some(actor_pane.as_str())
+        );
+
+        ipc.stop();
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn route_refreshes_closed_starting_authoritative_actor_without_start_timeout() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-authoritative-actor-starting-closed");
+        let session = "codex";
+        let cwd = test_cwd();
+        let stale_pane = iso.auto_start(session, &cwd).unwrap();
+        let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            r#"exec /bin/sh -c 'printf "BOOTING\n"; cat'"#,
+        );
+        let _ = wait_for_pane_contains(
+            &iso,
+            &actor_pane,
+            "BOOTING",
+            std::time::Duration::from_secs(3),
+        );
+
+        let doc = dir.path().join("starting-authoritative-closed.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "commit_success", Some(snapshot), Some(snapshot))
+            .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-authoritative-actor-starting-closed";
+        sessions::register(session_id, &stale_pane, &file_path).unwrap();
+
+        let actor_window = iso.pane_window(&actor_pane).unwrap();
+        crate::session_actor::project_binding_in(
+            dir.path(),
+            &file_path,
+            session_id,
+            &actor_pane,
+            &actor_window,
+            "route",
+            "dispatch_bind",
+        )
+        .unwrap();
+
+        let injects = Arc::new(Mutex::new(Vec::<String>::new()));
+        let injects_for_ipc = injects.clone();
+        let close_at = Instant::now() + Duration::from_millis(120);
+        let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
+            IpcMethod::State if Instant::now() >= close_at => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "closed",
+                "restart_count": 0
+            })),
+            IpcMethod::State => IpcResponse::ok(serde_json::json!({
+                "running": true,
+                "state": "healthy",
+                "actor_state": "starting",
+                "restart_count": 0
+            })),
+            IpcMethod::Inject { bytes } => {
+                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
+            }
+            IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
+            IpcMethod::Stop { .. } => IpcResponse::ok_empty(),
+        })
+        .unwrap();
+
+        let err = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect_err("route must fail closed as soon as a starting actor refreshes to closed");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("the authoritative actor is closed"),
+            "closed actor refresh should surface the terminal state instead of the stale starting gate: {message}"
+        );
+        assert!(
+            injects.lock().unwrap().is_empty(),
+            "route must not queue a reopen once the starting actor refreshes to closed"
         );
 
         ipc.stop();

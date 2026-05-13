@@ -266,6 +266,7 @@ struct Coverage {
     route_dispatch_proofs: usize,
     starting_prompt_promotions: usize,
     busy_dispatch_blocks: usize,
+    closed_dispatch_blocks: usize,
     busy_interrupt_recoveries: usize,
     stale_generation_blocks: usize,
     stale_pane_blocks: usize,
@@ -313,6 +314,9 @@ impl Coverage {
         if message.contains("supervisor lifecycle Busy cannot accept route dispatch") {
             self.busy_dispatch_blocks += 1;
         }
+        if message.contains("supervisor lifecycle Closed cannot accept route dispatch") {
+            self.closed_dispatch_blocks += 1;
+        }
     }
 
     fn merge(&mut self, other: Coverage) {
@@ -331,6 +335,7 @@ impl Coverage {
         self.route_dispatch_proofs += other.route_dispatch_proofs;
         self.starting_prompt_promotions += other.starting_prompt_promotions;
         self.busy_dispatch_blocks += other.busy_dispatch_blocks;
+        self.closed_dispatch_blocks += other.closed_dispatch_blocks;
         self.busy_interrupt_recoveries += other.busy_interrupt_recoveries;
         self.stale_generation_blocks += other.stale_generation_blocks;
         self.stale_pane_blocks += other.stale_pane_blocks;
@@ -1500,6 +1505,22 @@ fn route_sim_blocks_starting_to_busy_bootstrap_until_current_ready_prompt() {
 
     assert_eq!(world.coverage.route_dispatch_acceptances, 1);
     assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn route_sim_blocks_starting_actor_that_closes_before_ready_prompt() {
+    let mut world = SimWorld::new(2_007);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+
+    world.apply(SimCommand::SupervisorClosed).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+
+    assert_eq!(world.coverage.closed_dispatch_blocks, 1);
+    assert_eq!(world.coverage.starting_prompt_promotions, 0);
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+    assert_eq!(world.coverage.route_dispatch_proofs, 0);
 }
 
 #[test]

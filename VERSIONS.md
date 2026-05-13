@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Starting actor reroutes now refresh terminal lifecycle states immediately.** While route is waiting for a `starting` authoritative actor to become dispatch-ready, a supervisor refresh to `closed` or `blocked` now stops the wait and surfaces that terminal actor state instead of burning the startup-ready timeout and reporting stale `starting` state. Updated route specs and added SimWorld plus tmux-backed route coverage. This closes `#startreadytimeout` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **OpenCode live-pane submits now send real Return instead of newline.** Harness-aware tmux submissions use OpenCode's Kitty keyboard Return sequence for routed reopens, supervisor IPC injects, auto-triggers, and file-scoped `/clear`, so OpenCode panes whose TUI keymap distinguishes `return` from `ctrl+j` submit the prompt instead of inserting a blank line. Updated the session tmux spec and tmux-router coverage.
 
 - **Completed work can now live in an explicit external done archive.** `agent:done archive=<repo-relative>.done.md` appends reaped backlog/icebox entries to the named markdown file instead of growing the session document, creates the archive when missing, rejects unsafe paths, suppresses duplicate retry entries, and lets preflight/session-check use archived IDs as dropped-history proof. Updated pending specs and runbook guidance. This closes `#donearchiveattr` in `tasks/agent-doc/agent-doc-bugs2.md`.

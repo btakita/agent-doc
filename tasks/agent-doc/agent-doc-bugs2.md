@@ -34,7 +34,19 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 - Trailing prompt/context: Read recent logs since the hybrid pty was implemented.
-<!-- agent:boundary:2db5c1c0 -->
+❯ Read logs since the hybrid pty was implemented. Note the issues. #next-tasks
+### Re: Hybrid pty log review — gpt-5
+
+Read the recent `ops.log`, `debug.log.2026-05-13`, and the `b26b9957...` session log after the hybrid/owned-pty work. I added backlog items for the concrete issues that showed up:
+
+- Starting actor readiness loops repeatedly timing out before the pane becomes route-ready, including stale/closed actor cases.
+- Direct pane submit latency being reported as timed out or over budget even when dispatch-start proof later shows the prompt was consumed.
+- Late fallback patch writes continuing after a cycle has already committed, eventually leading to drift/session-check interruption around an unresolved prompt-only tail.
+- Clear/restart racing a starting owned pane and sending input before the actor is ready.
+- Reap decisions relying on noisy spinner/screen-tail fragments instead of stable prompt state.
+
+No code was changed and I did not run the test suite for this cycle; this was log review plus next-task capture.
+<!-- agent:boundary:b0bdc06d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,6 +121,11 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#startreadytimeout] #agent-doc-bug: Starting authoritative actors repeatedly miss the 8s route readiness window after owned/hybrid pty startup; logs show repeated route_authoritative_actor_starting_not_ready for Codex panes before eventual prompt readiness, and sometimes against a closed actor. Make starting-state routing fail closed with a single actionable diagnostic, refresh closed actors immediately, and cover with SimWorld plus tmux-router tests.
+- [ ] [#directsubmitbudget] #agent-doc-bug: Direct pane submit telemetry reports 5.18s timeouts / over-budget sends even when dispatch_start_proof later proves the prompt was consumed. Split input-acceptance latency from dispatch-start proof, avoid false timeout language after consumed proof, and tune the owned/hybrid pty submit budget around actual tmux/control-mode behavior.
+- [ ] [#latefallbackloop] #agent-doc-bug: Late fallback patch writes keep firing after a cycle is already committed; logs show repeated late_fallback_patch_rejected reason=already_committed, ipc_write_consumed, commit_already_current, and one resume_commit_blocked_drift with an unresolved prompt-only tail. Stop fallback writers at terminal commit state or rebind them to the next cycle before accepting IPC patches.
+- [ ] [#clearstartingrace] #agent-doc-bug: Clear/restart commands can race starting owned panes; logs show session_clear_sent while generation 170 was still starting, followed by protected-input refusals, commits, and repeated starting_not_ready. Gate clear/restart on dispatch-ready or clean-exit prompt state and document-dirty state before sending literal Enter into the pane.
+- [ ] [#ownedreapbusy] #agent-doc-bug: Owned pane reap decisions are noisy and often keep panes alive from spinner tails like Working/escape-title fragments instead of a stable idle/busy signal. Normalize screen-tail sampling or prefer supervisor prompt state so route_owned_reap_decision does not preserve panes based on transient renderer text.
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
 - [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.
 - [ ] [#multiplexertrait] Evaluate Multiplexer trait abstraction over tmux to reduce coupling (785 tmux references across 43 files). Would allow future Zellij backend and make the tmux surface testable via mock backend. [recommended]

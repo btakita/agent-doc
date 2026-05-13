@@ -30,29 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-191710.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-204322.md`*
 
 Compacted content:
-- Archived 1 response topic(s): xcst
+- Archived 1 response topic(s): xlog
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#xlog]. spec-test-build-install-commit-push
-### Re: xlog — gpt-5
-
-Implemented and pushed `#xlog` in `src/tsift`.
-
-`log-digest` now classifies agent-doc runtime failure/churn lines as signal groups instead of leaving them only as symbol refs. It reuses the shared `runtime_churn` classifier, adds warning signals for restart churn families and `commit_already_current` closeout churn, and adds error signals for nonzero `claude_exit` / `codex_exit` events. I also updated `SPEC.md`, `VERSIONS.md`, the direct unit coverage, and the compiled CLI regression.
-
-Verification completed:
-
-- Focused regressions: `log_digest_classifies_agent_doc_runtime_churn_as_signals`, `restart_churn_detects_requested_families`, `log_digest_classifies_agent_doc_runtime_events_as_signals`.
-- Full local CI target: `make ci-full` passed, including clippy, 589 unit tests, 107 integration tests, and the ignored SimWorld medium corpus.
-- Build/install: `cargo build --manifest-path src/tsift/Cargo.toml` passed; `cargo install --path src/tsift --force` replaced the local binary; `tsift --version` reports `tsift 0.1.42`.
-- Real-log check: installed `tsift log-digest` on `.agent-doc/logs/tsift-v0.1.log` now reports `signal_groups: 8`, including closeout churn, restart churn, timeout, and nonzero exit signals.
-
-Committed and pushed `ed742d2 fix: classify agent-doc log churn signals` to `btakita/tsift` `main`.
-
-Remote GitHub Actions did start a new run (`25824241991`) but the job failed before running steps. The check-run annotation says the job was not started because recent account payments failed or the spending limit needs to be increased, so there were no CI logs to inspect beyond that external billing blocker.
-<!-- agent:boundary:e8714f68 -->
+<!-- agent:boundary:9817af44 -->
 <!-- /agent:exchange -->
 ###
 <!--

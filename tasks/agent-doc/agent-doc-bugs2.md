@@ -179,7 +179,7 @@ This keeps tmux's session/layout model but eliminates the `send-keys` / `capture
 #### Verdict
 
 Yes, but scoped as "own the managed PTY" rather than "replace tmux." The portable-pty + alacritty_terminal stack is proven and would eliminate the entire class of input/output heuristic bugs. The `#multiplexertrait` backlog item is the right first step — it creates the abstraction boundary needed to swap the managed-pane backend without touching layout/session code.
-<!-- agent:boundary:54231c87 -->
+<!-- agent:boundary:ab3305c7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -256,6 +256,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ownedpty] Implement portable-pty + alacritty_terminal backend for managed panes — agent-doc owns the child PTY directly instead of tmux send-keys/capture-pane, eliminating the input heuristic failure class. Depends on #multiplexertrait abstraction boundary. [recommended]
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
 - [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.
 - [ ] [#multiplexertrait] Evaluate Multiplexer trait abstraction over tmux to reduce coupling (785 tmux references across 43 files). Would allow future Zellij backend and make the tmux surface testable via mock backend. [recommended]

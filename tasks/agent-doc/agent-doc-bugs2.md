@@ -179,7 +179,57 @@ This keeps tmux's session/layout model but eliminates the `send-keys` / `capture
 #### Verdict
 
 Yes, but scoped as "own the managed PTY" rather than "replace tmux." The portable-pty + alacritty_terminal stack is proven and would eliminate the entire class of input/output heuristic bugs. The `#multiplexertrait` backlog item is the right first step — it creates the abstraction boundary needed to swap the managed-pane backend without touching layout/session code.
-<!-- agent:boundary:ab3305c7 -->
+❯ Is the verdict proposal portable across all operating systems like Windows, OSX, Windows?
+❯ Would the Verdict proposal work with any terminal on the operating systems?
+❯ Is there a way to distribute a single terminal that runs tmux with the agent-doc package?
+### Re: cross-platform portability & bundled terminal — opus-4-6
+
+#### OS portability of the owned-PTY approach
+
+**Linux & macOS** — fully portable. `portable-pty` (from WezTerm) supports both via POSIX PTY APIs (`openpty`/`forkpty`). `alacritty_terminal` parses VT sequences identically on both. No tmux dependency changes — tmux runs natively on both.
+
+**Windows** — partial. `portable-pty` supports Windows via ConPTY (Windows 10 1809+), so the PTY-owning layer works. The problem is tmux: it doesn't run on Windows natively. Current options:
+- **WSL2** — tmux works inside WSL, but agent-doc would need to bridge between the Windows host terminal and WSL tmux. This is how most Windows developers use tmux today.
+- **No tmux** — if agent-doc owns the PTY and the layout engine, tmux becomes optional on Windows. Agent-doc could render its own pane layout via crossterm/ratatui directly in the Windows terminal. This actually *strengthens* the case for the owned-PTY approach on Windows.
+- **MSYS2/Cygwin tmux** — exists but unreliable, not a serious option.
+
+So the owned-PTY stack is *more* portable than the current tmux-dependent architecture, not less. On Windows you'd skip tmux entirely and use agent-doc's own layout.
+
+#### Terminal compatibility
+
+The owned-PTY approach works with **any terminal emulator** on any OS because agent-doc sits between the terminal and the child process:
+
+```
+User's terminal  ←→  agent-doc (PTY owner + layout)  ←→  child processes
+     ↑                        ↑                              ↑
+ any terminal           you control this              OpenCode/Claude/Codex
+```
+
+Agent-doc negotiates capabilities with both sides independently:
+- **Outer terminal** — agent-doc queries what the user's terminal supports (Kitty keyboard, true color, etc.) via standard ANSI queries
+- **Inner children** — agent-doc presents itself as the terminal to child processes, advertising exactly the capabilities the child needs (e.g., always advertise Kitty keyboard to OpenCode regardless of whether the outer terminal supports it)
+
+This decoupling means a user on xterm (legacy) can run OpenCode (which wants Kitty protocol) because agent-doc translates between the two. Today that translation happens through tmux's limited passthrough; with owned PTY, agent-doc has full control.
+
+#### Bundling a terminal with agent-doc
+
+Three realistic options:
+
+1. **Bundle WezTerm as the launcher** — WezTerm is Rust, has a library mode (`wezterm-gui` can be embedded), and supports Kitty keyboard protocol. Agent-doc could ship a `wezterm-mux-server` + agent-doc bundle that starts a WezTerm window with agent-doc's layout pre-configured. Cross-platform (Linux, macOS, Windows). Downside: WezTerm is a large dependency (~50MB binary).
+
+2. **Bundle a headless multiplexer, use any terminal** — ship agent-doc with its own PTY multiplexer daemon (the owned-PTY approach). Users connect with whatever terminal they prefer. Similar to how tmux works today but without requiring a separate tmux install. The daemon speaks a simple protocol; the "terminal" is just a thin display client. This is the cleanest separation.
+
+3. **Embed alacritty as a library** — Alacritty's terminal emulation is available as `alacritty_terminal` (the parser) but the GUI (`alacritty` proper) isn't designed for embedding. Not practical without forking.
+
+**Option 2 is the strongest path.** It means:
+- `cargo install agent-doc` gives you everything — no tmux dependency
+- Works on Windows without WSL
+- Works with any terminal emulator
+- The PTY daemon is testable in CI without a display server
+- Distribution is a single static binary
+
+The tradeoff is building the layout engine and session persistence that tmux provides for free. But those are well-scoped problems (ratatui for layout, a simple state file for session recovery) compared to the ongoing cost of tmux input heuristic bugs.
+<!-- agent:boundary:c3b7b09b -->
 <!-- /agent:exchange -->
 ###
 <!--

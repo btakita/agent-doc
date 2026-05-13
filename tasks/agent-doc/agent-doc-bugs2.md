@@ -29,51 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-012614.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-020008.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Codex Resume Writable Roots; CI Follow-up
+- Archived 2 response topic(s): IPC timeout duplicate patchback; CI clippy failure
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#ipc-timeout-dup]. spec-test-build-install-commit-push
-### Re: IPC timeout duplicate patchback — gpt-5
-
-Implemented `#ipc-timeout-dup` and marked it done.
-
-What changed:
-- Updated the stream IPC timeout path so, after the local fallback write is committed, the queued `.agent-doc/patches/*.json` fallback file is removed. The claimed-patch sentinel is still written so a watcher that already saw the file can fail closed instead of replaying it.
-- Added a finalize integration regression covering the exit-75 timeout path: local write happens, `HEAD` contains the response, queued patch JSON is gone, and the claimed sentinel remains.
-- Updated `SPEC.md`, closeout/core command specs, `CLAUDE.md`, and `VERSIONS.md` to describe the new closeout invariant.
-
-Verification:
-- `cargo test --test finalize_integration stream_ipc_timeout_commit_removes_fallback_patch_file`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- CI review: latest GitHub `CI` run I found was old and red at `cargo clippy`; it did not expose a tmux-specific leg to reproduce locally.
-
-Commits:
-- `src/agent-doc` pushed commit `659d714` on `20260422/codex-agent-backend`.
-- parent repo commit `8cde23e20` records the submodule pointer update and plan file; parent push follows this session closeout.
-❯ Please fix the clippy error on CI.
-### Re: CI clippy failure — gpt-5
-
-Fixed the `agent-doc` `main` CI failure and pushed it.
-
-What changed on `btakita/agent-doc` `main`:
-- Replaced the failing `ops.sort_by(|a, b| b.0.cmp(&a.0))` with `ops.sort_by_key(|op| std::cmp::Reverse(op.0))` in `src/template.rs`.
-- Restored the `audit-docs` fallback warning for directories without a project marker, because fixing clippy exposed that existing test failure on `main`.
-- Added the missing `tmux-ci` Makefile target so the CI workflow's tmux step has a valid local target.
-
-Verification:
-- `cargo clippy -- -D warnings` passed in the temporary `main` worktree.
-- `make check` passed in the temporary `main` worktree.
-- `make tmux-ci` passed in the temporary `main` worktree.
-- GitHub Actions `CI` run `25773430221` passed on `main` after the push.
-
-Commit:
-- `btakita/agent-doc` `main`: `a0eb329` (`fix: repair main ci checks`).
-<!-- agent:boundary:c03bb886 -->
+<!-- agent:boundary:44a1d20d -->
 <!-- /agent:exchange -->
 ###
 <!--

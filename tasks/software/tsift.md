@@ -35,7 +35,27 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #sfail
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:a39bd964 -->
+❯ do [#stok]. spec-test-build-install-commit-push
+### Re: #stok — gpt-5
+
+Completed `#stok`.
+
+Changed `src/tsift` so Codex token accounting prefers `info.last_token_usage` when present, skips duplicate cumulative snapshots, and keeps cumulative-delta fallback for older transcripts. That fixes the interleaved cumulative-stream case that produced fake million-token turns.
+
+Also bounded `session-review` aggregation to the same newest matched session rows it emits, so hidden older matches cannot inflate a 12-row review into a billion-token aggregate. Updated `SPEC.md` and `VERSIONS.md`, and added deterministic compiled CLI fixtures for both the Codex `last_token_usage` case and bounded session-review aggregation.
+
+Verification passed:
+
+- `cargo fmt -- --check`
+- focused `session-cost` and `session-review` regressions
+- `make check`
+- latest GitHub Actions `CI`: `completed success` for `fix: anchor session failure extraction`
+- `cargo build --release`
+- `cargo install --path . --force`
+- real `tasks/software/tsift.md` sanity check now reports largest turn around `207,715` total tokens and bounded 12-row total around `64.1M`, not the prior `1.4B` / `1.4M` outlier shape.
+
+Committed and pushed the tsift submodule commit `8384b35` (`fix: bound session review token accounting`). Committed the parent submodule pointer as `aa0878da7` (`chore: advance tsift submodule`); parent push follows this document finalization.
+<!-- agent:boundary:7285cac5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +64,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#stok] Audit Codex/Claude token accounting in tsift session-review and session-cost for cumulative-usage double counting and cross-session duplication; the 12-session tasks/software/tsift.md review reported about 1.4B prompt tokens and a 1.4M-token largest turn, which needs a deterministic fixture.
 - [ ] [#slock] Add deterministic lock-contention coverage for tsift index/search/status paths and recovery guidance; historical review surfaced 34 database file is locked failures while tsift locks can report no writer lock with live WAL/SHM sidecars, so snapshot fallback and diagnostics need regression coverage.
 - [ ] [#sfile] Filter empty or non-file file references from log-digest / session-digest; .agent-doc/logs/tsift-v0.1.log produced an empty path file group with 132 occurrences, degrading anchors and downstream next-context file lists.
 <!-- /agent:backlog -->
@@ -68,6 +87,7 @@ k
 - 2026-05-13 [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
 - 2026-05-13 [#sctx] Fix tsift session-review / context-pack --next-context active-context scoping so prompt targets, files, and failures come from the current unresolved tail instead of historical assistant text, presets, examples, or unrelated matched sessions; regression should reject stale do-hash prompts, Re summaries, prompt-preset text, and bogus paths like /! from tasks/software/tsift.md review output.
 - 2026-05-13 [#sfail] Tighten tsift session-review failure extraction so it reports command/test/log failures with command and session anchors, not instruction text or source snippets like After finalize, panic snippets, or generic command exited with code 1; preserve real failing assertions and cargo exits separately.
+- 2026-05-13 [#stok] Audit Codex/Claude token accounting in tsift session-review and session-cost for cumulative-usage double counting and cross-session duplication; the 12-session tasks/software/tsift.md review reported about 1.4B prompt tokens and a 1.4M-token largest turn, which needs a deterministic fixture.
 <!-- /agent:done -->
 
 ## Completed / Reaped

@@ -230,7 +230,7 @@ Implementation: `flush_to_document()` uses `template::apply_patches()`.
 
 ### IPC-First Writes (v0.17.5)
 
-All write paths (`run`, `stream`, `write`) try IPC to the IDE plugin when `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set. IPC writes a JSON patch file to `.agent-doc/patches/<hash>.json`; the IDE plugin applies it via Document API (preserving cursor, undo stack, no "externally modified" dialog) and deletes the file as ACK. On IPC timeout (2s), exits with code 75 (`EX_TEMPFAIL`) instead of falling back to disk write. Use `agent-doc write --force-disk` to bypass IPC and write directly to disk.
+All write paths (`run`, `stream`, `write`) try IPC to the IDE plugin when `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set. IPC writes a JSON patch file to `.agent-doc/patches/<hash>.json`; the IDE plugin applies it via Document API (preserving cursor, undo stack, no "externally modified" dialog) and deletes the file as ACK. On IPC timeout (2s), stream closeout writes locally, commits when possible, removes the queued fallback patch after a successful local commit, and exits with code 75 (`EX_TEMPFAIL`). Use `agent-doc write --force-disk` to bypass IPC and write directly to disk.
 
 - `try_ipc(file, patches, unmatched, frontmatter_yaml, baseline, content_ours)` — component-level patches for template/stream documents. `content_ours` (baseline + response, no user edits) is saved as the snapshot on IPC success; pass `None` to fall back to reading the current file.
 - `try_ipc_full_content()` — full document replacement for inline-mode documents

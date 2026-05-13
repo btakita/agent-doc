@@ -43,8 +43,9 @@
 //!   `merge::merge_contents_crdt` for conflict-free merge. Saves both a text
 //!   snapshot and a CRDT state snapshot after every flush. Supports IPC-first
 //!   writes: when `.agent-doc/patches/` exists and `--force-disk` is not set,
-//!   tries `try_ipc` first; on timeout (exit code 75 / `EX_TEMPFAIL`) leaves a
-//!   fallback patch file for the plugin to pick up later.
+//!   tries `try_ipc` first; on timeout (exit code 75 / `EX_TEMPFAIL`) writes
+//!   locally and removes the fallback patch file after a successful local
+//!   commit so an editor watcher cannot replay it later.
 //!
 //! - `run_ipc`: explicit IPC-only mode. Serialises patches as JSON to
 //!   `.agent-doc/patches/<hash>.json`, polls for the plugin to delete the file
@@ -3970,8 +3971,9 @@ pub fn run_template(
 /// `baseline` is the document content at the time the response was generated.
 ///
 /// When `force_disk` is false and `.agent-doc/patches/` exists (plugin installed),
-/// tries IPC first. On IPC timeout, leaves the patch file in place and exits
-/// with code 75 (EX_TEMPFAIL) instead of falling back to disk write.
+/// tries IPC first. On IPC timeout, writes locally, commits when possible,
+/// removes the queued fallback patch after the local closeout, and exits with
+/// code 75 (EX_TEMPFAIL).
 /// When `force_disk` is true, always uses direct disk write.
 pub fn run_stream(
     file: &Path,
@@ -4394,10 +4396,11 @@ pub fn run_stream(
             if local_write_applied {
                 write_claimed_patch_sentinel(&project_root, &ipc_result.patch_id);
             }
-            if crate::git::is_in_git_repo(file)
-                && let Err(e) = crate::git::commit(file)
-            {
-                eprintln!("[commit] warning: commit before exit(75) failed: {}", e);
+            if crate::git::is_in_git_repo(file) {
+                match crate::git::commit(file) {
+                    Ok(_) => cleanup_fallback_patch_files(file),
+                    Err(e) => eprintln!("[commit] warning: commit before exit(75) failed: {}", e),
+                }
             }
             std::process::exit(75); // EX_TEMPFAIL
         }

@@ -203,3 +203,4 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 - Removes consecutive duplicate `### Re:` response blocks and updates the snapshot.
 - Also deletes the stale queued patch file so a plugin restart cannot replay the removed duplicate.
 - The normal template write/finalize path runs the same consecutive-response dedupe before saving snapshots, CRDT state, disk content, or sidecar-normalization full-content repair payloads. `session-check` fails closed if a duplicate survives closeout instead of reporting success.
+- Stream IPC timeout closeout also removes the queued fallback patch after its local write and commit succeed, so `dedupe` is not required as a second cleanup commit for that timeout shape.

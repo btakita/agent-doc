@@ -1093,7 +1093,7 @@ pub unsafe extern "C" fn agent_doc_write_ack_content(
     }
 }
 
-/// Check if --force-disk claimed this patch by writing a sentinel file.
+/// Check if the CLI claimed this patch by writing a local-closeout sentinel.
 /// Returns true if the sentinel `.agent-doc/claimed-patches/<patch_id>` exists.
 /// The sentinel is intentionally durable for the patch id so multiple editor
 /// watchers or repeated directory scans all skip the same locally-closed patch.
@@ -1121,7 +1121,7 @@ pub unsafe extern "C" fn agent_doc_is_claimed_by_force_disk(
 
     if sentinel.exists() {
         eprintln!(
-            "[ffi] patch_id {} claimed by force-disk — skipping apply",
+            "[ffi] patch_id {} claimed by local closeout — skipping apply",
             &patch_id_str[..patch_id_str.len().min(8)]
         );
         1

@@ -196,6 +196,58 @@ fn write_commit_writes_and_commits_session_response() {
 }
 
 #[test]
+fn stream_ipc_timeout_commit_removes_fallback_patch_file() {
+    let (tmp, doc) = setup_session_stream_doc();
+    fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let baseline = write_baseline(tmp.path(), &session_stream_doc_content());
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: ipc timeout — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .code(75);
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("### Re: ipc timeout — gpt-5"),
+        "timeout fallback should write the response locally"
+    );
+    assert!(
+        head_blob(tmp.path()).contains("### Re: ipc timeout — gpt-5"),
+        "timeout fallback should commit the local response before exiting 75"
+    );
+
+    let patch_jsons = fs::read_dir(tmp.path().join(".agent-doc/patches"))
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+        .collect::<Vec<_>>();
+    assert!(
+        patch_jsons.is_empty(),
+        "committed timeout fallback must remove queued patch JSON so the plugin cannot replay it"
+    );
+
+    let claimed_entries = fs::read_dir(tmp.path().join(".agent-doc/claimed-patches"))
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .collect::<Vec<_>>();
+    assert!(
+        !claimed_entries.is_empty(),
+        "timeout fallback should leave a claimed-patch sentinel for any watcher that already saw the file"
+    );
+}
+
+#[test]
 fn bare_write_stream_on_session_doc_fails_closed_after_write_applied() {
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);

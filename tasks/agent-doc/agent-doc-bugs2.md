@@ -29,34 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-232745.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-234307.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Hybrid pty log review
+- Archived 1 response topic(s): startreadytimeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#startreadytimeout]. spec-test-build-install-commit-push
-### Re: startreadytimeout — gpt-5
-Implemented `#startreadytimeout`.
-
-Route now stops waiting immediately when a `starting` authoritative actor refreshes to a terminal `closed` or `blocked` state, logs `route_authoritative_actor_starting_terminal`, and surfaces the terminal actor diagnostic instead of timing out against stale `starting` state.
-
-Updated specs/docs and added coverage:
-- SimWorld deterministic coverage for a starting actor that closes before a ready prompt.
-- Route unit coverage for terminal wait states.
-- Live tmux route regression proving the closed refresh fails closed without sending a reopen.
-
-Verification:
-- `cargo test route_sim_blocks_starting_actor_that_closes_before_ready_prompt`
-- `cargo test authoritative_actor_start_wait_terminal_state_only_for_terminal_states`
-- `cargo test route_refreshes_closed_starting_authoritative_actor_without_start_timeout -- --ignored`
-- `make check`
-- Latest GitHub Actions `Agent Doc` run 25832239425 had red `tmux-ci`, so I reproduced locally with `make tmux-ci`; local result passed, 227 live tmux tests.
-- `make install` completed and installed `agent-doc 0.33.16` plus `libagent_doc.so` locally.
-
-Committed and pushed:
-- `btakita/agent-doc` `20260422/codex-agent-backend`: `bfe47ed4` (`fix: refresh closed starting actors`)
-- `btakita/agent-loop` `main`: `785a41418` (`chore: update agent-doc submodule`)
-<!-- agent:boundary:10d61969 -->
+<!-- agent:boundary:5df0ce3a -->
 <!-- /agent:exchange -->
 ###
 <!--

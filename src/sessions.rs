@@ -79,7 +79,6 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
 
 // Re-export Tmux types from tmux-router.
 #[cfg(test)]
@@ -89,8 +88,6 @@ pub use tmux_router::Tmux;
 pub use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock};
 
 const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
-const OPENCODE_SUBMIT_DELAY: Duration = Duration::from_millis(50);
-const KITTY_RETURN_SEQUENCE: &str = "\x1b[13u";
 
 /// Return the path to the sessions registry file (relative to CWD).
 pub fn registry_path() -> PathBuf {
@@ -247,33 +244,8 @@ pub fn send_submitted_text_for_harness(
     text: &str,
     harness: &str,
 ) -> Result<()> {
-    if harness == "opencode" {
-        send_opencode_submitted_text(tmux, pane_id, text)
-    } else {
-        send_submitted_text(tmux, pane_id, text)
-    }
-}
-
-fn send_opencode_submitted_text(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()> {
-    let text = text.trim_end_matches(['\r', '\n']);
-    let status = tmux
-        .cmd()
-        .args(["send-keys", "-t", pane_id, "-l", text])
-        .status()
-        .context("failed to run tmux send-keys (OpenCode literal)")?;
-    if !status.success() {
-        anyhow::bail!("tmux send-keys failed for OpenCode pane {}", pane_id);
-    }
-    std::thread::sleep(OPENCODE_SUBMIT_DELAY);
-    let status = tmux
-        .cmd()
-        .args(["send-keys", "-t", pane_id, "-l", KITTY_RETURN_SEQUENCE])
-        .status()
-        .context("failed to run tmux send-keys (OpenCode return)")?;
-    if !status.success() {
-        anyhow::bail!("tmux send-keys OpenCode return failed for pane {}", pane_id);
-    }
-    Ok(())
+    tmux_router::submit_text_for_harness(tmux, pane_id, text, harness)
+        .with_context(|| format!("failed to submit input to {harness} pane {pane_id}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1065,6 +1037,7 @@ fn chrono_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     #[test]

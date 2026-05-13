@@ -29,6 +29,7 @@ The supervisor graduates `start.rs` into a process that **owns** claude as a chi
 | `supervisor/ipc.rs` | **landed** | Per-session supervisor IPC serves `inject`, `restart`, `state`, `pid`, and `stop`. |
 | `start.rs` wire-up | **landed** | The production `agent-doc start` path owns the supervisor lifecycle inline in `start.rs` while delegating focused pieces to `supervisor/*` modules. |
 | Project controller registration | **landed** | Supervisor startup lazy-launches the project controller, registers the actor generation and supervisor lease, and reports lifecycle transitions through controller IPC. |
+| `tmux-router` hybrid policy | **landed** | Control mode handles lifecycle/events, `pipe-pane` handles live output streams, and owned PTY input remains scoped to managed Claude/OpenCode supervisors that need byte-exact input. |
 
 The original rollout plan in this document is retained for architectural context,
 but the supervisor stack is now shipping. Current behavior should be read from

@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Strict closeout now reports slow commit phases and fails explicitly on stale parent gitlinks.** `finalize` / strict `write --commit` record a `closeout_latency` diagnostic when response durability crosses the closeout budget, with per-phase timings for commit retries, cycle-state checks, session-check, and cleanup. Submodule-hosted documents now fail closed after the bounded parent-pointer retry if the parent `HEAD:<submodule>` still differs from the submodule `HEAD`, naming `agent-doc commit <FILE>` as the idempotent recovery. This closes `#rspcmtdelay` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **JetBrains Run Agent Doc now forces the plain reopen prompt.** The JetBrains action calls `agent-doc route --dispatch-only --plain-trigger`, and route applies that flag by sending `agent-doc <FILE>` even when the document's normal harness trigger template is slash-command based. This keeps editor reruns from injecting `/agent-doc ...` into sessions such as `root.md` where the IDE action must send the plain Codex-compatible form. Bumped the JetBrains plugin build version to `0.2.114`.
 
 - **Cross-harness JetBrains reruns can replace stale actor records.** Route now treats a stored harness mismatch as authoritative only when the old actor still has a healthy live supervisor and a non-closed state. Dead panes, closed actors, and unreachable supervisor records fall through to fresh start/rebind, so running JetBrains `Run Agent Doc` in Claude after closing a Codex session no longer fails on `bound to harness codex, not claude-code`. Updated route specs and added focused coverage for the live-vs-stale mismatch guard.

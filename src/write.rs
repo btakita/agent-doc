@@ -919,8 +919,12 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
 }
 
 pub(crate) fn complete_required_closeout(file: &Path) -> Result<bool> {
+    let mut timer = CloseoutTimer::start(file);
+
     let mut did_commit = crate::git::commit(file)?;
+    timer.mark("git_commit");
     ensure_cycle_committed(file)?;
+    timer.mark("cycle_state");
     // Verify the snapshot is actually committed in the owning git root.
     // If it isn't (e.g., post-commit mutation dirtied the file, or the commit
     // staged wrong content), retry once before handing off to session-check.
@@ -929,16 +933,91 @@ pub(crate) fn complete_required_closeout(file: &Path) -> Result<bool> {
     {
         eprintln!("[commit] snapshot differs from HEAD after commit — retrying");
         did_commit |= crate::git::commit(file)?;
+        timer.mark("git_commit_retry_snapshot");
         ensure_cycle_committed(file)?;
+        timer.mark("cycle_state_retry_snapshot");
     }
     if crate::git::submodule_pointer_drift(file)?.is_some() {
         eprintln!("[commit] parent submodule pointer still stale after commit — retrying");
         did_commit |= crate::git::commit(file)?;
+        timer.mark("git_commit_retry_parent_pointer");
         ensure_cycle_committed(file)?;
+        timer.mark("cycle_state_retry_parent_pointer");
+    }
+    if let Some(drift) = crate::git::submodule_pointer_drift(file)? {
+        timer.mark("parent_pointer_verify_failed");
+        let parent_head = drift.parent_head.as_deref().unwrap_or("<missing>");
+        timer.finish();
+        anyhow::bail!(
+            "parent submodule pointer is not committed for {} after strict closeout: parent HEAD:{}={} but submodule HEAD={}. Run `agent-doc commit {}` to retry the idempotent parent-pointer closeout.",
+            file.display(),
+            drift.relative_path,
+            parent_head,
+            drift.submodule_head,
+            file.display()
+        );
     }
     crate::session_check::enforce_clean_closeout(file)?;
+    timer.mark("session_check");
     cleanup_fallback_patch_files(file);
+    timer.mark("fallback_cleanup");
+    timer.finish();
     Ok(did_commit)
+}
+
+#[derive(Debug)]
+struct CloseoutTimer<'a> {
+    file: &'a Path,
+    started: std::time::Instant,
+    last_mark: std::time::Instant,
+    phases: Vec<(String, u128)>,
+}
+
+impl<'a> CloseoutTimer<'a> {
+    const REPORT_THRESHOLD_MS: u128 = 250;
+
+    fn start(file: &'a Path) -> Self {
+        let now = std::time::Instant::now();
+        Self {
+            file,
+            started: now,
+            last_mark: now,
+            phases: Vec::new(),
+        }
+    }
+
+    fn mark(&mut self, phase: &str) {
+        let now = std::time::Instant::now();
+        self.phases.push((
+            phase.to_string(),
+            now.duration_since(self.last_mark).as_millis(),
+        ));
+        self.last_mark = now;
+    }
+
+    fn finish(&self) {
+        let total_ms = self.started.elapsed().as_millis();
+        if total_ms < Self::REPORT_THRESHOLD_MS {
+            return;
+        }
+        let message = closeout_latency_message(self.file, total_ms, &self.phases);
+        eprintln!("[perf] {message}");
+        crate::ops_log::log_op(self.file, &message);
+    }
+}
+
+fn closeout_latency_message(file: &Path, total_ms: u128, phases: &[(String, u128)]) -> String {
+    let phase_text = phases
+        .iter()
+        .map(|(phase, elapsed)| format!("{phase}:{elapsed}ms"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "closeout_latency file={} total_ms={} phases={}",
+        file.display(),
+        total_ms,
+        phase_text
+    )
 }
 
 fn ensure_cycle_committed(file: &Path) -> Result<()> {
@@ -10129,6 +10208,20 @@ mod submodule_patch_routing_tests {
             crate::git::submodule_pointer_drift(&doc).unwrap().is_some(),
             "parent gitlink should remain stale when parent commit fails"
         );
+    }
+
+    #[test]
+    fn closeout_latency_message_names_phase_timings() {
+        let doc = PathBuf::from("/tmp/session.md");
+        let phases = vec![
+            ("git_commit".to_string(), 140),
+            ("session_check".to_string(), 90),
+        ];
+
+        let message = super::closeout_latency_message(&doc, 230, &phases);
+
+        assert!(message.contains("closeout_latency file=/tmp/session.md total_ms=230"));
+        assert!(message.contains("phases=git_commit:140ms,session_check:90ms"));
     }
 
     // Note: a "not in git repo" fallback test is intentionally omitted because

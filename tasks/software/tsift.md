@@ -30,45 +30,15 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-055736.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-063916.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #stok
+- Archived 2 response topic(s): #slock; #sfile
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#slock]. spec-test-build-install-commit-push
-### Re: #slock — gpt-5
-
-Implemented `#slock`.
-
-Added deterministic WAL-without-`index.lock` regressions for the direct `tsift index`, `tsift search`, and `tsift status` paths. The tests now lock the case where SQLite WAL/SHM sidecars are live but the tsift-owned writer sidecar reports no active holder, preserving WAL-aware snapshot fallback and recovery guidance instead of raw `database is locked` failures or rollback-journal-only diagnostics.
-
-Updated `SPEC.md` and `VERSIONS.md` with the recovery invariant, extended the search post-precheck test hook so it can inject either rollback-journal or WAL contention, and installed the rebuilt local binary.
-
-Verification: targeted new regressions passed; `cargo fmt --check`; `make check`; `cargo build`; `cargo install --path .`; `tsift --version` -> `tsift 0.1.42`; latest GitHub Actions CI run `25781168424` was green.
-
-Pushed commits: `src/tsift` `38e16b3` (`test: cover WAL lock recovery paths`) and superproject `c7e9e079e` (`chore: update tsift submodule`).
-❯ do [#sfile]. spec-test-build-install-commit-push
-### Re: #sfile — gpt-5
-
-Implemented `#sfile`.
-
-`log-digest` and `session-digest` now reject structured runtime path fields when they normalize to an empty display path or point at an existing directory. That removes `cwd_resolved path=<project-root> source=project_root` from file anchors and next-context file lists while preserving real `file=...` / `path=...` document anchors.
-
-Added regressions for both digest paths, updated `SPEC.md` and `VERSIONS.md`, and verified the real `.agent-doc/logs/tsift-v0.1.log` case: both `log-digest` and `session-digest --source agent-doc-log` now report only `tasks/software/tsift.md` and `tasks/tsift.md`, with no empty file group.
-
-Verification: targeted regressions passed; `cargo fmt --check`; `make check`; `cargo build`; `cargo install --path .`; `tsift --version` -> `tsift 0.1.42`; tsift GitHub Actions CI run `25782061824` was green. Superproject `Agent Doc` run `25782075410` had green `tmux-ci`; its separate `check` job remained red on `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails` in `src/agent-doc`, outside the tsift change surface.
-
-Pushed commits: `src/tsift` `9f97992` (`fix: filter non-file digest anchors`) and superproject `1071f58c6` (`chore: update tsift submodule`).
-<!-- agent:boundary:4fe0fb83 -->
+<!-- agent:boundary:6e2c4215 -->
 <!-- /agent:exchange -->
 ###
 <!--
-```
-Suggestions
-ℹ File reads using 15.9k tokens (8%) → save ~4.8k
-  If you are re-reading files, consider referencing earlier reads. Use offset/limit for large files.
-```
-spec-test-build-install-commit-push
 -->
 
 ## Pending / Not Built

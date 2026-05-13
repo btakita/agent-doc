@@ -9,7 +9,7 @@
 //! - **`run(file, pane, debounce_ms, col_args)`**: Public entry point. Delegates to
 //!   `run_with_tmux` using the default tmux server. Accepts an optional explicit
 //!   `pane` override, a debounce delay in milliseconds, and column layout hints.
-//! - **`run_with_tmux(file, tmux, pane, debounce_ms, col_args)`**: Core routing logic.
+//! - **`run_with_tmux(file, tmux, pane, debounce_ms, col_args, mode, plain_trigger)`**: Core routing logic.
 //!   1. Prunes stale session registry entries via `resync::prune`.
 //!   2. If `debounce_ms > 0`, waits for the file's mtime to settle (`await_idle`).
 //!   3. Ensures a session UUID exists in the file's YAML frontmatter (generates one if missing).
@@ -1312,6 +1312,7 @@ pub fn run(
     debounce_ms: u64,
     col_args: &[String],
     mode: RouteMode,
+    plain_trigger: bool,
 ) -> Result<()> {
     run_with_tmux(
         file,
@@ -1320,6 +1321,7 @@ pub fn run(
         debounce_ms,
         col_args,
         mode,
+        plain_trigger,
     )
 }
 
@@ -1330,6 +1332,7 @@ pub fn run_with_tmux(
     debounce_ms: u64,
     col_args: &[String],
     mode: RouteMode,
+    plain_trigger: bool,
 ) -> Result<()> {
     tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
     let _ = resync::prune_with_tmux(tmux); // Clean stale entries before lookup
@@ -1354,7 +1357,10 @@ pub fn run_with_tmux(
 
     let fm = frontmatter::parse_for_file(&updated_content, file).map(|(f, _)| f)?;
     let global_config = crate::config::load().unwrap_or_default();
-    let harness = HarnessConfig::from_context(&fm, &global_config);
+    let mut harness = HarnessConfig::from_context(&fm, &global_config);
+    if plain_trigger {
+        apply_plain_trigger_override(&mut harness);
+    }
 
     // Use absolute path for trigger commands to avoid CWD-dependent resolution
     // when the pane's CWD differs from the invoker's (e.g., narrowed to a
@@ -4868,6 +4874,10 @@ fn routed_trigger_payload(trigger: &str) -> String {
     trigger.to_string()
 }
 
+fn apply_plain_trigger_override(harness: &mut HarnessConfig) {
+    harness.trigger_command_template = "agent-doc {file}".to_string();
+}
+
 fn routed_trigger_submit_payload(payload: &str) -> String {
     crate::supervisor::ipc::normalize_submit_text(payload)
 }
@@ -8304,6 +8314,17 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
     }
 
     #[test]
+    fn plain_trigger_override_uses_bare_agent_doc_reopen_for_route() {
+        let mut claude = HarnessConfig::claude();
+        apply_plain_trigger_override(&mut claude);
+        assert_eq!(claude.trigger_command("test.md"), "agent-doc test.md");
+
+        let mut opencode = HarnessConfig::opencode();
+        apply_plain_trigger_override(&mut opencode);
+        assert_eq!(opencode.trigger_command("test.md"), "agent-doc test.md");
+    }
+
+    #[test]
     fn routed_trigger_submit_payload_strips_trailing_line_endings() {
         assert_eq!(
             routed_trigger_submit_payload("agent-doc test.md\r\n"),
@@ -9971,7 +9992,7 @@ Body\n\
             &format!("exec {} {}", ready_agent.display(), doc.display()),
         );
 
-        run_with_tmux(&doc, &iso, None, 0, &[], RouteMode::DispatchOnly)
+        run_with_tmux(&doc, &iso, None, 0, &[], RouteMode::DispatchOnly, false)
             .expect("dispatch-only route should ignore the stale startup-miss gate and send");
 
         let after = wait_for_pane_contains(
@@ -14115,7 +14136,7 @@ Body\n\
             unsafe {
                 std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1");
             }
-            let r = run_with_tmux(&file, &iso, None, 0, &[], RouteMode::Managed);
+            let r = run_with_tmux(&file, &iso, None, 0, &[], RouteMode::Managed, false);
             unsafe {
                 std::env::remove_var("AGENT_DOC_NO_AUTOSTART");
             }
@@ -14164,7 +14185,7 @@ Body\n\
             unsafe {
                 std::env::set_var("AGENT_DOC_NO_AUTOSTART", "1");
             }
-            let r = run_with_tmux(&file, &iso, None, 0, &[], RouteMode::Managed);
+            let r = run_with_tmux(&file, &iso, None, 0, &[], RouteMode::Managed, false);
             unsafe {
                 std::env::remove_var("AGENT_DOC_NO_AUTOSTART");
             }

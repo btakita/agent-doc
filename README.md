@@ -43,13 +43,13 @@ agent-doc init session.md "My Topic"
 agent-doc claim session.md
 
 # 4. Route hotkey triggers to the correct tmux pane
-agent-doc route --dispatch-only session.md
+agent-doc route --dispatch-only --plain-trigger session.md
 
 # 5. Run: diff, send to agent, write response back
 agent-doc run session.md
 ```
 
-The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only <file>` via a hotkey, and agent-doc dispatches the correct harness-specific trigger through the owning supervisor into the right pane. Claude Code panes receive `/agent-doc <file>`; Codex panes receive plain `agent-doc <file>`. That editor path always stays a bounded reopen send; it does not restart Codex just because the previous prompt was `/clear`.
+The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only --plain-trigger <file>` via a hotkey, and agent-doc dispatches the plain `agent-doc <file>` reopen into the right pane. That editor path always stays a bounded reopen send; it does not restart Codex just because the previous prompt was `/clear`.
 
 ## Feature Taxonomy
 
@@ -229,7 +229,7 @@ This catalog is intentionally detailed. It records user-visible capabilities and
 - **Codex forwarded `Ctrl+C` and EOF/Ctrl-D now always hand control back to the operator** — after a stdin-forwarded `Ctrl+C` that terminates the child, or a forwarded stdin EOF/Ctrl-D, agent-doc returns to an explicit canonical `Enter`/`q` prompt mode so the operator can intentionally restart fresh or exit the supervisor cleanly even when the parent harness keeps stdin in raw-ish mode, including immediately after a successfully committed turn
 - **Only genuinely promptless clean exits auto-recover** — if a fresh/fresh-restart Codex child clean-exits before it ever surfaces an idle prompt and no operator `Ctrl+D` was forwarded, agent-doc still treats that as failed startup provenance and restarts fresh automatically instead of stopping for the quit prompt
 - **Starting actor reroutes promote only dispatch-ready panes** — when the controller still reports the authoritative actor as `starting`, route waits for the live pane to show a harness-specific dispatch-ready prompt, promotes that same actor to `ready`, and then uses the normal managed or dispatch-only send path. If the pane never becomes dispatch-ready, both route modes fail closed before sending tmux or supervisor input.
-- **Dispatch-only reroutes keep editor runs on the live session** — after `agent-doc session clear <file>` or when a Codex session lacks a fresh capability-proof log event, the next editor-triggered `agent-doc route --dispatch-only <file>` still sends the bare `agent-doc <FILE>` reopen through that same live pane's tmux input path; only the managed non-dispatch route keeps the tracked `/clear` and missing-capability fresh-restart policies
+- **Dispatch-only reroutes keep editor runs on the live session** — after `agent-doc session clear <file>` or when a Codex session lacks a fresh capability-proof log event, the next editor-triggered `agent-doc route --dispatch-only --plain-trigger <file>` still sends the plain `agent-doc <FILE>` reopen through that same live pane's tmux input path; only the managed non-dispatch route keeps the tracked `/clear` and missing-capability fresh-restart policies
 - **Codex dispatch-only reroutes now fail closed when acceptance never becomes routed-submit proof** — if a live Codex pane accepts `agent-doc route --dispatch-only <file>` but hook-visible tracking never records a routed submission proof for that bare reopen, route stops with an accepted-but-unproven error instead of treating pane acceptance alone as success. This applies to ready authoritative actor reroutes as well as startup-window reroutes, and it suppresses the older optimistic fallback line so editor diagnostics show one clear outcome
 - **Dispatch-only proof scope is explicit** — route ops logs include both `proof` and `proof_scope`; Claude Code and OpenCode dispatch-only routes are labeled `accepted_only` unless they gain a harness dispatch-start hook, while hook-backed Codex can report `dispatch_start` proof
 - **Dispatch-only reroutes now absorb same-file restart handoffs before surfacing a boot-window refusal** — if the first starting-pane ready probe times out but the supervisor immediately restarts the same session in-place or hands it to a new pane for the same file, route follows that newer run instead of pinning the stale pane and surfacing a false `still booting` error to the editor

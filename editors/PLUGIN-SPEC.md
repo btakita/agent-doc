@@ -87,7 +87,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Precondition:** Active file is `.md`.
 - **Behavior:**
   1. Save the active document to disk.
-  2. Run `agent-doc route --dispatch-only <relative-path>` via subprocess from project root. This must stay a bare reopen send into the owning session, not a post-`/clear` restart shortcut.
+  2. Run `agent-doc route --dispatch-only --plain-trigger <relative-path>` via subprocess from project root. This must send the plain `agent-doc <FILE>` reopen into the owning session, not a post-`/clear` restart shortcut.
   3. Show an immediate in-flight info notification while route is running, then an inline hint on success and a persistent error notification on failure. Failure UI must preserve the exact route error text in a copyable surface (for example, copy action plus saved diagnostics file) instead of only a transient toast. A later successful route for the same document must clear that saved route-error diagnostic so obsolete startup/proof failures are not surfaced after recovery.
   4. Register the file for prompt polling (Section 2.6).
 - **Run action statelessness:** Do not block manual Run behind a plugin-local "already in progress" gate. Repeated Run presses should still dispatch the bare reopen and let the CLI own pane targeting.

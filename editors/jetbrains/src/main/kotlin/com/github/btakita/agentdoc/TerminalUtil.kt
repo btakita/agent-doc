@@ -162,9 +162,9 @@ object TerminalUtil {
     }
 
     /**
-     * Routes a document trigger command via `agent-doc route --dispatch-only`.
+     * Routes a document trigger command via `agent-doc route --dispatch-only --plain-trigger`.
      *
-     * This calls `agent-doc route --dispatch-only <path>` which:
+     * This calls `agent-doc route --dispatch-only --plain-trigger <path>` which:
      * 1. Reads the session UUID from the file's frontmatter
      * 2. Looks up the tmux pane for that session
      * 3. Resolves the active harness trigger and sends the bare reopen through the
@@ -184,7 +184,7 @@ object TerminalUtil {
 
         try {
             // Build route command with optional layout args
-            val cmd = mutableListOf(agentDoc, "route", "--dispatch-only", relativePath)
+            val cmd = buildRunRouteCommand(agentDoc, relativePath)
 
             val manager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
             val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
@@ -274,6 +274,9 @@ object TerminalUtil {
             notifyError(project, "Failed to run agent-doc: ${e.message}\nLooked for: $agentDoc")
         }
     }
+
+    internal fun buildRunRouteCommand(agentDoc: String, relativePath: String): MutableList<String> =
+        mutableListOf(agentDoc, "route", "--dispatch-only", "--plain-trigger", relativePath)
 
     internal fun buildRouteLayoutArgs(
         visibleMdFiles: List<String>,

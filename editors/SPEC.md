@@ -5,7 +5,7 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 1. Run (Submit)
 
 - **Trigger:** `Ctrl+Shift+Alt+A` (configurable)
-- **Behavior:** Save the active `.md` file, call `agent-doc route --dispatch-only <relative-path>` from the project root. This action must send the bare harness trigger into the owning live session; it must not restart Codex just because the latest tracked prompt was `/clear`.
+- **Behavior:** Save the active `.md` file, call `agent-doc route --dispatch-only --plain-trigger <relative-path>` from the project root. This action must send the plain `agent-doc <FILE>` reopen into the owning live session; it must not restart Codex just because the latest tracked prompt was `/clear`.
 - **Feedback:** Show an immediate in-flight info notification while `agent-doc route` is running, then finish with an inline hint near the cursor. Error notifications persist. If an editor persists exact route failures to disk, a later successful route for the same document must clear that saved diagnostic so obsolete startup/proof failures are not surfaced after recovery.
 - **Availability:** Only enabled when a `.md` file is active.
 

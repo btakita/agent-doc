@@ -10,6 +10,20 @@ import org.junit.Test
 class TerminalUtilTest {
 
     @Test
+    fun `run route command requests plain trigger for editor dispatch`() {
+        assertEquals(
+            listOf(
+                "/usr/local/bin/agent-doc",
+                "route",
+                "--dispatch-only",
+                "--plain-trigger",
+                "tasks/root.md",
+            ),
+            TerminalUtil.buildRunRouteCommand("/usr/local/bin/agent-doc", "tasks/root.md"),
+        )
+    }
+
+    @Test
     fun `replacing an alive route cancels the stale run`() {
         val registry = TerminalUtil.InFlightRouteRegistry()
         val stale = FakeRouteHandle(alive = true)

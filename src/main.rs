@@ -421,7 +421,7 @@ enum Commands {
         )]
         route_owned_reap_policy: start::RouteOwnedReapPolicy,
     },
-    /// Route /agent-doc command to the correct tmux pane
+    /// Route agent-doc command to the correct tmux pane
     Route {
         /// Path to the session document
         file: PathBuf,
@@ -429,6 +429,10 @@ enum Commands {
         /// busy-session recovery, startup-miss gating, or cycle-ack waiting.
         #[arg(long)]
         dispatch_only: bool,
+        /// Send the plain `agent-doc <FILE>` reopen even for harnesses whose
+        /// normal startup trigger is slash-command based.
+        #[arg(long)]
+        plain_trigger: bool,
         /// Tmux pane ID for lazy claiming (auto-claims if existing claim is stale)
         #[arg(long)]
         pane: Option<String>,
@@ -1468,6 +1472,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Route {
             file,
             dispatch_only,
+            plain_trigger,
             pane,
             cols,
             focus: _focus,
@@ -1483,7 +1488,7 @@ fn main() -> anyhow::Result<()> {
             } else {
                 route::RouteMode::Managed
             };
-            route::run(&file, pane.as_deref(), debounce, &cols, mode)
+            route::run(&file, pane.as_deref(), debounce, &cols, mode, plain_trigger)
         }
         Commands::Prompt { file, answer, all } => {
             if all {

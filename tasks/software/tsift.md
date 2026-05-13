@@ -35,7 +35,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #fwin bounded source windows
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:ac73fe85 -->
+❯ do [#frpt]. spec-test-build-install-commit-push
+### Re: #frpt repeated file-read diagnostics — gpt-5
+
+Implemented `#frpt` in `src/tsift`.
+
+What changed:
+
+- `tsift session-cost` now detects repeated source-file reads from Claude/Codex transcripts, including native `Read` tool calls plus shell reads like `sed -n`, `cat`, `bat`, `head`, and `tail`.
+- Repeated reads are grouped by `path` + `range`, with deterministic total and duplicate token estimates plus concrete `tsift source-read ... --budget normal` and `tsift summarize --file ...` follow-up commands.
+- `tsift session-review` now aggregates those repeated-read diagnostics across matched sessions and exposes them in JSON, compact, envelope metrics, and human output.
+- Updated `SPEC.md` and `VERSIONS.md`, with regressions in `session_cost` and `session_review` coverage.
+
+Verification:
+
+- `cargo test session_cost` passed.
+- `cargo test session_review` passed.
+- `make check` passed.
+- `make ci-full` passed, including the ignored wider SimWorld test.
+- `cargo build --release` passed.
+- `cargo install --path .` replaced the local `tsift` binary; `tsift --version` reports `tsift 0.1.42`.
+- Latest GitHub Actions CI for tsift is green: run `25783419063` (`CI`, created 2026-05-13 06:53 UTC), with the `Full CI suite` step running `make ci-full`. There is no separate tmux CI leg in the tsift workflow; CI carries the wider deterministic SimWorld coverage.
+
+Commits:
+
+- tsift: `8ea4532` (`feat: report repeated file reads`) pushed to `origin/main`.
+- parent agent-loop submodule pointer: `37744ac60` (`tsift: report repeated file reads`) committed locally; parent push follows after this required document closeout.
+<!-- agent:boundary:f7841b75 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +70,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#frpt] Add session-review/session-cost repeated-file-read diagnostics that group file-read tool calls by path/range, estimate duplicate tokens, and emit concrete tsift follow-up commands instead of generic harness advice.
 - [ ] [#frwr] Teach tsift rewrite to intercept large ordinary source reads inside indexed repos and route them to the bounded source-read surface, while preserving small explicit windows and non-source files as passthrough.
 - [ ] [#ftok] Add a real-session token-savings fixture for repeated source-file reads, including full-file cat/bat, oversized sed/head/tail windows, and a fail-under threshold proving the bounded source-read workflow saves tokens without hiding required line anchors.
 <!-- /agent:backlog -->
@@ -72,6 +97,7 @@ k
 - 2026-05-13 [#slock] Add deterministic lock-contention coverage for tsift index/search/status paths and recovery guidance; historical review surfaced 34 database file is locked failures while tsift locks can report no writer lock with live WAL/SHM sidecars, so snapshot fallback and diagnostics need regression coverage.
 - 2026-05-13 [#sfile] Filter empty or non-file file references from log-digest / session-digest; .agent-doc/logs/tsift-v0.1.log produced an empty path file group with 132 occurrences, degrading anchors and downstream next-context file lists.
 - 2026-05-13 [#fwin] Add a bounded source-file read/window command that returns line-range previews, stable handles, symbol/summary refs, and explicit expand commands so agents can inspect files incrementally instead of re-reading whole files.
+- 2026-05-13 [#frpt] Add session-review/session-cost repeated-file-read diagnostics that group file-read tool calls by path/range, estimate duplicate tokens, and emit concrete tsift follow-up commands instead of generic harness advice.
 <!-- /agent:done -->
 
 ## Completed / Reaped

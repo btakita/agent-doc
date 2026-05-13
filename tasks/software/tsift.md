@@ -55,7 +55,32 @@ Verification:
 Commits:
 - tsift: `df3133e` (`fix: keep next-context prompts live`), pushed to `origin/main`.
 - agent-loop: `103eb91bd` (`chore: update tsift submodule`) committed locally; parent push follows this binary-owned document closeout so the session document stays out of the manual repo commit.
-<!-- agent:boundary:a4394a2c -->
+❯ agent-doc has SimWorld. Should SimWorld be extracted so tsift can use it to speed up test suites? What library would be a good candidate? tmux-router? Does tsift use tmux-router? Should the shared SimWorld be a standalone library?
+### Re: SimWorld extraction — gpt-5
+
+Short answer: do not extract `agent-doc`'s `SimWorld` wholesale for `tsift` yet. The useful part is the pattern, not the current domain model.
+
+What I found:
+- `agent-doc`'s `SimWorld` is strongly tied to agent-doc closeout state: template documents, response capture/write/commit phases, backlog guards, route actor lifecycle, and sync-layout ownership projections.
+- `tsift` does not use `tmux-router`. `src/tsift/Cargo.toml` has no `tmux-router` dependency, and `cargo tree -p tsift --invert tmux-router` reports no matching package. The `tmux-router` entry in `src/tsift/Cargo.lock` is only an unused workspace patch marker.
+- `agent-doc` does use `tmux-router`, and its SimWorld has sync-layout cases because agent-doc owns tmux pane/session behavior. That does not map cleanly to tsift's main risk surface.
+
+For `tsift`, the best candidate for SimWorld-style acceleration is a local deterministic test harness around pure workflow state, especially:
+- session transcript classification: `session-digest`, `session-cost`, `session-review`, `context-pack`;
+- workspace/index status state: missing/stale/fresh scoped indexes, lock states, summary cache states;
+- rewrite/digest-runner routing decisions.
+
+That would let most matrix coverage run in memory with fixed seeds and compact traces, while keeping a smaller number of CLI integration tests for real subprocess, filesystem, sqlite, git, and timeout behavior. It should reduce suite cost more directly than bringing in tmux-router.
+
+If we extract anything, the right shape is a tiny standalone dev/test crate that provides only generic simulation machinery: deterministic RNG, command schedule runner, seed corpus budgets, trace formatting, and coverage counters. The domain worlds should stay in each consumer (`agent-doc` closeout world, `tsift` index/session/rewrite world, maybe later `tmux-router` layout world). I would only create that standalone crate after a `tsift`-local prototype proves the same runner API is useful in both projects.
+
+So the sequence I would use is:
+1. Build a `tsift`-local `sim_world` for the session/rewrite/status state machines.
+2. Move expensive CLI matrix tests behind a smaller smoke set only after the in-memory model covers the same decision invariants.
+3. Extract a shared crate only for the generic runner once both `agent-doc` and `tsift` have near-identical harness code.
+
+`tmux-router` is a good separate candidate for its own SimWorld-style layout projection tests, but it is not the right shared library for tsift.
+<!-- agent:boundary:8206d8fe -->
 <!-- /agent:exchange -->
 ###
 <!--

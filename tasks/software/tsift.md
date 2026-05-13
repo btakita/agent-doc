@@ -35,7 +35,27 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): #slock; #sfile
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:6e2c4215 -->
+❯ What are the #next-steps for tsift to make file reads more efficient?
+```
+Suggestions
+ℹ File reads using 15.9k tokens (8%) → save ~4.8k
+  If you are re-reading files, consider referencing earlier reads. Use offset/limit for large files.
+```
+### Re: #next-steps — gpt-5
+
+Top backlog item: `#fwin`.
+
+The next practical step is to give tsift a bounded source-file read surface. Today the efficient path is strong for search, explain, session-review, context-pack, diffs, tests, logs, and long session transcripts; the remaining gap is ordinary source inspection after search has found a file. That is where agents still fall back to `cat`, broad `sed`, or repeated local reads.
+
+I put these in priority order:
+
+1. `#fwin` — add a bounded source-file read/window command with line-range previews, stable handles, symbol/summary refs, and expand commands.
+2. `#frpt` — add diagnostics to session-review/session-cost that group repeated file-read tool calls and estimate duplicate token cost, so tsift can surface the same class of problem the harness warning showed.
+3. `#frwr` — teach `tsift rewrite` to intercept large ordinary source reads in indexed repos and route them to the bounded read surface, while preserving small explicit windows as passthrough.
+4. `#ftok` — lock this with a real-session token-savings fixture for repeated source-file reads.
+
+The order matters: build the narrow read primitive first, then measure repeated reads against it, then add rewrite automation, then pin the savings contract in CI.
+<!-- agent:boundary:5fa61fe4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,6 +64,10 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#fwin] Add a bounded source-file read/window command that returns line-range previews, stable handles, symbol/summary refs, and explicit expand commands so agents can inspect files incrementally instead of re-reading whole files.
+- [ ] [#frpt] Add session-review/session-cost repeated-file-read diagnostics that group file-read tool calls by path/range, estimate duplicate tokens, and emit concrete tsift follow-up commands instead of generic harness advice.
+- [ ] [#frwr] Teach tsift rewrite to intercept large ordinary source reads inside indexed repos and route them to the bounded source-read surface, while preserving small explicit windows and non-source files as passthrough.
+- [ ] [#ftok] Add a real-session token-savings fixture for repeated source-file reads, including full-file cat/bat, oversized sed/head/tail windows, and a fail-under threshold proving the bounded source-read workflow saves tokens without hiding required line anchors.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

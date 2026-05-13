@@ -34,7 +34,21 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): startreadytimeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5df0ce3a -->
+
+❯ (preset #spec-test-build-install-commit-push)
+❯ update spec + tests. build + install for local testing. commit + push
+❯ do [#multiplexertrait]
+synchronous orchestra
+preset #spec-test-build-install-commit-push
+- do [#multiplexertrait]
+- do [#startreadytimeout]
+- do [#directsubmitbudget]
+- do [#latefallbackloop]
+- do [#clearstartingrace]
+- do [#ownedreapbusy]
+- do [#opencodeinputdiag]
+- do [#tmuxe2etests]
+<!-- agent:boundary:d7880e56 -->
 <!-- /agent:exchange -->
 ###
 <!--

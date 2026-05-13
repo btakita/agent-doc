@@ -64,7 +64,49 @@ Commits:
 - parent repo: `c4504c5ef agent-doc(tsift): 2026-05-13 03:00:34`
 
 Pushed both the `src/agent-doc` branch and parent `main`.
-<!-- agent:boundary:3bbb0463 -->
+❯ agent-doc opencode still does not properly allow arrow keys or tab to pass through. Please investigate the currently running opencode session in addition to the source code. Please verify the fix works on a real opencode instance.
+```
+┃    ← Access external directory ~/work/btakita/corky/.github                                                                                                                                                                               ^[[C^[[D^[[C^[[B^[[Ayml" in ~/work/btakita/corky/.github/workflows                                                        
+┃                                                                                                                       ┃  △ Permission required
+┃    ← Access external directory ~/work/btakita/corky/.github/workflows                                                 ┃
+┃  Patterns                                                                                                             ┃                                                                                                                       ┃  - /home/brian/work/btakita/corky/.github/workflows/*
+┃
+┃
+┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
+```
+### Re: OpenCode permission key forwarding — gpt-5
+
+Fixed the OpenCode permission-prompt key path.
+
+The live Corky OpenCode pane confirmed the failure mode before the patch: `agent-doc prompt --answer 2 tasks/software/corky.md` sent a literal `l` into the OpenCode prompt instead of moving selection, and a direct left-arrow probe showed literal `^[[D` in the pane. The running prompt was OpenCode 1.14.48's `Permission required` prompt for `~/work/btakita/corky/.github/workflows`.
+
+Root cause was the previous workaround being wrong in two ways:
+
+- `prompt --answer` relied on printable `h`/`l` for OpenCode horizontal permission prompts.
+- the supervisor PTY filter stripped OpenTUI/Kitty keyboard-mode negotiation (`CSI > ... u`, `CSI > ... m`, `CSI < ... u`) for every harness, so real arrow/tab keys could fall through as literal escape text.
+
+Changes made in `src/agent-doc`:
+
+- `src/supervisor/pty.rs`: made `PtyFilter` harness-aware. Claude/Codex keep the existing terminal-query suppression; OpenCode now preserves Kitty keyboard-mode sequences while still stripping DSR/DA/XTVERSION/DCS noise.
+- `src/start.rs`: creates the PTY filter through the harness-aware constructor.
+- `src/prompt.rs`: OpenCode prompt automation now uses `Left`/`Right`, and OpenCode prompt parsing reads the highlighted selected option from ANSI captures instead of assuming option 0.
+- `specs/07-core-commands.md` and `VERSIONS.md`: updated the OpenCode prompt/key contract.
+
+Verification:
+
+- `cargo test prompt::tests`
+- `cargo test supervisor::pty::tests`
+- `make check`
+- `make build`
+- `make install`
+- Real OpenCode 1.14.48 startup under the patched supervisor preserved the keyboard negotiation sequences (`CSI ? u`, `CSI >4;1m`) in the OpenCode output path instead of filtering them out. I did not interrupt the current Corky prompt after `session restart-supervisor --fresh` refused because the pane was still `alive-busy`; the stuck pane remains available for the user to decide how to handle.
+- Latest checked `Agent Doc` CI run `25784630448`: `tmux-ci` passed. Its `check` job was red on the known `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails` pushed-state failure; local `make check` is green after the current fix.
+
+Commits:
+
+- `c2f0a0f6` in `src/agent-doc`: `fix: preserve opencode permission keys`
+- `ac1a8bd20` in the parent repo: `agent-doc: preserve opencode permission keys`
+<!-- agent:boundary:0dc243ff -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -991,6 +991,17 @@ pub fn run(file: &Path) -> Result<()> {
         }
     }
 
+    // Step 0d: Fail closed on out-of-band closeout drift before transcript
+    // repair can normalize a dirty response body into prompt-looking lines.
+    // Open cycles still go through repair first so interrupted write/commit
+    // boundaries can recover normally.
+    let open_cycle = crate::cycle_state::load(file)?
+        .map(|state| state.is_open())
+        .unwrap_or(false);
+    if !open_cycle && crate::session_check::detect_unstarted_prompt_bearing_diff(file)?.is_none() {
+        enforce_no_uncommitted_closeout_drift(file)?;
+    }
+
     // Step 1: Recover orphaned pending responses.
     eprintln!("[preflight] step 1: repair");
     let mut recovered = recovered_prior
@@ -2796,6 +2807,58 @@ mod tests {
         assert!(message.contains("news/README.md"));
         assert!(message.contains("news/2026-05-01/README.md"));
         assert!(message.contains("agent-doc write --commit"));
+    }
+
+    #[test]
+    fn preflight_fails_closed_on_uncommitted_exchange_drift_without_response_heading() {
+        let dir = setup_project();
+        let root = dir.path();
+
+        let doc = root.join("monsterrodholders.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ deploy v0.4.9\n",
+            "### Re: shopcozi mobile CSS fix — glm-5.1\n\n",
+            "Patched the mobile CSS and deployed v0.4.9.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, committed).unwrap();
+        snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "monsterrodholders.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let dirty = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ deploy v0.4.9\n",
+            "### Re: shopcozi mobile CSS fix — glm-5.1\n\n",
+            "Patched the mobile CSS and deployed v0.4.9.\n\n",
+            "Verification:\n",
+            "- npm test\n",
+            "- docker compose run post-deploy\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, dirty).unwrap();
+
+        let err = run(&doc).expect_err("preflight should block uncommitted exchange drift");
+        let message = err.to_string();
+        assert!(message.contains("uncommitted exchange changes"));
+        assert!(message.contains("agent-doc write --commit"));
+        assert!(
+            !message.contains("snapshot differs from HEAD"),
+            "body-only exchange drift should be diagnosed before generic snapshot drift: {message}"
+        );
     }
 
     #[test]

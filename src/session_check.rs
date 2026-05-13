@@ -412,6 +412,17 @@ pub(crate) fn detect_uncommitted_closeout_drift(file: &Path) -> Result<Option<St
             closeout_recovery_hint(file)
         )));
     }
+    if let Some(marker) = detect_uncommitted_exchange_drift(file)? {
+        if detect_unstarted_prompt_bearing_diff(file)?.is_some() {
+            return Ok(None);
+        }
+        return Ok(Some(format!(
+            "document has uncommitted exchange changes beyond the committed snapshot: {}{} {}",
+            marker,
+            tracked_side_effect_note(file)?,
+            closeout_recovery_hint(file)
+        )));
+    }
     match crate::git::verify_snapshot_committed(file)? {
         crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead {
             snapshot_len,

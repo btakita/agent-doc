@@ -116,6 +116,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 
 - Verifies that the latest response cycle reached a terminal committed state and that no likely direct assistant patchback bypassed the binary-owned write path.
 - Fails on open cycle states, uncommitted visible `### Re:` / `## Assistant` patchbacks, hidden `snapshot != HEAD` closeout drift, or committed-cycle exchange drift that appends a prompt+response pair or other new assistant response content.
+- Preflight/sync closeout-drift guards reuse the same exchange-drift detection for promptless response-body drift, so a prior OpenCode/Codex/direct-exec response body that is visible only in the working tree cannot be hidden behind a generic clean snapshot or postponed to the next manual commit. Prompt-bearing user edits still flow into the next normal preflight diff.
 - Fails when a committed submodule document snapshot still leaves the parent repository submodule pointer uncommitted, naming the submodule path and prescribing `agent-doc commit <FILE>` recovery.
 - Fails after a committed closeout when the working tree still contains prompt-bearing user edits that were added concurrently with the write and therefore are absent from the committed snapshot.
 - Fails after a closed cycle when the live `agent:exchange` tail ends with a prompt-looking block and no later assistant response, even if the prompt already matches the committed snapshot. This prevents direct/manual implementation commits from counting as closeout when the response patchback was skipped.

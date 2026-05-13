@@ -25,14 +25,50 @@
 
 use anyhow::Result;
 use instruction_files::AuditConfig;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn run(root_override: Option<&Path>) -> Result<()> {
     let config = AuditConfig::agent_doc();
+    let nested_override = root_override
+        .is_none()
+        .then(resolve_nested_dev_crate_root_override)
+        .flatten();
+    let fallback_root = if root_override.is_none() && nested_override.is_none() {
+        fallback_root_without_marker(&config)
+    } else {
+        None
+    };
     let resolved_root = root_override
         .map(|p| p.to_path_buf())
-        .or_else(resolve_nested_dev_crate_root_override);
+        .or(nested_override)
+        .or(fallback_root);
     instruction_files::run(&config, resolved_root.as_deref())
+}
+
+fn fallback_root_without_marker(config: &AuditConfig) -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?.canonicalize().ok()?;
+    if find_project_marker_root_from(&cwd, config).is_some() {
+        return None;
+    }
+    eprintln!("Warning: no project root marker found, using current directory");
+    Some(cwd)
+}
+
+fn find_project_marker_root_from(start: &Path, config: &AuditConfig) -> Option<PathBuf> {
+    let mut dir = start;
+    loop {
+        if config
+            .root_markers
+            .iter()
+            .any(|marker| dir.join(marker).exists())
+        {
+            return Some(dir.to_path_buf());
+        }
+        match dir.parent() {
+            Some(parent) if parent != dir => dir = parent,
+            _ => return None,
+        }
+    }
 }
 
 fn resolve_nested_dev_crate_root_override() -> Option<std::path::PathBuf> {

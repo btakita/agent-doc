@@ -1,4 +1,4 @@
-.PHONY: build build-release release test clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
+.PHONY: build build-release release test tmux-ci clippy check precommit install install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin
 
 # Build debug binary
 build:
@@ -23,6 +23,10 @@ release: check
 # Run tests (unset git hook env vars so temp-repo tests are not confused by GIT_DIR)
 test:
 	env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test
+
+# Live tmux integration sweep for CI.
+tmux-ci:
+	env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE cargo test --all-targets -- --ignored --test-threads="1"
 
 # Lint
 clippy:

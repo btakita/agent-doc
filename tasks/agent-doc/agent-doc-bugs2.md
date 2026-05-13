@@ -34,7 +34,17 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 4 response topic(s): OpenCode permission inputs; OpenCode permission key forwarding; OpenCode prompt verification; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:02f5d1c7 -->
+❯ do [#opencodepromptplugins]. Please verify your fix with a live opencode session. spec-test-build-install-commit-push
+### Re: opencode prompt plugins — gpt-5
+
+Implemented `#opencodepromptplugins`.
+
+Changed the JetBrains and VS Code prompt UIs to pass `agent-doc prompt --answer` the one-based parsed-option position while still displaying and matching OpenCode's visible TUI numbers. Added flat `agent-doc prompt --all` JSON normalization with `selected` preservation for both plugins, plus focused tests and spec/docs/version updates. Bumped local plugin builds to JetBrains `0.2.116` and VS Code `0.2.15`.
+
+Verified with `npm test`, `./gradlew test`, `./gradlew buildPlugin`, `npm run package`, `make check`, `make tmux-ci`, `make install`, `agent-doc plugin install vscode --local`, and `agent-doc plugin install jetbrains --local`. I also ran a live OpenCode demo session in tmux, claimed it with agent-doc, triggered `/permission bash`, observed the active prompt JSON, answered `--answer 3`, and confirmed the prompt became inactive with OpenCode on the reject follow-up.
+
+Committed `src/agent-doc` as `97b4b026 fix: align editor prompt answer indices` and updated the parent repo gitlink as `85bbfe714 fix: align editor prompt plugins`. The parent branch push will run after this finalize commit so the session response commit is included. JetBrains reported install targets under IntelliJ IDEA 2026.1; restart the IDE to activate the updated plugin.
+<!-- agent:boundary:a776d544 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,7 +108,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#opencodepromptplugins] [recommended] Add editor-plugin prompt-answer coverage for JetBrains and VSCode: verify both prompt UIs pass the selected option index to agent-doc prompt --answer, handle flat agent-doc prompt --all JSON including selected, and include a live OpenCode permission prompt smoke after installing the plugin.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->
@@ -229,4 +238,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-13 [#rspcmtdelay] #agent-doc-bug: Session response patchback had a long delay before being committed; current `src/session-share/tasks/root.md` evidence required failed `write --commit`/`finalize`, manual patching, stale preflight repair, and parent pointer closeout before `session-check` passed. Plan: tasks/agent-doc/plan-response-commit-delay.md
 - 2026-05-13 [#rspcmt9] #agent-doc-bug: Direct Codex chat answered a Monster Rod Holders session prompt but did not write the response to `src/boost-client/tasks/monsterrodholders.md`; manual `agent-doc write --commit` then committed the submodule response but initially failed the parent pointer closeout on root `.git/index.lock`, requiring `agent-doc commit <file>` recovery. Plan: tasks/agent-doc/plan-direct-chat-response-patchback-required.md
 - 2026-05-13 [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
+- 2026-05-13 [#opencodepromptplugins] [recommended] Add editor-plugin prompt-answer coverage for JetBrains and VSCode: verify both prompt UIs pass the selected option index to agent-doc prompt --answer, handle flat agent-doc prompt --all JSON including selected, and include a live OpenCode permission prompt smoke after installing the plugin.
 <!-- /agent:done -->

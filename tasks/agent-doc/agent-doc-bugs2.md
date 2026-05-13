@@ -54,7 +54,39 @@ So the right shape is:
 `#ownedpty` is still relevant, but narrower than the backlog wording can imply. It is not needed to replace all tmux usage. Tmux is still valuable for panes, layout, attach/detach, stash behavior, and operator-visible sessions. Owned PTY matters when the requirement is: agent-doc must inject or mediate input as the actual terminal endpoint, without asking tmux to reinterpret a key. That is the only path that can truly eliminate the Kitty/non-Kitty `send-keys` distinction for managed panes, because agent-doc can negotiate or emulate the terminal protocol and write the exact byte stream to the child PTY.
 
 I would treat `#tmuxhybridpty` as the umbrella architecture and `#ownedpty` as its phase-3 backend for managed panes where input correctness is still not provable through tmux. We should not delete `#ownedpty`; we should keep it scoped to managed Claude/OpenCode/Codex panes and avoid using it as a general-purpose tmux replacement.
-<!-- agent:boundary:c9d9a1a2 -->
+❯ do [#tmuxhybridpty]. spec-test-build-install-commit-push
+### Re: tmuxhybridpty — gpt-5
+
+Implemented `#tmuxhybridpty` as the shared hybrid policy layer instead of replacing tmux wholesale.
+
+What landed:
+
+- `tmux-router` now has `src/hybrid.rs` with explicit lifecycle/output/input policy:
+  - lifecycle/events: control mode
+  - live output stream: `pipe-pane`
+  - tmux-backed submit fallback: normal Enter or OpenCode Kitty Return
+  - owned PTY: scoped to managed Claude/OpenCode input where byte-exact delivery matters
+- `tmux-router` exposes `strategy_for_harness`, `submit_text_for_harness`, and an RAII `TmuxPipePane` guard for `pipe-pane` file streaming.
+- `agent-doc` now delegates harness-aware tmux submission through `tmux-router::submit_text_for_harness`, removing the duplicated OpenCode Kitty-return implementation from `sessions.rs`.
+- Specs now document the hybrid architecture boundary in the session tmux commands, routing, supervisor, and tmux-router concepts docs.
+- Cleaned the `tmux-router` clippy blockers in `sync.rs` so the crate can pass `cargo clippy -- -D warnings` on this toolchain.
+
+Verification:
+
+- `make check` from repo root: passed.
+- `make tmux-ci` from `src/agent-doc`: first run hit one live tmux flake in `fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs`; the isolated rerun passed, and a full second `make tmux-ci` passed with 226 ignored live tests.
+- `cargo test` from `src/tmux-router`: passed, including the new hybrid policy and `pipe-pane` stream tests.
+- `cargo clippy -- -D warnings` from `src/tmux-router`: passed.
+- Focused live tests passed for control-mode output, `pipe-pane` streaming, and OpenCode Kitty-return submission.
+- Latest GitHub `Agent Doc` run on `main` was red for both `check` and `tmux-ci`, but GitHub returned no retained step logs; local tmux evidence above is green.
+- `make install` from `src/agent-doc`: installed the local `agent-doc` binary and `libagent_doc-0.33.16.so`.
+
+Committed and pushed:
+
+- `tmux-router` `cc4ebfb` (`main`): `feat: add hybrid pane policy`
+- `agent-doc` `13e49ce` (`20260422/codex-agent-backend`): `feat: centralize hybrid tmux submit policy`
+- root `agent-loop` `9a57813`: `feat: update hybrid tmux architecture`
+<!-- agent:boundary:be1468cb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,7 +161,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxhybridpty] Implement hybrid control-mode + pipe-pane + owned-PTY architecture: control mode for lifecycle events, pipe-pane for output streaming, owned PTY only for managed panes (OpenCode, Claude) where input reliability matters. Depends on #tmuxcontrolmode.
 - [ ] [#ownedpty] Implement portable-pty + alacritty_terminal backend for managed panes — agent-doc owns the child PTY directly instead of tmux send-keys/capture-pane, eliminating the input heuristic failure class. Depends on #multiplexertrait abstraction boundary. [recommended]
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
 - [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.

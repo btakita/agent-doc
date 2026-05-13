@@ -47,7 +47,28 @@ Main issues: `session-review` and `context-pack --next-context` still overreach.
 Operational signals: `session-cost` found restart/no-op churn in the tsift session log: 28 fresh restarts, 8 ctrl-D restart-loop events, 5 auto-trigger timeouts, and 123 `commit_already_current` events. The wider review also reported `commit_already_current` 4306 times. `tsift locks` reported no writer lock for the root index but did find live WAL/SHM sidecars and recommended inspecting for a wedged writer before reindexing.
 
 I added five backlog items in priority order. Top backlog item: `#sctx`.
-<!-- agent:boundary:648d8966 -->
+❯ do [#sctx]. spec-test-build-install-commit-push
+### Re: #sctx — gpt-5
+
+Implemented and shipped #sctx.
+
+Changed tsift so `session-review --next-context` derives active prompt targets, touched files/symbols, and unresolved failures from the live unresolved `agent:exchange` tail for agent-doc template documents. Aggregate review still keeps historical hotspots for triage; next-context falls back to aggregates only when no live tail exists.
+
+Updated `src/tsift/SPEC.md`, `src/tsift/src/session_review.rs`, `src/tsift/src/session_digest.rs`, and `src/tsift/tests/exit_code.rs`. Added unit and compiled CLI regressions for stale `do [#...]` prompts, `### Re:` summaries, prompt-preset/completed-backlog ballast, and stale `/!` file/failure context.
+
+Verification:
+- `cargo test session_review_next_context`
+- `cargo test context_pack_json_composes_next_context_and_optional_digests`
+- `make check`
+- `cargo build --release`
+- `cargo install --path . --locked`; installed `/home/brian/.cargo/bin/tsift`, `tsift 0.1.42`
+- live smoke: `tsift session-review --next-context --json tasks/software/tsift.md` now reports only `do [#sctx]...`, empty touched files, and empty unresolved failures
+- GitHub CI `25779577313` passed `make ci-full`; no `tmux-ci` target or tmux-test leg exists in this tsift repo, and `.github/workflows/ci.yml` runs `make ci-full`
+
+Committed and pushed:
+- `btakita/tsift` `d4435be` (`fix: scope next-context to live session tail`)
+- `btakita/agent-loop` `a0179169f` (`chore: bump tsift submodule`)
+<!-- agent:boundary:03139289 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,7 +77,6 @@ I added five backlog items in priority order. Top backlog item: `#sctx`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sctx] Fix tsift session-review / context-pack --next-context active-context scoping so prompt targets, files, and failures come from the current unresolved tail instead of historical assistant text, presets, examples, or unrelated matched sessions; regression should reject stale do-hash prompts, Re summaries, prompt-preset text, and bogus paths like /! from tasks/software/tsift.md review output.
 - [ ] [#sfail] Tighten tsift session-review failure extraction so it reports command/test/log failures with command and session anchors, not instruction text or source snippets like After finalize, panic snippets, or generic command exited with code 1; preserve real failing assertions and cargo exits separately.
 - [ ] [#stok] Audit Codex/Claude token accounting in tsift session-review and session-cost for cumulative-usage double counting and cross-session duplication; the 12-session tasks/software/tsift.md review reported about 1.4B prompt tokens and a 1.4M-token largest turn, which needs a deterministic fixture.
 - [ ] [#slock] Add deterministic lock-contention coverage for tsift index/search/status paths and recovery guidance; historical review surfaced 34 database file is locked failures while tsift locks can report no writer lock with live WAL/SHM sidecars, so snapshot fallback and diagnostics need regression coverage.
@@ -80,6 +100,7 @@ k
 - 2026-05-13 [#t275] [recommended] Prototype a tsift-local deterministic SimWorld for session/rewrite/status state-machine coverage before extracting any shared simulation crate.
 - 2026-05-13 [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
 - 2026-05-13 [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
+- 2026-05-13 [#sctx] Fix tsift session-review / context-pack --next-context active-context scoping so prompt targets, files, and failures come from the current unresolved tail instead of historical assistant text, presets, examples, or unrelated matched sessions; regression should reject stale do-hash prompts, Re summaries, prompt-preset text, and bogus paths like /! from tasks/software/tsift.md review output.
 <!-- /agent:done -->
 
 ## Completed / Reaped

@@ -66,7 +66,41 @@ Commits:
 - parent repo: `3ff55399c` (`agent-doc: align editor clear busy actions`)
 
 Unrelated dirty paths left untouched: `mail`, `src/session-share`, `tasks/software/corky.md`, and `tasks/software/tsift.md`.
-<!-- agent:boundary:4ab0c72b -->
+❯ do [#syncforceux]. spec-test-build-install-commit-push
+
+❯ JB `Clear Session Context` on this file still has:
+```
+Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 74% used
+```
+### Re: syncforceux — gpt-5
+
+Implemented `#syncforceux`.
+
+The editor sync path now treats safe-passive sync lock contention as deferred instead of applied. VS Code now recognizes the `[sync] safe_passive_sync_lock_contention_retry ... coalesced=skipped_stale action=retry` marker and keeps the stale command out of `lastTabSyncState`, so only the newest tab/layout request is retried. JetBrains already parsed that marker for automatic tab sync; I fixed the structural layout-change detector so it no longer acquires the plugin sync guard and then calls `SyncLayoutAction.syncLayout`, which reacquired the same guard and could self-skip. The detector now builds and runs the exact-visible `agent-doc sync --no-autostart` command directly while holding the guard through the CLI process, then replays the newest generation after unlock when needed.
+
+Specs now state the editor contract explicitly: contention markers are deferred, not successful syncs; stale requests must not update last-applied editor state; editor-side guards must not self-contend.
+
+Verification:
+- `npm test` in `src/agent-doc/editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test` in `src/agent-doc/editors/jetbrains`
+- `cargo fmt`
+- `make check`
+- `make build`
+- `make tmux-ci` (225 live tmux tests passed)
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
+- `npm run package` in `src/agent-doc/editors/vscode`
+- `agent-doc plugin install --local jetbrains` installed JetBrains plugin `0.2.119` to IntelliJIdea2026.1; restart the IDE to activate it.
+- `agent-doc plugin install --local vscode` installed VS Code/Codium extension `0.2.18`.
+- GitHub Actions: latest `CI` run `25773430221` succeeded; it has no remote tmux job listed.
+
+Commits pushed:
+- `src/agent-doc`: `984fa131` (`fix: retry editor sync contention`)
+- parent repo: `8f1622a24` (`agent-doc: retry editor sync contention`)
+
+Unrelated dirty paths left untouched: `mail`, `src/session-share`, `tasks/software/corky.md`, and this session document until this finalize commit.
+<!-- agent:boundary:cd1c4da6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,7 +176,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#syncforceux] [recommended] #next-steps: Make `agent-doc sync` reliable under concurrent editor sync by coalescing or superseding duplicate sync requests, proving the latest selected document is eventually applied, and evaluating an explicit `agent-doc sync --force` path with JetBrains/VSCode force action only for stale or replaceable in-flight syncs.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->
@@ -277,4 +310,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-13 [#k89p] [recommended] #next-steps: Add an ops-log effectiveness summary command/report that groups recent ipc_write_consumed + commit_success, route_dispatch_start_proven, post_commit_local_drift, session_clear_live_busy_guard_bypassed, route_authoritative_actor_starting_not_ready, accepted_only route proof, and sync over-budget events by document/session so log review produces signal without manual grep.
 - 2026-05-13 [#q97c] [recommended] #next-steps: Investigate session_clear_live_busy_guard_bypassed for authoritative actors still running agent-doc; current ops.log evidence for agent-doc-bugs2.md at [1778693812] clears pane %1 while the tail still reports gpt-5.5 high / Context 85% used, then immediately reroutes. Require explicit interrupt/confirm semantics or stronger idle proof before clear.
 - 2026-05-13 [#jbclearstaleidle] [recommended] #next-steps: Re-test JetBrains Clear Session Context against current agent-doc-bugs2 stale-busy evidence and ensure Refresh recomputes live idle proof, Status shows controller vs pane evidence, and Interrupt and clear is the only destructive path for truly busy agent-doc turns.
+- 2026-05-13 [#syncforceux] [recommended] #next-steps: Make `agent-doc sync` reliable under concurrent editor sync by coalescing or superseding duplicate sync requests, proving the latest selected document is eventually applied, and evaluating an explicit `agent-doc sync --force` path with JetBrains/VSCode force action only for stale or replaceable in-flight syncs.
 <!-- /agent:done -->

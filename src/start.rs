@@ -1123,6 +1123,65 @@ fn current_child_prompt_visible(
     harness.matches_prompt(stripped.trim())
 }
 
+fn opencode_permission_prompt_active(shared: &SupervisorShared) -> bool {
+    let recent = shared.recent_output.lock().unwrap();
+    let output = String::from_utf8_lossy(&recent);
+    let prompt = crate::prompt::parse_prompt(&output);
+    if !prompt.active {
+        return false;
+    }
+    prompt.options.as_ref().is_some_and(|options| {
+        options.iter().any(|option| option.label == "Allow once")
+            && options.iter().any(|option| option.label == "Allow always")
+            && options.iter().any(|option| option.label == "Reject")
+    })
+}
+
+fn translate_opencode_permission_arrow_keys(data: &[u8]) -> Option<Vec<u8>> {
+    let mut translated = Vec::with_capacity(data.len());
+    let mut changed = false;
+    let mut i = 0;
+    while i < data.len() {
+        let replacement = if data[i..].starts_with(b"\x1b[C")
+            || data[i..].starts_with(b"\x1b[B")
+            || data[i..].starts_with(b"\x1bOC")
+            || data[i..].starts_with(b"\x1bOB")
+        {
+            Some((&b"\t"[..], 3))
+        } else if data[i..].starts_with(b"\x1b[D")
+            || data[i..].starts_with(b"\x1b[A")
+            || data[i..].starts_with(b"\x1bOD")
+            || data[i..].starts_with(b"\x1bOA")
+        {
+            Some((&b"\x1b[Z"[..], 3))
+        } else {
+            None
+        };
+
+        if let Some((bytes, consumed)) = replacement {
+            translated.extend_from_slice(bytes);
+            i += consumed;
+            changed = true;
+        } else {
+            translated.push(data[i]);
+            i += 1;
+        }
+    }
+
+    changed.then_some(translated)
+}
+
+fn normalize_stdin_for_harness_permission_prompt(
+    shared: &SupervisorShared,
+    harness: &crate::harness::HarnessConfig,
+    data: &[u8],
+) -> Option<Vec<u8>> {
+    if harness.binary != "opencode" || !opencode_permission_prompt_active(shared) {
+        return None;
+    }
+    translate_opencode_permission_arrow_keys(data)
+}
+
 fn is_help_screen_visible(
     shared: &SupervisorShared,
     harness: &crate::harness::HarnessConfig,
@@ -1950,6 +2009,7 @@ fn spawn_reader_thread(
 #[cfg(unix)]
 fn spawn_writer_thread(
     shared: Arc<SupervisorShared>,
+    harness: crate::harness::HarnessConfig,
     writer: Arc<Mutex<SharedPtyWriter>>,
     stop_fd: std::os::unix::io::RawFd,
     stop: Arc<AtomicBool>,
@@ -2024,6 +2084,9 @@ fn spawn_writer_thread(
                         }
                         continue;
                     }
+                    let maybe_translated =
+                        normalize_stdin_for_harness_permission_prompt(&shared, &harness, data);
+                    let data = maybe_translated.as_deref().unwrap_or(data);
                     // Detect Ctrl+D (\x04) — in raw mode this is a byte, not EOF.
                     // The pty slave's line discipline interprets it as EOF for the child.
                     if let Some(ref flag) = ctrl_d_flag
@@ -2077,6 +2140,7 @@ fn spawn_writer_thread(
 #[cfg(not(unix))]
 fn spawn_writer_thread(
     _shared: Arc<SupervisorShared>,
+    _harness: crate::harness::HarnessConfig,
     writer: Arc<Mutex<SharedPtyWriter>>,
     _stop_fd: (),
     stop: Arc<AtomicBool>,
@@ -2686,6 +2750,7 @@ pub(crate) fn run_with_reap_policy(
         #[cfg(unix)]
         let writer_thread = spawn_writer_thread(
             shared.clone(),
+            harness.clone(),
             writer_arc.clone(),
             writer_stop.read_fd(),
             writer_stop_flag.clone(),
@@ -2695,6 +2760,7 @@ pub(crate) fn run_with_reap_policy(
         #[cfg(not(unix))]
         let writer_thread = spawn_writer_thread(
             shared.clone(),
+            harness.clone(),
             writer_arc.clone(),
             (),
             writer_stop_flag.clone(),
@@ -4792,6 +4858,47 @@ Done.
     }
 
     #[test]
+    fn opencode_permission_prompt_translates_legacy_arrows_to_tab_controls() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(
+            &shared,
+            b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject ctrl+f fullscreen \xe2\x87\x86 select enter confirm\n",
+        );
+
+        let translated = normalize_stdin_for_harness_permission_prompt(
+            &shared,
+            &harness,
+            b"\x1b[C\x1b[C\x1b[D\x1b[Atext",
+        )
+        .expect("OpenCode permission prompt should translate legacy arrow escapes");
+
+        assert_eq!(translated, b"\t\t\x1b[Z\x1b[Ztext");
+    }
+
+    #[test]
+    fn opencode_permission_prompt_translation_is_gated_to_permission_dialog() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(&shared, b"Ask anything...\n");
+
+        assert!(
+            normalize_stdin_for_harness_permission_prompt(&shared, &harness, b"\x1b[C").is_none(),
+            "normal OpenCode prompt editing must keep arrow keys unchanged"
+        );
+
+        let codex = crate::harness::HarnessConfig::codex();
+        record_recent_output(
+            &shared,
+            b"\x1b[48;2;245;167;66mAllow once\x1b[0m Allow always Reject ctrl+f fullscreen \xe2\x87\x86 select enter confirm\n",
+        );
+        assert!(
+            normalize_stdin_for_harness_permission_prompt(&shared, &codex, b"\x1b[C").is_none(),
+            "non-OpenCode harnesses must not receive OpenCode permission key translation"
+        );
+    }
+
+    #[test]
     fn current_child_prompt_visible_uses_latest_nonempty_line() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::codex();
@@ -5004,6 +5111,7 @@ Done.
         let shared = Arc::new(SupervisorShared::new("test", "writer-stop".to_string()));
         let handle = spawn_writer_thread(
             shared,
+            crate::harness::HarnessConfig::codex(),
             writer_arc,
             stop.read_fd(),
             stop_flag.clone(),
@@ -5063,8 +5171,15 @@ Done.
         let stop_fd = stop.read_fd();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let shared = Arc::new(SupervisorShared::new("test", "writer-epipe".to_string()));
-        let handle =
-            spawn_writer_thread(shared, writer_arc, stop_fd, stop_flag.clone(), None, None);
+        let handle = spawn_writer_thread(
+            shared,
+            crate::harness::HarnessConfig::codex(),
+            writer_arc,
+            stop_fd,
+            stop_flag.clone(),
+            None,
+            None,
+        );
 
         // Inject a byte into stdin to trigger a write attempt.
         // The write will fail (EPIPE) and the thread should exit.

@@ -107,6 +107,12 @@ The supervisor is a single process that:
 - Pty is allocated before claude spawns and destroyed after claude exits + IPC socket closes.
 - SIGWINCH on the tmux pane → forwarded to the pty master so claude sees resize.
 - On supervisor exit (user `q`), pty slave closes, claude gets SIGHUP.
+- OpenCode permission prompts are a guarded stdin exception: when recent child
+  output parses as the horizontal `Allow once` / `Allow always` / `Reject`
+  permission dialog, the stdin forwarder rewrites legacy arrow-key escapes to
+  Tab/BackTab selector keys before forwarding them to the child. Outside that
+  active permission prompt, OpenCode receives the original arrow bytes so normal
+  composer navigation is unchanged.
 
 ### Actor lifecycle reporting
 

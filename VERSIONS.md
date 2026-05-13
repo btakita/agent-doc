@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Managed OpenCode permission arrows no longer leak escape text.** While the supervisor sees an active OpenCode `Allow once` / `Allow always` / `Reject` permission prompt, legacy arrow-key escape sequences from stdin are translated to the prompt footer's Tab/BackTab selector controls before they reach OpenCode. Normal OpenCode prompt editing remains unchanged, and the regression covers the `^[[C` / `^[[D` leak shape from a live permission dialog.
+
 - **Editor prompt answers now run from the owning session cwd.** `agent-doc prompt --all` entries include `cwd`, and the JetBrains/VS Code prompt UIs use that root when calling `prompt --answer` instead of assuming the current IDE workspace root. Failed answer submissions now clear the temporary suppression key so the still-active prompt can reappear. Added process-level JetBrains coverage for the prompt-answer command cwd and a live tmux integration regression proving OpenCode answers send Tab rather than a raw left/right arrow escape. Bumped local plugin builds to JetBrains `0.2.117` and VS Code `0.2.16`.
 
 - **Editor prompt answers now use the `prompt --answer` positional contract.** JetBrains and VS Code prompt UIs accept flat `agent-doc prompt --all` entries with `selected`, keep the selected state in their prompt item model, and send the selected option's one-based position to `agent-doc prompt --answer` instead of forwarding the displayed TUI option number. Bumped the local-testing plugin builds to JetBrains `0.2.116` and VS Code `0.2.15`.

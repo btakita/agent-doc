@@ -276,8 +276,10 @@ pub fn reap(file: &Path) -> Result<()> {
     let canonical = canonicalize_component_content(file, &final_content);
     let mut new_doc = comp.replace_content(&full_content, &canonical);
     if !removed_items.is_empty() {
-        new_doc = crate::preflight::archive_pending_done(&new_doc, &removed_items)
+        let archived = crate::preflight::archive_pending_done(file, &new_doc, &removed_items)
+            .context("failed to archive reaped item(s) to agent:done")?
             .context("failed to archive reaped item(s) to agent:done")?;
+        new_doc = archived;
     }
     std::fs::write(file, &new_doc)?;
     if changed {

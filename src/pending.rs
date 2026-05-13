@@ -1097,10 +1097,25 @@ pub struct DroppedBacklogReport {
 ///
 /// `done_ids` allows callers to exclude items that were explicitly marked done
 /// during the current cycle (from `cycle_state.pending_done_ids`).
+#[allow(dead_code)]
 pub fn detect_dropped_from_history(
     current_doc: &str,
     baseline_doc: &str,
     done_ids: &HashSet<String>,
+) -> Result<DroppedBacklogReport> {
+    detect_dropped_from_history_with_extra_current_ids(
+        current_doc,
+        baseline_doc,
+        done_ids,
+        &HashSet::new(),
+    )
+}
+
+pub fn detect_dropped_from_history_with_extra_current_ids(
+    current_doc: &str,
+    baseline_doc: &str,
+    done_ids: &HashSet<String>,
+    extra_current_ids: &HashSet<String>,
 ) -> Result<DroppedBacklogReport> {
     let baseline_components = crate::component::parse(baseline_doc)?;
     let Some(baseline_backlog) = baseline_components
@@ -1139,6 +1154,7 @@ pub fn detect_dropped_from_history(
             current_ids.extend(extract_pending_ids_from_text(comp.content(current_doc)));
         }
     }
+    current_ids.extend(extra_current_ids.iter().cloned());
 
     let excluded_ranges: Vec<(usize, usize)> = current_components
         .iter()
@@ -1190,7 +1206,7 @@ pub fn detect_dropped_from_history(
     Ok(DroppedBacklogReport { dropped })
 }
 
-fn extract_pending_ids_from_text(text: &str) -> HashSet<String> {
+pub(crate) fn extract_pending_ids_from_text(text: &str) -> HashSet<String> {
     let mut ids = HashSet::new();
     let mut rest = text;
     while let Some(start) = rest.find("[#") {

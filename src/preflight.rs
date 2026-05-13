@@ -100,7 +100,7 @@
 //! - `links_cache_dir_creates_directory`: creates `.agent-doc/links_cache/` and
 //!   returns `Some(path)` when `.agent-doc/` exists.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1684,7 +1684,7 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
 
         current_content = comp.replace_content(&current_content, &current_body);
         if !removed_items.is_empty()
-            && let Some(archived) = archive_pending_done(&current_content, &removed_items)
+            && let Some(archived) = archive_pending_done(file, &current_content, &removed_items)?
         {
             current_content = archived;
         }
@@ -1704,7 +1704,7 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
                 })?;
             *snap_content = snap_comp.replace_content(snap_content, &current_body);
             if !removed_items.is_empty()
-                && let Some(archived) = archive_pending_done(snap_content, &removed_items)
+                && let Some(archived) = archive_pending_done(file, snap_content, &removed_items)?
             {
                 *snap_content = archived;
             }
@@ -1887,10 +1887,12 @@ fn enforce_no_dropped_backlog(file: &Path) -> Result<()> {
     })?;
     let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
 
-    let report = crate::pending::detect_dropped_from_history(
+    let external_done_ids = external_done_archive_ids(file, &current_content)?;
+    let report = crate::pending::detect_dropped_from_history_with_extra_current_ids(
         &current_content,
         &head_content,
         &resolved_ids,
+        &external_done_ids,
     )?;
     if !report.dropped.is_empty() {
         let refs = report
@@ -2270,24 +2272,27 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
 /// is always rendered with a trailing blank line so successive turns don't
 /// pack entries onto one line.
 pub(crate) fn archive_pending_done(
+    file: &Path,
     content: &str,
     removed: &[crate::pending::PendingItem],
-) -> Option<String> {
+) -> Result<Option<String>> {
     if removed.is_empty() {
-        return None;
+        return Ok(None);
     }
     let mut content_with_archive = content.to_string();
-    let components = crate::component::parse(&content_with_archive).ok()?;
+    let components = crate::component::parse(&content_with_archive)?;
     if !components
         .iter()
         .any(|c| crate::component::is_backlog_done_component(&c.name))
     {
-        content_with_archive = insert_pending_done_component(&content_with_archive)?;
+        content_with_archive = insert_pending_done_component(&content_with_archive)
+            .context("failed to insert agent:done component")?;
     }
-    let components = crate::component::parse(&content_with_archive).ok()?;
+    let components = crate::component::parse(&content_with_archive)?;
     let archive = components
         .into_iter()
-        .find(|c| crate::component::is_backlog_done_component(&c.name))?;
+        .find(|c| crate::component::is_backlog_done_component(&c.name))
+        .context("document is missing agent:done component")?;
     let existing_body = &content_with_archive[archive.open_end..archive.close_start];
 
     // Use the `date` command so we stay on agent-doc's no-chrono policy
@@ -2301,24 +2306,32 @@ pub(crate) fn archive_pending_done(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "unknown-date".to_string());
 
+    if let Some(archive_path) = archive.attrs.get("archive") {
+        let target = resolve_done_archive_target(file, archive_path)?;
+        append_external_done_archive(&target, &today, removed)?;
+        let pointer = format!("\n<!-- completed work archived in {} -->\n", archive_path);
+        let new_body = if existing_body.trim().is_empty() || existing_body.trim() == pointer.trim()
+        {
+            pointer
+        } else {
+            existing_body.to_string()
+        };
+        return Ok(Some(
+            archive.replace_content(&content_with_archive, &new_body),
+        ));
+    }
+
     let mut new_body = existing_body.to_string();
     if !new_body.is_empty() && !new_body.ends_with('\n') {
         new_body.push('\n');
     }
     for item in removed {
-        new_body.push_str(&format!("- {} [#{}] {}", today, item.id, item.text));
-        if item.continuation.is_empty() {
-            new_body.push('\n');
-        } else {
-            new_body.push('\n');
-            new_body.push_str(&item.continuation);
-            if !item.continuation.ends_with('\n') {
-                new_body.push('\n');
-            }
-        }
+        new_body.push_str(&render_done_archive_entry(&today, item));
     }
 
-    Some(archive.replace_content(&content_with_archive, &new_body))
+    Ok(Some(
+        archive.replace_content(&content_with_archive, &new_body),
+    ))
 }
 
 fn insert_pending_done_component(content: &str) -> Option<String> {
@@ -2339,6 +2352,147 @@ fn insert_pending_done_component(content: &str) -> Option<String> {
     result.push_str("## Completed / Reaped\n\n<!-- agent:done -->\n<!-- /agent:done -->\n");
     result.push_str(&content[insert_at..]);
     Some(result)
+}
+
+pub(crate) fn external_done_archive_ids(file: &Path, content: &str) -> Result<HashSet<String>> {
+    let mut ids = HashSet::new();
+    let components = crate::component::parse(content)?;
+    for archive in components
+        .iter()
+        .filter(|c| crate::component::is_backlog_done_component(&c.name))
+    {
+        let Some(archive_path) = archive.attrs.get("archive") else {
+            continue;
+        };
+        let target = resolve_done_archive_target(file, archive_path)?;
+        let archive_content = match std::fs::read_to_string(&target) {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to read done archive {}", target.display()));
+            }
+        };
+        ids.extend(crate::pending::extract_pending_ids_from_text(
+            &archive_content,
+        ));
+    }
+    Ok(ids)
+}
+
+fn resolve_done_archive_target(file: &Path, archive_path: &str) -> Result<PathBuf> {
+    if archive_path.trim().is_empty() {
+        bail!("agent:done archive= must not be empty");
+    }
+    if !archive_path.ends_with(".done.md") {
+        bail!(
+            "agent:done archive={} must point to a .done.md file",
+            archive_path
+        );
+    }
+    let relative = Path::new(archive_path);
+    if relative.is_absolute() {
+        bail!(
+            "agent:done archive={} must be repo-relative, not absolute",
+            archive_path
+        );
+    }
+    if relative.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
+        bail!(
+            "agent:done archive={} must not escape the repository",
+            archive_path
+        );
+    }
+
+    let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let root = crate::snapshot::find_project_root(&canonical_file).with_context(|| {
+        format!(
+            "failed to find repository root for done archive resolution from {}",
+            file.display()
+        )
+    })?;
+    let target = root.join(relative);
+    if let Ok(canonical_target) = target.canonicalize() {
+        if !canonical_target.starts_with(&root) {
+            bail!(
+                "agent:done archive={} resolves outside the repository",
+                archive_path
+            );
+        }
+    } else if let Some(parent) = target.parent()
+        && let Ok(canonical_parent) = parent.canonicalize()
+        && !canonical_parent.starts_with(&root)
+    {
+        bail!(
+            "agent:done archive={} resolves outside the repository",
+            archive_path
+        );
+    }
+    Ok(target)
+}
+
+fn append_external_done_archive(
+    target: &Path,
+    today: &str,
+    removed: &[crate::pending::PendingItem],
+) -> Result<()> {
+    let mut existing = match std::fs::read_to_string(target) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            "# Agent Doc Completed Work\n\n".to_string()
+        }
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("failed to read done archive {}", target.display()));
+        }
+    };
+    let mut changed = false;
+    if !existing.is_empty() && !existing.ends_with('\n') {
+        existing.push('\n');
+        changed = true;
+    }
+    for item in removed {
+        let first_line = format!("- {} [#{}] {}", today, item.id, item.text);
+        if existing.lines().any(|line| line == first_line) {
+            continue;
+        }
+        existing.push_str(&render_done_archive_entry(today, item));
+        changed = true;
+    }
+    if changed || !target.exists() {
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create done archive directory {}",
+                    parent.display()
+                )
+            })?;
+        }
+        crate::write::atomic_write_pub(target, &existing)
+            .with_context(|| format!("failed to write done archive {}", target.display()))?;
+    }
+    Ok(())
+}
+
+fn render_done_archive_entry(today: &str, item: &crate::pending::PendingItem) -> String {
+    let mut entry = format!("- {} [#{}] {}", today, item.id, item.text);
+    if item.continuation.is_empty() {
+        entry.push('\n');
+    } else {
+        entry.push('\n');
+        entry.push_str(&item.continuation);
+        if !item.continuation.ends_with('\n') {
+            entry.push('\n');
+        }
+    }
+    entry
 }
 
 /// Read the claims log and truncate it. Returns lines as a `Vec<String>`.
@@ -3152,12 +3306,16 @@ mod tests {
 
     #[test]
     fn archive_pending_done_inserts_canonical_done_component() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
         let content = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n"
         );
+        std::fs::write(&file, content).unwrap();
         let archived = archive_pending_done(
+            &file,
             content,
             &[crate::pending::PendingItem {
                 marker: crate::pending::PendingListMarker::Bullet,
@@ -3168,6 +3326,7 @@ mod tests {
                 continuation: String::new(),
             }],
         )
+        .unwrap()
         .unwrap();
 
         assert!(archived.contains("<!-- agent:done -->"));
@@ -3179,6 +3338,8 @@ mod tests {
 
     #[test]
     fn archive_pending_done_ignores_removed_pending_done_alias() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
         let content = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "<!-- agent:backlog -->\n",
@@ -3186,7 +3347,9 @@ mod tests {
             "<!-- agent:pending-done -->\n",
             "<!-- /agent:pending-done -->\n"
         );
+        std::fs::write(&file, content).unwrap();
         let archived = archive_pending_done(
+            &file,
             content,
             &[crate::pending::PendingItem {
                 marker: crate::pending::PendingListMarker::Bullet,
@@ -3197,12 +3360,133 @@ mod tests {
                 continuation: String::new(),
             }],
         )
+        .unwrap()
         .unwrap();
 
         assert!(archived.contains("<!-- agent:pending-done -->"));
         assert!(archived.contains("<!-- agent:done -->"));
         assert!(!archived.contains("<!-- agent:backlog-done -->"));
         assert!(archived.contains("[#done1] completed item"));
+    }
+
+    #[test]
+    fn archive_pending_done_appends_to_external_done_archive() {
+        let dir = setup_project();
+        let file = dir.path().join("tasks/session.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks/session.done.md -->\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&file, content).unwrap();
+
+        let archived = archive_pending_done(
+            &file,
+            content,
+            &[crate::pending::PendingItem {
+                marker: crate::pending::PendingListMarker::Bullet,
+                id: "done1".to_string(),
+                state: crate::pending::PendingState::Done,
+                gate_type: None,
+                text: "completed externally".to_string(),
+                continuation: String::new(),
+            }],
+        )
+        .unwrap()
+        .unwrap();
+
+        let external = std::fs::read_to_string(dir.path().join("tasks/session.done.md")).unwrap();
+        assert!(external.contains("[#done1] completed externally"));
+        assert!(!archived.contains("[#done1]"));
+        assert!(archived.contains("completed work archived in tasks/session.done.md"));
+
+        archive_pending_done(
+            &file,
+            &archived,
+            &[crate::pending::PendingItem {
+                marker: crate::pending::PendingListMarker::Bullet,
+                id: "done1".to_string(),
+                state: crate::pending::PendingState::Done,
+                gate_type: None,
+                text: "completed externally".to_string(),
+                continuation: String::new(),
+            }],
+        )
+        .unwrap()
+        .unwrap();
+        let external_after =
+            std::fs::read_to_string(dir.path().join("tasks/session.done.md")).unwrap();
+        assert_eq!(external_after.matches("[#done1]").count(), 1);
+    }
+
+    #[test]
+    fn archive_pending_done_rejects_invalid_external_archive_paths() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
+        let item = crate::pending::PendingItem {
+            marker: crate::pending::PendingListMarker::Bullet,
+            id: "done1".to_string(),
+            state: crate::pending::PendingState::Done,
+            gate_type: None,
+            text: "completed item".to_string(),
+            continuation: String::new(),
+        };
+        for archive_path in [
+            "/tmp/session.done.md",
+            "../session.done.md",
+            "tasks/session.md",
+        ] {
+            let content = format!(
+                "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n<!-- agent:done archive={} -->\n<!-- /agent:done -->\n",
+                archive_path
+            );
+            std::fs::write(&file, &content).unwrap();
+            let err = archive_pending_done(&file, &content, std::slice::from_ref(&item))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("agent:done archive="),
+                "unexpected error for {archive_path}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn external_done_archive_ids_satisfy_dropped_history_guard() {
+        let dir = setup_project();
+        let file = dir.path().join("tasks/session.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(
+            dir.path().join("tasks/session.done.md"),
+            "# Agent Doc Completed Work\n\n- 2026-05-13 [#item1] Was open\n",
+        )
+        .unwrap();
+        let baseline = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#item1] Was open\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let current = concat!(
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done archive=tasks/session.done.md -->\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&file, current).unwrap();
+
+        let external_ids = external_done_archive_ids(&file, current).unwrap();
+        let report = crate::pending::detect_dropped_from_history_with_extra_current_ids(
+            current,
+            baseline,
+            &HashSet::new(),
+            &external_ids,
+        )
+        .unwrap();
+
+        assert!(report.dropped.is_empty());
     }
 
     #[test]

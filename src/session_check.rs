@@ -534,8 +534,13 @@ fn check_backlog_replay_guard(file: &Path) -> Result<GuardResult> {
 
     let resolved_ids = crate::cycle_state::resolved_pending_ids(file)?;
 
-    let report =
-        crate::pending::detect_dropped_from_history(&current_content, &baseline, &resolved_ids)?;
+    let external_done_ids = crate::preflight::external_done_archive_ids(file, &current_content)?;
+    let report = crate::pending::detect_dropped_from_history_with_extra_current_ids(
+        &current_content,
+        &baseline,
+        &resolved_ids,
+        &external_done_ids,
+    )?;
 
     if !report.dropped.is_empty() {
         let refs = report

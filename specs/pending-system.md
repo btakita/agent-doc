@@ -117,19 +117,28 @@ On every preflight run:
    - `[ ]` and `[/]` are never auto-reaped. `[/]` explicitly survives forever until an operator moves it to `[x]`. No TTL on gated state — the operator owns the gate.
    - Append an archive entry to canonical `agent:done`. If the component does not
      already exist, create a visible `## Completed / Reaped` section after the
-     tracked work components first, then append the entry. Legacy
-     `agent:backlog-done` and `agent:pending-done` components are not accepted
-     as archive aliases; run `agent-doc migrate` to rewrite them to `agent:done`.
-     Completed tracked work must remain grep-visible
-     in the session document instead of disappearing from the live backlog
-     without a local record.
+     tracked work components first, then append the entry. If the opening marker
+     uses `archive=<repo-relative>.done.md`, append to that external markdown
+     file instead, create it when missing, leave the local `agent:done` component
+     as the routing marker, and suppress duplicate date/id/text entries on
+     retry. Absolute paths, parent-directory escapes, outside-repo targets, and
+     non-`.done.md` targets fail closed before active tracked work is mutated.
+     Legacy `agent:backlog-done` and `agent:pending-done` components are not
+     accepted as archive aliases; run `agent-doc migrate` to rewrite them to
+     `agent:done`. Completed tracked work must remain grep-visible in either the
+     session document or its explicit external done archive instead of
+     disappearing from the live backlog without a local record.
    - Persistence invariant: the reap must land in both the working tree document and the snapshot that the commit boundary stages. If preflight cannot persist that synchronized reap safely, it must fail closed instead of continuing with completed tracked-work items still present in backlog or icebox.
 - The standalone `agent-doc backlog <file> reap` command follows the same
   visibility rule for direct maintenance: it removes completed items from live
   tracked work, creates `agent:done` when needed, and appends each removed item
-  there instead of silently deleting it.
+  there or to its explicit `archive=...done.md` target instead of silently
+  deleting it.
 - Same-cycle resurrection invariant: once a cycle reaps a tracked `[#id]`, closeout must fail closed if that same id reappears in the live `agent:backlog` or `agent:icebox` before commit. Do not silently treat the stale rewrite as generic local drift.
 - Same-cycle completion invariant: when preflight/repair reap a user-authored `[x]` tracked item directly from the document, that id counts as intentionally resolved for the current cycle's history-replay guards even if no explicit `--done <id>` flag was recorded. Do not restore the older `[ ]` or `[/]` history entry just because the completion came from a manual document edit.
+- External archive invariant: preflight and session-check must treat IDs found
+  in the `agent:done archive=...done.md` target as completed-history proof for
+  backlog replay. Invalid archive targets fail closed instead of being ignored.
 - No-partial-reap invariant: if a completed tracked item is followed by malformed flush-left spill such as pasted command/diff transcript lines, reap/archive the whole logical block with that parent item. Do not delete only the tracked parent line and leave orphan prose behind in the live backlog.
 4. Commit the rewritten component as part of the existing boundary-maintenance commit.
 

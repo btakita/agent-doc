@@ -218,7 +218,7 @@ agent-doc is designed for **single-user, local operation**. All session data (do
 This catalog is intentionally detailed. It records user-visible capabilities and workflow invariants that are useful for operators, release notes, and implementation audits, but it is no longer part of the first-screen README overview.
 
 - **Template mode** — named component regions (`<!-- agent:name -->`) updated independently; inline attrs (`patch=`, `max_lines=`) > `components.toml` > built-in defaults
-- **Completed backlog archive** — reaped tracked work is stored in the canonical `agent:done` component; `agent-doc migrate` rewrites old `agent:backlog-done` and `agent:pending-done` tags
+- **Completed backlog archive** — reaped tracked work is stored in canonical `agent:done`, or in an explicit repo-relative `.done.md` file via `agent:done archive=...`; `agent-doc migrate` rewrites old `agent:backlog-done` and `agent:pending-done` tags
 - **CRDT merge** — yrs-based conflict-free merge for concurrent edits between agent writes and user edits
 - **IPC-first writes** — socket IPC (Unix domain sockets); editor plugin receives JSON patches instead of file overwrites; preserves cursor position, undo history, and avoids "externally modified" dialogs
 - **Tmux routing** — persistent per-document agent sessions; `route` dispatches to the correct pane or auto-starts one using the active harness's trigger shape (`/agent-doc` for Claude Code, plain `agent-doc` for Codex); reconciler always runs (no early exits) handling 0/1/2+ panes uniformly

@@ -632,7 +632,7 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
     }
 
     let mut repaired = backlog.replace_content(&content, &new_body);
-    if let Some(archived) = crate::preflight::archive_pending_done(&repaired, &removed) {
+    if let Some(archived) = crate::preflight::archive_pending_done(file, &repaired, &removed)? {
         repaired = archived;
     }
 
@@ -656,7 +656,9 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
             })?;
 
         let mut new_snapshot = snap_backlog.replace_content(&snap_content, &new_body);
-        if let Some(archived) = crate::preflight::archive_pending_done(&new_snapshot, &removed) {
+        if let Some(archived) =
+            crate::preflight::archive_pending_done(file, &new_snapshot, &removed)?
+        {
             new_snapshot = archived;
         }
         snapshot::save(file, &new_snapshot)?;

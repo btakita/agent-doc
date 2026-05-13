@@ -29,36 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-035716.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-040944.md`*
 
 Compacted content:
-- Archived 1 response topic(s): JetBrains Run Agent Doc plain trigger
+- Archived 1 response topic(s): #rspcmtdelay
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#rspcmtdelay]. spec-test-build-install-commit-push
-### Re: #rspcmtdelay — gpt-5
-
-Implemented `#rspcmtdelay`.
-
-What changed:
-- `src/agent-doc/src/write.rs` now wraps strict closeout in a phase timer and emits a `closeout_latency` diagnostic when the closeout budget is crossed, including commit, retry, cycle-state, session-check, and cleanup phase timings.
-- Strict `finalize` / `write --commit` now fail closed after the bounded submodule parent-pointer retry if the parent `HEAD:<submodule>` gitlink still differs from the submodule `HEAD`, with `agent-doc commit <FILE>` as the idempotent recovery.
-- Updated `src/agent-doc/specs/07-closeout-commands.md` and `src/agent-doc/VERSIONS.md` for the new closeout timing and stale-parent-gitlink behavior.
-
-Verification:
-- `cargo test closeout_latency_message_names_phase_timings`
-- `cargo test required_closeout_fails_when_parent_submodule_pointer_commit_fails`
-- `make check` passed: clippy, full default tests, and the medium deterministic SimWorld seed corpus.
-- `make build-release` passed.
-- `make install` passed and installed the binary plus `libagent_doc-0.33.16.so`.
-- `agent-doc --version` reports `agent-doc 0.33.16`.
-- Latest GitHub `CI` run for `btakita/agent-doc` inspected: `25773430221`, completed successfully on 2026-05-13 01:57:58Z. The job metadata did not show a separate red tmux leg.
-
-Commits created:
-- `src/agent-doc` `cf801553` (`fix: surface slow closeout layers`)
-- parent `agent-loop` `a5ded7b` (`chore: update agent-doc closeout diagnostics`)
-
-Push follows after this document closeout commit lands.
-<!-- agent:boundary:adc229d5 -->
+<!-- agent:boundary:787abf72 -->
 <!-- /agent:exchange -->
 ###
 <!--

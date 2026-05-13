@@ -30,38 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-070033.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-135837.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #fwin bounded source windows
+- Archived 1 response topic(s): #frpt repeated file-read diagnostics
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#frpt]. spec-test-build-install-commit-push
-### Re: #frpt repeated file-read diagnostics — gpt-5
-
-Implemented `#frpt` in `src/tsift`.
-
-What changed:
-
-- `tsift session-cost` now detects repeated source-file reads from Claude/Codex transcripts, including native `Read` tool calls plus shell reads like `sed -n`, `cat`, `bat`, `head`, and `tail`.
-- Repeated reads are grouped by `path` + `range`, with deterministic total and duplicate token estimates plus concrete `tsift source-read ... --budget normal` and `tsift summarize --file ...` follow-up commands.
-- `tsift session-review` now aggregates those repeated-read diagnostics across matched sessions and exposes them in JSON, compact, envelope metrics, and human output.
-- Updated `SPEC.md` and `VERSIONS.md`, with regressions in `session_cost` and `session_review` coverage.
-
-Verification:
-
-- `cargo test session_cost` passed.
-- `cargo test session_review` passed.
-- `make check` passed.
-- `make ci-full` passed, including the ignored wider SimWorld test.
-- `cargo build --release` passed.
-- `cargo install --path .` replaced the local `tsift` binary; `tsift --version` reports `tsift 0.1.42`.
-- Latest GitHub Actions CI for tsift is green: run `25783419063` (`CI`, created 2026-05-13 06:53 UTC), with the `Full CI suite` step running `make ci-full`. There is no separate tmux CI leg in the tsift workflow; CI carries the wider deterministic SimWorld coverage.
-
-Commits:
-
-- tsift: `8ea4532` (`feat: report repeated file reads`) pushed to `origin/main`.
-- parent agent-loop submodule pointer: `37744ac60` (`tsift: report repeated file reads`) committed locally; parent push follows after this required document closeout.
-<!-- agent:boundary:f7841b75 -->
+<!-- agent:boundary:c9619c18 -->
 <!-- /agent:exchange -->
 ###
 <!--

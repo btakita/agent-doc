@@ -29,83 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-144300.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-162534.md`*
 
 Compacted content:
-- Archived 4 response topic(s): OpenCode permission inputs; OpenCode permission key forwarding; OpenCode prompt verification; 1 more
+- Archived 3 response topic(s): opencode prompt plugins; editor prompt cwd and OpenCode prompt tests; incorrect JB user prompts
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#opencodepromptplugins]. Please verify your fix with a live opencode session. spec-test-build-install-commit-push
-### Re: opencode prompt plugins — gpt-5
-
-Implemented `#opencodepromptplugins`.
-
-Changed the JetBrains and VS Code prompt UIs to pass `agent-doc prompt --answer` the one-based parsed-option position while still displaying and matching OpenCode's visible TUI numbers. Added flat `agent-doc prompt --all` JSON normalization with `selected` preservation for both plugins, plus focused tests and spec/docs/version updates. Bumped local plugin builds to JetBrains `0.2.116` and VS Code `0.2.15`.
-
-Verified with `npm test`, `./gradlew test`, `./gradlew buildPlugin`, `npm run package`, `make check`, `make tmux-ci`, `make install`, `agent-doc plugin install vscode --local`, and `agent-doc plugin install jetbrains --local`. I also ran a live OpenCode demo session in tmux, claimed it with agent-doc, triggered `/permission bash`, observed the active prompt JSON, answered `--answer 3`, and confirmed the prompt became inactive with OpenCode on the reject follow-up.
-
-Committed `src/agent-doc` as `97b4b026 fix: align editor prompt answer indices` and updated the parent repo gitlink as `85bbfe714 fix: align editor prompt plugins`. The parent branch push will run after this finalize commit so the session response commit is included. JetBrains reported install targets under IntelliJ IDEA 2026.1; restart the IDE to activate the updated plugin.
-❯ Left/Right buttons still don't work with agent-doc opencode. #next-steps 
-```
-┃
-┃   ^[[D
-┃
-┃  Build · GLM-5.1 Z.AI Coding Plan
-```
-❯ The JB prompt selection still does not submit the answer. #next-steps
-
-❯ Please test both using an integration test.
-### Re: editor prompt cwd and OpenCode prompt tests — gpt-5
-Fixed the prompt-answer path and added the requested integration coverage.
-
-`agent-doc prompt --all` now includes the owning session `cwd`. JetBrains and VS Code both use that cwd when running `agent-doc prompt --answer`, so editor prompt selections no longer assume the current IDE workspace root. Both editor integrations also clear the temporary "recently answered" suppression key if the answer command fails, so a still-active prompt can show again instead of disappearing after a failed submission.
-
-For OpenCode, I added a live tmux integration regression that drives `answer_with_tmux` against a synthetic OpenCode permission prompt and asserts the first navigation byte is Tab, not an arrow escape. That covers the `^[[D`/`^[[C` leak class directly. For JetBrains, I added process-level prompt-answer coverage proving the command is built with the one-based answer position and runs from the prompt entry's cwd.
-
-Updated the specs/docs and bumped local editor package versions to JetBrains `0.2.117` and VS Code `0.2.16`.
-
-Verification passed:
-
-- `npm test`
-- `npm run package`
-- `./gradlew test`
-- `./gradlew buildPlugin`
-- `cargo test prompt::tests:: -- --test-threads=1`
-- `cargo test answer_opencode_prompt_sends_tab_not_arrow_escape -- --ignored --test-threads=1`
-- `make check`
-- `make tmux-ci`
-
-Committed `src/agent-doc` as `54c2992a fix: answer prompts from owning cwd`, then committed the parent repo gitlink as `0fe48b052 fix: answer editor prompts from session cwd`. Existing unrelated parent worktree changes were left alone.
-❯ I'm seeing incorrect JB user prompts. spec-test-build-install-commit-push
-❯ ![img_8.png](img_8.png)
-### Re: incorrect JB user prompts — gpt-5
-
-Fixed the JetBrains prompt label path by changing the CLI parser that feeds editor prompt polling. OpenCode horizontal permission prompts now use an explicit `← ...` question line when one exists, and otherwise fall back to the neutral label `Permission required`; they no longer reuse prior terminal content like shell `printf` / ANSI fixture text as the user-facing question.
-
-Updated the regression surface in `src/agent-doc`:
-
-- `src/prompt.rs` now normalizes OpenCode prompts without explicit questions and has a regression test for the raw ANSI/shell-command case from the screenshot.
-- Editor and CLI docs/specs now record the normalized prompt-label contract for JetBrains, VSCode, and the shared editor spec.
-- A timing-sensitive live tmux route test was stabilized by waiting for the mock prompt to become ready before probing supervisor-owner fallback.
-
-Verification completed:
-
-- `cargo test prompt::tests:: -- --test-threads=1`
-- `cargo test answer_opencode_prompt_sends_tab_not_arrow_escape -- --ignored --test-threads=1`
-- `npm test` in `src/agent-doc/editors/vscode`
-- `npm run package` in `src/agent-doc/editors/vscode` (only the existing LICENSE warning)
-- `./gradlew test` in `src/agent-doc/editors/jetbrains`
-- `./gradlew buildPlugin` in `src/agent-doc/editors/jetbrains`
-- `make check` in `src/agent-doc`
-- `make tmux-ci` in `src/agent-doc`
-- `make install` in `src/agent-doc`; installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so`
-
-CI/tmux evidence: latest GitHub Actions run `25773430221` for `btakita/agent-doc` was green; that workflow exposes the normal `check` job and no separate tmux-test job, so local `make tmux-ci` is the tmux evidence for this cycle.
-
-Commits:
-
-- `src/agent-doc`: `39223238` (`fix: normalize opencode prompt labels`), pushed to `origin/20260422/codex-agent-backend`.
-- parent repo: `c58cf2845` (`chore: update agent-doc prompt labels`), with only the `src/agent-doc` gitlink staged in the manual commit. The parent branch push follows this binary-owned session closeout so it includes the session response commit too.
-<!-- agent:boundary:bfe4cf1e -->
+<!-- agent:boundary:0367cf1e -->
 <!-- /agent:exchange -->
 ###
 <!--

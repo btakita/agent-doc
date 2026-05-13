@@ -34,10 +34,46 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): OpenCode dispatch-only input routing
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a5c94de9 -->
+❯ do [#rspcmt9]. spec-test-build-install-commit-push
+### Re: #rspcmt9 direct chat patchback closeout — gpt-5
+
+Implemented, verified, installed, committed, and pushed `#rspcmt9`.
+
+The Codex Stop hook now treats strict closeout failures as recoverable document blockers instead of generic hook failures. When it replays a direct Codex/chat response into a session document but cannot finish the parent gitlink commit for a submodule, it blocks the turn, preserves hook state for retry, and surfaces the `agent-doc commit <FILE>` recovery hint instead of returning `continue=true`.
+
+Changes:
+- `src/agent-doc/src/codex_hook.rs`: catch `complete_required_closeout` errors inside Stop-hook auto-close and return a recoverable block with the original closeout error.
+- `src/agent-doc/src/codex_hook.rs`: added a regression for submodule response write success plus held parent `.git/index.lock`, asserting the response lands, the parent pointer remains stale, hook state remains, and the block reason names `agent-doc commit` recovery.
+- `src/agent-doc/specs/09-git-integration.md`: documented the Stop-hook parent-pointer closeout invariant.
+- `tasks/agent-doc/plan-direct-chat-response-patchback-required.md`: marked the completed implementation/regression checklist items.
+
+Verification:
+- `cargo test codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails`
+- `cargo test codex_hook::tests`
+- `cargo test --test codex_hook_integration`
+- `make check`
+- `cargo build`
+- `cargo install --path . --locked`
+- Latest completed root `Agent Doc` workflow `25781035937`: `tmux-ci` job passed, including `make tmux-ci` completed successfully at 2026-05-13 05:58:16Z. Newer root workflow runs were still in progress when checked, not completed red tmux legs.
+
+Commits pushed:
+- `b3e61d00` in `btakita/agent-doc` on `20260422/codex-agent-backend`: `fix: block codex stop on parent pointer failure`
+- `4695c030a` in `btakita/agent-loop` on `main`: `fix: record direct chat patchback closeout`
+<!-- agent:boundary:80705b7c -->
 <!-- /agent:exchange -->
 ###
 <!--
+agent-doc opencode does not correctly allow the user to use the arrow keys to select `Allow always`. spec-test-build-install-commit-push
+```
+   ⠙[[[Dd ~/work/btakita/corky/pyproject.toml                                                                         
+┃                                                                                                                       ┃  △ Permission required
+┃    ← Access external directory ~/work/btakita/corky/.github/workflows                                                 ┃
+┃  Patterns                                                                                                             ┃
+┃  - /home/brian/work/btakita/corky/.github/workflows/*                                                                 ┃
+┃                                                                                                                       ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
+┃                                                                                                                     
+```
+---
 JB `Run Agent Doc` on root.md with `agent: claude` sends an incorrect command
 ```
 ❯ agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md
@@ -95,7 +131,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspcmt9] #agent-doc-bug: Direct Codex chat answered a Monster Rod Holders session prompt but did not write the response to `src/boost-client/tasks/monsterrodholders.md`; manual `agent-doc write --commit` then committed the submodule response but initially failed the parent pointer closeout on root `.git/index.lock`, requiring `agent-doc commit <file>` recovery. Plan: tasks/agent-doc/plan-direct-chat-response-patchback-required.md
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
@@ -225,4 +260,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - 2026-05-12 [#directrunpfx] #agent-doc-bug: Direct `agent-doc <file>` committed the Monster Rod Holders `Read the image.` prompt and Markdown image line without the canonical `❯ ` prefix before the response block, making user prompt text look like assistant prose. Plan: tasks/agent-doc/plan-direct-run-unprefixed-exchange-prompt.md
 - 2026-05-13 [#rspcmtdelay] #agent-doc-bug: Session response patchback had a long delay before being committed; current `src/session-share/tasks/root.md` evidence required failed `write --commit`/`finalize`, manual patching, stale preflight repair, and parent pointer closeout before `session-check` passed. Plan: tasks/agent-doc/plan-response-commit-delay.md
+- 2026-05-13 [#rspcmt9] #agent-doc-bug: Direct Codex chat answered a Monster Rod Holders session prompt but did not write the response to `src/boost-client/tasks/monsterrodholders.md`; manual `agent-doc write --commit` then committed the submodule response but initially failed the parent pointer closeout on root `.git/index.lock`, requiring `agent-doc commit <file>` recovery. Plan: tasks/agent-doc/plan-direct-chat-response-patchback-required.md
 <!-- /agent:done -->

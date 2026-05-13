@@ -29,110 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-181854.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-192208.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Clear Session Context live-busy guard; JetBrains sync and clear follow-ups
+- Archived 3 response topic(s): JetBrains Clear Session Context stale-busy actions; syncforceux; Clear Session Context active panes
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#jbclearstaleidle]. spec-test-build-install-commit-push
-### Re: JetBrains Clear Session Context stale-busy actions — gpt-5
-
-Implemented `#jbclearstaleidle`.
-
-Clear Session Context now has an explicit protected-busy contract across the editor plugin surface. The shared editor specs now say direct `alive-busy` pane evidence fails closed, stale busy projection is reconciled only after `agent-doc session status` reports `live_pane: state=alive-idle ... prompt_ready=true`, and `Interrupt and clear` is the only plugin action that intentionally interrupts a busy turn.
-
-JetBrains already had the typed Refresh/Interrupt/Status/Copy warning path, so I tightened the JetBrains spec and added regression coverage that the raw status output preserves actor, live pane, supervisor, and controller lease evidence for stale-busy diagnosis. VS Code now mirrors the same busy-refusal parser and operator actions: Refresh re-runs status and retries clear only on idle proof, Interrupt and clear requires confirmation and runs `agent-doc session interrupt-clear`, Show status displays the exact CLI output, and Copy details preserves the raw refusal text.
-
-Local live evidence for this document now shows the intended stale/projection split clearly: actor/controller reported ready while direct `live_pane` reported `alive-busy` for pane `%1`, so the editor should surface status instead of guessing from plugin-local state.
-
-Verification:
-- `cargo test clear_live_busy_refusal_points_to_interrupt_clear`
-- `npm test` in `src/agent-doc/editors/vscode`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test` in `src/agent-doc/editors/jetbrains`
-- `cargo fmt`
-- `make check`
-- `make build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
-- `npm run package` in `src/agent-doc/editors/vscode`
-- `agent-doc plugin install --local jetbrains` installed JetBrains plugin `0.2.119` to IntelliJIdea2026.1; restart the IDE to activate it.
-- `agent-doc plugin install --local vscode` installed VS Code/Codium extension `0.2.18`.
-- GitHub Actions: latest `CI` run `25773430221` succeeded; it has one `check` job and no remote tmux job.
-- `make tmux-ci` passed locally: 225 ignored tmux tests, 0 failed.
-
-Commits:
-- `src/agent-doc`: `48afeba` (`fix: align editor clear busy actions`)
-- parent repo: `3ff55399c` (`agent-doc: align editor clear busy actions`)
-
-Unrelated dirty paths left untouched: `mail`, `src/session-share`, `tasks/software/corky.md`, and `tasks/software/tsift.md`.
-❯ do [#syncforceux]. spec-test-build-install-commit-push
-
-❯ JB `Clear Session Context` on this file still has:
-```
-Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 74% used
-```
-### Re: syncforceux — gpt-5
-
-Implemented `#syncforceux`.
-
-The editor sync path now treats safe-passive sync lock contention as deferred instead of applied. VS Code now recognizes the `[sync] safe_passive_sync_lock_contention_retry ... coalesced=skipped_stale action=retry` marker and keeps the stale command out of `lastTabSyncState`, so only the newest tab/layout request is retried. JetBrains already parsed that marker for automatic tab sync; I fixed the structural layout-change detector so it no longer acquires the plugin sync guard and then calls `SyncLayoutAction.syncLayout`, which reacquired the same guard and could self-skip. The detector now builds and runs the exact-visible `agent-doc sync --no-autostart` command directly while holding the guard through the CLI process, then replays the newest generation after unlock when needed.
-
-Specs now state the editor contract explicitly: contention markers are deferred, not successful syncs; stale requests must not update last-applied editor state; editor-side guards must not self-contend.
-
-Verification:
-- `npm test` in `src/agent-doc/editors/vscode`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test` in `src/agent-doc/editors/jetbrains`
-- `cargo fmt`
-- `make check`
-- `make build`
-- `make tmux-ci` (225 live tmux tests passed)
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
-- `npm run package` in `src/agent-doc/editors/vscode`
-- `agent-doc plugin install --local jetbrains` installed JetBrains plugin `0.2.119` to IntelliJIdea2026.1; restart the IDE to activate it.
-- `agent-doc plugin install --local vscode` installed VS Code/Codium extension `0.2.18`.
-- GitHub Actions: latest `CI` run `25773430221` succeeded; it has no remote tmux job listed.
-
-Commits pushed:
-- `src/agent-doc`: `984fa131` (`fix: retry editor sync contention`)
-- parent repo: `8f1622a24` (`agent-doc: retry editor sync contention`)
-
-Unrelated dirty paths left untouched: `mail`, `src/session-share`, `tasks/software/corky.md`, and this session document until this finalize commit.
-### Re: Clear Session Context active panes — gpt-5
-
-Implemented the Clear Session Context guard change.
-
-`agent-doc session clear <FILE>` no longer fails solely because the pane is classified `alive-busy`. Clear Session Context is now treated as an explicit operator action for ordinary active/status panes, including the Codex footer-only shape from this repro (`gpt-5.5 high ... Context ... used`). The remaining guard is scoped to protected prompt input: permission prompts, queued drafts, shell search, or drafted user input. Those refusals now log `session_clear_protected_input_guard_refused` and point to `agent-doc session interrupt-clear <FILE>` for an intentional discard.
-
-I updated the shared specs, JetBrains specs, VS Code specs, ops summary categories, JetBrains parser/tests, and VS Code parser/tests. JetBrains and VS Code now parse the new protected-input refusal separately from the legacy alive-busy refusal, and the protected-input warning omits `Refresh and retry` because ordinary busy panes are no longer a clear blocker.
-
-Verification:
-- `cargo fmt`
-- `cargo test protected_clear_refusal_points_to_interrupt_clear`
-- `cargo test ops_summary_groups_tracked_events_by_file_and_session`
-- `npm test` in `src/agent-doc/editors/vscode`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test` in `src/agent-doc/editors/jetbrains`
-- `make check`
-- `make build`
-- `make tmux-ci` (225 live tmux tests passed)
-- `make install`; `agent-doc --version` -> `agent-doc 0.33.16`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
-- `npm run package` in `src/agent-doc/editors/vscode`
-- `agent-doc plugin install --local vscode` installed VS Code/Codium extension `0.2.18`
-- `agent-doc plugin install --local jetbrains` installed JetBrains plugin `0.2.119` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJIdea2026.1 to load it.
-
-Live evidence:
-- `agent-doc session status tasks/agent-doc/agent-doc-bugs2.md` now reports `live_pane: state=alive-idle pane=%1 source=authoritative_actor current_command=agent-doc prompt_ready=true tail=gpt-5.5 high ... Context 86% used`.
-- I checked for a JetBrains UI automation harness in the repo and did not find RemoteRobot/IDE driver/runIde UI-test wiring. IntelliJIdea2026.1 is running, but the newly installed plugin cannot be loaded into that running IDE without restart, so I could not safely automate the actual button click in this turn.
-
-Commits prepared before this session closeout:
-- `src/agent-doc`: `7c2ddb9a` (`fix: let clear proceed for active panes`)
-- parent repo: `1b43130f6` (`agent-doc: let clear proceed for active panes`)
-
-Per the agent-doc closeout rule, I am pushing the submodule and parent repo after this response is finalized and committed.
-<!-- agent:boundary:e047b8c5 -->
+<!-- agent:boundary:64d56e62 -->
 <!-- /agent:exchange -->
 ###
 <!--

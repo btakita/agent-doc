@@ -257,3 +257,33 @@ three committed-cycle branches of `inspect_core`:
 - `uncommitted_exchange_drift_ignored_when_only_status_changed` — proves the guard
   does NOT fire when only the status component changed (non-exchange drift is benign
   for this invariant).
+
+## Repeated OpenCode Patchback Not Committed (#rspcmt8)
+
+### Reproduction
+
+- **Document:** `boost-client/tasks/monsterrodholders.md` shopcozi mobile CSS
+  fix v0.4.9
+- **Session:** a9421282, GLM-5.1 agent
+- **Harness:** OpenCode
+- **Symptom:** The response was visible in the exchange section, but
+  `tasks/monsterrodholders.md` remained dirty and the user had to request
+  "commit the document."
+- **Same class as:** #rspcmt2, #rspcmt3, #rspcmt4, #rspcmt5, #rspcmt6, #rspcmt7
+
+### Additional Fix
+
+`detect_uncommitted_closeout_drift()` now reuses the harness-agnostic
+`detect_uncommitted_exchange_drift()` guard for promptless exchange drift before
+falling back to generic `snapshot != HEAD` checks. That closes the gap where an
+OpenCode response body could be appended to `agent:exchange` without a fresh
+response heading and still avoid the preflight/sync closeout-drift blocker until
+a later manual commit, while preserving normal prompt-bearing user edits for the
+next preflight diff.
+
+### Regression Coverage
+
+- `preflight_fails_closed_on_uncommitted_exchange_drift_without_response_heading`
+  proves the next `agent-doc <FILE>` invocation fails closed when a prior
+  OpenCode-style response body is visible in the exchange section but absent
+  from the committed snapshot.

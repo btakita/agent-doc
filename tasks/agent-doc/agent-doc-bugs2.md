@@ -49,14 +49,17 @@ Evidence:
 The prevention change I would make in agent-doc is to separate "live pane exists" from "pane is allowed to surface editor prompts." A pane should only be eligible for JB/VSCode permission prompt UI when it is owned by the current document's controller lease, matches the current generation, and belongs to an open cycle. Completed idle panes in stash, or panes whose registry was deregistered but whose supervisor is still alive, should be shut down/reaped or hidden from prompt discovery.
 
 I added a backlog item for that prevention work: `#orphanpromptprune`.
-<!-- agent:boundary:2708fd0b -->
+### Re: note — gpt-5.5
+
+Noted. I kept the cleanup result and the `#orphanpromptprune` prevention item in the document.
+<!-- agent:boundary:09104758 -->
 <!-- /agent:exchange -->
 ###
 <!--
 The agent:done tag should support an attribute to link to a sepate "done" file (*.done.md) so the document does not become bloated. Plan so we agree on the attribute name.
 ---
 The sandbox check tmux prompt should be terse and more "human readable" on a single line. Explain the status without the extra information.
-sp
+spec-test-build-install-commit-push
 ---
 `--pending-only` should be renamed to `--backlog-only`.
 spec-test-build-install-commit-push

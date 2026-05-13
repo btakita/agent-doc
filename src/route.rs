@@ -8097,6 +8097,26 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     }
 
     #[test]
+    fn ready_prompt_candidate_accepts_opencode_idle_splash_without_prompt_glyph() {
+        let harness = HarnessConfig::opencode();
+        let content = "\
+                                                                                                     ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▄ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+                                                                                   ┃
+                                                                                   ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                                   ┃
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                                   tab agents  ctrl+p commands
+                                                                                        ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+";
+        assert!(
+            ready_prompt_candidate(content, &harness).is_some(),
+            "OpenCode 1.14 can render the idle composer as splash chrome without a prompt glyph"
+        );
+    }
+
+    #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn wait_for_agent_ready_rejects_codex_prompt_with_real_drafted_text() {
         let _tmux_guard = tmux_start_lock();

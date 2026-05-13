@@ -1367,6 +1367,24 @@ mod tests {
     }
 
     #[test]
+    fn live_pane_prompt_ready_accepts_opencode_idle_splash_without_prompt_glyph() {
+        let harness = crate::harness::HarnessConfig::opencode();
+
+        assert!(live_pane_prompt_ready(
+            &harness,
+            "\
+                                                                                                     ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▄ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+                                                                                   ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                                   tab agents  ctrl+p commands
+                                                                                        ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+"
+        ));
+    }
+
+    #[test]
     fn live_pane_prompt_ready_accepts_codex_status_chrome_only_output() {
         let harness = crate::harness::HarnessConfig::codex();
 

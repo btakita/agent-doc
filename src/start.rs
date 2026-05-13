@@ -4858,6 +4858,26 @@ Done.
     }
 
     #[test]
+    fn current_child_prompt_visible_accepts_opencode_idle_splash_without_prompt_glyph() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(
+            &shared,
+            "\
+                                                                                                     ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▄ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+                                                                                   ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                                   tab agents  ctrl+p commands
+                                                                                        ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
+"
+            .as_bytes(),
+        );
+        assert!(current_child_prompt_visible(&shared, &harness));
+    }
+
+    #[test]
     fn route_owned_live_pane_busy_requires_idle_prompt_before_reap() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::codex();

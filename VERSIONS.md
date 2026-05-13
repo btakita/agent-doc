@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **OpenCode idle splash now promotes managed sessions to ready.** OpenCode 1.14 can render an idle composer as the splash chrome (`Ask anything...`, build-plan text, command/footer hints, cwd/version status) without a standalone `>` prompt or `context ... % used` footer. Shared harness readiness now treats that chrome-only splash as dispatch-ready, so start, route, and session status promote the actor instead of timing out with `route_authoritative_actor_starting_not_ready` after the capability proof succeeds.
+
 - **Managed capability proof results now use tmux status messages.** Successful and failed Codex/OpenCode/Claude managed proof diagnostics still go to the session log, but `start` now surfaces the user-visible `[start] managed ... capability proof` line with `tmux display-message` targeted at the owned pane instead of writing it into the agent pane transcript. This keeps proof diagnostics from interfering with TUI prompt detection or the next agent input.
 
 - **OpenCode proof output no longer strands startup in `starting`.** OpenCode prompt readiness now ignores supervisor capability-proof diagnostics and treats an otherwise chrome-only `context ... % used` footer as an idle composer. That lets route/start promote a proven OpenCode actor to `ready` and dispatch the trigger instead of timing out with `route_authoritative_actor_starting_not_ready` after `opencode_capability_proof status=proven`.

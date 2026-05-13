@@ -211,7 +211,7 @@ impl HarnessConfig {
         }
         match self.binary.as_str() {
             "codex" => trimmed.contains("·") && trimmed.contains("Context "),
-            "opencode" => is_context_usage_status_line(trimmed),
+            "opencode" => is_opencode_idle_chrome_line(trimmed),
             _ => false,
         }
     }
@@ -236,7 +236,10 @@ impl HarnessConfig {
             if !self.is_ignorable_output_line(trimmed) {
                 return false;
             }
-            if is_context_usage_status_line(trimmed) {
+            if is_context_usage_status_line(trimmed)
+                || is_opencode_idle_splash_anchor_line(trimmed)
+                || is_opencode_cwd_version_status_line(trimmed)
+            {
                 saw_status = true;
             }
         }
@@ -380,6 +383,85 @@ fn is_opencode_help_screen(output: &str) -> bool {
 fn is_context_usage_status_line(trimmed: &str) -> bool {
     let lower = trimmed.to_ascii_lowercase();
     lower.contains("context ") && lower.contains("% used")
+}
+
+fn is_opencode_idle_chrome_line(trimmed: &str) -> bool {
+    if is_context_usage_status_line(trimmed)
+        || is_opencode_idle_splash_anchor_line(trimmed)
+        || is_opencode_cwd_version_status_line(trimmed)
+    {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("tab agents") && lower.contains("ctrl+p commands") {
+        return true;
+    }
+    if trimmed.contains("Build ·") || trimmed.starts_with("● Tip ") {
+        return true;
+    }
+    is_opencode_box_art_line(trimmed)
+}
+
+fn is_opencode_idle_splash_anchor_line(trimmed: &str) -> bool {
+    trimmed.contains("Ask anything")
+}
+
+fn is_opencode_cwd_version_status_line(trimmed: &str) -> bool {
+    let mut parts = trimmed.split_whitespace();
+    let Some(first) = parts.next() else {
+        return false;
+    };
+    let Some(last) = trimmed.split_whitespace().next_back() else {
+        return false;
+    };
+    if !(first.starts_with("~/") || first.starts_with('/')) || !first.contains(':') {
+        return false;
+    }
+    let mut segments = last.split('.');
+    let Some(major) = segments.next() else {
+        return false;
+    };
+    let Some(minor) = segments.next() else {
+        return false;
+    };
+    let Some(patch) = segments.next() else {
+        return false;
+    };
+    segments.next().is_none()
+        && major.chars().all(|ch| ch.is_ascii_digit())
+        && minor.chars().all(|ch| ch.is_ascii_digit())
+        && patch.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn is_opencode_box_art_line(trimmed: &str) -> bool {
+    let mut saw_art = false;
+    for ch in trimmed.chars() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        if matches!(
+            ch,
+            '┃' | '╹'
+                | '▀'
+                | '▄'
+                | '─'
+                | '│'
+                | '┌'
+                | '┐'
+                | '└'
+                | '┘'
+                | '═'
+                | '╔'
+                | '╗'
+                | '╚'
+                | '╝'
+        ) {
+            saw_art = true;
+            continue;
+        }
+        return false;
+    }
+    saw_art
 }
 
 fn is_managed_capability_proof_line(trimmed: &str) -> bool {
@@ -907,6 +989,26 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
         let output = "\
 [start] managed opencode capability proof: opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:18812,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:18820
 zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+
+        assert!(h.is_idle_chrome_only_output(output));
+        assert!(h.last_prompt_candidate(output).is_none());
+    }
+
+    #[test]
+    fn idle_chrome_only_output_accepts_opencode_idle_splash_without_prompt_glyph() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+                                                                                                      ▄
+                                                                                                     ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▄ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+                                                                                   ┃
+                                                                                   ┃  Ask anything... \"What is the tech stack of this project?\"
+                                                                                   ┃
+                                                                                   ┃  Build · GLM-5.1 Z.AI Coding Plan
+                                                                                   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                                                                                                   tab agents  ctrl+p commands
+                                                                                        ● Tip Toggle username display in chat via command palette (Ctrl+P)
+  ~/work/btakita/agent-loop:main                                                                                                                                                                                                       1.14.48
 ";
 
         assert!(h.is_idle_chrome_only_output(output));

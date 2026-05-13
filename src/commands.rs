@@ -177,7 +177,7 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd(
         "/agent-doc prompt",
         "<FILE>",
-        "Detect permission prompts from Claude",
+        "Detect permission prompts from Claude Code or OpenCode",
     ));
     cmds.push(cmd(
         "/agent-doc audit-docs",

@@ -446,7 +446,7 @@ enum Commands {
         #[arg(long, default_value_t = 0)]
         debounce: u64,
     },
-    /// Detect permission prompts from a Claude Code session
+    /// Detect permission prompts from a Claude Code or OpenCode session
     Prompt {
         /// Path to the session document (omit with --all)
         file: Option<PathBuf>,

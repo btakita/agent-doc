@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **OpenCode permission prompts now answer horizontal options correctly.** `agent-doc prompt` detects OpenCode's `Permission required` prompt row with `Allow once`, `Allow always`, and `Reject`, and `prompt --answer` uses Left/Right navigation for that horizontal selector instead of Claude Code's Up/Down menu movement. Route busy detection also treats this OpenCode prompt as an active permission blocker instead of injecting a rerun over it.
+
 - **OpenCode dispatch-only startup probes now use the OpenCode redraw budget.** JetBrains `Run Agent Doc` can hit an OpenCode pane just after the controller has seen the idle splash but before the second startup-window guard catches the same prompt. Dispatch-only routing now gives OpenCode the longer harness-specific prompt/recovery budget instead of the short Codex-style boot probe, avoiding false `latest run is still booting` refusals after OpenCode is already accepting input.
 
 - **OpenCode idle splash now promotes managed sessions to ready.** OpenCode 1.14 can render an idle composer as the splash chrome (`Ask anything...`, build-plan text, command/footer hints, cwd/version status) without a standalone `>` prompt or `context ... % used` footer. Shared harness readiness now treats that chrome-only splash as dispatch-ready, so start, route, and session status promote the actor instead of timing out with `route_authoritative_actor_starting_not_ready` after the capability proof succeeds.

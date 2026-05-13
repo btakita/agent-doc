@@ -98,9 +98,9 @@ Two modes:
 
 `agent-doc prompt <FILE>`
 
-- Detects active permission prompts from a Claude Code pane by scanning the captured pane footer.
-- Supports both bracketed legacy options and numbered-list options.
-- `--answer N` selects an option and presses Enter.
+- Detects active permission prompts from Claude Code and OpenCode panes by scanning the captured pane footer.
+- Supports Claude Code bracketed legacy options, Claude Code numbered-list options, and OpenCode horizontal `Allow once` / `Allow always` / `Reject` permission rows.
+- `--answer N` selects an option using the prompt's navigation axis (Claude Code Up/Down, OpenCode Left/Right) and presses Enter.
 - `--all` polls every live session.
 
 ## skill

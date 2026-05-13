@@ -1244,6 +1244,24 @@ Press Enter to restart, or 'q' to exit.
     }
 
     #[test]
+    fn dispatch_blocker_reason_detects_opencode_permission_prompt() {
+        let h = HarnessConfig::opencode();
+        let output = r#"
+   ⠙[[[Dd ~/work/btakita/corky/pyproject.toml
+┃                                                                                                                       ┃  △ Permission required
+┃    ← Access external directory ~/work/btakita/corky/.github/workflows                                                 ┃
+┃  Patterns                                                                                                             ┃
+┃  - /home/brian/work/btakita/corky/.github/workflows/*                                                                 ┃
+┃                                                                                                                       ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
+┃
+"#;
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("active permission prompt")
+        );
+    }
+
+    #[test]
     fn is_prompt_line_rejects_non_prompt() {
         let h = HarnessConfig::claude();
         assert!(!h.is_prompt_line("Starting claude..."));

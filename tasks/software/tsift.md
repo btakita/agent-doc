@@ -35,14 +35,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): arXiv 2605.05242 implications; DCI benchmark
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:4adc2d69 -->
+❯ do [#s1k1]. spec-test-build-install-commit-push
+### Re: #s1k1 search workflow — gpt-5
+
+Implemented and pushed `src/tsift` commit `1078801` (`feat: add search workflow recipe`) to `origin/main`.
+
+What changed:
+- Added `tsift workflow search`, with human, JSON, and envelope-compatible output for an ordered exact search -> semantic search -> explain -> summarize -> digest workflow.
+- The recipe explicitly preserves handles across expansions: `sfam-*`, `shit-*`, `edef-*`, `ecall-*`, `eces-*`, artifact handles, touched-symbol handles, and `resume_commands[]`.
+- Documented the workflow in `SPEC.md` and added it to generated `tsift init` code-navigation instructions.
+- Added unit coverage for the workflow recipe and integration coverage for `tsift workflow search --json`.
+
+Verification:
+- `cargo test` passed: 556 unit tests and 90 integration tests.
+- `make check` passed: `cargo clippy -- -D warnings` plus the full test suite.
+- `cargo build` passed.
+- `cargo install --path .` passed and replaced `/home/brian/.cargo/bin/tsift`.
+- Installed smoke check passed: `tsift workflow search --json` emitted the expected ordered recipe.
+- Latest GitHub Actions CI run `25774327358` is green (`clippy + test`). This repo's CI workflow has no separate tmux-test job.
+
+I left unrelated dirty parent-repo entries untouched. The `src/tsift` submodule worktree itself is clean at the pushed commit.
+<!-- agent:boundary:b512dd89 -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#s1k1] Add a composable search workflow surface or documented recipes that preserve result handles across search --exact, search, explain, summarize, and digest expansion steps.
 - [ ] [#v6y3] Add breadth/scale guards to search envelopes: high-hit warnings, corpus-size/tool-budget signals, and concrete next-narrowing commands before agents fan out too broadly.
 <!-- /agent:backlog -->
 
@@ -56,6 +75,7 @@ Compacted content:
 
 <!-- agent:done -->
 - 2026-05-12 [#686r] Add a DCI-style tsift benchmark: compare exact/chained rg, lexical BM25, and hybrid search on multi-hop code/repo tasks, tracking localization, tool calls, latency, and token budget.
+- 2026-05-12 [#s1k1] Add a composable search workflow surface or documented recipes that preserve result handles across search --exact, search, explain, summarize, and digest expansion steps.
 <!-- /agent:done -->
 
 ## Completed / Reaped

@@ -34,7 +34,28 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): Codex Resume Writable Roots; CI Follow-up
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b45b9c29 -->
+❯ do [#ipc-timeout-dup]. spec-test-build-install-commit-push
+### Re: IPC timeout duplicate patchback — gpt-5
+
+Implemented `#ipc-timeout-dup` and marked it done.
+
+What changed:
+- Updated the stream IPC timeout path so, after the local fallback write is committed, the queued `.agent-doc/patches/*.json` fallback file is removed. The claimed-patch sentinel is still written so a watcher that already saw the file can fail closed instead of replaying it.
+- Added a finalize integration regression covering the exit-75 timeout path: local write happens, `HEAD` contains the response, queued patch JSON is gone, and the claimed sentinel remains.
+- Updated `SPEC.md`, closeout/core command specs, `CLAUDE.md`, and `VERSIONS.md` to describe the new closeout invariant.
+
+Verification:
+- `cargo test --test finalize_integration stream_ipc_timeout_commit_removes_fallback_patch_file`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- CI review: latest GitHub `CI` run I found was old and red at `cargo clippy`; it did not expose a tmux-specific leg to reproduce locally.
+
+Commits:
+- `src/agent-doc` pushed commit `659d714` on `20260422/codex-agent-backend`.
+- parent repo commit `8cde23e20` records the submodule pointer update and plan file; parent push follows this session closeout.
+<!-- agent:boundary:e056674a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,7 +92,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ipc-timeout-dup] #agent-doc-bug: IPC timeout during finalize causes duplicate response patchback — binary commits to git, plugin independently applies fallback patch, document ends up with two copies of response. Dedupe in write --commit does not cleanly remove duplicate from HEAD. Plan: tasks/agent-doc/plan-ipc-timeout-duplicate-patchback.md
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
@@ -196,4 +216,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#tmuxroutesync] #next-steps: Implement the current tmux route/sync plan: typed actor_binding protocol, current-generation ready-prompt barrier before dispatch, safe-passive sync burst coalescing/cache, and deterministic plus real-tmux route/sync coverage. Plan: tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md
 - 2026-05-12 [#codexresumegitdir] #agent-doc-bug: Managed Codex writable-root proof is still insufficient for reused/resumed actors. Monster Rod Holders shipping-rule turn could edit `src/boost-client/src/monsterrodholders-dev` but could not update local `.git/modules/...` metadata, so it committed from a temporary clone and left the local checkout dirty. Agent-doc must prove the live actor generation has the exact gitdir/superproject writable roots before dispatch, and fresh-start instead of `codex exec resume` when roots are missing because resume strips `--add-dir`. Plan: tasks/agent-doc/plan-codex-resume-writable-root-contract.md
 - 2026-05-12 [#va0j] [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.113, then re-test Clear Session Context against the stale-busy Codex status-only pane.
+- 2026-05-12 [#ipc-timeout-dup] #agent-doc-bug: IPC timeout during finalize causes duplicate response patchback — binary commits to git, plugin independently applies fallback patch, document ends up with two copies of response. Dedupe in write --commit does not cleanly remove duplicate from HEAD. Plan: tasks/agent-doc/plan-ipc-timeout-duplicate-patchback.md
 <!-- /agent:done -->

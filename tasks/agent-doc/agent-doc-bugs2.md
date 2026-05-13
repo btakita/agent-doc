@@ -29,52 +29,15 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-061942.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-063849.md`*
 
 Compacted content:
-- Archived 1 response topic(s): OpenCode permission prompt
+- Archived 1 response topic(s): #rspcmt8 promptless exchange closeout drift
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#rspcmt8]. spec-test-build-install-commit-push
-### Re: #rspcmt8 promptless exchange closeout drift — gpt-5
-
-Implemented and pushed `#rspcmt8`.
-
-What changed:
-- `src/agent-doc/src/session_check.rs` now lets the preflight/sync closeout-drift guard reuse the existing exchange-drift detector for promptless response-body drift, while preserving normal prompt-bearing user edits for the next preflight diff.
-- `src/agent-doc/src/preflight.rs` now checks promptless closeout drift before transcript repair can normalize dirty response body lines into prompt-looking text.
-- Added regression coverage for an OpenCode-style response body visible in `agent:exchange` but absent from the committed snapshot.
-- Updated `src/agent-doc/specs/07-closeout-commands.md` and `tasks/agent-doc/plan-response-patchback-uncommitted.md` with the #rspcmt8 evidence and closeout contract.
-
-Verification:
-- `cargo test preflight_fails_closed_on_uncommitted_exchange_drift_without_response_heading`
-- `cargo test preflight_does_not_swallow_user_prose_that_mentions_head`
-- `cargo test uncommitted_exchange_drift`
-- `make check`
-- `make build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- Latest root `Agent Doc` workflow run `25782075410` has green `tmux-ci`; its separate `check` job was red from an earlier pushed state, and local `make check` is green after this fix.
-
-Commits pushed:
-- `src/agent-doc` `1efdc01e` (`fix: block promptless exchange closeout drift`) to `origin/20260422/codex-agent-backend`
-- parent `agent-loop` `87ac6a184` (`agent-doc: block promptless exchange drift`) to `origin/main`
-- parent `agent-loop` `fe17f1d96` (`agent-doc(root): 2026-05-13 02:31:32 (submodule pointer)`) was a concurrent session-share pointer commit already present locally after my push; I pushed it so `main` was not left ahead.
-
-Unrelated dirty work remains in `mail`, `src/session-share`, and `tasks/software/corky.md`.
-<!-- agent:boundary:7123ed8f -->
+<!-- agent:boundary:c223ff98 -->
 <!-- /agent:exchange -->
 ###
 <!--
-agent-doc opencode permission inputs has issues:
-- The JB selection does not select the permission in the CLI. It highlights the next option instead.
-- The arrow keys and tab key doesn't work.
-
-```
-┃                                                                                                                       ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
-┃                                                                                                                                                                                                                                             ^[[C^[[D^[[A^[[B		
-```
-spec-test-build-install-commit-push
----
 JB `Run Agent Doc` on root.md with `agent: claude` sends an incorrect command
 ```
 ❯ agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md

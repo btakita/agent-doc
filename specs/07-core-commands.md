@@ -99,7 +99,7 @@ Two modes:
 `agent-doc ops summary [--project-root DIR] [--limit N] [--json]`
 
 - Reads `.agent-doc/logs/ops.log` and groups high-signal operational events by document path and session id when the log line provides them.
-- The tracked event families are `ipc_write_consumed`, `commit_success`, `route_dispatch_start_proven`, `post_commit_local_drift`, `session_clear_live_busy_guard_bypassed`, `route_authoritative_actor_starting_not_ready`, dispatch-only route lines with `proof_scope=accepted_only`, and `sync_latency` entries with `status=over_budget`.
+- The tracked event families are `ipc_write_consumed`, `commit_success`, `route_dispatch_start_proven`, `post_commit_local_drift`, `session_clear_live_busy_guard_bypassed`, `session_clear_live_busy_guard_refused`, `route_authoritative_actor_starting_not_ready`, dispatch-only route lines with `proof_scope=accepted_only`, and `sync_latency` entries with `status=over_budget`.
 - `--limit` scans only the trailing N log lines, defaulting to a bounded recent tail; `--limit 0` scans the full log.
 - Human output is optimized for quick operator review. `--json` emits the same buckets for editor plugins or dashboards.
 

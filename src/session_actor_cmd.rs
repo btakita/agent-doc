@@ -340,7 +340,7 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext) -> Result<()> {
         crate::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
-                "session_clear_live_busy_guard_bypassed file={} pane={} source={} current_command={} tail={:?}",
+                "session_clear_live_busy_guard_refused file={} pane={} source={} current_command={} tail={:?}",
                 ctx.canonical_file.display(),
                 evidence.pane_id.as_deref().unwrap_or("unknown"),
                 evidence.source,
@@ -348,8 +348,28 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext) -> Result<()> {
                 evidence.tail.as_deref().unwrap_or("unknown")
             ),
         );
+        anyhow::bail!(
+            "{}",
+            live_busy_clear_refusal_message(&ctx.canonical_file, &evidence)
+        );
     }
     Ok(())
+}
+
+fn live_busy_clear_refusal_message(file: &Path, evidence: &LivePaneEvidence) -> String {
+    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
+    let command = evidence.current_command.as_deref().unwrap_or("unknown");
+    let tail = evidence.tail.as_deref().unwrap_or("unknown");
+    format!(
+        "session_clear refused for {} because pane {} is alive-busy (source={}, current_command={}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt before retrying `agent-doc session clear`, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the pane and clear context.",
+        file.display(),
+        pane,
+        evidence.source,
+        command,
+        tail,
+        file.display(),
+        file.display()
+    )
 }
 
 pub fn interrupt_clear(file: &Path) -> Result<()> {
@@ -1402,6 +1422,24 @@ mod tests {
             &harness,
             "›\nexploring repository\n"
         ));
+    }
+
+    #[test]
+    fn clear_live_busy_refusal_points_to_interrupt_clear() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("gpt-5.5 high · ~/work/btakita/agent-loop · Context 85% used".to_string()),
+        };
+
+        let message = live_busy_clear_refusal_message(Path::new("/tmp/doc.md"), &evidence);
+
+        assert!(message.contains("session_clear refused"));
+        assert!(message.contains("pane %7 is alive-busy"));
+        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
     }
 
     #[test]

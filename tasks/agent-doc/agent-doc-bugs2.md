@@ -29,12 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-232029.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-232202.md`*
 
 Compacted content:
-- Archived 1 response topic(s): ownedpty
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f0a67e73 -->
+- Trailing prompt/context: Read recent logs since the hybrid pty was implemented.
+<!-- agent:boundary:2db5c1c0 -->
 <!-- /agent:exchange -->
 ###
 <!--

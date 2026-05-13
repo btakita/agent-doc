@@ -35,7 +35,30 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): clean EOF quits and restart churn
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:f634c7dc -->
+❯ do [#idxf]. spec-test-build-install-commit-push
+### Re: stale tsift index reminders — gpt-5
+
+Completed `#idxf`.
+
+Implemented a lightweight stale-index reminder surface in tsift: `status` now emits structured `reminders` plus human reminder lines when the index is stale, and `context-pack` carries those same reminders as `status_reminders` so resumable handoff packs expose the reindex command and missing-summary follow-up without requiring a separate status call.
+
+Updated the spec and changelog, added focused regression coverage for both `status` and `context-pack`, refreshed the local tsift index with `tsift status --fix --json`, built and installed the final binary locally, and pushed the code.
+
+Verification:
+- `cargo test status_reports_stale_index_reminder`
+- `cargo test context_pack_status_reminders_include_stale_index_state`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `tsift status --fix --json`
+- `tsift context-pack /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --json`
+
+CI check: `gh run list --workflow CI --limit 1` showed the latest GitHub Actions run was red because the job was not started due to account billing/spending-limit status, so there was no failed test log to fix locally.
+
+Pushed commits:
+- `btakita/tsift` `ea6a648` (`feat: surface stale index reminders`)
+- `btakita/agent-loop` `9f2ad66` (`chore: update tsift submodule`)
+<!-- agent:boundary:9fba77b9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +67,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#idxf] Refresh stale tsift index state and add a lightweight status/context-pack reminder when the tsift repo index is stale; status currently reports 8 stale files and no summaries.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

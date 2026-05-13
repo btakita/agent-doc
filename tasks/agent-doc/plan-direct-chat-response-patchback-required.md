@@ -50,10 +50,10 @@ Current evidence:
 
 ## Implementation Steps
 
-- [ ] Add an instruction/hook-level invariant: after a direct chat response that
+- [x] Add an instruction/hook-level invariant: after a direct chat response that
       refers to a session-document prompt, run `agent-doc write --commit <file>`
       before final success.
-- [ ] Make the required closeout command resilient to parent index locks by
+- [x] Make the required closeout command resilient to parent index locks by
       failing with a clear retry path and preserving the already-written
       response capture.
 - [ ] Add a recovery helper or session-check hint that can finish only the parent
@@ -63,9 +63,9 @@ Current evidence:
 
 ## Regression Coverage
 
-- [ ] Simulate direct chat response to a prompt-only session document tail and
+- [x] Simulate direct chat response to a prompt-only session document tail and
       assert success is blocked until `write --commit` records the response.
-- [ ] Simulate submodule write success plus parent index-lock failure and assert
+- [x] Simulate submodule write success plus parent index-lock failure and assert
       `session-check` reports the missing parent pointer.
 - [ ] Simulate idempotent recovery with `agent-doc commit <file>` after the
       response is already committed in the submodule.

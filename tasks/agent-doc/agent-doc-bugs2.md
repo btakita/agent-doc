@@ -82,16 +82,51 @@ Commits created:
 - parent `agent-loop`: `d8cbcd8c0 agent-doc: preserve nested panes during resync`
 
 Per the session-document commit boundary, I will push those commits after this finalize step succeeds.
-<!-- agent:boundary:5ec300d0 -->
-<!-- /agent:exchange -->
-###
-<!--
-When I navigate the editor to tsift.md and JB `Sync Tmux Layout`, JB shows an error. It seems the manual reap killed the active tmux panes and now agent-doc cannot recover to sync the document. This issues happens with all documents where the tmux pane was killed. agent-doc sync should be more durable and recover tmux panes that crashed or were externally killed.
+❯ When I navigate the editor to tsift.md and JB `Sync Tmux Layout`, JB shows an error. It seems the manual reap killed the active tmux panes and now agent-doc cannot recover to sync the document. This issues happens with all documents where the tmux pane was killed. agent-doc sync should be more durable and recover tmux panes that crashed or were externally killed.
 ```
 Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.
 ```
-spec-test-build-install-commit-push
----
+❯ spec-test-build-install-commit-push
+### Re: durable editor sync after killed panes — gpt-5
+
+Implemented and shipped the fix.
+
+What changed:
+- JetBrains manual and automatic layout sync now run `agent-doc sync` with a bounded subprocess timeout. If a sync stalls after dead/stale tmux pane state, the plugin terminates that subprocess, releases its local sync guard, and leaves the latest selection pending so retry can run binary recovery instead of permanently showing `Sync deferred: another tmux layout sync is already running`.
+- VS Code sync paths now use the same bounded timeout for manual sync and automatic tab sync.
+- Updated shared editor specs, JetBrains specs, and plugin specs for the timeout/retry invariant.
+- Bumped local plugin builds: JetBrains `0.2.118`, VS Code `0.2.17`.
+
+Local recovery evidence:
+- `agent-doc sync --col ...tasks/software/tsift.md --focus ...tasks/software/tsift.md` recovered the killed `tsift.md` binding by starting replacement pane `%57` and reconciling layout.
+
+Verification passed:
+- `./gradlew test`
+- `npm test`
+- `make check`
+- `make tmux-ci` (`225 passed; 0 failed` live tmux tests)
+- `make install`
+- `./gradlew buildPlugin signPlugin`
+- `npm run package`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+CI inspected:
+- Latest completed parent `Agent Doc` workflow before this push had a green `tmux-ci` job and red `check` job.
+- Latest submodule `CI` workflow inspected was green: run `25773430221`.
+- New parent run for this push started: `25815706822`.
+
+Local install/package:
+- Installed CLI and `libagent_doc.so` via `make install`.
+- Installed JetBrains plugin `0.2.118` into both IntelliJIdea2026.1 plugin directories. Restart IntelliJ to load it.
+- Built VS Code package: `src/agent-doc/editors/vscode/agent-doc-0.2.17.vsix`.
+
+Commits pushed:
+- `src/agent-doc`: `ff8aae13 fix: bound editor sync subprocesses`
+- parent `agent-loop`: `e701994af agent-doc: bound editor sync subprocesses`
+<!-- agent:boundary:b31ded48 -->
+<!-- /agent:exchange -->
+###
+<!--
 The agent:done tag should support an attribute to link to a sepate "done" file (*.done.md) so the document does not become bloated. Plan so we agree on the attribute name.
 ---
 The sandbox check tmux prompt should be terse and more "human readable" on a single line. Explain the status without the extra information.
@@ -118,6 +153,10 @@ Should tsift fail fast in this case?
     strategy.
 ```
 spec-test-build-install-commit-push
+---
+How can we move the agent-doc concept to html files?
+Can the agent-doc supervisor run a web server, using contenteditable via tinymcp or another editor to write back to the source file?
+Would major editors such as VSCode, JetBrains, Zig, and TUI editors support this workflow?
 ---
 With the latest supply chain attacks on npm and pypi, should agent-doc should run in a docker container? Should all software written run in a docker container?
 ---

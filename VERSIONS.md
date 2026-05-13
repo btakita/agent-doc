@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Post-commit follow-up prompts no longer look like missed patchback repair.** When `commit` sees `snapshot == HEAD` and the live file only adds a later user follow-up, it now logs a dedicated `post_commit_user_follow_up` marker and suppresses `prior_patchback_without_response_body` / `out_of_band_write` noise. The follow-up still remains uncommitted for the next response cycle, but ops diagnostics no longer imply a missing assistant response body. This closes `#codexpatchbodyloop` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **IPC timeout closeout deletes stale fallback patches.** The CRDT stream IPC timeout path now removes the queued `.agent-doc/patches/<hash>.json` file after its local write and git commit succeed, while still leaving the claimed-patch sentinel for any watcher that already observed the file. This prevents a late editor file-watcher pass from replaying the same response after the binary has already committed it. Added a child-process regression for the exit-75 timeout path. This closes `#ipc-timeout-dup` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Clear Session Context removes the remaining live busy refusal.** File-scoped `agent-doc session clear <FILE>` now treats the clear command itself as the operator recovery action: after controller authorization it logs stale or conservative `alive-busy` live-pane classifications and still sends the harness-native clear through the resolved direct pane or supervisor path. Codex status now also recognizes the current `› Explain this codebase` idle placeholder as prompt-ready evidence. This closes the follow-up JetBrains Clear Session Context repro in `tasks/agent-doc/agent-doc-bugs2.md`.

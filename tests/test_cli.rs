@@ -307,7 +307,7 @@ fn test_cli_patch_replaces_exchange_even_when_component_is_append_mode() {
 }
 
 #[test]
-fn test_commit_explains_prior_patchback_without_new_response_body() {
+fn test_commit_explains_head_current_follow_up_without_repair_body_noise() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();
     let doc = root.join("session.md");
@@ -339,14 +339,12 @@ fn test_commit_explains_prior_patchback_without_new_response_body() {
     cmd.assert()
         .success()
         .stderr(predicate::str::contains(
-            "no new assistant response body was supplied",
-        ))
-        .stderr(predicate::str::contains(
-            "will not synthesize a second assistant patchback",
+            "leaving later local user follow-up edits uncommitted",
         ))
         .stderr(predicate::str::contains(
             "This is not a full closeout for the follow-up prompt",
-        ));
+        ))
+        .stderr(predicate::str::contains("agent-doc write --commit"));
 }
 
 #[test]

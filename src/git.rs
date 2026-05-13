@@ -1602,10 +1602,10 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     // Warn on significant file/snapshot drift — may indicate an out-of-band write
     // that bypassed the agent-doc write pipeline (snapshot not updated).
     let snap_len = snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0);
-    if snap_len > 0 && file_len > snap_len {
+    if snap_len > 0 && file_len > snap_len && post_commit_local_drift.is_none() {
         let drift = file_len - snap_len;
-        // Always log out-of-band drift (any positive delta) for aggregation and
-        // root-cause analysis — classifies small/frequent vs large/rare gaps.
+        // Log unclassified positive drift for aggregation/root-cause analysis.
+        // Classified post-commit local edits have their own markers below.
         crate::ops_log::log_op(
             file,
             &format!(
@@ -1704,7 +1704,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
         if let Some(kind) = post_commit_local_drift {
             if kind == PostCommitLocalDriftKind::UserFollowUp {
                 eprintln!(
-                    "[commit] prior response is already committed in HEAD for {} — no new assistant response body was supplied, so commit will not synthesize a second assistant patchback; leaving later local user follow-up edits uncommitted. This is not a full closeout for the follow-up prompt; run `agent-doc {}` to answer it or pipe the missing response through `agent-doc write --commit {}`.",
+                    "[commit] prior response is already committed in HEAD for {} — leaving later local user follow-up edits uncommitted for the next response cycle. This is not a full closeout for the follow-up prompt; run `agent-doc {}` to answer it or pipe the response through `agent-doc write --commit {}`.",
                     file.display(),
                     file.display(),
                     file.display()
@@ -1712,7 +1712,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "prior_patchback_without_response_body file={} basis=head",
+                        "post_commit_user_follow_up file={} basis=head",
                         file.display()
                     ),
                 );
@@ -4795,6 +4795,18 @@ Done.
             "mixed cleanup should be diagnosed as preserved user follow-up drift:\n{log}"
         );
         assert!(
+            log.contains("post_commit_user_follow_up file="),
+            "mixed cleanup should use the benign user-follow-up marker:\n{log}"
+        );
+        assert!(
+            !log.contains("prior_patchback_without_response_body file="),
+            "fresh follow-up prompts must not be mislabeled as missing response-body repair:\n{log}"
+        );
+        assert!(
+            !log.contains("out_of_band_write file="),
+            "classified follow-up prompt drift must not be mislabeled as out-of-band write:\n{log}"
+        );
+        assert!(
             !log.contains("post_commit_escaped_tail_cleanup file="),
             "mixed cleanup must not be auto-adopted:\n{log}"
         );
@@ -4957,8 +4969,16 @@ Done.
             "follow-up noop closeout should classify post-commit local drift:\n{log}"
         );
         assert!(
-            log.contains("prior_patchback_without_response_body file="),
-            "follow-up noop closeout should record the missing-second-patchback diagnostic:\n{log}"
+            log.contains("post_commit_user_follow_up file="),
+            "follow-up noop closeout should record the benign follow-up diagnostic:\n{log}"
+        );
+        assert!(
+            !log.contains("prior_patchback_without_response_body file="),
+            "follow-up noop closeout must not reopen missed-response repair semantics:\n{log}"
+        );
+        assert!(
+            !log.contains("out_of_band_write file="),
+            "classified follow-up prompt drift must not be mislabeled as out-of-band write:\n{log}"
         );
     }
 
@@ -5541,6 +5561,10 @@ Done.
             log.contains("post_commit_local_drift file=")
                 && log.contains("kind=working_tree_edits"),
             "working-tree edits should be classified as post-commit local drift:\n{log}"
+        );
+        assert!(
+            !log.contains("out_of_band_write file="),
+            "classified post-commit local drift should not be mislabeled as out-of-band write:\n{log}"
         );
         assert!(
             !log.contains("drift_warning file="),

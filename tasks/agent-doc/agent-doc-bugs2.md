@@ -29,35 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-020008.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-025652.md`*
 
 Compacted content:
-- Archived 2 response topic(s): IPC timeout duplicate patchback; CI clippy failure
+- Archived 2 response topic(s): #codexpatchbodyloop; #opencodecapfail
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#codexpatchbodyloop]. spec-test-build-install-commit-push
-### Re: #codexpatchbodyloop — gpt-5
-
-Done. I changed `agent-doc` closeout diagnostics so an already-committed response followed by a fresh user edit is classified as `post_commit_user_follow_up` and no longer emits `prior_patchback_without_response_body` or `out_of_band_write` noise for that benign state.
-
-Updated the regression coverage plus closeout docs/spec/README/CLAUDE/VERSIONS. Code is committed in `src/agent-doc` as `7bde9db` and the parent gitlink is committed as `2d11a59`; per the session closeout ordering, I will push after this binary-owned document commit.
-
-Verification passed: latest GitHub Actions CI run `25773430221` is green and includes `make tmux-ci`; local `make check`, `cargo build`, `make install`, and `cargo run --quiet -- audit-docs` all passed.
-❯ do [#opencodecapfail]. spec-test-build-install-commit-push
-### Re: #opencodecapfail — gpt-5
-
-Done. I implemented the OpenCode managed capability proof gate and marked `#opencodecapfail` complete.
-
-The fix is in `src/agent-doc` commit `ea697e50` and parent pointer commit `bd0a48d1b`. OpenCode managed sessions now require `opencode_capability_proof` for SSH-gated documents, run bounded `opencode run --format json` child probes for SSH/network checks, classify child `socket: Operation not permitted` as managed OpenCode SSH denial, and keep route/session-status proof checks harness-aware so OpenCode is not held to Codex writable-root contracts. I also updated README/SPEC/backend spec/VERSIONS for the new contract.
-
-Verification passed:
-- `make check`
-- `cargo build`
-- `make install`
-- `cargo run --quiet -- audit-docs`
-- `make tmux-ci` (`222 passed; 0 failed` ignored/live tmux tests)
-
-CI review: latest GitHub Actions `CI` run `25773430221` on `main` is green. Its log did not show the current tmux leg, so I used the local `make tmux-ci` result as the tmux evidence for this turn.
-<!-- agent:boundary:a329eac6 -->
+<!-- agent:boundary:ec339ec3 -->
 <!-- /agent:exchange -->
 ###
 <!--

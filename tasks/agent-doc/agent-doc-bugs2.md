@@ -34,7 +34,28 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): tmuxhybridpty; tmuxhybridpty
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:34e2ad7a -->
+❯ do [#ownedpty]. Run ignored tmux tests in parallel. The tmux tests must pass in parallel. spec-test-build-install-commit-push
+### Re: ownedpty — gpt-5
+Implemented `#ownedpty`. Managed supervisors now keep an `alacritty_terminal` screen model for the owned child PTY, feed filtered child output into it, reset it on child spawn, and resize it with the PTY. Prompt/readiness/help/protected-input checks now prefer the current visible screen text and fall back to the raw byte ring only when the screen is empty, so cursor rewrites and line clears are interpreted as terminal state instead of append-only tmux scrollback.
+
+I also fixed the parallel tmux fixture that surfaced during validation: the mock registered `agent-doc` now ignores blank submitted lines, so prompt-confirmation Enter events do not hide the ready prompt as `GOT:` under parallel tmux execution. Specs and catalog docs were updated for the new owned-PTY screen invariant.
+
+Verification passed:
+- `cargo test supervisor::screen -- --test-threads=2`
+- `cargo test current_child_prompt_visible -- --test-threads=2`
+- `cargo test is_help_screen_visible -- --test-threads=2`
+- `make tmux-ci TMUX_TEST_THREADS=4` (226 ignored tmux tests passed in parallel)
+- `make check`
+- `make install`
+
+Latest GitHub CI for `main` was green (`25773430221`, 2026-05-13T01:55:57Z), but `gh run view` exposed only the standard `check` job, so the local `make tmux-ci TMUX_TEST_THREADS=4` run is the tmux-specific evidence for this turn.
+
+Commits prepared before this closeout:
+- `src/agent-doc` `f24da68a` (`feat: add owned pty screen model`)
+- superproject `01c62975c` (`chore: update agent-doc submodule`)
+
+Per the session-document closeout order, I will push those commits after this finalize step completes.
+<!-- agent:boundary:1ba14a8a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,7 +130,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ownedpty] Implement portable-pty + alacritty_terminal backend for managed panes — agent-doc owns the child PTY directly instead of tmux send-keys/capture-pane, eliminating the input heuristic failure class. Depends on #multiplexertrait abstraction boundary. [recommended]
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
 - [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.
 - [ ] [#multiplexertrait] Evaluate Multiplexer trait abstraction over tmux to reduce coupling (785 tmux references across 43 files). Would allow future Zellij backend and make the tmux surface testable via mock backend. [recommended]

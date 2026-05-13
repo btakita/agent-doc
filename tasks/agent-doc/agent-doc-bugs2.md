@@ -34,14 +34,48 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): external `agent:done` archive attribute
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:54f8ea7c -->
+❯ do [#donearchiveattr]. spec-test-build-install-commit-push
+### Re: external `agent:done` archive attribute — gpt-5
+
+Implemented `agent:done archive=<repo-relative>.done.md` for completed-work externalization.
+
+What changed:
+- Reaped backlog/icebox entries now append to the external `.done.md` file when `agent:done` has `archive=...`.
+- Archive targets fail closed for absolute paths, parent-directory escapes, outside-repo resolution, empty attrs, and non-`.done.md` targets.
+- Missing archive files are created deterministically with a small markdown header.
+- Retry appends suppress duplicate date/id/text entries.
+- The local `agent:done` marker remains present and gets a small pointer comment instead of growing with completed entries.
+- Preflight and session-check now count IDs in the external archive as completed-history proof for dropped-backlog replay.
+
+Updated specs/docs: `SPEC.md`, `specs/pending-system.md`, `specs/07-closeout-commands.md`, `runbooks/pending-ops.md`, `README.md`, `VERSIONS.md`, and the implementation plan status.
+
+Verification:
+- `cargo fmt`
+- `make check` passed after final edits.
+- Latest GitHub `CI` run inspected: `25773430221`, success on 2026-05-13; no red tmux leg found.
+- `make install` completed after the final check.
+- `agent-doc --version` reports `agent-doc 0.33.16`.
+
+Commits pushed:
+- `btakita/agent-doc` `20260422/codex-agent-backend`: `a6647b66 feat: support external done archives`
+- `btakita/agent-loop` `main`: `d3ef94d47 feat: support external done archives`
+<!-- agent:boundary:8eeaee33 -->
 <!-- /agent:exchange -->
 ###
 <!--
+Enter key in opencode does not submit prompts...enters a `\n` instead.
+```
+                       ┃                                                                                                                       ┃  agent-doc /home/brian/work/btakita/agent-loop/tasks/software/corky.md
+                       ┃                                                                                                                       ┃
+                       ┃                                                                                                                       ┃
+                       ┃ 
+```
+spec-test-build-install-commit-push
+---
 Autosync on editor file change + `Sync Tmux Layout` lands on a 1 tmux pane and 3 tmux pane layout with 2 editor panes.
 spec-test-build-install-commit-push
 ---
-The sandbox check tmux prompt should be terse and more "human readable" on a single line. Explain the status without the extra information.
+The managed proof check tmux prompt should be terse and more "human readable" on a single line. Explain the status without the extra information.
 spec-test-build-install-commit-push
 ---
 `--pending-only` should be renamed to `--backlog-only`.
@@ -111,7 +145,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#donearchiveattr] Implement external completed-work archive support for agent:done using archive=<repo-relative>.done.md. Plan: tasks/agent-doc/plan-external-done-archive-attribute.md
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->
@@ -122,4 +155,5 @@ minor (v0.34.0) release + publish. merge into main
 ## Completed / Reaped
 
 <!-- agent:done -->
+- 2026-05-13 [#donearchiveattr] Implement external completed-work archive support for agent:done using archive=<repo-relative>.done.md. Plan: tasks/agent-doc/plan-external-done-archive-attribute.md
 <!-- /agent:done -->

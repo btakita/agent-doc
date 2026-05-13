@@ -2,7 +2,7 @@
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
+agent: claude
 claude_model: claude-opus-4-6
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
@@ -34,10 +34,44 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): OpenCode Enter submit
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:054e0bae -->
+❯ JB `Clear Session Context` error on this document:
+```
+Clear Session Context is blocked for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 contains protected prompt input (drafted prompt input). Use Interrupt and clear to discard the prompt input, or Show status to inspect the session. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 28% used
+```
+❯ spec-test-build-install-commit-push
+### Re: JB Clear Session Context harness mismatch — opus-4-6
+
+**Root cause:** `protected_clear_input_reason` always used the document's configured harness (`ctx.harness` from frontmatter) for draft-input detection. When `agent: codex` but pane %1 runs OpenCode, the Codex harness's prompt heuristics misclassified OpenCode TUI output as "drafted prompt input".
+
+**Fix:** Added `HarnessConfig::from_pane_command(cmd)` that infers the actual harness from `pane_current_command` when unambiguous (`codex`, `opencode`, `claude`, `bun`), falling back to the document's configured harness for ambiguous commands (`node`, `agent-doc`, shell). Updated `protected_clear_input_reason` to use this.
+
+**Files changed:**
+- `src/harness.rs` — `from_pane_command()` + 3 test functions
+- `src/session_actor_cmd.rs` — harness inference in `protected_clear_input_reason`
+- `specs/07-session-tmux-commands.md` — documented the harness inference rule
+
+**Verification:** 2592 tests pass. Pre-existing `codex_bare_run_inside_owning_pane` failure is unrelated. Built, installed, committed, pushed.
+<!-- agent:boundary:e7f79da6 -->
 <!-- /agent:exchange -->
 ###
 <!--
+agent-doc running opencode still has input issues with the prompt mode...caused by the supervisor:
+- Enter
+- All arrow keys
+- Selecting and submitting prompts
+
+Please add ample logging and hook detection to debug the issue. These issues keep on reoccurring and take many turns to fix. The majority of my development on agent-doc is fixing issues between agent-doc and tmux. The issue seems architectural.
+
+Why is the test suite passing yet the product has critical regressions over and over and over and over and over again?
+
+Is tmux itself causing complications with the inputs? Is there a better tiled terminal emulator than tmux that has an api?
+
+Would a Rust port of https://github.com/tmux-python/libtmux help with the issues?
+
+Or is this an issue with the supervisor?
+
+#next-steps
+---
 Autosync on editor file change + `Sync Tmux Layout` lands on a 1 tmux pane and 3 tmux pane layout with 2 editor panes.
 spec-test-build-install-commit-push
 ---

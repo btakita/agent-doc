@@ -1111,7 +1111,12 @@ fn current_child_prompt_visible(
     shared: &SupervisorShared,
     harness: &crate::harness::HarnessConfig,
 ) -> bool {
-    let Some(line) = latest_prompt_candidate_line(shared, harness) else {
+    let recent = shared.recent_output.lock().unwrap();
+    let output = String::from_utf8_lossy(&recent);
+    if harness.binary == "opencode" && harness.is_idle_chrome_only_output(&output) {
+        return true;
+    }
+    let Some(line) = harness.last_prompt_candidate(&output) else {
         return false;
     };
     let stripped = crate::prompt::strip_ansi(&line);
@@ -4765,6 +4770,21 @@ Done.
             "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
         );
         assert!(!current_child_prompt_visible(&shared, &harness));
+    }
+
+    #[test]
+    fn current_child_prompt_visible_accepts_opencode_status_chrome_after_proof() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::opencode();
+        record_recent_output(
+            &shared,
+            "opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:18812,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:18820\n".as_bytes(),
+        );
+        record_recent_output(
+            &shared,
+            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n".as_bytes(),
+        );
+        assert!(current_child_prompt_visible(&shared, &harness));
     }
 
     #[test]

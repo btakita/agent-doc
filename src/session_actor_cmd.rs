@@ -936,6 +936,9 @@ fn live_pane_prompt_ready(harness: &crate::harness::HarnessConfig, captured: &st
     {
         return true;
     }
+    if harness.binary == "opencode" && harness.is_idle_chrome_only_output(captured) {
+        return true;
+    }
     harness.is_idle_chrome_only_output(captured)
 }
 
@@ -1351,6 +1354,16 @@ mod tests {
         let harness = crate::harness::HarnessConfig::opencode();
 
         assert!(live_pane_prompt_ready(&harness, "work complete\n>\n"));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_accepts_opencode_status_chrome_after_proof() {
+        let harness = crate::harness::HarnessConfig::opencode();
+
+        assert!(live_pane_prompt_ready(
+            &harness,
+            "[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:18812,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:18820\nzai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n"
+        ));
     }
 
     #[test]

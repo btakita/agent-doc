@@ -206,15 +206,24 @@ impl HarnessConfig {
         if trimmed.is_empty() {
             return true;
         }
-        self.binary == "codex" && trimmed.contains("·") && trimmed.contains("Context ")
+        if is_managed_capability_proof_line(trimmed) {
+            return true;
+        }
+        match self.binary.as_str() {
+            "codex" => trimmed.contains("·") && trimmed.contains("Context "),
+            "opencode" => is_context_usage_status_line(trimmed),
+            _ => false,
+        }
     }
 
-    /// Return true when the visible Codex pane contains only status/footer UI
+    /// Return true when the visible pane contains only status/footer UI
     /// chrome and no busy cue or prompt input. This is not enough for route
-    /// dispatch, but it is enough for operator status/clear to avoid trusting a
-    /// stale projected busy state over a visibly idle terminal.
+    /// dispatch for Codex, but it is enough for operator status/clear to avoid
+    /// trusting a stale projected busy state over a visibly idle terminal. For
+    /// OpenCode, the TUI can render an idle composer as status chrome only, so
+    /// callers may use this as a dispatch-ready signal.
     pub fn is_idle_chrome_only_output(&self, output: &str) -> bool {
-        if self.binary != "codex" || self.has_busy_cue(output) {
+        if !matches!(self.binary.as_str(), "codex" | "opencode") || self.has_busy_cue(output) {
             return false;
         }
 
@@ -227,7 +236,7 @@ impl HarnessConfig {
             if !self.is_ignorable_output_line(trimmed) {
                 return false;
             }
-            if trimmed.contains("Context ") {
+            if is_context_usage_status_line(trimmed) {
                 saw_status = true;
             }
         }
@@ -360,6 +369,15 @@ fn is_opencode_help_screen(output: &str) -> bool {
         })
         .count();
     subcommand_lines >= 3
+}
+
+fn is_context_usage_status_line(trimmed: &str) -> bool {
+    let lower = trimmed.to_ascii_lowercase();
+    lower.contains("context ") && lower.contains("% used")
+}
+
+fn is_managed_capability_proof_line(trimmed: &str) -> bool {
+    trimmed.contains("_capability_proof status=")
 }
 
 fn parse_sandbox_mode_config(value: &str) -> Option<String> {
@@ -875,6 +893,29 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
 ";
 
         assert!(h.is_idle_chrome_only_output(output));
+    }
+
+    #[test]
+    fn idle_chrome_only_output_accepts_opencode_status_after_capability_proof() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:18812,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:18820
+zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+
+        assert!(h.is_idle_chrome_only_output(output));
+        assert!(h.last_prompt_candidate(output).is_none());
+    }
+
+    #[test]
+    fn idle_chrome_only_output_rejects_opencode_working_text() {
+        let h = HarnessConfig::opencode();
+        let output = "\
+Working (21s - esc to interrupt)
+zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+
+        assert!(!h.is_idle_chrome_only_output(output));
     }
 
     #[test]

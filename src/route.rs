@@ -6751,6 +6751,9 @@ fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<Stri
     if harness.has_busy_cue(content) {
         return None;
     }
+    if harness.binary == "opencode" && harness.is_idle_chrome_only_output(content) {
+        return Some("opencode idle status chrome".to_string());
+    }
     harness
         .last_prompt_candidate(content)
         .filter(|line| harness.is_dispatch_ready_prompt_line(line))
@@ -8063,6 +8066,19 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
         assert!(
             ready_prompt_candidate(content, &harness).is_none(),
             "a Codex status/footer line alone is not a dispatch-ready prompt"
+        );
+    }
+
+    #[test]
+    fn ready_prompt_candidate_accepts_opencode_status_after_capability_proof() {
+        let harness = HarnessConfig::opencode();
+        let content = "\
+[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:18812,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:18820
+zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
+";
+        assert!(
+            ready_prompt_candidate(content, &harness).is_some(),
+            "OpenCode can render an idle composer as status chrome after proof output"
         );
     }
 

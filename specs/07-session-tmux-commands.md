@@ -310,7 +310,13 @@ single-owner actor controls:
   evidence classifies the resolved pane as `alive-busy`; ordinary active/status
   panes are allowed through the same `/clear` submit path. Clear may fail closed
   only when the live pane contains protected prompt input such as a permission
-  prompt, queued draft, shell search, or drafted user prompt. That refusal must
+  prompt, queued draft, shell search, or drafted user prompt. The protected-input
+  check must infer the actual harness from the pane's `pane_current_command`
+  when that command is an unambiguous harness binary (`codex`, `opencode`,
+  `claude`, `bun`), falling back to the document's configured harness only when
+  the command is ambiguous (`node`, `agent-doc`, shell). This prevents false
+  positives when the pane runs a different harness than the document specifies.
+  That refusal must
   record the protected-input reason in the ops log and tell the operator to use
   `agent-doc session interrupt-clear <FILE>` for an explicit discard. For Codex panes, a capture
   that shows only Codex status/footer chrome such as the model/cwd/context line,

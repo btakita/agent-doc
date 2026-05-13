@@ -132,6 +132,19 @@ impl HarnessConfig {
         }
     }
 
+    /// Infer harness from a pane's `pane_current_command`. Returns `None` when
+    /// the command is ambiguous (e.g. `node`, `agent-doc`) and the caller
+    /// should fall back to the document's configured harness.
+    pub fn from_pane_command(cmd: &str) -> Option<Self> {
+        match cmd {
+            "codex" => Some(Self::codex()),
+            "opencode" => Some(Self::opencode()),
+            "claude" => Some(Self::claude()),
+            "bun" => Some(Self::opencode()),
+            _ => None,
+        }
+    }
+
     /// Build the full arg list for a restart iteration.
     /// On first run, returns `base_args` unchanged.
     /// On restart, applies the `restart_behavior`.
@@ -732,6 +745,33 @@ mod tests {
     }
 
     #[test]
+    fn from_pane_command_unambiguous_binaries() {
+        assert_eq!(
+            HarnessConfig::from_pane_command("codex").unwrap().binary,
+            "codex"
+        );
+        assert_eq!(
+            HarnessConfig::from_pane_command("opencode").unwrap().binary,
+            "opencode"
+        );
+        assert_eq!(
+            HarnessConfig::from_pane_command("claude").unwrap().binary,
+            "claude"
+        );
+        assert_eq!(
+            HarnessConfig::from_pane_command("bun").unwrap().binary,
+            "opencode"
+        );
+    }
+
+    #[test]
+    fn from_pane_command_ambiguous_returns_none() {
+        assert!(HarnessConfig::from_pane_command("node").is_none());
+        assert!(HarnessConfig::from_pane_command("agent-doc").is_none());
+        assert!(HarnessConfig::from_pane_command("zsh").is_none());
+    }
+
+    #[test]
     fn from_context_uses_frontmatter_agent() {
         let fm = Frontmatter {
             agent: Some("codex".into()),
@@ -1194,6 +1234,24 @@ gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
 gpt-5.5 high · ~/work/btakita/agent-loop · Context 27% used
 ";
         assert_eq!(h.protected_prompt_input_reason(output), None);
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_skips_non_codex_harnesses() {
+        let opencode_output = "\
+› investigate this issue
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 28% used
+";
+        assert_eq!(
+            HarnessConfig::opencode().protected_prompt_input_reason(opencode_output),
+            None,
+            "OpenCode harness must not trigger Codex-specific draft detection"
+        );
+        assert_eq!(
+            HarnessConfig::claude().protected_prompt_input_reason(opencode_output),
+            None,
+            "Claude harness must not trigger Codex-specific draft detection"
+        );
     }
 
     #[test]

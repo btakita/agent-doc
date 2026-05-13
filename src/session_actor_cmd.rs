@@ -378,7 +378,11 @@ fn protected_clear_input_reason(
 ) -> Option<String> {
     let pane = evidence.pane_id.as_deref()?;
     let captured = crate::sessions::capture_pane(tmux, pane).ok()?;
-    let harness = crate::harness::HarnessConfig::from_agent_name(&ctx.harness);
+    let harness = evidence
+        .current_command
+        .as_deref()
+        .and_then(crate::harness::HarnessConfig::from_pane_command)
+        .unwrap_or_else(|| crate::harness::HarnessConfig::from_agent_name(&ctx.harness));
     harness.protected_prompt_input_reason(&captured)
 }
 

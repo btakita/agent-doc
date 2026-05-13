@@ -34,10 +34,47 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): OpenCode permission prompt
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7db2b282 -->
+❯ do [#rspcmt8]. spec-test-build-install-commit-push
+### Re: #rspcmt8 promptless exchange closeout drift — gpt-5
+
+Implemented and pushed `#rspcmt8`.
+
+What changed:
+- `src/agent-doc/src/session_check.rs` now lets the preflight/sync closeout-drift guard reuse the existing exchange-drift detector for promptless response-body drift, while preserving normal prompt-bearing user edits for the next preflight diff.
+- `src/agent-doc/src/preflight.rs` now checks promptless closeout drift before transcript repair can normalize dirty response body lines into prompt-looking text.
+- Added regression coverage for an OpenCode-style response body visible in `agent:exchange` but absent from the committed snapshot.
+- Updated `src/agent-doc/specs/07-closeout-commands.md` and `tasks/agent-doc/plan-response-patchback-uncommitted.md` with the #rspcmt8 evidence and closeout contract.
+
+Verification:
+- `cargo test preflight_fails_closed_on_uncommitted_exchange_drift_without_response_heading`
+- `cargo test preflight_does_not_swallow_user_prose_that_mentions_head`
+- `cargo test uncommitted_exchange_drift`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest root `Agent Doc` workflow run `25782075410` has green `tmux-ci`; its separate `check` job was red from an earlier pushed state, and local `make check` is green after this fix.
+
+Commits pushed:
+- `src/agent-doc` `1efdc01e` (`fix: block promptless exchange closeout drift`) to `origin/20260422/codex-agent-backend`
+- parent `agent-loop` `87ac6a184` (`agent-doc: block promptless exchange drift`) to `origin/main`
+- parent `agent-loop` `fe17f1d96` (`agent-doc(root): 2026-05-13 02:31:32 (submodule pointer)`) was a concurrent session-share pointer commit already present locally after my push; I pushed it so `main` was not left ahead.
+
+Unrelated dirty work remains in `mail`, `src/session-share`, and `tasks/software/corky.md`.
+<!-- agent:boundary:7123ed8f -->
 <!-- /agent:exchange -->
 ###
 <!--
+agent-doc opencode permission inputs has issues:
+- The JB selection does not select the permission in the CLI. It highlights the next option instead.
+- The arrow keys and tab key doesn't work.
+
+```
+┃                                                                                                                       ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
+┃                                                                                                                                                                                                                                             ^[[C^[[D^[[A^[[B		
+```
+spec-test-build-install-commit-push
+---
 JB `Run Agent Doc` on root.md with `agent: claude` sends an incorrect command
 ```
 ❯ agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md
@@ -97,7 +134,6 @@ minor (v0.34.0) release + publish. merge into main
 <!-- agent:backlog -->
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
-- [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -225,4 +261,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#directrunpfx] #agent-doc-bug: Direct `agent-doc <file>` committed the Monster Rod Holders `Read the image.` prompt and Markdown image line without the canonical `❯ ` prefix before the response block, making user prompt text look like assistant prose. Plan: tasks/agent-doc/plan-direct-run-unprefixed-exchange-prompt.md
 - 2026-05-13 [#rspcmtdelay] #agent-doc-bug: Session response patchback had a long delay before being committed; current `src/session-share/tasks/root.md` evidence required failed `write --commit`/`finalize`, manual patching, stale preflight repair, and parent pointer closeout before `session-check` passed. Plan: tasks/agent-doc/plan-response-commit-delay.md
 - 2026-05-13 [#rspcmt9] #agent-doc-bug: Direct Codex chat answered a Monster Rod Holders session prompt but did not write the response to `src/boost-client/tasks/monsterrodholders.md`; manual `agent-doc write --commit` then committed the submodule response but initially failed the parent pointer closeout on root `.git/index.lock`, requiring `agent-doc commit <file>` recovery. Plan: tasks/agent-doc/plan-direct-chat-response-patchback-required.md
+- 2026-05-13 [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:done -->

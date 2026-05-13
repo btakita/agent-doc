@@ -34,10 +34,36 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): ratatui pane embedding for harness sessions; more reliable tmux interactions
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3844ca8f -->
+❯ do [#tmuxcontrolmode]. spec-test-build-install-commit-push
+### Re: tmuxcontrolmode — gpt-5
+
+Implemented the tmux-router control-mode foundation and closed `#tmuxcontrolmode`.
+
+What changed:
+- Added `tmux_router::control` with `TmuxControlMode`, `TmuxControlEvent`, control payload decoding, timeout/event wait helpers, and `Tmux::attach_control_mode()`.
+- Added a `tmux-router events` CLI command for streaming parsed control-mode events.
+- Kept `capture_pane` for snapshot reads, but documented control mode as the event-driven path for pane output and lifecycle notifications.
+- Updated tmux-router README/API/concepts docs and module-level spec notes.
+- Fixed the root Makefile verification paths so `make check` runs against `src/agent-doc`, `src/corky`, and `src/instruction-files` in this checkout.
+
+Verification:
+- `cargo test` in `src/tmux-router`: 103 passed, including a real isolated tmux control-mode output test.
+- `cargo build --release` in `src/tmux-router`: passed.
+- `cargo install --path . --force` in `src/tmux-router`: installed `tmux-router v0.3.10`.
+- `tmux-router events --help`: confirmed the installed CLI exposes the new command.
+- `make check` at repo root: passed after the Makefile path fix.
+- Latest GitHub `CI` workflow on `agent-doc/main` was green at run `25773430221`; its job includes both `make check` and `make tmux-ci`.
+
+Commits:
+- `src/tmux-router`: `fcf2c30 feat: add tmux control-mode events` pushed to `btakita/tmux-router main`.
+- superproject: `c642e2d8f chore: wire tmux-router control-mode events` committed locally; push follows after this document closeout.
+<!-- agent:boundary:4196a15f -->
 <!-- /agent:exchange -->
 ###
 <!--
+Re [#tmuxhybridpty]: Can we avoid the Kitty vs non-Kitty protocol mapping layer? Does [#tmuxcontrolmode] allow for send-keys to bypass any translation layers we have that cause corrupted inputs?
+Is [#ownedpty] still relevant given we are implementing[#tmuxcontrolmode] and [#tmuxhybridpty]?
+---
 Autosync on editor file change + `Sync Tmux Layout` lands on a 1 tmux pane and 3 tmux pane layout with 2 editor panes.
 spec-test-build-install-commit-push
 ---
@@ -111,7 +137,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxcontrolmode] Migrate tmux-router to control mode (tmux -CC) for event-driven pane output and lifecycle notifications, replacing capture-pane polling. Natural fit for existing Tmux struct. [recommended]
 - [ ] [#tmuxhybridpty] Implement hybrid control-mode + pipe-pane + owned-PTY architecture: control mode for lifecycle events, pipe-pane for output streaming, owned PTY only for managed panes (OpenCode, Claude) where input reliability matters. Depends on #tmuxcontrolmode.
 - [ ] [#ownedpty] Implement portable-pty + alacritty_terminal backend for managed panes — agent-doc owns the child PTY directly instead of tmux send-keys/capture-pane, eliminating the input heuristic failure class. Depends on #multiplexertrait abstraction boundary. [recommended]
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.

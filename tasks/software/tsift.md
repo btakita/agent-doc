@@ -30,52 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-015410.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-023941.md`*
 
 Compacted content:
+- Archived 2 response topic(s): arXiv 2605.05242 implications; DCI benchmark
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ - Trailing prompt/context: Please review https://arxiv.org/abs/2605.05242. What are the implications for tsift?
-❯ Please review https://arxiv.org/abs/2605.05242. What are the implications for tsift?
-### Re: arXiv 2605.05242 implications — gpt-5
-
-I reviewed [arXiv:2605.05242](https://arxiv.org/abs/2605.05242), "Beyond Semantic Similarity: Rethinking Retrieval for Agentic Search via Direct Corpus Interaction," plus the current tsift spec/code. The paper is more validation than pivot for tsift: it argues that capable agents often need a higher-resolution corpus interface than a fixed top-k retriever, and that direct corpus interaction through `grep`/`rg`, file reads, shell pipelines, and lightweight scripts can beat strong sparse/dense/reranking baselines on agentic search tasks.
-
-The strongest implication is that tsift should stay centered on agent-controllable corpus operations, not on becoming a hidden semantic retriever. Existing tsift directions already line up with that: `search --exact` maps to `rg -F`, literal identifier/path-like queries auto-promote to exact search, scoped/federated workspace selection protects corpus boundaries, `--budget`/`--envelope` keeps observations bounded, and `explain`/graph/context-pack surfaces provide local inspection instead of only a ranked list.
-
-What the paper adds is a sharper product metric: retrieval interface resolution. tsift should measure whether an agent can narrow from broad clue to exact span, compose weak constraints, inspect local context, and launch the next search from surfaced evidence. That is different from only measuring top-k recall or NDCG. For code work, the useful benchmark is not "did the right file appear in the first ten results?" but "how many bounded tool steps did it take to isolate the symbol, call edge, failing test, or edit site?"
-
-Concrete implications for the roadmap:
-
-- Keep exact search first-class. The paper's tool traces are dominated by `rg | head`, chained `rg`, and local context peeking. tsift should make exact and chained narrowing cheap, bounded, and pleasant.
-- Treat BM25/vector/hybrid as accelerators, not the primary abstraction. They help locate anchors, but the agent still needs raw corpus operations once it has a clue.
-- Promote result handles and expansion commands. Every bounded preview should make the next narrowing operation obvious, because DCI wins by iterative refinement.
-- Add DCI-style evals. Compare `search --exact`, lexical, hybrid, `explain`, and digest/context-pack workflows on multi-hop repo tasks using tool calls, latency, token volume, and localization quality.
-- Add breadth guards. The paper reports that DCI scales well in search depth but gets expensive as corpus breadth grows. tsift should warn when a query is too broad and suggest narrower next commands before an agent burns budget.
-- Keep context management pragmatic. The paper's best results are not from preserving everything verbatim; selective truncation/compaction beats indiscriminate accumulation. tsift's budgeted envelopes and digest surfaces are directly aligned with that.
-
-Bottom line: tsift should frame itself as a high-resolution corpus interaction layer for agents. Semantic retrieval can remain a strategy, but the differentiator should be controlled, composable, inspectable search over live local corpora.
-❯ Agreed. do [#686r]. spec-test-build-install-commit-push
-### Re: DCI benchmark — gpt-5
-
-Done. Implemented [#686r] and pushed it.
-
-tsift now has `tsift dci-benchmark --fixture <path>` with a checked-in `fixtures/dci-search-benchmark.json` seed benchmark. It compares `exact_chained_rg`, `lexical_bm25`, and `hybrid` across multi-hop repo/code localization tasks and reports localization rate, average tool calls, latency, and estimated token budget. I also documented the benchmark in `SPEC.md` and added CLI/integration coverage.
-
-I had to fix the remote CI surface while pushing: the workflow now checks out sibling `tagpath`, installs `ripgrep` for exact-search tests, and release verify uses the same layout. I also fixed the Rust 1.95 Clippy lints that GitHub surfaced.
-
-Verification:
-- `cargo test dci_benchmark`
-- `make check`
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo build`
-- `cargo install --path .`
-- `tsift dci-benchmark --fixture fixtures/dci-search-benchmark.json --compact`
-- GitHub CI `btakita/tsift` run `25774327358` passed (`clippy + test`). There is no tmux CI leg in the tsift workflow.
-
-Pushed:
-- tsift: `35b087b`
-- agent-loop submodule pointer: `06710a49d`
-<!-- agent:boundary:cfdcd0cc -->
+<!-- agent:boundary:4adc2d69 -->
 <!-- /agent:exchange -->
 ###
 

@@ -51,7 +51,75 @@ Each managed pane is a `portable-pty` child process. The child writes VT escape 
 **Minimal viable scope:** PTY spawn/resize/kill (exists), VT parsing per pane (exists), tiled layout with focus (ratatui, needs pane abstraction), input routing (straightforward), session persistence (new but simple). The hard parts are solved crates; the novel work is agent-doc integration.
 
 The `#multiplexertrait` backlog item is the right first step — it draws the abstraction boundary for developing the new backend alongside tmux.
-<!-- agent:boundary:96437d5f -->
+❯ Is there a way to have more reliable interactions with tmux?
+### Re: more reliable tmux interactions — opus-4-6
+
+Yes — several approaches, ordered from least to most effort:
+
+#### 1. Use tmux control mode (`tmux -CC`)
+
+tmux has a machine-readable control mode that replaces the visual terminal with a line-oriented protocol. Instead of scraping `capture-pane` output, you get structured notifications:
+
+- `%output <pane> <data>` — pane output as it happens, no polling
+- `%session-changed`, `%window-add`, `%pane-mode-changed` — lifecycle events
+- `%begin`/`%end`/`%error` — command response framing with request IDs
+
+This eliminates the biggest reliability issue: timing-dependent `capture-pane` scraping. You'd open a persistent control-mode connection and receive pane output as a stream. iTerm2 uses this for its tmux integration.
+
+**What it fixes:** output capture races, prompt detection timing, missed pane lifecycle events.
+**What it doesn't fix:** `send-keys` is still fire-and-forget even in control mode.
+
+#### 2. Bracket `send-keys` with output fencing
+
+After sending keys, inject a sentinel sequence and wait for it to appear in the pane output:
+
+```
+tmux send-keys -t %3 -l "the input text"
+tmux send-keys -t %3 -l $'\x1b]133;sentinel-id\x07'
+# poll/stream until sentinel appears in pane output
+```
+
+OSC 133 is the shell-integration prompt sequence — most shells ignore unknown sequences, so the sentinel passes through harmlessly. If the child echoes it, you have confirmation that the input was processed. If it doesn't appear within a timeout, you know something went wrong.
+
+**What it fixes:** gives `send-keys` an ack mechanism.
+**What it doesn't fix:** depends on the child echoing or passing through the sentinel. TUI apps (OpenCode) may swallow it.
+
+#### 3. Use tmux's pipe-pane for output streaming
+
+`tmux pipe-pane -t %3 "cat > /tmp/pane3.out"` sends all pane output to a file/pipe in real time. Combined with `inotify` (or `kqueue` on macOS), this gives event-driven output monitoring without polling.
+
+**What it fixes:** eliminates `capture-pane` polling entirely.
+**What it doesn't fix:** input injection — still uses `send-keys`.
+
+#### 4. Use tmux's `wait-for` for synchronization
+
+tmux has a built-in channel primitive:
+
+```
+tmux send-keys -t %3 "some-command ; tmux wait-for -S done-123" Enter
+tmux wait-for done-123  # blocks until the signal
+```
+
+This gives true command-completion synchronization. The child shell runs the command, then signals tmux, and the caller unblocks. No polling, no timing heuristics.
+
+**What it fixes:** command-completion detection for shell-based harnesses.
+**What it doesn't fix:** only works when the child is a shell that can run `tmux wait-for`. TUI apps (OpenCode, Claude CLI) can't signal tmux channels.
+
+#### 5. Combine control mode + pipe-pane + owned PTY (hybrid)
+
+The most reliable approach short of replacing tmux entirely:
+
+- **Control mode** for lifecycle events and structured command responses
+- **pipe-pane** for real-time output streaming to agent-doc's VT parser
+- **Owned PTY** only for managed panes where input reliability matters (OpenCode, Claude)
+- **Standard tmux** for non-managed panes (user shells, editors)
+
+This is the pragmatic middle path from the earlier discussion, but with control mode making the tmux interaction surface much more deterministic.
+
+#### Recommendation
+
+Start with **control mode** (#1) — it's the highest-leverage change because it replaces the polling/scraping architecture with event-driven notifications. The `tmux-router` crate would open one control-mode connection per tmux server and dispatch events to the appropriate session/pane handlers. This is a natural fit for the existing `Tmux` struct and doesn't require the `#multiplexertrait` abstraction first.
+<!-- agent:boundary:6ad89150 -->
 <!-- /agent:exchange -->
 ###
 <!--

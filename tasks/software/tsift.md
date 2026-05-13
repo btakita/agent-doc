@@ -81,7 +81,19 @@ The issues I found are mostly about precision and command rewriting:
 - Unsupported rewrite cases are opaque: commands with shell redirection or `find` predicates can exit 1 without a pass-through command or no-rewrite explanation.
 
 I reordered the follow-up backlog by priority. Top backlog item: `#rgls`.
-<!-- agent:boundary:5a1b0cc4 -->
+❯ do [#rgls]. spec-test-build-install-commit-push
+### Re: #rgls file-listing rewrite passthrough — gpt-5
+
+Implemented `#rgls`.
+
+- `tsift rewrite` now keeps file-listing commands on the no-rewrite passthrough path instead of treating listing roots as exact search patterns. Covered forms include `rg --files ...`, `rg --type-list`, `rg --files-without-match`, and `find ...`.
+- Normal search rewrites still work; `rg authenticate src/` continues to emit `tsift --envelope search "authenticate" --exact --budget normal --path "src/"`.
+- Updated `SPEC.md`, `VERSIONS.md`, unit rewrite tests, compiled CLI rewrite tests, and deterministic SimWorld coverage.
+
+Verification passed: `cargo fmt --check`, focused `cargo test rewrite_`, focused `cargo test sim_world`, full `cargo test`, `make check`, `cargo build`, `cargo install --path . --force`, installed `tsift --version`, live `tsift rewrite "rg authenticate src/"`, live `tsift rewrite "rg --files src/tsift .agent-doc logs"` no-rewrite exit, live `tsift rewrite "find src/tsift .agent-doc -type f -name '*.rs'"` no-rewrite exit, and CI-equivalent `make ci-full` including ignored SimWorld coverage. Latest GitHub Actions CI run `25806252424` was green with `Full CI suite` successful; this tsift repo has no tmux-specific Makefile target or workflow entry.
+
+Commits: tsift submodule `e9b13f2` (`fix: pass through file listing rewrites`) pushed to `btakita/tsift`; superproject pointer commit `b5a906bb1` (`chore: update tsift file-listing rewrite`) is committed and will be pushed after this document closeout so the session commit is included.
+<!-- agent:boundary:56856902 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,7 +102,6 @@ I reordered the follow-up backlog by priority. Top backlog item: `#rgls`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rgls] Fix tsift rewrite handling for file-listing commands such as rg --files and find: preserve listing semantics, multiple roots, and shell safety, or pass through with an explanatory no-rewrite result instead of rewriting rg --files src/tsift to exact text search.
 - [ ] [#sfpx] Add a deterministic session-digest/session-review regression for failure false positives from assistant progress or CI-status prose; the current rollout classified my assessment sentence and prior status updates mentioning failure/red/check as failure groups even though --next-context correctly reported zero unresolved failures.
 - [ ] [#fref] Tighten codex-jsonl file-reference extraction so conversational fragments and shell syntax are not reported as touched files; the current session-digest surfaced false paths like 2>/dev/null, agent-doc/tsift, digest/session, progress/CI-status, and version/preflight.
 - [ ] [#scst] Calibrate session-review/session-cost aggregate token reporting so cached multi-session totals are separated from per-session cost; current review reports 57,615,403 total tokens and largest turn 186,897 across 12 matched sessions, while the latest single-session cost is 518,391 total with largest turn 67,644.
@@ -123,6 +134,7 @@ k
 - 2026-05-13 [#frpt] Add session-review/session-cost repeated-file-read diagnostics that group file-read tool calls by path/range, estimate duplicate tokens, and emit concrete tsift follow-up commands instead of generic harness advice.
 - 2026-05-13 [#frwr] Teach tsift rewrite to intercept large ordinary source reads inside indexed repos and route them to the bounded source-read surface, while preserving small explicit windows and non-source files as passthrough.
 - 2026-05-13 [#ftok] Add a real-session token-savings fixture for repeated source-file reads, including full-file cat/bat, oversized sed/head/tail windows, and a fail-under threshold proving the bounded source-read workflow saves tokens without hiding required line anchors.
+- 2026-05-13 [#rgls] Fix tsift rewrite handling for file-listing commands such as rg --files and find: preserve listing semantics, multiple roots, and shell safety, or pass through with an explanatory no-rewrite result instead of rewriting rg --files src/tsift to exact text search.
 <!-- /agent:done -->
 
 ## Completed / Reaped

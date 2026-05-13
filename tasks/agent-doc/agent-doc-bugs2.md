@@ -29,25 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-192208.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-201238.md`*
 
 Compacted content:
-- Archived 3 response topic(s): JetBrains Clear Session Context stale-busy actions; syncforceux; Clear Session Context active panes
+- Archived 1 response topic(s): external `agent:done` archive attribute
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ The agent:done tag should support an attribute to link to a separate "done" file (*.done.md) so the document does not become bloated. Plan so we agree on the attribute name.
-### Re: external `agent:done` archive attribute — gpt-5
-
-I propose `archive=` as the attribute name:
-
-```md
-&lt;!-- agent:done archive=tasks/agent-doc/agent-doc-bugs2.done.md --&gt;
-&lt;!-- /agent:done --&gt;
-```
-
-Reasoning: `archive` names the purpose of the linked file, not just the storage mechanism. On `agent:done`, it reads as "completed-work archive lives here" and avoids overloading generic names like `file` or `src`.
-
-I created the plan at `tasks/agent-doc/plan-external-done-archive-attribute.md` and captured the implementation follow-up in backlog. The plan keeps inline `agent:done` as the default, makes external archives opt-in, requires repo-local `*.done.md` paths, and calls out the guard/test work needed so external done entries still count as first-class proof for closeout and history replay.
-<!-- agent:boundary:ee5ce68c -->
+<!-- agent:boundary:54f8ea7c -->
 <!-- /agent:exchange -->
 ###
 <!--

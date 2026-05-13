@@ -4,7 +4,7 @@
 //! - Detects active Claude Code and OpenCode permission/question prompts in a tmux pane and surfaces them as JSON.
 //! - `run(file)` — resolves the session's tmux pane from the document frontmatter, captures pane content, parses for prompt patterns, and prints a `PromptInfo` JSON object to stdout.
 //! - `run_all()` — iterates every entry in `sessions.json`, skips dead panes, and prints a JSON array of `PromptAllEntry` objects (one per live session with its prompt state).
-//! - `answer(file, option_index)` — navigates the prompt TUI to the target option using the prompt's axis (Claude Code: Up/Down, OpenCode: Left/Right; 30 ms between presses) then sends Enter. Validates that a prompt is active and the index is in range before sending keys.
+//! - `answer(file, option_index)` — navigates the prompt TUI to the target option using the prompt's axis (Claude Code: Up/Down, OpenCode: h/l; 30 ms between presses) then sends Enter. OpenCode `Allow always` sends a second Enter to accept the follow-up confirmation prompt. Validates that a prompt is active and the index is in range before sending keys.
 //! - Claude prompt detection anchors on the footer pattern `"Esc to cancel"` (searched bottom-up), then scans upward for options in bracket format (`[N] label`) or numbered list format (`N. label`), then identifies the question as the first non-empty, non-option line above.
 //! - OpenCode prompt detection anchors on the horizontal control footer (`"select"` + `"enter confirm"`) and parses the `Allow once`, `Allow always`, and `Reject` options rendered on the same row.
 //! - ANSI escape codes are stripped before pattern matching; `strip_ansi` is `pub(crate)` for reuse.
@@ -25,7 +25,8 @@
 //! - parse_yes_no_prompt: two-option prompt → active, 2 options
 //! - markdown_list_not_prompt: numbered markdown list above `Esc to cancel` → inactive (not detected as options)
 //! - parse_opencode_permission_prompt: horizontal OpenCode permission prompt → active, 3 options, selected=0
-//! - navigation_axis_for_opencode_permission_prompt: OpenCode prompt uses horizontal Left/Right movement
+//! - navigation_keys_for_opencode_permission_prompt: OpenCode prompt uses horizontal h/l movement
+//! - opencode_allow_always_requires_confirmation: OpenCode `Allow always` is followed by a confirmation prompt
 //! - strip_ansi_basic: bold/reset escape sequence → plain text without escape codes
 //! - parse_option_line_with_cursor: `❯ [2] label` → index=2, label extracted
 //! - parse_option_line_numbered_format: `1. Yes` / `❯ 3. No` → index + label extracted
@@ -43,6 +44,12 @@ use crate::{frontmatter, sessions};
 enum PromptNavigationAxis {
     Vertical,
     Horizontal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PromptNavigationKeys {
+    prev: &'static str,
+    next: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -219,23 +226,21 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
     }
 
     // Navigate to the selected option and press Enter. Claude Code uses a
-    // vertical menu; OpenCode's permission prompt uses a horizontal option row.
+    // vertical menu. OpenCode's permission prompt binds both Left/Right and h/l,
+    // but h/l survives terminal/tmux forwarding paths where arrow escape
+    // sequences can leak into the composer literally.
     let current = info.selected.unwrap_or(0);
     let target = option_index - 1; // convert to 0-based
-    let axis = navigation_axis_for_prompt(&pane_content);
-    let (prev_key, next_key) = match axis {
-        PromptNavigationAxis::Vertical => ("Up", "Down"),
-        PromptNavigationAxis::Horizontal => ("Left", "Right"),
-    };
+    let keys = navigation_keys_for_prompt(&pane_content);
 
     if target < current {
         for _ in 0..(current - target) {
-            sessions::send_key(tmux, &pane_id, prev_key)?;
+            sessions::send_key(tmux, &pane_id, keys.prev)?;
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     } else if target > current {
         for _ in 0..(target - current) {
-            sessions::send_key(tmux, &pane_id, next_key)?;
+            sessions::send_key(tmux, &pane_id, keys.next)?;
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     }
@@ -243,6 +248,12 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
     // Brief pause then press Enter to confirm
     std::thread::sleep(std::time::Duration::from_millis(50));
     sessions::send_key(tmux, &pane_id, "Enter")?;
+    if navigation_axis_for_prompt(&pane_content) == PromptNavigationAxis::Horizontal
+        && opencode_option_requires_confirmation(&options[target])
+    {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        sessions::send_key(tmux, &pane_id, "Enter")?;
+    }
 
     eprintln!("Sent option {} to pane {}", option_index, pane_id);
     Ok(())
@@ -370,6 +381,23 @@ fn navigation_axis_for_prompt(content: &str) -> PromptNavigationAxis {
     } else {
         PromptNavigationAxis::Vertical
     }
+}
+
+fn navigation_keys_for_prompt(content: &str) -> PromptNavigationKeys {
+    match navigation_axis_for_prompt(content) {
+        PromptNavigationAxis::Vertical => PromptNavigationKeys {
+            prev: "Up",
+            next: "Down",
+        },
+        PromptNavigationAxis::Horizontal => PromptNavigationKeys {
+            prev: "h",
+            next: "l",
+        },
+    }
+}
+
+fn opencode_option_requires_confirmation(option: &PromptOption) -> bool {
+    option.label == "Allow always"
 }
 
 fn strip_box_prefix(line: &str) -> &str {
@@ -689,6 +717,16 @@ Bash command
             navigation_axis_for_prompt(content),
             PromptNavigationAxis::Horizontal
         );
+        assert_eq!(
+            navigation_keys_for_prompt(content),
+            PromptNavigationKeys {
+                prev: "h",
+                next: "l"
+            }
+        );
+        assert!(!opencode_option_requires_confirmation(&opts[0]));
+        assert!(opencode_option_requires_confirmation(&opts[1]));
+        assert!(!opencode_option_requires_confirmation(&opts[2]));
     }
 
     #[test]

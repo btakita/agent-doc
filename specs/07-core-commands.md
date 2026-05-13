@@ -100,7 +100,8 @@ Two modes:
 
 - Detects active permission prompts from Claude Code and OpenCode panes by scanning the captured pane footer.
 - Supports Claude Code bracketed legacy options, Claude Code numbered-list options, and OpenCode horizontal `Allow once` / `Allow always` / `Reject` permission rows.
-- `--answer N` selects an option using the prompt's navigation axis (Claude Code Up/Down, OpenCode Left/Right) and presses Enter.
+- `prompt --answer` uses Claude Code's vertical Up/Down movement for Claude prompts, but uses OpenCode's printable `h`/`l` horizontal bindings for OpenCode permission prompts so forwarded arrow escape sequences cannot leak into the composer as literal text. Selecting OpenCode `Allow always` also sends the follow-up confirmation Enter because OpenCode opens a second `Always allow` confirmation prompt before persisting that choice.
+- `--answer N` selects an option using the prompt's navigation contract and presses Enter.
 - `--all` polls every live session.
 
 ## skill

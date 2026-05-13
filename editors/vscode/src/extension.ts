@@ -690,7 +690,7 @@ async function clearSessionContextAction(): Promise<void> {
             const action = await vscode.window.showWarningMessage(
                 buildBusySessionClearBlockedMessage(rel, refusal),
                 { modal: false },
-                'Refresh and retry',
+                ...(refusal.protectedReason ? [] : ['Refresh and retry']),
                 'Interrupt and clear',
                 'Show status',
                 'Copy details',

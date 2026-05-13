@@ -306,11 +306,13 @@ single-owner actor controls:
   records the clear prompt state so the next reroute can reapply the original
   launch contract. Before contacting tmux or the supervisor, it must record a
   controller operator-command acceptance or fail with the rejected stage. Clear
-  must fail closed when direct tmux evidence classifies the resolved pane as
-  `alive-busy`; the refusal must record the live evidence in the ops log and
-  tell the operator to retry after `agent-doc session status <FILE>` shows idle
-  proof, or to use `agent-doc session interrupt-clear <FILE>` for an explicit
-  interrupt-and-clear discard. For Codex panes, a capture
+  is an explicit operator action and must not fail solely because direct tmux
+  evidence classifies the resolved pane as `alive-busy`; ordinary active/status
+  panes are allowed through the same `/clear` submit path. Clear may fail closed
+  only when the live pane contains protected prompt input such as a permission
+  prompt, queued draft, shell search, or drafted user prompt. That refusal must
+  record the protected-input reason in the ops log and tell the operator to use
+  `agent-doc session interrupt-clear <FILE>` for an explicit discard. For Codex panes, a capture
   that shows only Codex status/footer chrome such as the model/cwd/context line,
   with no prompt input or busy cue, is direct idle evidence for operator
   clear/status; Codex idle placeholder prompts such as `› Explain this codebase`

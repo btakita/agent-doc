@@ -83,6 +83,37 @@ describe('sessionUi', () => {
         assert.match(message, /Interrupt and clear/);
     });
 
+    it('parses protected prompt input clear refusals', () => {
+        const output =
+            'Error: session_clear refused for /repo/tasks/root.md because pane %2 contains protected prompt input (reason=drafted prompt input, source=authoritative_actor, current_command=agent-doc, tail="› unfinished prompt"). Clear the prompt input manually, or run `agent-doc session interrupt-clear /repo/tasks/root.md` to intentionally interrupt the pane and clear context.';
+
+        const refusal = parseBusySessionClearRefusal(output);
+
+        assert.ok(refusal);
+        assert.strictEqual(refusal.file, '/repo/tasks/root.md');
+        assert.strictEqual(refusal.pane, '%2');
+        assert.strictEqual(refusal.protectedReason, 'drafted prompt input');
+        assert.strictEqual(refusal.tail, '› unfinished prompt');
+    });
+
+    it('builds protected prompt input warning without refresh retry guidance', () => {
+        const message = buildBusySessionClearBlockedMessage(
+            'tasks/root.md',
+            {
+                file: '/repo/tasks/root.md',
+                pane: '%2',
+                source: 'authoritative_actor',
+                currentCommand: 'agent-doc',
+                tail: '› unfinished prompt',
+                protectedReason: 'drafted prompt input',
+            },
+        );
+
+        assert.match(message, /protected prompt input/);
+        assert.match(message, /Interrupt and clear/);
+        assert.doesNotMatch(message, /Refresh and retry/);
+    });
+
     it('detects only idle direct pane status as refresh-retry eligible', () => {
         const output = [
             'document: /repo/tasks/root.md',

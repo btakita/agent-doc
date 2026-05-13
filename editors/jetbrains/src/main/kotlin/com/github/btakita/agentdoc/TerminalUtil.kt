@@ -24,6 +24,11 @@ object TerminalUtil {
         """session_clear refused for (.+?) because pane (\S+) is alive-busy""",
         RegexOption.DOT_MATCHES_ALL,
     )
+    private val PROTECTED_CLEAR_REFUSAL_HEADER_REGEX = Regex(
+        """session_clear refused for (.+?) because pane (\S+) contains protected prompt input""",
+        RegexOption.DOT_MATCHES_ALL,
+    )
+    private val PROTECTED_CLEAR_REASON_REGEX = Regex("""reason=([^,)]+)""")
     private val BUSY_CLEAR_SOURCE_REGEX = Regex("""source=([^,)]+)""")
     private val BUSY_CLEAR_COMMAND_REGEX = Regex("""current_command=([^,)]+)""")
 
@@ -114,6 +119,7 @@ object TerminalUtil {
         val source: String,
         val currentCommand: String,
         val tail: String,
+        val protectedReason: String = "",
     )
 
     internal val inFlightRouteRegistry = InFlightRouteRegistry()
@@ -626,6 +632,21 @@ object TerminalUtil {
         }
 
     internal fun parseBusySessionClearRefusal(output: String): BusySessionClearRefusal? {
+        val protectedMatch = PROTECTED_CLEAR_REFUSAL_HEADER_REGEX.find(output)
+        if (protectedMatch != null) {
+            val detail = output.substring(protectedMatch.range.last + 1)
+            val source = BUSY_CLEAR_SOURCE_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
+            val currentCommand = BUSY_CLEAR_COMMAND_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
+            val reason = PROTECTED_CLEAR_REASON_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
+            return BusySessionClearRefusal(
+                file = protectedMatch.groupValues[1],
+                pane = protectedMatch.groupValues[2],
+                source = source.ifBlank { "unknown" },
+                currentCommand = currentCommand.ifBlank { "unknown" },
+                tail = extractBusyClearTail(detail),
+                protectedReason = reason.ifBlank { "protected prompt input" },
+            )
+        }
         val match = BUSY_CLEAR_REFUSAL_HEADER_REGEX.find(output) ?: return null
         val detail = output.substring(match.range.last + 1)
         val source = BUSY_CLEAR_SOURCE_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
@@ -648,6 +669,7 @@ object TerminalUtil {
         val rawTail = detail.substring(start + marker.length)
             .substringBefore("). Run `agent-doc session status")
             .substringBefore("). Run agent-doc session status")
+            .substringBefore("). Clear the prompt input manually")
             .trim()
             .removeSuffix(").")
             .removeSuffix(")")
@@ -710,9 +732,11 @@ object TerminalUtil {
                 .getNotificationGroup("Agent Doc")
                 .createNotification(summary, NotificationType.WARNING)
             notification.isImportant = true
-            notification.addAction(NotificationAction.createSimple("Refresh and retry") {
-                refreshAndRetryClearSessionContext(project, file)
-            })
+            if (refusal.protectedReason.isBlank()) {
+                notification.addAction(NotificationAction.createSimple("Refresh and retry") {
+                    refreshAndRetryClearSessionContext(project, file)
+                })
+            }
             notification.addAction(NotificationAction.createSimple("Interrupt and clear") {
                 interruptAndClearSessionContext(project, file)
             })
@@ -733,6 +757,21 @@ object TerminalUtil {
         relativePath: String,
         refusal: BusySessionClearRefusal,
     ): String = buildString {
+        if (refusal.protectedReason.isNotBlank()) {
+            append("Clear Session Context is blocked for ")
+            append(relativePath)
+            append(".\nPane ")
+            append(refusal.pane)
+            append(" contains protected prompt input")
+            append(" (")
+            append(refusal.protectedReason)
+            append("). Use Interrupt and clear to discard the prompt input, or Show status to inspect the session.")
+            if (refusal.tail.isNotBlank() && refusal.tail != "unknown") {
+                append("\nLatest pane output: ")
+                append(refusal.tail)
+            }
+            return@buildString
+        }
         append("Session is still running for ")
         append(relativePath)
         append(".\nPane ")

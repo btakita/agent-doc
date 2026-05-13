@@ -280,6 +280,40 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `protected prompt input clear refusal parses protected reason`() {
+        val output = """
+            Error: session_clear refused for /repo/tasks/root.md because pane %2 contains protected prompt input (reason=drafted prompt input, source=authoritative_actor, current_command=agent-doc, tail="› unfinished prompt"). Clear the prompt input manually, or run `agent-doc session interrupt-clear /repo/tasks/root.md` to intentionally interrupt the pane and clear context.
+        """.trimIndent()
+
+        val refusal = TerminalUtil.parseBusySessionClearRefusal(output)
+
+        assertNotNull(refusal)
+        assertEquals("/repo/tasks/root.md", refusal!!.file)
+        assertEquals("%2", refusal.pane)
+        assertEquals("drafted prompt input", refusal.protectedReason)
+        assertEquals("› unfinished prompt", refusal.tail)
+    }
+
+    @Test
+    fun `protected prompt input clear warning omits refresh retry guidance`() {
+        val message = TerminalUtil.buildBusySessionClearBlockedMessage(
+            relativePath = "tasks/root.md",
+            refusal = TerminalUtil.BusySessionClearRefusal(
+                file = "/repo/tasks/root.md",
+                pane = "%2",
+                source = "authoritative_actor",
+                currentCommand = "agent-doc",
+                tail = "› unfinished prompt",
+                protectedReason = "drafted prompt input",
+            ),
+        )
+
+        assertTrue(message.contains("protected prompt input"))
+        assertTrue(message.contains("Interrupt and clear"))
+        assertFalse(message.contains("Refresh and retry"))
+    }
+
+    @Test
     fun `session status idle direct pane enables refresh retry clear`() {
         val output = """
             document: /repo/tasks/root.md

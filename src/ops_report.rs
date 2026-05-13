@@ -169,6 +169,8 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
         "commit_success" => "commit success",
         "route_dispatch_start_proven" => "route dispatch proven",
         "post_commit_local_drift" => "post-commit local drift",
+        "session_clear_active_pane_allowed" => "active clear allowed",
+        "session_clear_protected_input_guard_refused" => "protected input clear refused",
         "session_clear_live_busy_guard_bypassed" => "busy clear bypassed",
         "session_clear_live_busy_guard_refused" => "busy clear refused",
         "route_authoritative_actor_starting_not_ready" => "starting actor not ready",
@@ -271,18 +273,20 @@ mod tests {
 [102] route_dispatch_start_proven file=tasks/a.md pane=%1 harness=codex proof=consumed timeout_secs=10
 [103] route_dispatch_only_sent file=tasks/b.md pane=%2 harness=opencode proof=accepted proof_scope=accepted_only
 [104] post_commit_local_drift file=/repo/tasks/a.md kind=user_follow_up basis=head
-[105] session_clear_live_busy_guard_bypassed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[106] session_clear_live_busy_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[107] route_authoritative_actor_starting_not_ready file=tasks/c.md pane=%3 harness=codex generation=9 actor_state=starting
-[108] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
-[109] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
+[105] session_clear_active_pane_allowed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[106] session_clear_protected_input_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor reason=drafted_prompt_input current_command=agent-doc
+[107] session_clear_live_busy_guard_bypassed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[108] session_clear_live_busy_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[109] route_authoritative_actor_starting_not_ready file=tasks/c.md pane=%3 harness=codex generation=9 actor_state=starting
+[110] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
+[111] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
 ";
 
         let report =
             summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
 
-        assert_eq!(report.scanned_lines, 10);
-        assert_eq!(report.matched_events, 9);
+        assert_eq!(report.scanned_lines, 12);
+        assert_eq!(report.matched_events, 11);
         assert!(
             report.buckets.iter().any(|bucket| {
                 bucket.category == "write ipc consumed"
@@ -301,7 +305,7 @@ mod tests {
         );
         assert!(
             report.buckets.iter().any(|bucket| {
-                bucket.category == "busy clear refused"
+                bucket.category == "protected input clear refused"
                     && bucket.file == "tasks/a.md"
                     && bucket.samples[0].contains("current_command=agent-doc")
             }),

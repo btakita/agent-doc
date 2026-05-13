@@ -337,10 +337,29 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext) -> Result<()> {
     if evidence.state == LivePaneState::AliveIdle {
         reconcile_idle_projection_from_evidence(ctx, &evidence)?;
     } else if evidence.state == LivePaneState::AliveBusy {
+        if let Some(reason) = protected_clear_input_reason(ctx, &tmux, &evidence) {
+            let log_reason = reason.replace(char::is_whitespace, "_");
+            crate::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "session_clear_protected_input_guard_refused file={} pane={} source={} reason={} current_command={} tail={:?}",
+                    ctx.canonical_file.display(),
+                    evidence.pane_id.as_deref().unwrap_or("unknown"),
+                    evidence.source,
+                    log_reason,
+                    evidence.current_command.as_deref().unwrap_or("unknown"),
+                    evidence.tail.as_deref().unwrap_or("unknown")
+                ),
+            );
+            anyhow::bail!(
+                "{}",
+                protected_clear_refusal_message(&ctx.canonical_file, &evidence, &reason)
+            );
+        }
         crate::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
-                "session_clear_live_busy_guard_refused file={} pane={} source={} current_command={} tail={:?}",
+                "session_clear_active_pane_allowed file={} pane={} source={} current_command={} tail={:?}",
                 ctx.canonical_file.display(),
                 evidence.pane_id.as_deref().unwrap_or("unknown"),
                 evidence.source,
@@ -348,26 +367,37 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext) -> Result<()> {
                 evidence.tail.as_deref().unwrap_or("unknown")
             ),
         );
-        anyhow::bail!(
-            "{}",
-            live_busy_clear_refusal_message(&ctx.canonical_file, &evidence)
-        );
     }
     Ok(())
 }
 
-fn live_busy_clear_refusal_message(file: &Path, evidence: &LivePaneEvidence) -> String {
+fn protected_clear_input_reason(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    evidence: &LivePaneEvidence,
+) -> Option<String> {
+    let pane = evidence.pane_id.as_deref()?;
+    let captured = crate::sessions::capture_pane(tmux, pane).ok()?;
+    let harness = crate::harness::HarnessConfig::from_agent_name(&ctx.harness);
+    harness.protected_prompt_input_reason(&captured)
+}
+
+fn protected_clear_refusal_message(
+    file: &Path,
+    evidence: &LivePaneEvidence,
+    reason: &str,
+) -> String {
     let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
     let command = evidence.current_command.as_deref().unwrap_or("unknown");
     let tail = evidence.tail.as_deref().unwrap_or("unknown");
     format!(
-        "session_clear refused for {} because pane {} is alive-busy (source={}, current_command={}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt before retrying `agent-doc session clear`, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the pane and clear context.",
+        "session_clear refused for {} because pane {} contains protected prompt input (reason={}, source={}, current_command={}, tail={:?}). Clear the prompt input manually, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the pane and clear context.",
         file.display(),
         pane,
+        reason,
         evidence.source,
         command,
         tail,
-        file.display(),
         file.display()
     )
 }
@@ -1425,7 +1455,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_live_busy_refusal_points_to_interrupt_clear() {
+    fn protected_clear_refusal_points_to_interrupt_clear() {
         let evidence = LivePaneEvidence {
             pane_id: Some("%7".to_string()),
             source: "authoritative_actor",
@@ -1435,10 +1465,15 @@ mod tests {
             tail: Some("gpt-5.5 high · ~/work/btakita/agent-loop · Context 85% used".to_string()),
         };
 
-        let message = live_busy_clear_refusal_message(Path::new("/tmp/doc.md"), &evidence);
+        let message = protected_clear_refusal_message(
+            Path::new("/tmp/doc.md"),
+            &evidence,
+            "drafted prompt input",
+        );
 
         assert!(message.contains("session_clear refused"));
-        assert!(message.contains("pane %7 is alive-busy"));
+        assert!(message.contains("pane %7 contains protected prompt input"));
+        assert!(message.contains("reason=drafted prompt input"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
     }
 

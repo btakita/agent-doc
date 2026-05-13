@@ -19,12 +19,16 @@ export interface BusySessionClearRefusal {
     source: string;
     currentCommand: string;
     tail: string;
+    protectedReason?: string;
 }
 
 const BUSY_CLEAR_REFUSAL_HEADER_REGEX =
     /session_clear refused for (.+?) because pane (\S+) is alive-busy/s;
+const PROTECTED_CLEAR_REFUSAL_HEADER_REGEX =
+    /session_clear refused for (.+?) because pane (\S+) contains protected prompt input/s;
 const BUSY_CLEAR_SOURCE_REGEX = /source=([^,)]+)/s;
 const BUSY_CLEAR_COMMAND_REGEX = /current_command=([^,)]+)/s;
+const PROTECTED_CLEAR_REASON_REGEX = /reason=([^,)]+)/s;
 
 export function buildSessionCommandArgs(
     command: SessionCommandName,
@@ -85,6 +89,21 @@ export function sessionStatusShowsIdleDirectPane(output: string): boolean {
 }
 
 export function parseBusySessionClearRefusal(output: string): BusySessionClearRefusal | undefined {
+    const protectedMatch = PROTECTED_CLEAR_REFUSAL_HEADER_REGEX.exec(output);
+    if (protectedMatch) {
+        const detail = output.slice((protectedMatch.index ?? 0) + protectedMatch[0].length);
+        const source = BUSY_CLEAR_SOURCE_REGEX.exec(detail)?.[1] || 'unknown';
+        const currentCommand = BUSY_CLEAR_COMMAND_REGEX.exec(detail)?.[1] || 'unknown';
+        const protectedReason = PROTECTED_CLEAR_REASON_REGEX.exec(detail)?.[1] || 'protected prompt input';
+        return {
+            file: protectedMatch[1],
+            pane: protectedMatch[2],
+            source,
+            currentCommand,
+            tail: extractBusyClearTail(detail),
+            protectedReason,
+        };
+    }
     const match = BUSY_CLEAR_REFUSAL_HEADER_REGEX.exec(output);
     if (!match) return undefined;
 
@@ -104,6 +123,16 @@ export function buildBusySessionClearBlockedMessage(
     relativePath: string,
     refusal: BusySessionClearRefusal,
 ): string {
+    if (refusal.protectedReason) {
+        const tail = refusal.tail && refusal.tail !== 'unknown'
+            ? `\nLatest pane output: ${refusal.tail}`
+            : '';
+        return [
+            `Clear Session Context is blocked for ${relativePath}.`,
+            `Pane ${refusal.pane} contains protected prompt input (${refusal.protectedReason}).`,
+            'Use Interrupt and clear to discard the prompt input, or Show status to inspect the session.',
+        ].join(' ') + tail;
+    }
     const command = refusal.currentCommand && refusal.currentCommand !== 'unknown'
         ? ` (${refusal.currentCommand})`
         : '';
@@ -130,6 +159,7 @@ function extractBusyClearTail(detail: string): string {
     let rawTail = detail.slice(start + marker.length)
         .split('). Run `agent-doc session status')[0]
         .split('). Run agent-doc session status')[0]
+        .split('). Clear the prompt input manually')[0]
         .trim();
     rawTail = rawTail.replace(/\)\.$/, '').replace(/\)$/, '').trim();
     if (rawTail.startsWith('"') && rawTail.endsWith('"')) {

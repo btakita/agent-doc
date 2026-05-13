@@ -35,7 +35,19 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #frpt repeated file-read diagnostics
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:c9619c18 -->
+❯ do [#frwr]. spec-test-build-install-commit-push
+### Re: #frwr source-read rewrite — gpt-5
+
+Implemented `#frwr`.
+
+- `tsift rewrite` now routes large ordinary source reads in indexed tsift projects to `tsift --envelope source-read ...`: full-file `cat`/`bat` reads start with an 80-line bounded window, large `head` and `sed -n` windows preserve their start/range, and large `tail` windows preserve the tail anchor.
+- Small explicit source windows, non-source files, unindexed projects, shell-metacharacter commands, and session/transcript reads remain on their existing passthrough or session-digest paths.
+- Updated `SPEC.md`, direct rewrite tests, and deterministic SimWorld coverage for large indexed source reads and short-window passthrough.
+
+Verification passed: `cargo fmt --check`, `cargo test rewrite_`, `make check`, `cargo build`, `cargo install --path . --force`, `tsift --version`, and a live `tsift rewrite "cat src/main.rs"` check. Latest GitHub Actions CI run `25784555160` was already green (`clippy + test`, `Full CI suite` step succeeded); the tsift repo has no `tmux-ci`/`tmux-test` target to run locally.
+
+Commits: tsift submodule `894ee7c` pushed to `btakita/tsift`, and superproject submodule pointer commit `ccbd9c93b` is ready to push after this document closeout.
+<!-- agent:boundary:cd0a6e3e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +56,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#frwr] Teach tsift rewrite to intercept large ordinary source reads inside indexed repos and route them to the bounded source-read surface, while preserving small explicit windows and non-source files as passthrough.
 - [ ] [#ftok] Add a real-session token-savings fixture for repeated source-file reads, including full-file cat/bat, oversized sed/head/tail windows, and a fail-under threshold proving the bounded source-read workflow saves tokens without hiding required line anchors.
 <!-- /agent:backlog -->
 
@@ -72,6 +83,7 @@ k
 - 2026-05-13 [#sfile] Filter empty or non-file file references from log-digest / session-digest; .agent-doc/logs/tsift-v0.1.log produced an empty path file group with 132 occurrences, degrading anchors and downstream next-context file lists.
 - 2026-05-13 [#fwin] Add a bounded source-file read/window command that returns line-range previews, stable handles, symbol/summary refs, and explicit expand commands so agents can inspect files incrementally instead of re-reading whole files.
 - 2026-05-13 [#frpt] Add session-review/session-cost repeated-file-read diagnostics that group file-read tool calls by path/range, estimate duplicate tokens, and emit concrete tsift follow-up commands instead of generic harness advice.
+- 2026-05-13 [#frwr] Teach tsift rewrite to intercept large ordinary source reads inside indexed repos and route them to the bounded source-read surface, while preserving small explicit windows and non-source files as passthrough.
 <!-- /agent:done -->
 
 ## Completed / Reaped

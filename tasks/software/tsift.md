@@ -35,7 +35,29 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): tsift log review; #sctx
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:d7d11065 -->
+❯ do [#sfail]. spec-test-build-install-commit-push
+### Re: #sfail — gpt-5
+
+Implemented `#sfail` in `src/tsift` and marked it done.
+
+What changed:
+- `session-digest` failure rows now carry an optional parsed `command` anchor, and Codex/Claude tool output failure lines inherit the command that produced them.
+- `session-review` failure rows now carry optional `command` and `session_path` anchors, including budget/envelope previews and human output.
+- Failure extraction now filters active prompt directives, instruction/meta prose such as `After finalize...`, source snippets like `panic!(...)`, and unknown-command generic exits, while preserving real panic/assertion lines and named command exits such as `cargo test exited with code 1`.
+- Updated `SPEC.md`, `VERSIONS.md`, and regression coverage for both digest-level filtering and review-level command/session anchors.
+
+Verification:
+- `cargo test session_digest::tests::codex_jsonl_digest_anchors_command_failures_and_filters_instruction_snippets` passed.
+- `cargo test session_review::tests::session_review_failure_rows_keep_command_and_session_anchors` passed.
+- `make check` passed after all edits: clippy, 567 unit tests, and 95 compiled CLI tests.
+- `cargo build --release` passed.
+- `cargo install --path .` replaced the local binary, and `tsift --version` reports `tsift 0.1.42`.
+- Latest GitHub Actions `CI` for `src/tsift` was green, and root `Agent Doc` run `25780225104` had `tmux-ci` and `check` green.
+
+Commits pushed:
+- `btakita/tsift@48d18c3` (`fix: anchor session failure extraction`)
+- `btakita/agent-loop@20441a6e1` (`chore: update tsift submodule`)
+<!-- agent:boundary:f9a22476 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +66,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sfail] Tighten tsift session-review failure extraction so it reports command/test/log failures with command and session anchors, not instruction text or source snippets like After finalize, panic snippets, or generic command exited with code 1; preserve real failing assertions and cargo exits separately.
 - [ ] [#stok] Audit Codex/Claude token accounting in tsift session-review and session-cost for cumulative-usage double counting and cross-session duplication; the 12-session tasks/software/tsift.md review reported about 1.4B prompt tokens and a 1.4M-token largest turn, which needs a deterministic fixture.
 - [ ] [#slock] Add deterministic lock-contention coverage for tsift index/search/status paths and recovery guidance; historical review surfaced 34 database file is locked failures while tsift locks can report no writer lock with live WAL/SHM sidecars, so snapshot fallback and diagnostics need regression coverage.
 - [ ] [#sfile] Filter empty or non-file file references from log-digest / session-digest; .agent-doc/logs/tsift-v0.1.log produced an empty path file group with 132 occurrences, degrading anchors and downstream next-context file lists.
@@ -68,6 +89,7 @@ k
 - 2026-05-13 [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
 - 2026-05-13 [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
 - 2026-05-13 [#sctx] Fix tsift session-review / context-pack --next-context active-context scoping so prompt targets, files, and failures come from the current unresolved tail instead of historical assistant text, presets, examples, or unrelated matched sessions; regression should reject stale do-hash prompts, Re summaries, prompt-preset text, and bogus paths like /! from tasks/software/tsift.md review output.
+- 2026-05-13 [#sfail] Tighten tsift session-review failure extraction so it reports command/test/log failures with command and session anchors, not instruction text or source snippets like After finalize, panic snippets, or generic command exited with code 1; preserve real failing assertions and cargo exits separately.
 <!-- /agent:done -->
 
 ## Completed / Reaped

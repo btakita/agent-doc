@@ -1732,6 +1732,9 @@ fn purge_orphaned_agent_panes(tmux: &Tmux) {
 }
 
 fn purge_orphaned_agent_panes_with_registry(tmux: &Tmux, registry: &sessions::SessionRegistry) {
+    let current_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let live_supervisors = crate::supervisor::ipc::active_supervisor_pids(&current_root);
+    let mut pane_context_cache = PaneProjectContextCache::default();
     let registered_panes: std::collections::HashSet<&str> =
         registry.values().map(|e| e.pane.as_str()).collect();
 
@@ -1776,6 +1779,61 @@ fn purge_orphaned_agent_panes_with_registry(tmux: &Tmux, registry: &sessions::Se
             }
             // Only target agent processes (not shells or user processes)
             if AGENT_PROCESSES.contains(&cmd.as_str()) {
+                let pane_root = pane_project_root(tmux, pane_id);
+                let registered_in_pane_root = pane_root
+                    .as_ref()
+                    .filter(|root| **root != current_root)
+                    .is_some_and(|root| {
+                        registry_for_project_root(&mut pane_context_cache, root)
+                            .values()
+                            .any(|entry| entry.pane == *pane_id)
+                    });
+                if registered_in_pane_root {
+                    eprintln!(
+                        "resync: non-stash pane {} is registered in its own project root — skipping kill",
+                        pane_id
+                    );
+                    continue;
+                }
+                if let Some(owner_file) =
+                    live_owned_registered_file_for_pane(tmux, pane_id, registry).or_else(|| {
+                        pane_root
+                            .as_ref()
+                            .filter(|root| **root != current_root)
+                            .and_then(|root| {
+                                let pane_registry =
+                                    registry_for_project_root(&mut pane_context_cache, root);
+                                live_owned_registered_file_for_pane(tmux, pane_id, pane_registry)
+                            })
+                    })
+                {
+                    eprintln!(
+                        "resync: non-stash pane {} is unregistered in this project but still owns {} — skipping kill",
+                        pane_id, owner_file
+                    );
+                    continue;
+                }
+                if let Some(supervisor_session) = pane_hosts_live_supervisor_session(
+                    tmux,
+                    pane_id,
+                    &live_supervisors,
+                )
+                .or_else(|| {
+                    pane_root
+                        .as_ref()
+                        .filter(|root| **root != current_root)
+                        .and_then(|root| {
+                            let pane_live_supervisors =
+                                live_supervisors_for_project_root(&mut pane_context_cache, root);
+                            pane_hosts_live_supervisor_session(tmux, pane_id, pane_live_supervisors)
+                        })
+                }) {
+                    eprintln!(
+                        "resync: non-stash pane {} is unregistered in this project but still hosts live supervisor {} — skipping kill",
+                        pane_id, supervisor_session
+                    );
+                    continue;
+                }
                 if let Err(e) = tmux.kill_pane(pane_id) {
                     eprintln!(
                         "resync: failed to kill orphaned agent pane {}: {}",
@@ -3746,6 +3804,45 @@ mod tests {
         // Both panes should survive (they're running shells, not agent processes)
         assert!(iso.pane_alive(&pane1), "shell pane1 should survive");
         assert!(iso.pane_alive(&pane2), "shell pane2 should survive");
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn purge_orphan_agent_in_non_stash_preserves_nested_project_owner() {
+        let parent = tempfile::tempdir().unwrap();
+        let nested = parent.path().join("nested");
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        let doc = nested.join("tasks/root.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# Root\n").unwrap();
+        let script = write_mock_agent_doc(parent.path());
+
+        let _cwd_guard = ScopedCurrentDir::set(parent.path());
+        let iso = IsolatedTmux::new("resync-preserve-nested-owner");
+        let pane = iso.new_session("test", &nested).unwrap();
+        let sibling = iso.split_window(&pane, &nested, "-dh").unwrap();
+        launch_mock_agent_doc(&iso, &pane, &script, &doc);
+        sessions::register_full_in(
+            &nested,
+            "nested-session",
+            &pane,
+            &doc.to_string_lossy(),
+            123,
+            "@1",
+        )
+        .unwrap();
+
+        purge_orphaned_agent_panes_with_registry(&iso, &SessionRegistry::new());
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        assert!(
+            iso.pane_alive(&pane),
+            "parent resync must not kill a non-stash pane registered in a nested project"
+        );
+        assert!(
+            iso.pane_alive(&sibling),
+            "sibling shell pane should survive"
+        );
     }
 
     #[test]

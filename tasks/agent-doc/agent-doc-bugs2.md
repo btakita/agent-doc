@@ -29,41 +29,15 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-220921.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-222126.md`*
 
 Compacted content:
-- Archived 2 response topic(s): ratatui pane embedding for harness sessions; more reliable tmux interactions
+- Archived 1 response topic(s): tmuxcontrolmode
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#tmuxcontrolmode]. spec-test-build-install-commit-push
-### Re: tmuxcontrolmode — gpt-5
-
-Implemented the tmux-router control-mode foundation and closed `#tmuxcontrolmode`.
-
-What changed:
-- Added `tmux_router::control` with `TmuxControlMode`, `TmuxControlEvent`, control payload decoding, timeout/event wait helpers, and `Tmux::attach_control_mode()`.
-- Added a `tmux-router events` CLI command for streaming parsed control-mode events.
-- Kept `capture_pane` for snapshot reads, but documented control mode as the event-driven path for pane output and lifecycle notifications.
-- Updated tmux-router README/API/concepts docs and module-level spec notes.
-- Fixed the root Makefile verification paths so `make check` runs against `src/agent-doc`, `src/corky`, and `src/instruction-files` in this checkout.
-
-Verification:
-- `cargo test` in `src/tmux-router`: 103 passed, including a real isolated tmux control-mode output test.
-- `cargo build --release` in `src/tmux-router`: passed.
-- `cargo install --path . --force` in `src/tmux-router`: installed `tmux-router v0.3.10`.
-- `tmux-router events --help`: confirmed the installed CLI exposes the new command.
-- `make check` at repo root: passed after the Makefile path fix.
-- Latest GitHub `CI` workflow on `agent-doc/main` was green at run `25773430221`; its job includes both `make check` and `make tmux-ci`.
-
-Commits:
-- `src/tmux-router`: `fcf2c30 feat: add tmux control-mode events` pushed to `btakita/tmux-router main`.
-- superproject: `c642e2d8f chore: wire tmux-router control-mode events` committed locally; push follows after this document closeout.
-<!-- agent:boundary:4196a15f -->
+<!-- agent:boundary:fd9a0456 -->
 <!-- /agent:exchange -->
 ###
 <!--
-Re [#tmuxhybridpty]: Can we avoid the Kitty vs non-Kitty protocol mapping layer? Does [#tmuxcontrolmode] allow for send-keys to bypass any translation layers we have that cause corrupted inputs?
-Is [#ownedpty] still relevant given we are implementing[#tmuxcontrolmode] and [#tmuxhybridpty]?
----
 Autosync on editor file change + `Sync Tmux Layout` lands on a 1 tmux pane and 3 tmux pane layout with 2 editor panes.
 spec-test-build-install-commit-push
 ---
@@ -121,8 +95,6 @@ Why is agent-doc starting a child Codex run?
 ---
 Confirm that z.ai subscriptions are message based and not token based. If message based, is agent-doc inefficient on message based plans? Please review code + logs.
 #next-steps
----
-`[#2fha] 2026-05-11 [#nopatchbackopencode] ...` backlog item should have had the id `[#nopatchbackopencode]`.
 ---
 minor (v0.34.0) release + publish. merge into main
 ---

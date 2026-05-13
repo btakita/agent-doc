@@ -34,10 +34,40 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): JetBrains Run Agent Doc plain trigger
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3d8e03a6 -->
+❯ do [#rspcmtdelay]. spec-test-build-install-commit-push
+### Re: #rspcmtdelay — gpt-5
+
+Implemented `#rspcmtdelay`.
+
+What changed:
+- `src/agent-doc/src/write.rs` now wraps strict closeout in a phase timer and emits a `closeout_latency` diagnostic when the closeout budget is crossed, including commit, retry, cycle-state, session-check, and cleanup phase timings.
+- Strict `finalize` / `write --commit` now fail closed after the bounded submodule parent-pointer retry if the parent `HEAD:<submodule>` gitlink still differs from the submodule `HEAD`, with `agent-doc commit <FILE>` as the idempotent recovery.
+- Updated `src/agent-doc/specs/07-closeout-commands.md` and `src/agent-doc/VERSIONS.md` for the new closeout timing and stale-parent-gitlink behavior.
+
+Verification:
+- `cargo test closeout_latency_message_names_phase_timings`
+- `cargo test required_closeout_fails_when_parent_submodule_pointer_commit_fails`
+- `make check` passed: clippy, full default tests, and the medium deterministic SimWorld seed corpus.
+- `make build-release` passed.
+- `make install` passed and installed the binary plus `libagent_doc-0.33.16.so`.
+- `agent-doc --version` reports `agent-doc 0.33.16`.
+- Latest GitHub `CI` run for `btakita/agent-doc` inspected: `25773430221`, completed successfully on 2026-05-13 01:57:58Z. The job metadata did not show a separate red tmux leg.
+
+Commits created:
+- `src/agent-doc` `cf801553` (`fix: surface slow closeout layers`)
+- parent `agent-loop` `a5ded7b` (`chore: update agent-doc closeout diagnostics`)
+
+Push follows after this document closeout commit lands.
+<!-- agent:boundary:adc229d5 -->
 <!-- /agent:exchange -->
 ###
 <!--
+JB `Run Agent Doc` on root.md with `agent: claude` sends an incorrect command
+```
+❯ agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md
+  ⎿  API Error: 400 Could not process image
+```
+---
 Should tsift fail fast in this case?
 ```
 • Ran tsift search "transcript not found livekit-101"
@@ -88,7 +118,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspcmtdelay] #agent-doc-bug: Session response patchback had a long delay before being committed; current `src/session-share/tasks/root.md` evidence required failed `write --commit`/`finalize`, manual patching, stale preflight repair, and parent pointer closeout before `session-check` passed. Plan: tasks/agent-doc/plan-response-commit-delay.md
 - [ ] [#rspcmt9] #agent-doc-bug: Direct Codex chat answered a Monster Rod Holders session prompt but did not write the response to `src/boost-client/tasks/monsterrodholders.md`; manual `agent-doc write --commit` then committed the submodule response but initially failed the parent pointer closeout on root `.git/index.lock`, requiring `agent-doc commit <file>` recovery. Plan: tasks/agent-doc/plan-direct-chat-response-patchback-required.md
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
@@ -218,4 +247,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - 2026-05-12 [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - 2026-05-12 [#directrunpfx] #agent-doc-bug: Direct `agent-doc <file>` committed the Monster Rod Holders `Read the image.` prompt and Markdown image line without the canonical `❯ ` prefix before the response block, making user prompt text look like assistant prose. Plan: tasks/agent-doc/plan-direct-run-unprefixed-exchange-prompt.md
+- 2026-05-13 [#rspcmtdelay] #agent-doc-bug: Session response patchback had a long delay before being committed; current `src/session-share/tasks/root.md` evidence required failed `write --commit`/`finalize`, manual patching, stale preflight repair, and parent pointer closeout before `session-check` passed. Plan: tasks/agent-doc/plan-response-commit-delay.md
 <!-- /agent:done -->

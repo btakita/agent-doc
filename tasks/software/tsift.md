@@ -30,34 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-052929.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-054340.md`*
 
 Compacted content:
-- Archived 2 response topic(s): tsift log review; #sctx
+- Archived 1 response topic(s): #sfail
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#sfail]. spec-test-build-install-commit-push
-### Re: #sfail — gpt-5
-
-Implemented `#sfail` in `src/tsift` and marked it done.
-
-What changed:
-- `session-digest` failure rows now carry an optional parsed `command` anchor, and Codex/Claude tool output failure lines inherit the command that produced them.
-- `session-review` failure rows now carry optional `command` and `session_path` anchors, including budget/envelope previews and human output.
-- Failure extraction now filters active prompt directives, instruction/meta prose such as `After finalize...`, source snippets like `panic!(...)`, and unknown-command generic exits, while preserving real panic/assertion lines and named command exits such as `cargo test exited with code 1`.
-- Updated `SPEC.md`, `VERSIONS.md`, and regression coverage for both digest-level filtering and review-level command/session anchors.
-
-Verification:
-- `cargo test session_digest::tests::codex_jsonl_digest_anchors_command_failures_and_filters_instruction_snippets` passed.
-- `cargo test session_review::tests::session_review_failure_rows_keep_command_and_session_anchors` passed.
-- `make check` passed after all edits: clippy, 567 unit tests, and 95 compiled CLI tests.
-- `cargo build --release` passed.
-- `cargo install --path .` replaced the local binary, and `tsift --version` reports `tsift 0.1.42`.
-- Latest GitHub Actions `CI` for `src/tsift` was green, and root `Agent Doc` run `25780225104` had `tmux-ci` and `check` green.
-
-Commits pushed:
-- `btakita/tsift@48d18c3` (`fix: anchor session failure extraction`)
-- `btakita/agent-loop@20441a6e1` (`chore: update tsift submodule`)
-<!-- agent:boundary:f9a22476 -->
+<!-- agent:boundary:a39bd964 -->
 <!-- /agent:exchange -->
 ###
 <!--

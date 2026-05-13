@@ -34,7 +34,25 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 4 response topic(s): orphaned tmux pane cleanup; note; recover root tmux pane; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ce33c962 -->
+❯ Review logs for agent-doc effectiveness and issues. #next-steps
+### Re: log review — gpt-5.5
+
+I reviewed the current `.agent-doc/logs/ops.log` tail plus the active cycle state for this document.
+
+Effectiveness is better than the backlog history suggests for the Codex path. Recent `agent-doc-bugs2.md` turns repeatedly show the good sequence: `route_dispatch_start_proven proof=consumed`, `ipc_write_consumed patches=1`, `commit_success`, then `transient_cleanup`. That means the current direct Codex route + IPC write + session-document commit path is mostly doing the thing we care about: the response crosses the document boundary and gets committed.
+
+The remaining problems in the logs are still worth treating as workflow risks:
+
+- `session_clear_live_busy_guard_bypassed` appears for this document at `[1778693812]`: the authoritative pane was still reported as running `agent-doc` with a live Codex tail, then `session_clear` was sent and the pane was rerouted. That may be an intentional operator bypass, but the log reads like a dangerous path unless there is explicit interrupt/confirm semantics and stronger idle proof.
+- Route proof quality is still harness-dependent. Codex routes now show `proof=consumed proof_scope=dispatch_start`; OpenCode still has `proof=accepted proof_scope=accepted_only`, which only proves pane input acceptance, not dispatch start. That is already captured in the backlog, but the latest logs confirm it is still the right distinction.
+- Some `post_commit_local_drift` entries are expected user follow-up edits, but the same event name also appears for `working_tree_edits`. The log stream needs a higher-level summary so expected follow-ups do not hide real redirty/patchback regressions.
+- Sync latency is mostly within budget in the recent tail, but there are still isolated over-budget phases: `postlock_actor_focus=358ms`, `controller_actor_lookup=360ms`, and `prune_stash_panes=309ms`. These are smaller than the earlier multi-second regressions, but still confirm the route/sync budget work remains relevant.
+- Another session still hit `route_authoritative_actor_starting_not_ready` for `tasks/software/tsift.md` after about 9s. That fits the existing stale-starting / route-starting backlog class rather than a new root cause.
+
+I added two recommended backlog items: one to make this kind of ops-log review a first-class summary command/report, and one to investigate the clear-while-busy bypass evidence.
+
+No code was changed and I did not run the test suite; this was a log review and backlog-capture turn.
+<!-- agent:boundary:d09e3405 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -110,6 +128,8 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#k89p] [recommended] #next-steps: Add an ops-log effectiveness summary command/report that groups recent ipc_write_consumed + commit_success, route_dispatch_start_proven, post_commit_local_drift, session_clear_live_busy_guard_bypassed, route_authoritative_actor_starting_not_ready, accepted_only route proof, and sync over-budget events by document/session so log review produces signal without manual grep.
+- [ ] [#q97c] [recommended] #next-steps: Investigate session_clear_live_busy_guard_bypassed for authoritative actors still running agent-doc; current ops.log evidence for agent-doc-bugs2.md at [1778693812] clears pane %1 while the tail still reports gpt-5.5 high / Context 85% used, then immediately reroutes. Require explicit interrupt/confirm semantics or stronger idle proof before clear.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->

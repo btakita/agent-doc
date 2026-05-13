@@ -34,11 +34,7 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): direct run prompt prefixes
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:fad9f538 -->
-<!-- /agent:exchange -->
-###
-<!--
-JB `Run Agent Doc` after closing Codex session and opening Claude session.
+❯ JB `Run Agent Doc` after closing Codex session and opening Claude session.
 ```
 resync: stash pane %31 is registered in its own project root — skipping kill
 resync: stash pane %16 is registered in its own project root — skipping kill
@@ -48,8 +44,44 @@ resync: stash pane %24 is registered in its own project root — skipping kill
 resync: stash pane %13 is registered in its own project root — skipping kill
 [route] target tmux session: 0
 Error: authoritative actor record for tasks/root.md is bound to harness codex, not claude-code
-
 ```
+❯ spec-test-build-install-commit-push
+### Re: stale cross-harness actor record — gpt-5
+
+Fixed the JetBrains `Run Agent Doc` failure after switching from Codex to Claude.
+
+Root cause: `route.rs` treated any stored actor harness mismatch as authoritative before proving that the old actor was still a live dispatch authority. That meant a stale Codex actor record could block a fresh Claude run with `bound to harness codex, not claude-code` after the Codex session had been closed.
+
+Changed `src/agent-doc/src/route.rs` so cross-harness mismatch only blocks when the stored actor still has a healthy live supervisor and a non-closed actor state. Dead panes, closed actors, and unreachable supervisor records now log `route_authoritative_actor_harness_mismatch_stale` and fall through to fresh start/rebind.
+
+Updated specs and release notes:
+- `src/agent-doc/specs/08-session-routing.md`
+- `src/agent-doc/specs/08a-session-actor-contract.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification:
+- `cargo test route::tests::mismatched_authoritative_actor_can_be_replaced_only_when_not_live_authority`
+- `make check`
+- latest GitHub Actions `agent-doc.yml` run `25776168291` is green, including `tmux-ci`
+- `make build install`
+
+Committed and pushed:
+- `src/agent-doc`: `d20639aa` (`fix: allow stale cross-harness actor rebind`) pushed to `20260422/codex-agent-backend`
+- parent repo: `8ffb117e1` (`chore: update agent-doc submodule`) pushed to `main`
+
+No follow-up backlog items; the requested spec, test, build, install, commit, and push work is complete.
+<!-- agent:boundary:84d6ec47 -->
+<!-- /agent:exchange -->
+###
+<!--
+Should tsift fail fast in this case?
+```
+• Ran tsift search "transcript not found livekit-101"
+  └ Error: tsift search timed out after 30s (strategy: lexical). The search root looks fresh, so reindexing is unlikely
+    to help. Re-run with `--timeout 0` to disable the timeout, narrow `--path` / `--scope`, or try a different
+    strategy.
+```
+spec-test-build-install-commit-push
 ---
 With the latest supply chain attacks on npm and pypi, should agent-doc should run in a docker container? Should all software written run in a docker container?
 ---

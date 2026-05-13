@@ -30,90 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-023941.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-033937.md`*
 
 Compacted content:
-- Archived 2 response topic(s): arXiv 2605.05242 implications; DCI benchmark
+- Archived 4 response topic(s): #s1k1 search workflow; #v6y3 search scale guards; tsift log survey; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#s1k1]. spec-test-build-install-commit-push
-### Re: #s1k1 search workflow — gpt-5
-
-Implemented and pushed `src/tsift` commit `1078801` (`feat: add search workflow recipe`) to `origin/main`.
-
-What changed:
-- Added `tsift workflow search`, with human, JSON, and envelope-compatible output for an ordered exact search -> semantic search -> explain -> summarize -> digest workflow.
-- The recipe explicitly preserves handles across expansions: `sfam-*`, `shit-*`, `edef-*`, `ecall-*`, `eces-*`, artifact handles, touched-symbol handles, and `resume_commands[]`.
-- Documented the workflow in `SPEC.md` and added it to generated `tsift init` code-navigation instructions.
-- Added unit coverage for the workflow recipe and integration coverage for `tsift workflow search --json`.
-
-Verification:
-- `cargo test` passed: 556 unit tests and 90 integration tests.
-- `make check` passed: `cargo clippy -- -D warnings` plus the full test suite.
-- `cargo build` passed.
-- `cargo install --path .` passed and replaced `/home/brian/.cargo/bin/tsift`.
-- Installed smoke check passed: `tsift workflow search --json` emitted the expected ordered recipe.
-- Latest GitHub Actions CI run `25774327358` is green (`clippy + test`). This repo's CI workflow has no separate tmux-test job.
-
-I left unrelated dirty parent-repo entries untouched. The `src/tsift` submodule worktree itself is clean at the pushed commit.
-❯ do [#v6y3]. spec-test-build-install-commit-push
-### Re: #v6y3 search scale guards — gpt-5
-
-Implemented and pushed `src/tsift` commit `fe2b60f` (`feat: guard broad search previews`) to `origin/main`.
-
-What changed:
-- Added `report.scale_guard` to budgeted search previews when result count or corpus size is broad enough to make agent fan-out risky.
-- The guard reports `high-hit` or `corpus-size`, includes preview/corpus/budget signals, and emits concrete `narrow_commands` before ordinary expansion follow-ups in envelope output.
-- Human budget output now prints the scale guard warning, signals, and narrowing commands.
-- Updated `SPEC.md` and generated `tsift init` Code Navigation text so harnesses know to run `narrow_commands` before dispatching parallel agents.
-- Added unit coverage for broad preview warnings and narrowing-command emission.
-
-Verification:
-- `cargo test` passed: 557 unit tests and 90 integration tests.
-- `make check` passed: `cargo clippy -- -D warnings` plus the full test suite.
-- `cargo build` passed.
-- `cargo install --path .` passed and replaced `/home/brian/.cargo/bin/tsift`.
-- Installed smoke check passed with `tsift --envelope search main --exact --path src --budget small --json --timeout 0`, emitting `report.scale_guard` and guard-first `follow_up`. The same broad exact search without `--timeout 0` hit the expected 30s timeout and printed the timeout/narrowing guidance.
-- GitHub Actions CI run `25775922451` is green (`clippy + test`). This repo's CI workflow has no separate tmux-test job.
-
-I left unrelated dirty parent-repo entries untouched. The `src/tsift` submodule worktree itself is clean at the pushed commit.
-❯ Please survey the logs to see the effectiveness of tsift. #next-steps
-❯ Please find bugs from the logs. #next-steps
-### Re: tsift log survey — gpt-5
-
-I surveyed the tsift session doc, related Codex/Claude transcripts, and `.agent-doc/logs/ops.log` using the installed `tsift 0.1.42` digest surfaces.
-
-Effectiveness signal: `tsift session-review tasks/software/tsift.md --json` found 12 matching sessions out of 3,826 considered, plus the related agent-doc logs. It produced useful rollups without replaying the full logs: 25,365 command groups, 97,281 file groups, 130,010 symbol groups, token/cached-input totals, restart/no-op closeout guardrails, and the biggest prompt turns. The key cost signal is strong: about 1.377B total tokens with 96.73% cached input, and a largest prompt turn of 1,443,819 tokens. `session-cost` on the agent-doc ops log also surfaced operational churn directly: `commit_already_current` appeared 4,095 times, max restart count was 9, and it recommended compacting/avoiding no-op reopen cycles.
-
-The log surfaces are useful, but the bug signals are noisy enough that the next work should focus on precision:
-
-- `session-review --next-context` reported successful filtered test summaries like `test result: ok. 0 passed; 0 failed...` as unresolved failures. That makes the failure list look worse than the actual session state and hides real failures such as assertions or nonzero exits.
-- Prompt-target extraction is too broad. The active target list includes frontmatter preset text, examples, and older resolved directives rather than just the live exchange tail/current unresolved prompts.
-- `log-digest` compacted the 99,637-line ops log into a small signal set, but it reported `file_ref_groups=0` and `no file anchors detected` even though the records contain structured `file=...` fields. That limits its usefulness for routing from a log signal back to the responsible document/session.
-- Local `tsift status --json` reports the installed binary is usable but the repo instructions are stale: Code Navigation found `0.1.41`, expected `0.1.42`. That should be covered by a release/status regression so the first command in future sessions does not immediately erode trust.
-
-I added those items to the backlog in priority order. Top backlog item: `#sflt`.
-❯ do [#sflt]. spec-test-build-install-commit-push
-### Re: #sflt failure classification — gpt-5
-
-Implemented and pushed `src/tsift` commit `b907171` (`fix: ignore passing test summaries in session review`) to `origin/main`.
-
-What changed:
-- Tightened `session-digest` failure classification so bare labels and passing test summaries such as `failures:`, `No failures detected`, `test result: ok. ... 0 failed`, and `4 passed, 0 failed` no longer become unresolved failures.
-- Preserved real panic/assertion/error/exit evidence, including failing Rust test summaries and nonzero command exits.
-- Documented the contract in `SPEC.md` for both `session-digest` and `session-review --next-context`.
-- Added unit and integration coverage for the session-digest surface and the session-review next-context surface.
-
-Verification:
-- Focused regressions passed: new session-digest unit tests, `session_digest_ignores_successful_test_summaries_from_stdin`, and `session_review_next_context_ignores_successful_test_summaries`.
-- `cargo test` passed: 559 unit tests and 92 integration tests.
-- `make check` passed: `cargo clippy -- -D warnings` plus the full test suite.
-- `cargo build` passed.
-- `cargo install --path . --force` passed and replaced `/home/brian/.cargo/bin/tsift`.
-- Installed smoke check passed: `tsift session-review --next-context --json` returned `unresolved_failures: []` for the false-positive success-summary fixture.
-- GitHub Actions CI run `25776674905` is green (`clippy + test`). This repo defines no tmux workflow or `tmux-ci` target, so there was no separate tmux leg to run.
-
-I left unrelated dirty parent-repo entries untouched. The `src/tsift` submodule worktree itself is clean at the pushed commit.
-<!-- agent:boundary:bb0b7d5e -->
+<!-- agent:boundary:195ecb4e -->
 <!-- /agent:exchange -->
 ###
 <!--

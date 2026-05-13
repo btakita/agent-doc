@@ -54,14 +54,34 @@ Concrete implications for the roadmap:
 - Keep context management pragmatic. The paper's best results are not from preserving everything verbatim; selective truncation/compaction beats indiscriminate accumulation. tsift's budgeted envelopes and digest surfaces are directly aligned with that.
 
 Bottom line: tsift should frame itself as a high-resolution corpus interaction layer for agents. Semantic retrieval can remain a strategy, but the differentiator should be controlled, composable, inspectable search over live local corpora.
-<!-- agent:boundary:8a0fc676 -->
+❯ Agreed. do [#686r]. spec-test-build-install-commit-push
+### Re: DCI benchmark — gpt-5
+
+Done. Implemented [#686r] and pushed it.
+
+tsift now has `tsift dci-benchmark --fixture <path>` with a checked-in `fixtures/dci-search-benchmark.json` seed benchmark. It compares `exact_chained_rg`, `lexical_bm25`, and `hybrid` across multi-hop repo/code localization tasks and reports localization rate, average tool calls, latency, and estimated token budget. I also documented the benchmark in `SPEC.md` and added CLI/integration coverage.
+
+I had to fix the remote CI surface while pushing: the workflow now checks out sibling `tagpath`, installs `ripgrep` for exact-search tests, and release verify uses the same layout. I also fixed the Rust 1.95 Clippy lints that GitHub surfaced.
+
+Verification:
+- `cargo test dci_benchmark`
+- `make check`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo build`
+- `cargo install --path .`
+- `tsift dci-benchmark --fixture fixtures/dci-search-benchmark.json --compact`
+- GitHub CI `btakita/tsift` run `25774327358` passed (`clippy + test`). There is no tmux CI leg in the tsift workflow.
+
+Pushed:
+- tsift: `35b087b`
+- agent-loop submodule pointer: `06710a49d`
+<!-- agent:boundary:cfdcd0cc -->
 <!-- /agent:exchange -->
 ###
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#686r] Add a DCI-style tsift benchmark: compare exact/chained rg, lexical BM25, and hybrid search on multi-hop code/repo tasks, tracking localization, tool calls, latency, and token budget.
 - [ ] [#s1k1] Add a composable search workflow surface or documented recipes that preserve result handles across search --exact, search, explain, summarize, and digest expansion steps.
 - [ ] [#v6y3] Add breadth/scale guards to search envelopes: high-hit warnings, corpus-size/tool-budget signals, and concrete next-narrowing commands before agents fan out too broadly.
 <!-- /agent:backlog -->
@@ -71,6 +91,12 @@ Bottom line: tsift should frame itself as a high-resolution corpus interaction l
 - [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
 - [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-05-12 [#686r] Add a DCI-style tsift benchmark: compare exact/chained rg, lexical BM25, and hybrid search on multi-hop code/repo tasks, tracking localization, tool calls, latency, and token budget.
+<!-- /agent:done -->
 
 ## Completed / Reaped
 

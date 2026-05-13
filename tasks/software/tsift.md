@@ -30,40 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-190249.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-191710.md`*
 
 Compacted content:
-- Archived 1 response topic(s): xctx
+- Archived 1 response topic(s): xcst
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#xcst]. spec-test-build-install-commit-push
-### Re: xcst — gpt-5
-
-Done.
-
-Implemented the `session-cost` restart-loop guardrail fix in `src/tsift`: `max_restart_count` is now contextual detail only and no longer emits `restart_loop` by itself when `fresh_restart`, `auto_trigger_timeout`, and `ctrl_d_restart_loop` churn counts are absent.
-
-Updated:
-- `src/session_cost.rs`: removed the `max_restart_count >= 2` standalone trigger and added a direct guardrail regression.
-- `tests/exit_code.rs`: added compiled CLI coverage for `agent-doc-log` input with only `mode=continue restart_count=...`, proving no `restart_loop` guardrail is emitted.
-- `SPEC.md`: documented that `max_restart_count` must not trigger restart-loop warnings by itself.
-- `VERSIONS.md`: added the unreleased changelog entry.
-
-Verification:
-- `cargo test derive_guardrails_ignores_restart_count_without_churn` passed.
-- `cargo test session_cost_does_not_warn_restart_loop_for_continue_restart_count` passed.
-- `make check` passed.
-- `cargo build` passed.
-- `cargo install --path .` passed and installed `tsift 0.1.42`.
-- `make ci-full` passed locally, including the ignored SimWorld corpus.
-- Installed-binary repro passed: continue-only restart-count logs report `restart_churn_groups:0`, `max_restart_count:3`, and no guardrails.
-
-CI:
-- Latest tsift GitHub Actions CI run for this push (`25820542857`) is red because the job was not started due to account billing/spend-limit blocking, not because tests failed. Local `make ci-full` covered the CI-owned ignored corpus.
-
-Commits pushed:
-- `btakita/tsift` `4b237ba fix: suppress false restart-loop guardrails`
-- `btakita/agent-loop` `c3d5fd544 chore: update tsift submodule`
-<!-- agent:boundary:e12bbff7 -->
+<!-- agent:boundary:eb2bb757 -->
 <!-- /agent:exchange -->
 ###
 <!--

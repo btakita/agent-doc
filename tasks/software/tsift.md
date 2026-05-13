@@ -80,7 +80,29 @@ So the sequence I would use is:
 3. Extract a shared crate only for the generic runner once both `agent-doc` and `tsift` have near-identical harness code.
 
 `tmux-router` is a good separate candidate for its own SimWorld-style layout projection tests, but it is not the right shared library for tsift.
-<!-- agent:boundary:aa2abec4 -->
+❯ do [#t275]. Ensure full edge case coverage that the tmux tests perform. Ignore the tmux tests for local dev and run full suite including tmux tests on github actions. In the agent harness files, ensure the local test step checks CI for the last CI run and fixes any breaking tests.
+❯ spec-test-build-install-commit-push
+### Re: #t275 — gpt-5
+
+Done. Implemented `#t275` in `src/tsift`, pushed the tsift commit, and updated the parent submodule pointer.
+
+The main change is a tsift-local deterministic `SimWorld` in `src/sim_world.rs`. It covers the edge classes that matter for tsift's agent workflow surface without requiring live tmux: live session prompt extraction versus copied instruction ballast, long/short session-read rewrite routing, test/log/diff digest rewrites, shell metacharacter passthrough, and missing/stale/current Code Navigation status recommendations. The fast corpus runs in normal `cargo test`; the wider ignored corpus now runs through `make ci-full` on GitHub Actions.
+
+I also updated `Makefile`, CI, release verification, `SPEC.md`, `VERSIONS.md`, and the generated harness guidance in `AGENTS.md` / `CLAUDE.md` / `src/init.rs`. Local dev stays on `make check`; GitHub Actions owns the full `make ci-full` suite, including ignored deterministic simulator coverage. The harness guidance now tells agents to check the latest CI run with `gh run list --workflow CI --limit 1` and fix red CI before calling work complete.
+
+Verification:
+- `cargo test sim_world` passed.
+- `make check` passed: clippy plus 564 unit tests and 92 integration tests.
+- `make ci-full` passed locally, including `sim_world_medium_seed_corpus_runs_wider_deterministic_budget` via `cargo test -- --ignored`.
+- `cargo build --release` passed.
+- `cargo install --path . --force` installed `tsift 0.1.42` locally.
+- `tsift status` reports a fresh index and current Code Navigation instructions.
+- GitHub Actions CI run `25777739556` passed on `main` for `test: add deterministic sim world`, exercising the new `make ci-full` path.
+
+Commits:
+- tsift: `f0da300` (`test: add deterministic sim world`), pushed to `origin/main`.
+- agent-loop: `41690431b` (`chore: update tsift submodule`), pushed to `origin/main`.
+<!-- agent:boundary:fda252b1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,7 +111,7 @@ So the sequence I would use is:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#t275] [recommended] Prototype a tsift-local deterministic SimWorld for session/rewrite/status state-machine coverage before extracting any shared simulation crate.
+- [x] [#t275] [recommended] Prototype a tsift-local deterministic SimWorld for session/rewrite/status state-machine coverage before extracting any shared simulation crate.
 - [ ] [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
 - [ ] [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
 <!-- /agent:backlog -->

@@ -1505,12 +1505,21 @@ fn should_preserve_failed_route_pane(
         && tmux.pane_alive(pane_id)
 }
 
-fn dispatch_only_starting_pane_ready_timeout() -> Duration {
-    if cfg!(test) {
+fn dispatch_only_starting_pane_ready_timeout_for_binary(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> Duration {
+    if test_mode {
         Duration::from_millis(250)
+    } else if matches!(binary, Some("opencode")) {
+        Duration::from_secs(15)
     } else {
         Duration::from_secs(2)
     }
+}
+
+fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duration {
+    dispatch_only_starting_pane_ready_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test))
 }
 
 fn dispatch_only_starting_pane_recovery_timeout(harness: Option<&HarnessConfig>) -> Duration {
@@ -1582,10 +1591,12 @@ fn wait_for_starting_pane_recovery_target(
     session_id: &str,
     current_pane: &str,
     file_path: &str,
+    harness: &HarnessConfig,
     initial_status: Option<&crate::startup_miss::SessionLogStatus>,
 ) -> Option<StartingPaneRecoveryTarget> {
     let registry_base_dir = registry_base_dir_for_dispatch(file_path);
-    let deadline = std::time::Instant::now() + dispatch_only_starting_pane_recovery_timeout(None);
+    let deadline =
+        std::time::Instant::now() + dispatch_only_starting_pane_recovery_timeout(Some(harness));
     let poll = Duration::from_millis(100);
 
     while std::time::Instant::now() < deadline {
@@ -1668,7 +1679,7 @@ fn dispatch_only_send_reopen(
             let ready_outcome = wait_for_agent_ready_outcome(
                 tmux,
                 &dispatch_pane,
-                dispatch_only_starting_pane_ready_timeout(),
+                dispatch_only_starting_pane_ready_timeout(harness),
                 harness,
             );
             if ready_outcome.is_ready() {
@@ -1682,6 +1693,7 @@ fn dispatch_only_send_reopen(
                     session_id,
                     &dispatch_pane,
                     file_path,
+                    harness,
                     log_status.as_ref(),
                 )
             {
@@ -2874,6 +2886,7 @@ fn recover_dispatch_only_authoritative_waiting_input(
         session_id,
         pane,
         file_path,
+        harness,
         initial_status.as_ref(),
     ) {
         Some(StartingPaneRecoveryTarget::DifferentPane(recovered)) => recovered,
@@ -15984,6 +15997,26 @@ Body\n\
     fn dispatch_only_starting_pane_recovery_timeout_default() {
         let timeout = dispatch_only_starting_pane_recovery_timeout(None);
         assert_eq!(timeout, Duration::from_millis(400));
+    }
+
+    #[test]
+    fn dispatch_only_starting_pane_ready_timeout_production_values() {
+        assert_eq!(
+            dispatch_only_starting_pane_ready_timeout_for_binary(Some("opencode"), false),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_ready_timeout_for_binary(Some("codex"), false),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_ready_timeout_for_binary(Some("claude"), false),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_ready_timeout_for_binary(Some("opencode"), true),
+            Duration::from_millis(250)
+        );
     }
 
     #[test]

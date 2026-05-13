@@ -76,7 +76,7 @@ For `Sync Tmux Layout`: yes, `agent-doc sync` should be reliable without making 
 I would support `--force`, but narrowly: it should replace a stale or queued sync request, not blindly bypass active-turn safety or pane ownership checks. In the plugins, the error should become typed UI with a force action only when the backend says force is valid; otherwise it should remain a wait/retry/status message.
 
 For `Clear Session Context`: the busy-pane refusal is the right default for a pane currently running `agent-doc`. The next UX work is to make the plugin actions precise: `Refresh` should recompute live pane evidence, `Status` should expose controller-vs-pane disagreement, and `Interrupt and clear` should be an explicit destructive action. I captured both follow-ups in the backlog.
-<!-- agent:boundary:75593cdc -->
+<!-- agent:boundary:2dc9ea0e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -152,7 +152,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#syncforceux] [recommended] #next-steps: Make  reliable under concurrent editor sync by coalescing or superseding duplicate sync requests, proving the latest selected document is eventually applied, and evaluating an explicit  path with JetBrains/VSCode force action only for stale or replaceable in-flight syncs.
+- [ ] [#syncforceux] [recommended] #next-steps: Make `agent-doc sync` reliable under concurrent editor sync by coalescing or superseding duplicate sync requests, proving the latest selected document is eventually applied, and evaluating an explicit `agent-doc sync --force` path with JetBrains/VSCode force action only for stale or replaceable in-flight syncs.
 - [ ] [#jbclearstaleidle] [recommended] #next-steps: Re-test JetBrains Clear Session Context against current agent-doc-bugs2 stale-busy evidence and ensure Refresh recomputes live idle proof, Status shows controller vs pane evidence, and Interrupt and clear is the only destructive path for truly busy agent-doc turns.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md

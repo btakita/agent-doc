@@ -92,7 +92,28 @@ The log surfaces are useful, but the bug signals are noisy enough that the next 
 - Local `tsift status --json` reports the installed binary is usable but the repo instructions are stale: Code Navigation found `0.1.41`, expected `0.1.42`. That should be covered by a release/status regression so the first command in future sessions does not immediately erode trust.
 
 I added those items to the backlog in priority order. Top backlog item: `#sflt`.
-<!-- agent:boundary:df460a68 -->
+❯ do [#sflt]. spec-test-build-install-commit-push
+### Re: #sflt failure classification — gpt-5
+
+Implemented and pushed `src/tsift` commit `b907171` (`fix: ignore passing test summaries in session review`) to `origin/main`.
+
+What changed:
+- Tightened `session-digest` failure classification so bare labels and passing test summaries such as `failures:`, `No failures detected`, `test result: ok. ... 0 failed`, and `4 passed, 0 failed` no longer become unresolved failures.
+- Preserved real panic/assertion/error/exit evidence, including failing Rust test summaries and nonzero command exits.
+- Documented the contract in `SPEC.md` for both `session-digest` and `session-review --next-context`.
+- Added unit and integration coverage for the session-digest surface and the session-review next-context surface.
+
+Verification:
+- Focused regressions passed: new session-digest unit tests, `session_digest_ignores_successful_test_summaries_from_stdin`, and `session_review_next_context_ignores_successful_test_summaries`.
+- `cargo test` passed: 559 unit tests and 92 integration tests.
+- `make check` passed: `cargo clippy -- -D warnings` plus the full test suite.
+- `cargo build` passed.
+- `cargo install --path . --force` passed and replaced `/home/brian/.cargo/bin/tsift`.
+- Installed smoke check passed: `tsift session-review --next-context --json` returned `unresolved_failures: []` for the false-positive success-summary fixture.
+- GitHub Actions CI run `25776674905` is green (`clippy + test`). This repo defines no tmux workflow or `tmux-ci` target, so there was no separate tmux leg to run.
+
+I left unrelated dirty parent-repo entries untouched. The `src/tsift` submodule worktree itself is clean at the pushed commit.
+<!-- agent:boundary:bb0b7d5e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,7 +122,6 @@ I added those items to the backlog in priority order. Top backlog item: `#sflt`.
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sflt] Fix session-review/session-digest failure classification so successful test summaries and generic instruction text like `failures:` are not reported as unresolved failures; preserve real failing assertions/exits with command and session anchors.
 - [ ] [#sprm] Tighten `tsift session-review --next-context` prompt-target extraction so frontmatter prompt presets, examples, archived/resolved prompts, and repeated historical directives do not appear as active prompt targets.
 - [ ] [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
 - [ ] [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
@@ -119,6 +139,7 @@ k
 - 2026-05-12 [#686r] Add a DCI-style tsift benchmark: compare exact/chained rg, lexical BM25, and hybrid search on multi-hop code/repo tasks, tracking localization, tool calls, latency, and token budget.
 - 2026-05-12 [#s1k1] Add a composable search workflow surface or documented recipes that preserve result handles across search --exact, search, explain, summarize, and digest expansion steps.
 - 2026-05-12 [#v6y3] Add breadth/scale guards to search envelopes: high-hit warnings, corpus-size/tool-budget signals, and concrete next-narrowing commands before agents fan out too broadly.
+- 2026-05-12 [#sflt] Fix session-review/session-digest failure classification so successful test summaries and generic instruction text like `failures:` are not reported as unresolved failures; preserve real failing assertions/exits with command and session anchors.
 <!-- /agent:done -->
 
 ## Completed / Reaped

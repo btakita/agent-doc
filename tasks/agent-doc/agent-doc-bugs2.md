@@ -34,11 +34,25 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 3 response topic(s): JetBrains Clear Session Context stale-busy actions; syncforceux; Clear Session Context active panes
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:64d56e62 -->
+❯ The agent:done tag should support an attribute to link to a separate "done" file (*.done.md) so the document does not become bloated. Plan so we agree on the attribute name.
+### Re: external `agent:done` archive attribute — gpt-5
+
+I propose `archive=` as the attribute name:
+
+```md
+&lt;!-- agent:done archive=tasks/agent-doc/agent-doc-bugs2.done.md --&gt;
+&lt;!-- /agent:done --&gt;
+```
+
+Reasoning: `archive` names the purpose of the linked file, not just the storage mechanism. On `agent:done`, it reads as "completed-work archive lives here" and avoids overloading generic names like `file` or `src`.
+
+I created the plan at `tasks/agent-doc/plan-external-done-archive-attribute.md` and captured the implementation follow-up in backlog. The plan keeps inline `agent:done` as the default, makes external archives opt-in, requires repo-local `*.done.md` paths, and calls out the guard/test work needed so external done entries still count as first-class proof for closeout and history replay.
+<!-- agent:boundary:ee5ce68c -->
 <!-- /agent:exchange -->
 ###
 <!--
-The agent:done tag should support an attribute to link to a sepate "done" file (*.done.md) so the document does not become bloated. Plan so we agree on the attribute name.
+Autosync on editor file change + `Sync Tmux Layout` lands on a 1 tmux pane and 3 tmux pane layout with 2 editor panes.
+spec-test-build-install-commit-push
 ---
 The sandbox check tmux prompt should be terse and more "human readable" on a single line. Explain the status without the extra information.
 spec-test-build-install-commit-push
@@ -110,18 +124,9 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#donearchiveattr] Implement external completed-work archive support for agent:done using archive=<repo-relative>.done.md. Plan: tasks/agent-doc/plan-external-done-archive-attribute.md
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
-
-JB `Clear Session Context` still has
-```
-Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 60% used
-```
-`Refresh and Retry` does not work.
-
-It may be better to just remove these guards for `Clear Session Context`. Do they prevent any issues? I can't think of any issues. It is the issue. 
-Please verify by automating the actual UI if possible.
-spec-test-build-install-commit-push
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

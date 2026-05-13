@@ -38,6 +38,7 @@ describe('buildTabChangeCommand', () => {
                 'src/boost-client/tasks/monsterrodholders.md',
                 '--focus',
                 'src/boost-client/tasks/monsterrodholders.md',
+                '--exact-visible',
                 '--no-autostart',
             ],
         });
@@ -73,6 +74,7 @@ describe('buildTabChangeCommand', () => {
                 'src/boost-client/tasks/monsterrodholders.md',
                 '--focus',
                 'src/boost-client/tasks/monsterrodholders.md',
+                '--exact-visible',
                 '--no-autostart',
             ],
         });
@@ -98,6 +100,7 @@ describe('buildTabChangeCommand', () => {
                 'src/boost-client/tasks/monsterrodholders.md',
                 '--focus',
                 'src/boost-client/tasks/monsterrodholders.md',
+                '--exact-visible',
                 '--no-autostart',
             ],
         });
@@ -130,6 +133,35 @@ describe('buildTabChangeCommand', () => {
                 'src/session-share/tasks/claudescore-3.md',
                 '--focus',
                 'src/session-share/tasks/claudescore-3.md',
+                '--exact-visible',
+                '--no-autostart',
+            ],
+        });
+    });
+
+    it('marks automatic single-file tab sync as exact-visible to avoid stale sibling resurrection', () => {
+        const planned = buildTabChangeCommand({
+            activeFile: 'tasks/software/tsift.md',
+            visibleMd: ['tasks/software/tsift.md'],
+            visibleColumns: [['tasks/software/tsift.md']],
+            previous: {
+                activeFile: 'tasks/software/corky.md',
+                visibleSignature: visibleSignatureFromColumns([
+                    ['tasks/software/tsift.md'],
+                    ['tasks/software/corky.md'],
+                ]),
+            },
+        });
+
+        assert.deepStrictEqual(planned?.command, {
+            kind: 'sync',
+            args: [
+                'sync',
+                '--col',
+                'tasks/software/tsift.md',
+                '--focus',
+                'tasks/software/tsift.md',
+                '--exact-visible',
                 '--no-autostart',
             ],
         });

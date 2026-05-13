@@ -109,7 +109,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 ## sync
 
-`agent-doc sync [--col <FILES>,...] [--window W] [--focus FILE] [--no-autostart]`
+`agent-doc sync [--col <FILES>,...] [--window W] [--focus FILE] [--no-autostart] [--exact-visible]`
 
 - Declaratively mirrors editor layout into tmux columns.
 - Files with session ids are managed even when their current registry entry was pruned; `claim` is the only command that creates a new session id.
@@ -212,6 +212,11 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   visible projection, sync must select that column rather than replacing the
   currently active tmux pane; active-pane inference is only for true same-side
   replacements.
+- Automatic editor plugins that have captured the full visible markdown
+  projection must pass `--exact-visible` with `--no-autostart`. In that mode a
+  single provided `--col` is authoritative and must not expand from remembered
+  layout state, so switching the editor away from a document like
+  `tasks/software/corky.md` cannot reintroduce its stale pane as a sibling.
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.
 - If any visible file stays blocked under passive `--no-autostart`, sync must preserve the current visible tmux layout and warn instead of reconciling the remaining foreign pane set into a new authoritative layout. This includes the live mixed-root replay shape where `tasks/agent-doc/agent-doc-bugs2.md` shares the visible `agent-doc` window with `src/session-share/tasks/claudescore-3.md`; a blocked sibling file must not let the remaining visible pane set collapse into a new authoritative layout.

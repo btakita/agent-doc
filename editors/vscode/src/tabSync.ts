@@ -79,7 +79,7 @@ export function visibleSignatureFromColumns(visibleColumns: string[][]): string 
 export function buildSyncCommandArgs(
     visibleColumns: string[][],
     activeFile: string,
-    options?: { noAutostart?: boolean },
+    options?: { noAutostart?: boolean; exactVisible?: boolean },
 ): string[] {
     const columns = normalizeVisibleColumns(visibleColumns);
     const normalizedColumns = columns.length > 0 ? columns : [[activeFile]];
@@ -88,6 +88,9 @@ export function buildSyncCommandArgs(
         args.push('--col', column.join(','));
     }
     args.push('--focus', activeFile);
+    if (options?.exactVisible) {
+        args.push('--exact-visible');
+    }
     if (options?.noAutostart !== false) {
         args.push('--no-autostart');
     }
@@ -123,7 +126,7 @@ export function buildTabChangeCommand(input: TabChangeInput): PlannedTabChange |
     return {
         command: {
             kind: 'sync',
-            args: buildSyncCommandArgs(visibleColumns, input.activeFile),
+            args: buildSyncCommandArgs(visibleColumns, input.activeFile, { exactVisible: true }),
         },
         nextState,
     };

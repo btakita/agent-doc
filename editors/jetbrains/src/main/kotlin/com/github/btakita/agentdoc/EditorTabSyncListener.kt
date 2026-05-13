@@ -329,6 +329,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     editorLayout = snapshot.editorLayout,
                     focusedFile = snapshot.activeFile,
                     noAutostart = true,
+                    exactVisible = true,
                 )
             }
         }

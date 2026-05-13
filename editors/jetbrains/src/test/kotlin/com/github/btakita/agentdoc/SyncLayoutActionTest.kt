@@ -16,9 +16,11 @@ class SyncLayoutActionTest {
             editorLayout = null,
             focusedFile = "/repo/tasks/one.md",
             noAutostart = true,
+            exactVisible = true,
         )
 
         assertTrue(cmd.contains("--no-autostart"))
+        assertTrue(cmd.contains("--exact-visible"))
     }
 
     @Test
@@ -124,6 +126,32 @@ class SyncLayoutActionTest {
                 "/repo/src/boost-client/tasks/monsterrodholders.md",
                 "--focus",
                 "/repo/src/boost-client/tasks/monsterrodholders.md",
+            ),
+            cmd,
+        )
+    }
+
+    @Test
+    fun `automatic exact visible single file sync does not ask cli to expand remembered siblings`() {
+        val cmd = SyncLayoutAction.buildSyncCommand(
+            agentDoc = "agent-doc",
+            visibleMdFiles = listOf("/repo/tasks/software/tsift.md"),
+            editorLayout = null,
+            focusedFile = "/repo/tasks/software/tsift.md",
+            noAutostart = true,
+            exactVisible = true,
+        )
+
+        assertEquals(
+            listOf(
+                "agent-doc",
+                "sync",
+                "--col",
+                "/repo/tasks/software/tsift.md",
+                "--focus",
+                "/repo/tasks/software/tsift.md",
+                "--exact-visible",
+                "--no-autostart",
             ),
             cmd,
         )

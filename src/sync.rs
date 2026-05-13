@@ -997,6 +997,29 @@ fn expand_focus_only_columns_for_editor_switch(
     expanded
 }
 
+fn apply_focus_only_expansion_policy(
+    col_args: &[String],
+    remembered_layout: &[String],
+    active_column_index: Option<usize>,
+    auto_start_mode: AutoStartMode,
+    exact_visible_projection: bool,
+) -> Vec<String> {
+    if exact_visible_projection {
+        sync_log(&format!(
+            "safe_passive_exact_visible_projection columns={:?}",
+            col_args
+        ));
+        col_args.to_vec()
+    } else {
+        expand_focus_only_columns_for_editor_switch(
+            col_args,
+            remembered_layout,
+            active_column_index,
+            auto_start_mode,
+        )
+    }
+}
+
 fn lookup_registry_entry_for_file_session(
     file: &Path,
     session_id: &str,
@@ -1735,11 +1758,21 @@ fn skip_auto_start_for_recent_session_loss(file: &Path, session_id: &str) -> Res
 
 pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
     tracing::debug!(cols = ?col_args, window, focus, "sync::run start");
-    run_with_options(
+    run_with_options(col_args, window, focus, AutoStartMode::Full)
+}
+
+fn run_with_options(
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    auto_start_mode: AutoStartMode,
+) -> Result<()> {
+    run_with_options_internal(
         col_args,
         window,
         focus,
-        AutoStartMode::Full,
+        auto_start_mode,
+        false,
         &Tmux::default_server(),
     )
 }
@@ -1801,11 +1834,25 @@ pub fn run_layout_only(
     window: Option<&str>,
     focus: Option<&str>,
 ) -> Result<()> {
-    run_with_options(
+    run_with_options(col_args, window, focus, AutoStartMode::SafePassive)
+}
+
+/// Run sync in passive editor mode with an exact editor-visible projection.
+///
+/// Unlike generic focus-only safe-passive sync, this mode does not expand a
+/// single provided column from remembered layout state. Editors use it when
+/// their selection snapshot already represents the full visible markdown set.
+pub fn run_layout_only_exact_visible(
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+) -> Result<()> {
+    run_with_options_internal(
         col_args,
         window,
         focus,
         AutoStartMode::SafePassive,
+        true,
         &Tmux::default_server(),
     )
 }
@@ -1816,7 +1863,7 @@ pub fn run_with_tmux(
     focus: Option<&str>,
     tmux: &Tmux,
 ) -> Result<()> {
-    run_with_options(col_args, window, focus, AutoStartMode::Full, tmux)
+    run_with_options_internal(col_args, window, focus, AutoStartMode::Full, false, tmux)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2830,11 +2877,12 @@ fn check_build_stamp() {
     let _ = std::fs::write(&stamp_path, build_ts);
 }
 
-fn run_with_options(
+fn run_with_options_internal(
     col_args: &[String],
     window: Option<&str>,
     focus: Option<&str>,
     auto_start_mode: AutoStartMode,
+    exact_visible_projection: bool,
     tmux: &Tmux,
 ) -> Result<()> {
     let window = normalize_scope_arg(window);
@@ -3025,11 +3073,12 @@ fn run_with_options(
             auto_start_mode,
         );
     }
-    col_args = expand_focus_only_columns_for_editor_switch(
+    col_args = apply_focus_only_expansion_policy(
         &col_args,
         &remembered_layout,
         active_column_index,
         auto_start_mode,
+        exact_visible_projection,
     )
     .into_iter()
     .filter(|col| !col.is_empty())
@@ -7195,11 +7244,12 @@ mod tests {
         let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "corky", "-d"]);
         let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "stash-2", "-d"]);
 
-        run_with_options(
+        run_with_options_internal(
             &[doc_str.clone()],
             None,
             Some(doc_str.as_str()),
             AutoStartMode::Full,
+            false,
             &iso,
         )
         .unwrap();
@@ -7269,11 +7319,12 @@ mod tests {
         .unwrap();
         let _ = iso.raw_cmd(&["new-window", "-t", "test:", "-n", "stash", "-d"]);
 
-        run_with_options(
+        run_with_options_internal(
             &[doc_str.clone()],
             Some("test:0"),
             Some(doc_str.as_str()),
             AutoStartMode::Full,
+            false,
             &iso,
         )
         .unwrap();
@@ -7979,6 +8030,39 @@ mod tests {
     }
 
     #[test]
+    fn exact_visible_projection_does_not_expand_from_remembered_focus_only_layout() {
+        let saved_layout = vec![
+            "tasks/tsift.md".to_string(),
+            "tasks/software/corky.md".to_string(),
+        ];
+        let focused = vec!["tasks/tsift.md".to_string()];
+
+        let expanded = apply_focus_only_expansion_policy(
+            &focused,
+            &saved_layout,
+            Some(0),
+            AutoStartMode::SafePassive,
+            false,
+        );
+        assert_eq!(
+            expanded, saved_layout,
+            "legacy focus-only sync still preserves remembered sibling columns"
+        );
+
+        let exact = apply_focus_only_expansion_policy(
+            &focused,
+            &saved_layout,
+            Some(0),
+            AutoStartMode::SafePassive,
+            true,
+        );
+        assert_eq!(
+            exact, focused,
+            "editor snapshots marked exact-visible must not reintroduce stale remembered siblings"
+        );
+    }
+
+    #[test]
     fn empty_window_arg_normalized_to_none() {
         assert_eq!(normalize_scope_arg(None), None);
         assert_eq!(normalize_scope_arg(Some("")), None);
@@ -8517,11 +8601,12 @@ mod tests {
             .unwrap();
         fs2::FileExt::lock_exclusive(&holder).unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[active_doc.to_string_lossy().to_string()],
             None,
             Some(active_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             &iso,
         )
         .unwrap();
@@ -9159,7 +9244,7 @@ mod tests {
         )
         .unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[
                 non_agent.to_string_lossy().to_string(),
                 child_doc.to_string_lossy().to_string(),
@@ -9167,6 +9252,7 @@ mod tests {
             Some(root_window.as_str()),
             None,
             AutoStartMode::Full,
+            false,
             &iso,
         )
         .unwrap();
@@ -10236,7 +10322,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         )
         .unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[
                 tsift_doc.to_string_lossy().to_string(),
                 claudescore_doc.to_string_lossy().to_string(),
@@ -10244,6 +10330,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             None,
             Some(tsift_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             &iso,
         )
         .unwrap();
@@ -10308,11 +10395,12 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         )
         .unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[doc.to_string_lossy().to_string()],
             None,
             Some(doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             &iso,
         )
         .unwrap();
@@ -10396,7 +10484,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         crate::cycle_state::start_preflight(&doc_a, Some(&doc_a_content), Some(&doc_a_content))
             .unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[
                 doc_c.to_string_lossy().to_string(),
                 doc_b.to_string_lossy().to_string(),
@@ -10404,6 +10492,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             None,
             Some(doc_c.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             &iso,
         )
         .unwrap();
@@ -10505,7 +10594,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         crate::cycle_state::start_preflight(&doc_a, Some(&doc_a_content), Some(&doc_a_content))
             .unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[
                 doc_c.to_string_lossy().to_string(),
                 doc_b.to_string_lossy().to_string(),
@@ -10513,6 +10602,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             None,
             Some(doc_c.to_string_lossy().as_ref()),
             AutoStartMode::Full,
+            false,
             &iso,
         )
         .unwrap();
@@ -10608,11 +10698,12 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         )
         .unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[requested_doc.to_string_lossy().to_string()],
             None,
             Some(requested_doc.to_string_lossy().as_ref()),
             mode,
+            false,
             &iso,
         )
         .unwrap();
@@ -10751,7 +10842,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         .unwrap();
         iso.select_pane(&bugs_pane).unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[
                 tsift_doc.to_string_lossy().to_string(),
                 claudescore_doc.to_string_lossy().to_string(),
@@ -10759,6 +10850,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             None,
             Some(claudescore_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             &iso,
         )
         .unwrap();
@@ -10856,11 +10948,12 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         }
         iso.select_pane(&left_pane).unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[new_left_doc.to_string_lossy().to_string()],
             None,
             Some(new_left_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             &iso,
         )
         .unwrap();
@@ -10945,11 +11038,12 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         }
         iso.select_pane(&bugs_pane).unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[docs_doc.to_string_lossy().to_string()],
             None,
             Some(docs_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             &iso,
         )
         .unwrap();
@@ -11039,11 +11133,12 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
         }
         iso.select_pane(&left_pane).unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[new_left_doc.to_string_lossy().to_string()],
             None,
             Some(new_left_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             &iso,
         )
         .unwrap();
@@ -11133,7 +11228,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             .unwrap();
         iso.select_pane(&pane_a).unwrap();
 
-        run_with_options(
+        run_with_options_internal(
             &[
                 doc_c.to_string_lossy().to_string(),
                 doc_b.to_string_lossy().to_string(),
@@ -11141,6 +11236,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             None,
             Some(doc_b.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             &iso,
         )
         .unwrap();

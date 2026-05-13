@@ -531,6 +531,10 @@ enum Commands {
         /// Arrange/reconcile existing panes without auto-starting replacement sessions.
         #[arg(long)]
         no_autostart: bool,
+        /// Treat provided --col values as the exact editor-visible projection.
+        /// This disables focus-only expansion from remembered column memory.
+        #[arg(long)]
+        exact_visible: bool,
     },
     /// Replace content in a named component
     Patch {
@@ -1537,12 +1541,21 @@ fn main() -> anyhow::Result<()> {
             focus,
             rename,
             no_autostart,
+            exact_visible,
         } => {
             if rename && let Some(ref f) = focus {
                 sync::write_rename_debounce(f);
             }
             if no_autostart {
-                sync::run_layout_only(&columns, window.as_deref(), focus.as_deref())
+                if exact_visible {
+                    sync::run_layout_only_exact_visible(
+                        &columns,
+                        window.as_deref(),
+                        focus.as_deref(),
+                    )
+                } else {
+                    sync::run_layout_only(&columns, window.as_deref(), focus.as_deref())
+                }
             } else {
                 sync::run(&columns, window.as_deref(), focus.as_deref())
             }

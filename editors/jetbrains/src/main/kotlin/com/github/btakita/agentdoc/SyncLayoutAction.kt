@@ -171,18 +171,20 @@ class SyncLayoutAction : AnAction() {
             editorLayout: EditorLayout?,
             focusedFile: String?,
             noAutostart: Boolean,
+            exactVisible: Boolean = false,
         ): List<String> {
             val focusArgs = if (focusedFile != null) listOf("--focus", focusedFile) else emptyList()
             val noAutostartArgs = if (noAutostart) listOf("--no-autostart") else emptyList()
+            val exactVisibleArgs = if (exactVisible) listOf("--exact-visible") else emptyList()
             return if (editorLayout != null && editorLayout.columns.size > 1) {
                 val colArgs = editorLayout.columns
                     .flatMap { col ->
                         listOf("--col", col.files.joinToString(","))
                     }
-                listOf(agentDoc, "sync") + colArgs + focusArgs + noAutostartArgs
+                listOf(agentDoc, "sync") + colArgs + focusArgs + exactVisibleArgs + noAutostartArgs
             } else {
                 val colArg = visibleMdFiles.joinToString(",")
-                listOf(agentDoc, "sync", "--col", colArg) + focusArgs + noAutostartArgs
+                listOf(agentDoc, "sync", "--col", colArg) + focusArgs + exactVisibleArgs + noAutostartArgs
             }
         }
 

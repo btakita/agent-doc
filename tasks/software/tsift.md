@@ -35,7 +35,27 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): #s1k1 search workflow; #v6y3 search scale guards; tsift log survey; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:195ecb4e -->
+❯ do [#sprm]. spec-test-build-install-commit-push
+### Re: #sprm — gpt-5
+
+Done. Implemented `#sprm` in `src/tsift` and pushed the tsift submodule commit.
+
+`session-review --next-context` now derives active prompt targets for agent-doc template documents from the live `agent:exchange` tail after the latest response boundary, instead of treating historical transcript aggregates as current work. The prompt-target filters also ignore frontmatter prompt presets, copied slash-command examples, and completed backlog archive rows, so prompt presets, compacted/resolved prompts, and repeated old `do ...` directives do not reappear as active next-context work.
+
+I documented the contract in `SPEC.md` and added regressions for markdown/session-digest filtering, copied Codex frontmatter prompt presets, and session-review preferring the live exchange prompt over repeated historical transcript prompts.
+
+Verification:
+- `cargo test` passed: 562 unit tests and 92 integration tests.
+- `make check` passed: clippy with `-D warnings`, then the full test target.
+- `cargo build --release` passed.
+- `cargo install --path . --force` installed `tsift 0.1.42` locally.
+- `tsift session-review --next-context --json /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` now reports only `do [#sprm]. spec-test-build-install-commit-push` in `active_prompt_targets`.
+- GitHub CI `25777027413` passed (`clippy + test`). There is no tmux CI leg in the tsift workflow.
+
+Commits:
+- tsift: `df3133e` (`fix: keep next-context prompts live`), pushed to `origin/main`.
+- agent-loop: `103eb91bd` (`chore: update tsift submodule`) committed locally; parent push follows this binary-owned document closeout so the session document stays out of the manual repo commit.
+<!-- agent:boundary:a4394a2c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +64,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sprm] Tighten `tsift session-review --next-context` prompt-target extraction so frontmatter prompt presets, examples, archived/resolved prompts, and repeated historical directives do not appear as active prompt targets.
 - [ ] [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
 - [ ] [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
 <!-- /agent:backlog -->
@@ -62,6 +81,7 @@ k
 - 2026-05-12 [#s1k1] Add a composable search workflow surface or documented recipes that preserve result handles across search --exact, search, explain, summarize, and digest expansion steps.
 - 2026-05-12 [#v6y3] Add breadth/scale guards to search envelopes: high-hit warnings, corpus-size/tool-budget signals, and concrete next-narrowing commands before agents fan out too broadly.
 - 2026-05-12 [#sflt] Fix session-review/session-digest failure classification so successful test summaries and generic instruction text like `failures:` are not reported as unresolved failures; preserve real failing assertions/exits with command and session anchors.
+- 2026-05-12 [#sprm] Tighten `tsift session-review --next-context` prompt-target extraction so frontmatter prompt presets, examples, archived/resolved prompts, and repeated historical directives do not appear as active prompt targets.
 <!-- /agent:done -->
 
 ## Completed / Reaped

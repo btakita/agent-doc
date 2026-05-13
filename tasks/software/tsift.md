@@ -80,7 +80,7 @@ So the sequence I would use is:
 3. Extract a shared crate only for the generic runner once both `agent-doc` and `tsift` have near-identical harness code.
 
 `tmux-router` is a good separate candidate for its own SimWorld-style layout projection tests, but it is not the right shared library for tsift.
-<!-- agent:boundary:8206d8fe -->
+<!-- agent:boundary:aa2abec4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -89,6 +89,7 @@ So the sequence I would use is:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#t275] [recommended] Prototype a tsift-local deterministic SimWorld for session/rewrite/status state-machine coverage before extracting any shared simulation crate.
 - [ ] [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
 - [ ] [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
 <!-- /agent:backlog -->

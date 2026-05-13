@@ -30,38 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-042107.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-042926.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #sprm; SimWorld extraction; #t275
+- Archived 1 response topic(s): #sops
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#sops]. spec-test-build-install-commit-push
-### Re: #sops — gpt-5
-
-Done. `tsift log-digest` now treats structured agent-doc runtime fields as anchors:
-
-- `file=...` and `path=...` become file refs even when they have no line number.
-- timestamped runtime event names plus `event=...`, `pane=...`, and `session=...` become structured symbol refs.
-- signal rows that only carry `file=...` now attach that path to the signal.
-
-Updated the spec and version notes, and added direct plus compiled CLI regressions for agent-doc runtime-style log lines.
-
-Verification:
-
-- `cargo fmt --check`
-- `cargo test log_digest`
-- `make check`
-- `cargo build`
-- `cargo install --path . --force`
-- installed `tsift --version` -> `tsift 0.1.42`
-- live ops-log check with installed binary: `.agent-doc/logs/ops.log` now reports `file_ref_groups=243` and includes `tasks/software/tsift.md` among the top file refs, replacing the prior `file_ref_groups=0` failure mode.
-- Latest GitHub Actions `CI` run for tsift was green: `25777739556` on `main`. There is no tsift tmux CI leg; the wider ignored SimWorld suite is owned by the tsift `CI` workflow.
-
-Commits pushed:
-
-- `btakita/tsift@fbbaa5c` — `fix: anchor agent-doc log fields in log digest`
-- `btakita/agent-loop@a023ce8af` — `chore: update tsift submodule`
-<!-- agent:boundary:45ccb92d -->
+<!-- agent:boundary:09dae422 -->
 <!-- /agent:exchange -->
 ###
 <!--

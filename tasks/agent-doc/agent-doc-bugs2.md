@@ -144,7 +144,17 @@ Commits:
 
 - `20df1bf` in `src/agent-doc`: `fix: answer opencode prompts with tab selector`
 - `79bd81f45` in the parent repo: `agent-doc: answer opencode prompts with tab selector`
-<!-- agent:boundary:ce53addc -->
+❯ Any #next-steps?
+### Re: OpenCode prompt next steps — gpt-5.5
+
+Yes: add plugin-level coverage for the prompt-answer path.
+
+The core CLI fix is shared by both editor plugins because JetBrains and VSCode both poll `agent-doc prompt --all` and answer by running `agent-doc prompt --answer <index> <file>`. The remaining risk is editor integration drift: option index wiring, JSON shape handling, and installed-plugin smoke coverage.
+
+I added one recommended backlog item for that:
+
+- `#opencodepromptplugins`: verify JetBrains and VSCode prompt UIs pass the selected option index to `prompt --answer`, handle the flat `prompt --all` JSON including `selected`, and include a live OpenCode permission prompt smoke after installing the plugin.
+<!-- agent:boundary:303b4d67 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -208,6 +218,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#opencodepromptplugins] [recommended] Add editor-plugin prompt-answer coverage for JetBrains and VSCode: verify both prompt UIs pass the selected option index to , handle flat  JSON including , and include a live OpenCode permission prompt smoke after installing the plugin.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->

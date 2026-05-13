@@ -30,53 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-204322.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-224007.md`*
 
 Compacted content:
-- Archived 1 response topic(s): xlog
+- Archived 2 response topic(s): tsift log review; session guardrails in next-context
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ Evaluate logs to assess the effectiveness and issues with tsift. #next-steps
-### Re: tsift log review — gpt-5
-
-I evaluated `.agent-doc/logs/tsift-v0.1.log` with the tsift commands that should explain this workflow: `log-digest`, `session-digest`, `session-cost`, `session-review`, `session-review --next-context`, `context-pack`, and `status`.
-
-The good news: the earlier `signals:0` gap is fixed in the current code path. `log-digest` now reports `signal_groups: 8` from the 1,710-line log and correctly surfaces agent-doc closeout churn, restart churn, timeout, and nonzero-exit signals. It also extracts `file_ref_groups: 2` and `symbol_ref_groups: 144`, so the log is no longer treated as inert text.
-
-The current log still shows real operational churn: `commit_already_current` dominates with 639 closeout-churn signal occurrences, plus `fresh_restart=28`, `quit_after_eof=17`, `ctrl_d_restart_loop=8`, `auto_trigger_timeout=5`, `claude_exit code=1` three times, and `claude_exit code=143` once. `session-cost` independently flags `restart_loop` and `noop_closeout`, with `commit_already_current` appearing 146 times in this log-level cost view.
-
-The broader `session-review` is useful but also shows why this needs follow-up. Across 12 matched sessions it found 74,275,063 total tokens, 98.03% cached input, a largest turn of 220,368 tokens, and guardrails for prompt budget, cache resend, restart loop, and noop closeout. The latest matched session alone is much smaller at 686,248 tokens, so the aggregate and latest-session split is working and avoids misrepresenting historic spend as the active turn.
-
-Main issue: `session-review --next-context` reports `unresolved_failures: []` even though the review and log digest both have actionable guardrails. That makes the resumable handoff too optimistic. The next context should carry guardrail/action-item signals forward so the following agent sees the restart/noop churn without needing to rediscover it.
-
-Secondary issue: `quit_after_eof` is grouped as restart churn. Some of those may be clean user exits rather than a harness loop, so tsift should separate clean EOF/user quit from actual retry/fresh-restart loops. Otherwise the warning can be directionally right but noisy.
-
-Repository status also needs attention: `tsift status . --json` reports the index is stale with 8 stale files and no summary cache. That does not invalidate the log assessment, but it means search/graph/symbol enrichment is weaker until the index is refreshed.
-
-I added prioritized follow-up backlog items. Top backlog id: `#srgd`.
-❯ do [#srgd]. spec-test-build-install-commit-push
-### Re: session guardrails in next-context — gpt-5
-
-Implemented `#srgd` in `src/tsift`.
-
-`session-review --next-context` now carries aggregate session guardrails forward as `guardrail:<kind>` unresolved-failure action rows, so guardrail-only handoffs no longer look clean when the review already detected prompt-budget, cached-resend, restart-loop, or no-op closeout risk. I updated the spec and version notes, added unit coverage, and extended the compiled CLI regression to assert the new next-context guardrail row.
-
-Verification completed:
-
-- `cargo fmt`
-- `cargo test session_review_discovers_cross_harness_logs_for_doc_target`
-- `cargo test --test exit_code session_review_aggregates_cross_harness_logs`
-- `make check` passed: clippy, 589 unit tests passing with 1 ignored, and 107 compiled integration tests passing
-- `cargo build --release`
-- `cargo install --path .`
-- installed binary smoke check: `tsift session-review --next-context tasks/software/tsift.md --json` now reports `guardrail:prompt_budget`, `guardrail:cache_resend`, `guardrail:restart_loop`, and `guardrail:noop_closeout`
-
-CI status: latest GitHub Actions `CI` run for `btakita/tsift` is red because the job was not started due to account billing/spending-limit configuration, not because tests ran and failed. There is no local `tmux-ci` target in `src/tsift`'s Makefile.
-
-Commits created:
-
-- `src/tsift`: `caf6a02 fix: carry session guardrails into next context` and pushed to `origin/main`
-- parent repo: `bf644ad60 chore: update tsift submodule`; this parent push happens after the agent-doc response commit, per the session closeout boundary
-<!-- agent:boundary:95aa9469 -->
+<!-- agent:boundary:3c0610f6 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -123,11 +123,11 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Trigger:** Starts after a Submit action registers a file. Polls every 1.5 seconds.
 - **Behavior:**
   1. Auto-save all tracked documents before each poll cycle.
-  2. Run `agent-doc prompt --all` and parse JSON array response.
+  2. Run `agent-doc prompt --all` and parse JSON array response, including each prompt entry's owning `cwd`.
   3. Filter for entries with `active: true` and non-empty `options[]`.
   4. Show one prompt at a time. Stick with the current prompt until it resolves before advancing to the next.
   5. Display prompt UI with question text, option buttons, and keyboard hints.
-- **Answer:** Run `agent-doc prompt --answer <index> <file>` when the user selects an option.
+- **Answer:** Run `agent-doc prompt --answer <index> <file>` from the prompt entry's `cwd` when the user selects an option.
 - **Dedup:** Track `answeredPromptKey` to suppress re-showing a prompt until the answer takes effect (prompt disappears from poll results).
 - **UI requirements:**
   - JetBrains: Bottom-anchored `JPanel` overlay with `Alt+Esc` focus toggle, `Alt+1..9` direct selection, `1-9` selection when focused, `Esc` dismiss, auto-focus after 1s inactivity.

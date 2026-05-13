@@ -9,7 +9,7 @@ Interactive document sessions with AI agents. Edit markdown documents in your ed
 - **Sync tmux layout** to mirror your editor's tab arrangement without auto-starting replacement sessions from passive editor churn
 - **Preserve split columns** by sending one `--col` per visible editor group instead of flattening every visible markdown tab into one stack
 - **Highlight agent-doc markdown structures** including component comments, boundaries, prompts, `### Re:` headings, tracked ids, and scratch HTML comments
-- **Answer active permission prompts** from flat `agent-doc prompt --all` JSON, preserving the TUI-selected option state and sending the one-based option position required by `agent-doc prompt --answer`
+- **Answer active permission prompts** from flat `agent-doc prompt --all` JSON, preserving the owning cwd and TUI-selected option state while sending the one-based option position required by `agent-doc prompt --answer`
 - **IPC patch watcher** applies agent responses directly via Document API (no external file change dialogs)
 - **Component patching** with inline attribute support (`patch=append`, `patch=replace`; `mode=` accepted as backward-compatible alias)
 

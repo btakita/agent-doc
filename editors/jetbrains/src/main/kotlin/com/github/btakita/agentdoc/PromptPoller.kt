@@ -305,21 +305,25 @@ class PromptPoller(private val project: Project) : Disposable {
     private fun handlePollResults(entries: List<PromptAllEntry>, basePath: String) {
         // Resolve VirtualFiles for sessions we haven't explicitly tracked
         for (entry in entries) {
-            if (entry.file.isNotEmpty() && !trackedFiles.containsKey(entry.file)) {
-                val absPath = java.io.File(basePath, entry.file).absolutePath
+            val entryBasePath = entry.cwd?.takeIf { it.isNotBlank() } ?: basePath
+            val trackedKey = "$entryBasePath:${entry.file}"
+            if (entry.file.isNotEmpty() && !trackedFiles.containsKey(trackedKey)) {
+                val absPath = java.io.File(entryBasePath, entry.file).absolutePath
                 val vf = LocalFileSystem.getInstance().findFileByPath(absPath)
                 if (vf != null) {
-                    trackedFiles[entry.file] = TrackedFile(vf, vf.modificationStamp)
+                    trackedFiles[trackedKey] = TrackedFile(vf, vf.modificationStamp)
                 }
             }
         }
 
-        // Collect all active prompts keyed by "file:question"
+        // Collect all active prompts keyed by owning root, file, and question.
         val allActiveEntries = entries.filter { it.info.active && it.info.options != null }
         if (allActiveEntries.isNotEmpty()) {
             LOG.info("[prompt-poller] ${allActiveEntries.size} active prompt(s) detected")
         }
-        val allActiveByKey = allActiveEntries.associateBy { "${it.file}:${it.info.question}" }
+        val allActiveByKey = allActiveEntries.associateBy {
+            "${it.cwd?.takeIf { cwd -> cwd.isNotBlank() } ?: basePath}:${it.file}:${it.info.question}"
+        }
 
         // Clear answered key once the answer takes effect (prompt disappears from poll)
         if (answeredPromptKey != null && answeredPromptKey !in allActiveByKey.keys) {
@@ -367,29 +371,26 @@ class PromptPoller(private val project: Project) : Disposable {
         LOG.info("[prompt-poller] showing prompt: $nextKey ($totalActive active)")
         ApplicationManager.getApplication().invokeLater {
             PromptPanel.show(project, next.info, fileName, totalActive) { optionIndex ->
-                answerPrompt(basePath, filePath, optionIndex)
+                answerPrompt(basePath, next.cwd, filePath, optionIndex)
             }
         }
     }
 
-    private fun answerPrompt(basePath: String, relativePath: String, optionIndex: Int) {
-        answeredPromptKey = currentPromptKey
+    private fun answerPrompt(basePath: String, promptCwd: String?, relativePath: String, optionIndex: Int) {
+        val promptKey = currentPromptKey
+        answeredPromptKey = promptKey
         currentPromptKey = null
         Thread {
             try {
-                val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
-                val process = ProcessBuilder(
-                    agentDoc, "prompt", "--answer", optionIndex.toString(), relativePath
-                )
-                    .directory(java.io.File(basePath))
-                    .redirectErrorStream(true)
-                    .start()
-                val output = process.inputStream.bufferedReader().readText()
-                val exitCode = process.waitFor()
-                if (exitCode != 0) {
-                    TerminalUtil.notifyError(project, "agent-doc prompt --answer failed:\n$output")
+                val cwd = promptCwd?.takeIf { it.isNotBlank() } ?: basePath
+                val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
+                val result = runPromptAnswerCommand(agentDoc, cwd, relativePath, optionIndex)
+                if (result.exitCode != 0) {
+                    answeredPromptKey = null
+                    TerminalUtil.notifyError(project, "agent-doc prompt --answer failed:\n${result.output}")
                 }
             } catch (e: Exception) {
+                answeredPromptKey = null
                 TerminalUtil.notifyError(project, "Failed to answer prompt: ${e.message}")
             }
         }.start()
@@ -435,8 +436,35 @@ data class PromptOption(
 data class PromptAllEntry(
     val sessionId: String,
     val file: String,
+    val cwd: String? = null,
     val info: PromptInfo,
 )
+
+internal data class PromptAnswerResult(
+    val exitCode: Int,
+    val output: String,
+)
+
+internal fun buildPromptAnswerCommand(
+    agentDoc: String,
+    optionIndex: Int,
+    relativePath: String,
+): List<String> = listOf(agentDoc, "prompt", "--answer", optionIndex.toString(), relativePath)
+
+internal fun runPromptAnswerCommand(
+    agentDoc: String,
+    cwd: String,
+    relativePath: String,
+    optionIndex: Int,
+): PromptAnswerResult {
+    val process = ProcessBuilder(buildPromptAnswerCommand(agentDoc, optionIndex, relativePath))
+        .directory(java.io.File(cwd))
+        .redirectErrorStream(true)
+        .start()
+    val output = process.inputStream.bufferedReader().readText()
+    val exitCode = process.waitFor()
+    return PromptAnswerResult(exitCode, output)
+}
 
 // ---------------------------------------------------------------------------
 // JSON parsing for `agent-doc prompt --all` (JSON array)
@@ -478,6 +506,7 @@ internal fun parsePromptAllJson(json: String): List<PromptAllEntry>? {
 private fun parsePromptAllEntry(json: String): PromptAllEntry? {
     val sessionId = extractJsonString(json, "session_id") ?: return null
     val file = extractJsonString(json, "file") ?: ""
+    val cwd = extractJsonString(json, "cwd")
     val active = json.contains("\"active\":true") || json.contains("\"active\": true")
 
     val info = if (active) {
@@ -489,7 +518,7 @@ private fun parsePromptAllEntry(json: String): PromptAllEntry? {
         PromptInfo(active = false)
     }
 
-    return PromptAllEntry(sessionId = sessionId, file = file, info = info)
+    return PromptAllEntry(sessionId = sessionId, file = file, cwd = cwd, info = info)
 }
 
 private fun extractJsonString(json: String, key: String): String? {

@@ -1048,8 +1048,9 @@ async function pollPrompts(root: string): Promise<void> {
         answeredPromptKey = currentPromptKey;
         currentPromptKey = undefined;
         try {
-            await runCli(['prompt', '--answer', selected.answerIndex.toString(), next.file], root);
+            await runCli(['prompt', '--answer', selected.answerIndex.toString(), next.file], next.cwd ?? root);
         } catch (err: any) {
+            answeredPromptKey = undefined;
             showError(`prompt --answer failed: ${err.message}`);
         }
     } else {

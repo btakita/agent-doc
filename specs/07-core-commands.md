@@ -102,7 +102,7 @@ Two modes:
 - Supports Claude Code bracketed legacy options, Claude Code numbered-list options, and OpenCode horizontal `Allow once` / `Allow always` / `Reject` permission rows.
 - `prompt --answer` uses Claude Code's vertical Up/Down movement for Claude prompts and OpenCode's Tab/BackTab selector movement for OpenCode permission prompts. OpenCode prompt detection captures panes with ANSI attributes so the currently highlighted option is read from the TUI state before navigation; plain-text captures are not sufficient because they lose the highlight. Selecting OpenCode `Allow always` also sends the follow-up confirmation Enter because OpenCode opens a second `Always allow` confirmation prompt before persisting that choice.
 - `--answer N` selects an option by one-based position in the parsed `options` array, not by the option's displayed TUI label number, then presses Enter.
-- `--all` polls every live session and serializes prompt fields flat on each entry: `session_id`, `file`, `active`, optional `question`, optional `options`, and optional 0-based `selected`.
+- `--all` polls every live session and serializes prompt fields flat on each entry: `session_id`, `file`, `cwd`, `active`, optional `question`, optional `options`, and optional 0-based `selected`. Editor integrations must answer from the entry's `cwd` so prompts owned by submodule or sibling project roots do not run against the wrong registry.
 
 ## skill
 

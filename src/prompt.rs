@@ -125,6 +125,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
 pub struct PromptAllEntry {
     pub session_id: String,
     pub file: String,
+    pub cwd: String,
     #[serde(flatten)]
     pub prompt: PromptInfo,
 }
@@ -185,6 +186,7 @@ pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
         entries.push(PromptAllEntry {
             session_id: entry.session_id.clone(),
             file: entry.file.clone(),
+            cwd: entry.cwd.clone(),
             prompt,
         });
     }
@@ -543,6 +545,48 @@ fn inactive() -> PromptInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    struct ScopedCurrentDir {
+        prev_cwd: PathBuf,
+        _env_guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl ScopedCurrentDir {
+        fn set(path: &Path) -> Self {
+            let env_guard = crate::test_support::env_lock();
+            let prev_cwd = std::env::current_dir()
+                .ok()
+                .filter(|cwd| cwd.exists())
+                .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+            std::env::set_current_dir(path).unwrap();
+            Self {
+                prev_cwd,
+                _env_guard: env_guard,
+            }
+        }
+    }
+
+    impl Drop for ScopedCurrentDir {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.prev_cwd);
+        }
+    }
+
+    fn wait_for<F>(timeout: Duration, mut predicate: F) -> bool
+    where
+        F: FnMut() -> bool,
+    {
+        let start = Instant::now();
+        while start.elapsed() < timeout {
+            if predicate() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        predicate()
+    }
 
     #[test]
     fn parse_permission_prompt() {
@@ -771,6 +815,7 @@ Bash command
         let entry = PromptAllEntry {
             session_id: "abc-123".to_string(),
             file: "tasks/plan.md".to_string(),
+            cwd: "/repo".to_string(),
             prompt: PromptInfo {
                 active: true,
                 question: Some("Allow?".to_string()),
@@ -790,6 +835,7 @@ Bash command
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("\"session_id\":\"abc-123\""));
         assert!(json.contains("\"file\":\"tasks/plan.md\""));
+        assert!(json.contains("\"cwd\":\"/repo\""));
         assert!(json.contains("\"active\":true"));
         assert!(json.contains("\"question\":\"Allow?\""));
     }
@@ -799,11 +845,84 @@ Bash command
         let entry = PromptAllEntry {
             session_id: "def-456".to_string(),
             file: "tasks/resume.md".to_string(),
+            cwd: "/repo".to_string(),
             prompt: inactive(),
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("\"active\":false"));
         assert!(!json.contains("\"question\""));
         assert!(!json.contains("\"options\""));
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn answer_opencode_prompt_sends_tab_not_arrow_escape() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd = ScopedCurrentDir::set(tmp.path());
+        let session_id = "prompt-opencode-tab-session";
+        let doc = tmp.path().join("prompt.md");
+        std::fs::write(
+            &doc,
+            format!("---\nagent_doc_session: {session_id}\n---\n# Prompt test\n"),
+        )
+        .unwrap();
+
+        let key_log = tmp.path().join("keys.bin");
+        let script = tmp.path().join("mock-opencode-prompt.sh");
+        std::fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env bash
+printf '\033[48;2;245;167;66mAllow once\033[0m Allow always Reject ⇆ select enter confirm\n'
+dd of='{}' bs=1 count=3 status=none
+sleep 1
+"#,
+                key_log.display()
+            ),
+        )
+        .unwrap();
+
+        let tmux = crate::sessions::IsolatedTmux::new("prompt-opencode-tab-answer");
+        let pane = tmux
+            .new_session("prompt-opencode-tab-answer", tmp.path())
+            .unwrap();
+        tmux.send_keys(&pane, &format!("bash {}", script.display()))
+            .unwrap();
+
+        assert!(
+            wait_for(Duration::from_secs(3), || {
+                crate::sessions::capture_pane_with_ansi(&tmux, &pane)
+                    .map(|content| parse_prompt(&content).active)
+                    .unwrap_or(false)
+            }),
+            "mock OpenCode prompt did not become active"
+        );
+
+        let mut registry = crate::sessions::SessionRegistry::new();
+        let key = crate::sessions::canonical_registry_key_in(tmp.path(), "prompt.md");
+        registry.insert(
+            key,
+            crate::sessions::SessionEntry {
+                pane: pane.clone(),
+                pid: std::process::id(),
+                cwd: tmp.path().to_string_lossy().to_string(),
+                started: "2026-05-13T00:00:00Z".to_string(),
+                session_id: session_id.to_string(),
+                file: "prompt.md".to_string(),
+                window: String::new(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        crate::sessions::save(&registry).unwrap();
+
+        answer_with_tmux(&doc, 2, &tmux).unwrap();
+
+        assert!(
+            wait_for(Duration::from_secs(3), || key_log.exists()),
+            "mock prompt did not record received keys"
+        );
+        let keys = std::fs::read(key_log).unwrap();
+        assert_eq!(keys.first().copied(), Some(b'\t'));
+        assert_ne!(keys.first().copied(), Some(0x1b), "sent an arrow escape");
     }
 }

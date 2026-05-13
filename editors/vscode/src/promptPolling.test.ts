@@ -8,6 +8,7 @@ describe('promptPolling', () => {
             {
                 session_id: 'abc',
                 file: 'tasks/demo.md',
+                cwd: '/work/demo',
                 active: true,
                 question: 'Permission required',
                 options: [
@@ -19,7 +20,8 @@ describe('promptPolling', () => {
         ]);
 
         assert.strictEqual(entries.length, 1);
-        assert.strictEqual(entries[0].key, 'tasks/demo.md:Permission required');
+        assert.strictEqual(entries[0].key, '/work/demo:tasks/demo.md:Permission required');
+        assert.strictEqual(entries[0].cwd, '/work/demo');
         assert.strictEqual(entries[0].info.selected, 1);
         assert.deepStrictEqual(entries[0].info.options?.map(option => option.label), [
             'Allow once',

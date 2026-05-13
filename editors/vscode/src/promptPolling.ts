@@ -13,6 +13,7 @@ export interface PromptInfo {
 export interface PromptAllEntry {
     session_id: string;
     file: string;
+    cwd?: string;
     info?: PromptInfo;
     active?: boolean;
     question?: string;
@@ -22,6 +23,7 @@ export interface PromptAllEntry {
 
 export interface NormalizedPromptEntry {
     file: string;
+    cwd?: string;
     key: string;
     info: PromptInfo;
 }
@@ -45,7 +47,8 @@ export function normalizePromptEntries(entries: PromptAllEntry[]): NormalizedPro
         if (!info.active || !info.options || info.options.length === 0) continue;
         normalized.push({
             file: entry.file,
-            key: `${entry.file}:${info.question}`,
+            cwd: entry.cwd,
+            key: `${entry.cwd ?? ''}:${entry.file}:${info.question}`,
             info,
         });
     }

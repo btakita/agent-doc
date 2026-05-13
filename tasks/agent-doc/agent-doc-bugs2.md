@@ -34,7 +34,39 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): Clear Session Context live-busy guard; JetBrains sync and clear follow-ups
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:0c335b37 -->
+❯ do [#jbclearstaleidle]. spec-test-build-install-commit-push
+### Re: JetBrains Clear Session Context stale-busy actions — gpt-5
+
+Implemented `#jbclearstaleidle`.
+
+Clear Session Context now has an explicit protected-busy contract across the editor plugin surface. The shared editor specs now say direct `alive-busy` pane evidence fails closed, stale busy projection is reconciled only after `agent-doc session status` reports `live_pane: state=alive-idle ... prompt_ready=true`, and `Interrupt and clear` is the only plugin action that intentionally interrupts a busy turn.
+
+JetBrains already had the typed Refresh/Interrupt/Status/Copy warning path, so I tightened the JetBrains spec and added regression coverage that the raw status output preserves actor, live pane, supervisor, and controller lease evidence for stale-busy diagnosis. VS Code now mirrors the same busy-refusal parser and operator actions: Refresh re-runs status and retries clear only on idle proof, Interrupt and clear requires confirmation and runs `agent-doc session interrupt-clear`, Show status displays the exact CLI output, and Copy details preserves the raw refusal text.
+
+Local live evidence for this document now shows the intended stale/projection split clearly: actor/controller reported ready while direct `live_pane` reported `alive-busy` for pane `%1`, so the editor should surface status instead of guessing from plugin-local state.
+
+Verification:
+- `cargo test clear_live_busy_refusal_points_to_interrupt_clear`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test` in `src/agent-doc/editors/jetbrains`
+- `cargo fmt`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin`
+- `npm run package` in `src/agent-doc/editors/vscode`
+- `agent-doc plugin install --local jetbrains` installed JetBrains plugin `0.2.119` to IntelliJIdea2026.1; restart the IDE to activate it.
+- `agent-doc plugin install --local vscode` installed VS Code/Codium extension `0.2.18`.
+- GitHub Actions: latest `CI` run `25773430221` succeeded; it has one `check` job and no remote tmux job.
+- `make tmux-ci` passed locally: 225 ignored tmux tests, 0 failed.
+
+Commits:
+- `src/agent-doc`: `48afeba` (`fix: align editor clear busy actions`)
+- parent repo: `3ff55399c` (`agent-doc: align editor clear busy actions`)
+
+Unrelated dirty paths left untouched: `mail`, `src/session-share`, `tasks/software/corky.md`, and `tasks/software/tsift.md`.
+<!-- agent:boundary:4ab0c72b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,7 +143,6 @@ minor (v0.34.0) release + publish. merge into main
 
 <!-- agent:backlog -->
 - [ ] [#syncforceux] [recommended] #next-steps: Make `agent-doc sync` reliable under concurrent editor sync by coalescing or superseding duplicate sync requests, proving the latest selected document is eventually applied, and evaluating an explicit `agent-doc sync --force` path with JetBrains/VSCode force action only for stale or replaceable in-flight syncs.
-- [ ] [#jbclearstaleidle] [recommended] #next-steps: Re-test JetBrains Clear Session Context against current agent-doc-bugs2 stale-busy evidence and ensure Refresh recomputes live idle proof, Status shows controller vs pane evidence, and Interrupt and clear is the only destructive path for truly busy agent-doc turns.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->
@@ -245,4 +276,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-13 [#opencodepromptplugins] [recommended] Add editor-plugin prompt-answer coverage for JetBrains and VSCode: verify both prompt UIs pass the selected option index to agent-doc prompt --answer, handle flat agent-doc prompt --all JSON including selected, and include a live OpenCode permission prompt smoke after installing the plugin.
 - 2026-05-13 [#k89p] [recommended] #next-steps: Add an ops-log effectiveness summary command/report that groups recent ipc_write_consumed + commit_success, route_dispatch_start_proven, post_commit_local_drift, session_clear_live_busy_guard_bypassed, route_authoritative_actor_starting_not_ready, accepted_only route proof, and sync over-budget events by document/session so log review produces signal without manual grep.
 - 2026-05-13 [#q97c] [recommended] #next-steps: Investigate session_clear_live_busy_guard_bypassed for authoritative actors still running agent-doc; current ops.log evidence for agent-doc-bugs2.md at [1778693812] clears pane %1 while the tail still reports gpt-5.5 high / Context 85% used, then immediately reroutes. Require explicit interrupt/confirm semantics or stronger idle proof before clear.
+- 2026-05-13 [#jbclearstaleidle] [recommended] #next-steps: Re-test JetBrains Clear Session Context against current agent-doc-bugs2 stale-busy evidence and ensure Refresh recomputes live idle proof, Status shows controller vs pane evidence, and Interrupt and clear is the only destructive path for truly busy agent-doc turns.
 <!-- /agent:done -->

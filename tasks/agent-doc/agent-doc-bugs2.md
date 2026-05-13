@@ -55,7 +55,25 @@ Verification:
 Commits:
 - `src/agent-doc` pushed commit `659d714` on `20260422/codex-agent-backend`.
 - parent repo commit `8cde23e20` records the submodule pointer update and plan file; parent push follows this session closeout.
-<!-- agent:boundary:e056674a -->
+❯ Please fix the clippy error on CI.
+### Re: CI clippy failure — gpt-5
+
+Fixed the `agent-doc` `main` CI failure and pushed it.
+
+What changed on `btakita/agent-doc` `main`:
+- Replaced the failing `ops.sort_by(|a, b| b.0.cmp(&a.0))` with `ops.sort_by_key(|op| std::cmp::Reverse(op.0))` in `src/template.rs`.
+- Restored the `audit-docs` fallback warning for directories without a project marker, because fixing clippy exposed that existing test failure on `main`.
+- Added the missing `tmux-ci` Makefile target so the CI workflow's tmux step has a valid local target.
+
+Verification:
+- `cargo clippy -- -D warnings` passed in the temporary `main` worktree.
+- `make check` passed in the temporary `main` worktree.
+- `make tmux-ci` passed in the temporary `main` worktree.
+- GitHub Actions `CI` run `25773430221` passed on `main` after the push.
+
+Commit:
+- `btakita/agent-doc` `main`: `a0eb329` (`fix: repair main ci checks`).
+<!-- agent:boundary:c03bb886 -->
 <!-- /agent:exchange -->
 ###
 <!--

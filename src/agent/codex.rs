@@ -431,17 +431,64 @@ fn codex_exec_args_for_probe(launch_args: &[String]) -> Vec<String> {
     args
 }
 
+fn opencode_run_args_for_probe(launch_args: &[String], prompt: String) -> Vec<String> {
+    let mut args = vec![
+        "run".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+    ];
+    let mut iter = launch_args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--model" | "-m" | "--agent" | "--log-level" | "--variant" | "--prompt" => {
+                args.push(arg.clone());
+                if let Some(value) = iter.next() {
+                    args.push(value.clone());
+                }
+            }
+            "--pure" | "--print-logs" | "--dangerously-skip-permissions" | "--thinking" => {
+                args.push(arg.clone());
+            }
+            "--session" | "-s" | "--dir" | "--port" | "--hostname" | "--mdns-domain" | "--cors" => {
+                let _ = iter.next();
+            }
+            "--continue" | "-c" | "--fork" | "--interactive" | "-i" | "--mdns" => {}
+            _ if arg.starts_with("--model=")
+                || arg.starts_with("-m=")
+                || arg.starts_with("--agent=")
+                || arg.starts_with("--log-level=")
+                || arg.starts_with("--variant=")
+                || arg.starts_with("--prompt=") =>
+            {
+                args.push(arg.clone());
+            }
+            _ => {}
+        }
+    }
+    args.push(prompt);
+    args
+}
+
 fn codex_child_network_probe_prompt() -> String {
-    format!(
-        "Run exactly this command:\n\n\
+    "Run exactly this command:\n\n\
          sh -lc 'set -eu; \
          if command -v getent >/dev/null 2>&1; then getent hosts github.com >/dev/null; \
          else python3 -c \"import socket; socket.getaddrinfo(\\\"github.com\\\", 443)\"; fi; \
          if command -v curl >/dev/null 2>&1; then curl -fsSIL --max-time 10 https://github.com >/dev/null; \
          else python3 -c \"import urllib.request; urllib.request.urlopen(\\\"https://github.com\\\", timeout=10).close()\"; fi; \
-         printf \"{}\\n\"'",
-        CODEX_CHILD_NETWORK_PROBE_MARKER
-    )
+         printf \"%s%s\\n\" AGENT_DOC_NETWORK _PROBE_OK'"
+        .to_string()
+}
+
+fn opencode_child_network_probe_prompt() -> String {
+    "Run exactly this shell command. Return the command output only.\n\n\
+         sh -lc 'set -eu; \
+         if command -v getent >/dev/null 2>&1; then getent hosts github.com >/dev/null; \
+         else python3 -c \"import socket; socket.getaddrinfo(\\\"github.com\\\", 443)\"; fi; \
+         if command -v curl >/dev/null 2>&1; then curl -fsSIL --max-time 10 https://github.com >/dev/null; \
+         else python3 -c \"import urllib.request; urllib.request.urlopen(\\\"https://github.com\\\", timeout=10).close()\"; fi; \
+         printf \"%s%s\\n\" AGENT_DOC_NETWORK _PROBE_OK'"
+        .to_string()
 }
 
 fn classify_child_network_probe_failure(detail: &str, harness: &str) -> String {
@@ -556,6 +603,62 @@ fn validate_codex_child_network_probe_output(
     anyhow::bail!("{classification}: {detail}");
 }
 
+fn collect_json_strings(value: &serde_json::Value, output: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                output.push(trimmed.to_string());
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_json_strings(value, output);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for value in map.values() {
+                collect_json_strings(value, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn validate_opencode_child_probe_marker_output(
+    stdout: &str,
+    stderr: &str,
+    marker: &str,
+    probe_name: &str,
+    harness: &str,
+) -> Result<()> {
+    let combined = format!("{stdout}\n{stderr}");
+    if combined.contains(marker) {
+        return Ok(());
+    }
+
+    let mut extracted = Vec::new();
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+            collect_json_strings(&value, &mut extracted);
+        }
+    }
+    let detail = if extracted.is_empty() {
+        format!(
+            "{harness} child did not emit the {probe_name} probe marker; stderr={}",
+            stderr.trim()
+        )
+    } else {
+        extracted.join("\n")
+    };
+    let classification = if probe_name == "network" {
+        classify_child_network_probe_failure(&detail, harness)
+    } else {
+        classify_child_required_ssh_probe_failure(&detail, harness)
+    };
+    anyhow::bail!("{classification}: {detail}");
+}
+
 fn prove_codex_child_network_access(
     command: &str,
     launch_args: &[String],
@@ -594,8 +697,138 @@ fn prove_codex_child_network_access(
     )
 }
 
+fn prove_opencode_child_network_access(
+    command: &str,
+    launch_args: &[String],
+    env: &std::collections::HashMap<String, String>,
+    harness: &str,
+) -> Result<()> {
+    let probe_args =
+        opencode_run_args_for_probe(launch_args, opencode_child_network_probe_prompt());
+    let mut cmd = std::process::Command::new(command);
+    cmd.args(&probe_args).env_remove("OPENCODE_CLIENT");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    let output = wait_with_timeout(
+        cmd.spawn()
+            .map_err(|e| anyhow::anyhow!("failed to start {harness} child network probe: {e}"))?,
+        CODEX_CHILD_NETWORK_PROBE_TIMEOUT,
+        "network",
+        harness,
+    )?;
+    if !output.status.success() {
+        let detail = format!(
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        let classification = classify_child_network_probe_failure(&detail, harness);
+        anyhow::bail!("{classification}: {harness} child probe command exited nonzero: {detail}");
+    }
+    validate_opencode_child_probe_marker_output(
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+        CODEX_CHILD_NETWORK_PROBE_MARKER,
+        "network",
+        harness,
+    )
+}
+
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+const OPENCODE_CHILD_SSH_PROBE_MARKER: &str = "AGENT_DOC_OPENCODE_SSH_PROBE_OK";
+
+fn opencode_child_required_ssh_probe_prompt(targets: &[String]) -> String {
+    let targets = targets
+        .iter()
+        .map(|target| shell_single_quote(target))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "Run exactly this shell command. Return the command output only.\n\n\
+         sh -lc 'set -eu; \
+         for target do \
+           ssh -o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=no -o ControlPath=none -o ClearAllForwardings=yes -o PermitLocalCommand=no \"$target\" true; \
+         done; \
+         printf \"%s%s\\n\" AGENT_DOC_OPENCODE_SSH _PROBE_OK' sh {}",
+        targets
+    )
+}
+
+fn classify_child_required_ssh_probe_failure(detail: &str, harness: &str) -> String {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("operation not permitted")
+        || lower.contains("socket:")
+        || lower.contains("eperm")
+        || lower.contains("permission denied")
+        || lower.contains("network is unreachable")
+        || lower.contains("sandbox")
+    {
+        format!("SSH unavailable inside managed {harness} pane")
+    } else if lower.contains("could not resolve")
+        || lower.contains("temporary failure in name resolution")
+        || lower.contains("name or service not known")
+        || lower.contains("getaddrinfo")
+    {
+        format!("SSH target resolution failed inside managed {harness} pane")
+    } else if lower.contains("timed out") || lower.contains("timeout") {
+        format!("SSH probe timed out inside managed {harness} pane")
+    } else {
+        format!("SSH capability failed inside managed {harness} pane")
+    }
+}
+
+fn prove_opencode_child_required_ssh(
+    command: &str,
+    launch_args: &[String],
+    env: &std::collections::HashMap<String, String>,
+    targets: &[String],
+    harness: &str,
+) -> Result<()> {
+    if targets.is_empty() {
+        return Ok(());
+    }
+    let probe_args = opencode_run_args_for_probe(
+        launch_args,
+        opencode_child_required_ssh_probe_prompt(targets),
+    );
+    let mut cmd = std::process::Command::new(command);
+    cmd.args(&probe_args).env_remove("OPENCODE_CLIENT");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    let output = wait_with_timeout(
+        cmd.spawn()
+            .map_err(|e| anyhow::anyhow!("failed to start {harness} child SSH probe: {e}"))?,
+        Duration::from_secs(30),
+        "ssh",
+        harness,
+    )?;
+    if !output.status.success() {
+        let detail = format!(
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        let classification = classify_child_required_ssh_probe_failure(&detail, harness);
+        anyhow::bail!(
+            "{classification}: {harness} child SSH probe command exited nonzero: {detail}"
+        );
+    }
+    validate_opencode_child_probe_marker_output(
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+        OPENCODE_CHILD_SSH_PROBE_MARKER,
+        "ssh",
+        harness,
+    )
 }
 
 fn codex_child_writable_roots_probe_prompt(roots: &[PathBuf]) -> String {
@@ -804,11 +1037,20 @@ fn prove_writable_root(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn managed_capability_contract_required_for_doc(
+pub(crate) fn managed_capability_contract_required_for_doc_and_harness(
     file: &Path,
     fm: &Frontmatter,
     global_config: &crate::config::Config,
+    harness: &str,
 ) -> bool {
+    if harness == "opencode" {
+        return super::resolve_codex_network_access(fm, global_config)
+            == CodexNetworkAccess::Enabled
+            || !fm.required_ssh_targets.is_empty();
+    }
+    if harness != "codex" {
+        return false;
+    }
     super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled
         || !fm.required_ssh_targets.is_empty()
         || !crate::git::workspace_access_dirs_for_doc(file).is_empty()
@@ -835,7 +1077,12 @@ pub(crate) fn managed_capability_contract_required(
     global_config: &crate::config::Config,
     harness: &str,
 ) -> bool {
-    if !matches!(harness, "codex") {
+    if harness == "opencode" {
+        return super::resolve_codex_network_access(fm, global_config)
+            == CodexNetworkAccess::Enabled
+            || !fm.required_ssh_targets.is_empty();
+    }
+    if harness != "codex" {
         return false;
     }
     super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled
@@ -865,21 +1112,38 @@ pub(crate) fn prove_managed_session_capabilities(
         timings.network_host_dns = Some(phase_start.elapsed());
 
         let phase_start = Instant::now();
-        prove_codex_child_network_access(command, args, env, harness)?;
+        if harness == "opencode" {
+            prove_opencode_child_network_access(command, args, env, harness)?;
+        } else {
+            prove_codex_child_network_access(command, args, env, harness)?;
+        }
         timings.network_child = Some(phase_start.elapsed());
     }
 
     if !fm.required_ssh_targets.is_empty() {
         let phase_start = Instant::now();
-        let env = env_map_as_overrides(env);
+        let codex_env = env_map_as_overrides(env);
         Codex::new(None, None)
-            .with_env(env)
+            .with_env(codex_env)
             .with_required_ssh_targets(fm.required_ssh_targets.clone())
             .prove_required_ssh_capability()?;
+        if harness == "opencode" {
+            prove_opencode_child_required_ssh(
+                command,
+                args,
+                env,
+                &fm.required_ssh_targets,
+                harness,
+            )?;
+        }
         timings.ssh = Some(phase_start.elapsed());
     }
 
-    let writable_roots = add_dirs_from_args(args);
+    let writable_roots = if harness == "codex" {
+        add_dirs_from_args(args)
+    } else {
+        Vec::new()
+    };
     let writable_root_contract = writable_root_contract_id(&writable_roots);
     let phase_start = Instant::now();
     for root in &writable_roots {
@@ -2297,7 +2561,7 @@ mod tests {
             &config,
             "codex"
         ));
-        assert!(!managed_capability_contract_required(
+        assert!(managed_capability_contract_required(
             &[],
             &fm,
             &config,
@@ -2312,7 +2576,7 @@ mod tests {
             &config,
             "codex"
         ));
-        assert!(!managed_capability_contract_required(
+        assert!(managed_capability_contract_required(
             &[],
             &fm,
             &config,
@@ -2342,6 +2606,97 @@ mod tests {
             &config,
             "opencode"
         ));
+    }
+
+    #[test]
+    fn opencode_probe_args_use_run_format_json_and_preserve_safe_flags() {
+        let args = opencode_run_args_for_probe(
+            &[
+                "--model".to_string(),
+                "zai/glm-5".to_string(),
+                "--continue".to_string(),
+                "--dangerously-skip-permissions".to_string(),
+                "--dir".to_string(),
+                "/tmp/project".to_string(),
+            ],
+            "probe".to_string(),
+        );
+
+        assert_eq!(
+            args,
+            vec![
+                "run",
+                "--format",
+                "json",
+                "--model",
+                "zai/glm-5",
+                "--dangerously-skip-permissions",
+                "probe"
+            ]
+        );
+    }
+
+    #[test]
+    fn opencode_child_probe_classifies_socket_eperm_as_ssh_sandbox_denial() {
+        let err = validate_opencode_child_probe_marker_output(
+            r#"{"type":"message","text":"ssh monsterrodholders-server true\nsocket: Operation not permitted"}"#,
+            "",
+            OPENCODE_CHILD_SSH_PROBE_MARKER,
+            "ssh",
+            "OpenCode",
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("SSH unavailable inside managed OpenCode pane"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn managed_capability_proof_runs_opencode_child_ssh_probe() {
+        let (_ssh_dir, path_dir) = write_fake_ssh_script(
+            r#"#!/bin/sh
+if [ "$1" = "-G" ]; then
+  echo "user root"
+  echo "hostname $2"
+  echo "port 22"
+  exit 0
+fi
+exit 0
+"#,
+        );
+        let (_opencode_dir, opencode) = write_fake_codex_script(&format!(
+            r#"#!/bin/sh
+printf '%s\n' '{{"type":"message","text":"{}\n"}}'
+"#,
+            OPENCODE_CHILD_SSH_PROBE_MARKER
+        ));
+        let mut env = std::collections::HashMap::new();
+        let old_path = std::env::var("PATH").unwrap_or_default();
+        env.insert("PATH".to_string(), format!("{path_dir}:{old_path}"));
+        let mut fm = Frontmatter::default();
+        fm.required_ssh_targets = vec!["monsterrodholders-server".to_string()];
+
+        let event = prove_managed_session_capabilities(
+            &opencode,
+            &[
+                "--model".to_string(),
+                "zai/glm-5".to_string(),
+                "--dangerously-skip-permissions".to_string(),
+            ],
+            &env,
+            &fm,
+            &crate::config::Config::default(),
+            "opencode",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(event.contains("opencode_capability_proof status=proven"));
+        assert!(event.contains("ssh_targets=1"));
+        assert!(event.contains("writable_roots=0"));
     }
 
     #[test]
@@ -2474,10 +2829,11 @@ printf '%s\n' '{"type":"turn.completed","usage":{}}'
         fs::write(&doc, "test\n").unwrap();
 
         let fm = Frontmatter::default();
-        assert!(managed_capability_contract_required_for_doc(
+        assert!(managed_capability_contract_required_for_doc_and_harness(
             &doc,
             &fm,
-            &crate::config::Config::default()
+            &crate::config::Config::default(),
+            "codex"
         ));
     }
 

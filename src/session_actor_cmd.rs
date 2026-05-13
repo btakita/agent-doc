@@ -1195,18 +1195,23 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
     let global_config = crate::config::Config::default();
     #[cfg(not(test))]
     let global_config = crate::config::load().unwrap_or_default();
-    if !crate::agent::codex::managed_capability_contract_required_for_doc(
+    if !crate::agent::codex::managed_capability_contract_required_for_doc_and_harness(
         &ctx.canonical_file,
         &fm,
         &global_config,
+        &ctx.harness,
     ) {
         return "not_required".to_string();
     }
-    let expected_writable_contract = crate::agent::codex::managed_writable_root_contract_id_for_doc(
-        &ctx.canonical_file,
-        &fm,
-        &global_config,
-    );
+    let expected_writable_contract = if ctx.harness == "codex" {
+        crate::agent::codex::managed_writable_root_contract_id_for_doc(
+            &ctx.canonical_file,
+            &fm,
+            &global_config,
+        )
+    } else {
+        None
+    };
     let proven_prefix = format!("{}_capability_proof status=proven", ctx.harness);
     let proven_result = if let Some(contract) = expected_writable_contract.as_deref() {
         crate::startup_miss::session_log_has_event_after_latest_start_containing(

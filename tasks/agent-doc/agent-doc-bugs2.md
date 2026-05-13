@@ -119,7 +119,7 @@ This is the pragmatic middle path from the earlier discussion, but with control 
 #### Recommendation
 
 Start with **control mode** (#1) — it's the highest-leverage change because it replaces the polling/scraping architecture with event-driven notifications. The `tmux-router` crate would open one control-mode connection per tmux server and dispatch events to the appropriate session/pane handlers. This is a natural fit for the existing `Tmux` struct and doesn't require the `#multiplexertrait` abstraction first.
-<!-- agent:boundary:6ad89150 -->
+<!-- agent:boundary:b7217747 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -196,6 +196,8 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#tmuxcontrolmode] Migrate tmux-router to control mode (tmux -CC) for event-driven pane output and lifecycle notifications, replacing capture-pane polling. Natural fit for existing Tmux struct. [recommended]
+- [ ] [#tmuxhybridpty] Implement hybrid control-mode + pipe-pane + owned-PTY architecture: control mode for lifecycle events, pipe-pane for output streaming, owned PTY only for managed panes (OpenCode, Claude) where input reliability matters. Depends on #tmuxcontrolmode.
 - [ ] [#ownedpty] Implement portable-pty + alacritty_terminal backend for managed panes — agent-doc owns the child PTY directly instead of tmux send-keys/capture-pane, eliminating the input heuristic failure class. Depends on #multiplexertrait abstraction boundary. [recommended]
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
 - [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.

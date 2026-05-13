@@ -30,34 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-042926.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-043627.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #sops
+- Archived 1 response topic(s): #snav
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#snav]. spec-test-build-install-commit-push
-### Re: #snav — gpt-5
-
-Implemented and committed the stale-instruction release regression for `tsift status --fix`.
-
-What changed:
-- Added a compiled CLI regression proving `tsift status --fix --json` rewrites a stale `<!-- tsift:code-navigation v=0.1.41 -->` marker to the installed binary version and reports `instructions.state=current`.
-- Updated `SPEC.md` and `VERSIONS.md` to document that release-bump regression.
-- Fixed the current red CI clippy failure in `src/log_digest.rs` by collapsing the guarded `file`/`path` match arm.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test --test exit_code status_fix_refreshes_stale_instructions_after_version_bump_in_json`
-- `make check`
-- `make ci-full`
-- `cargo install --path .`
-- `tsift --version` -> `tsift 0.1.42`
-- Latest GitHub Actions CI before this work was red in the single `clippy + test` job on `src/log_digest.rs:649`; the local `make ci-full` run covers that failure path after the fix. This repo has no separate `tmux-test` workflow or `tmux-ci` target.
-
-Commits created locally:
-- `1240d83` in `src/tsift`: `test: cover status fix instruction refresh`
-- `b5faaf675` in the parent repo: `chore: bump tsift submodule`
-<!-- agent:boundary:aad532a1 -->
+<!-- agent:boundary:bbaf5e24 -->
 <!-- /agent:exchange -->
 ###
 <!--

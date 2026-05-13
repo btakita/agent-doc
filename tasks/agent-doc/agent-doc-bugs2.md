@@ -96,6 +96,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#directrunpfx] #agent-doc-bug: Direct `agent-doc <file>` committed the Monster Rod Holders `Read the image.` prompt and Markdown image line without the canonical `❯ ` prefix before the response block, making user prompt text look like assistant prose. Plan: tasks/agent-doc/plan-direct-run-unprefixed-exchange-prompt.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->

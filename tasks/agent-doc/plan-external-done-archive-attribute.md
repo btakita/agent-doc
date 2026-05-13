@@ -1,6 +1,6 @@
 # Plan — external done archive for `agent:done`
 
-**Status:** Draft
+**Status:** Implemented in agent-doc v0.33.16 development branch
 
 ## Problem
 

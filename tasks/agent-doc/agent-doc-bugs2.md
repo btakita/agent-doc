@@ -29,46 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-054111.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-055248.md`*
 
 Compacted content:
-- Archived 1 response topic(s): OpenCode idle splash routing
+- Archived 1 response topic(s): OpenCode dispatch-only input routing
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ The agent-doc opencode CLI does not properly accept user inputs. spec-test-build-install-commit-push
-
-❯ JB `Run Agent Doc` on corky.md (opencode) error:
-```
-resync: stash pane %28 is registered in its own project root — skipping kill
-resync: stash pane %19 is registered in its own project root — skipping kill
-resync: stash pane %13 is registered in its own project root — skipping kill
-[route] target tmux session: 0
-[route] opencode ready after 1.0s (2 polls)
-Error: dispatch-only opencode reopen refused to inject into pane %15 for tasks/software/corky.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
-```
-❯ spec-test-build-install-commit
-### Re: OpenCode dispatch-only input routing — gpt-5
-
-Fixed the OpenCode `Run Agent Doc` false refusal after a pane has already become idle enough to accept input.
-
-What changed:
-- `src/agent-doc/src/route.rs`: OpenCode startup-window dispatch-only ready probes now use the longer OpenCode redraw budget instead of the short Codex-style boot probe. The same-file startup recovery helper now receives the active harness and uses its harness-specific recovery budget. Added unit coverage for the production timeout values.
-- Updated `README.md`, `SPEC.md`, `specs/08-session-routing.md`, and `VERSIONS.md` to document the OpenCode-specific startup-window budget.
-
-Verification:
-- Latest GitHub CI workflow includes `make tmux-ci` and is green: run `25773430221`.
-- `cargo test route::tests::dispatch_only_starting_pane_ready_timeout_production_values`
-- `make check`
-- `cargo build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- `git -C src/agent-doc diff --check`
-
-Commit / push:
-- `src/agent-doc`: `47805c9` pushed to `origin/20260422/codex-agent-backend`.
-- parent `agent-loop`: `b16cf7853` pushed to `origin/main`.
-
-No follow-up backlog item was added because the requested fix is complete and pushed.
-<!-- agent:boundary:0efbb7b4 -->
+<!-- agent:boundary:a5c94de9 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -154,7 +154,7 @@ The core CLI fix is shared by both editor plugins because JetBrains and VSCode b
 I added one recommended backlog item for that:
 
 - `#opencodepromptplugins`: verify JetBrains and VSCode prompt UIs pass the selected option index to `prompt --answer`, handle the flat `prompt --all` JSON including `selected`, and include a live OpenCode permission prompt smoke after installing the plugin.
-<!-- agent:boundary:303b4d67 -->
+<!-- agent:boundary:1214028d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -218,7 +218,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#opencodepromptplugins] [recommended] Add editor-plugin prompt-answer coverage for JetBrains and VSCode: verify both prompt UIs pass the selected option index to , handle flat  JSON including , and include a live OpenCode permission prompt smoke after installing the plugin.
+- [ ] [#opencodepromptplugins] [recommended] Add editor-plugin prompt-answer coverage for JetBrains and VSCode: verify both prompt UIs pass the selected option index to agent-doc prompt --answer, handle flat agent-doc prompt --all JSON including selected, and include a live OpenCode permission prompt smoke after installing the plugin.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->

@@ -30,38 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-174631.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-183202.md`*
 
 Compacted content:
-- Archived 1 response topic(s): scst
+- Archived 1 response topic(s): rwno
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#rwno]. spec-test-build-install-commit-push
-### Re: rwno — gpt-5
-
-Done. `tsift rewrite` no-rewrite outcomes are now explicit without changing the rewrite protocol's stdout contract.
-
-What changed:
-- `tsift rewrite` still exits `1` with empty stdout when no rewrite exists, so hook callers can continue treating it as pass-through.
-- The CLI now writes a bounded stderr reason for no-rewrite exits, with specific messages for shell metacharacters/redirection and file-listing commands such as `find`, `rg --files`, and `rg --type-list`.
-- `tsift rewrite --run` keeps failing closed for no-rewrite commands and now explains that `--run` only executes rewritten commands.
-- `SPEC.md` documents the stdout/stderr/exit-code behavior.
-- Regression coverage now checks generic no-rewrite, `rg --files`, `find`, and redirection diagnostics.
-- I also fixed the deterministic `session_review_separates_aggregate_and_latest_session_cost` fixture ordering that full verification exposed.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test rewrite_`
-- `cargo test --test exit_code session_review_separates_aggregate_and_latest_session_cost`
-- `make check`
-- `cargo build`
-- `cargo install --path . --force`
-- Installed binary reports `tsift 0.1.42`
-- Latest GitHub Actions CI run checked: `25816043148`, conclusion `success`, job `clippy + test` success. This repo has no `tmux-ci` or `tmux-test` target/workflow entry to inspect.
-
-Commits pushed:
-- `btakita/tsift@5ebedbe` - `fix: explain tsift rewrite passthroughs`
-- `btakita/agent-loop@4fab24c2c` - `chore: update tsift submodule`
-<!-- agent:boundary:8fae8674 -->
+<!-- agent:boundary:71d00495 -->
 <!-- /agent:exchange -->
 ###
 <!--

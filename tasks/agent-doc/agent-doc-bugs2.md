@@ -34,10 +34,43 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): #rspcmt8 promptless exchange closeout drift
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c223ff98 -->
+❯ agent-doc opencode permission inputs has issues:
+❯ - The JB selection does not select the permission in the CLI. It highlights the next option instead.
+❯ - The arrow keys and tab key doesn't work.
+
+```
+┃                                                                                                                       ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
+┃                                                                                                                                                                                                                                             ^[[C^[[D^[[A^[[B		
+```
+❯ spec-test-build-install-commit-push
+### Re: OpenCode permission inputs — gpt-5
+Fixed the OpenCode permission-answer path.
+
+What changed:
+- `prompt --answer` now uses OpenCode's printable `h`/`l` selector bindings instead of forwarded arrow keys, avoiding literal `^[[C` / `^[[D` text in the composer.
+- Selecting `Allow always` now sends the second confirmation Enter that OpenCode requires before persisting that choice.
+- Updated the command spec and release notes for the OpenCode permission prompt contract.
+
+Verification:
+- `cargo test prompt::tests::parse_opencode_permission_prompt`
+- `make check`
+- Latest GitHub CI run inspected: `25773430221` was green, but that run did not include the current `make tmux-ci` step.
+- `make tmux-ci`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits:
+- `src/agent-doc`: `1dfd52e fix: answer opencode permission prompts reliably`
+- parent repo: `c4504c5ef agent-doc(tsift): 2026-05-13 03:00:34`
+
+Pushed both the `src/agent-doc` branch and parent `main`.
+<!-- agent:boundary:3bbb0463 -->
 <!-- /agent:exchange -->
 ###
 <!--
+Please ensure the JB opencode fixes are propagated to the VSCode plugin. Ensure the specs are updated for all editor plugins. Should we implement in the ffi plugin?
+#next-steps
+---
 JB `Run Agent Doc` on root.md with `agent: claude` sends an incorrect command
 ```
 ❯ agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md

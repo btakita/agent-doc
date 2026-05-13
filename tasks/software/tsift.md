@@ -30,38 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-184128.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-190249.md`*
 
 Compacted content:
-- Archived 1 response topic(s): logs review
+- Archived 1 response topic(s): xctx
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#xctx]. spec-test-build-install-commit-push
-### Re: xctx — gpt-5
-
-Implemented `#xctx` in `src/tsift`.
-
-The fix changes `session-review --next-context` so an agent-doc template document with a non-empty live exchange tail scopes the handoff to that tail even when the live instruction is freeform text rather than a formal `do [#id]` prompt. When the structured prompt extractor finds no prompt targets, next-context now uses the meaningful live tail text as the active prompt target and suppresses stale aggregate files/failures from older matched sessions.
-
-Updated:
-- `src/tsift/src/session_review.rs`
-- `src/tsift/tests/exit_code.rs`
-- `src/tsift/SPEC.md`
-
-Verification:
-- `cargo test session_review_next_context_scopes_freeform_live_exchange_tail`
-- `cargo test session_review_next_context_scopes_freeform_live_tail_over_stale_context`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- installed `tsift --version` reports `tsift 0.1.42`
-- live check: `tsift session-review --next-context --json tasks/software/tsift.md` now reports active prompt `do [#xctx]. spec-test-build-install-commit-push` with empty stale files/failures
-
-CI/tmux evidence: latest GitHub CI run `25816599122` for `btakita/tsift` was green (`clippy + test`). I did not find a separate tmux job in that workflow.
-
-Commits:
-- `src/tsift`: `acd2d0b fix: scope next-context freeform tails` pushed to `btakita/tsift main`
-- parent repo: `dad13b6f1 chore: update tsift submodule`
-<!-- agent:boundary:4b2b6846 -->
+<!-- agent:boundary:d6e7c6ad -->
 <!-- /agent:exchange -->
 ###
 <!--

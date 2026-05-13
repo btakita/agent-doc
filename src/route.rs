@@ -8070,6 +8070,21 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 70% used
     }
 
     #[test]
+    fn ready_prompt_candidate_rejects_codex_hook_review_prompt_after_capability_proof() {
+        let harness = HarnessConfig::codex();
+        let content = "\
+Starting codex...
+⚠ 1 hook needs review before it can run. Open /hooks to review it.
+
+› [start] managed codex capability proof: codex_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:9806,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:9815
+";
+        assert!(
+            ready_prompt_candidate(content, &harness).is_none(),
+            "Codex hook-review chrome requires operator approval before route can dispatch"
+        );
+    }
+
+    #[test]
     fn ready_prompt_candidate_accepts_opencode_status_after_capability_proof() {
         let harness = HarnessConfig::opencode();
         let content = "\

@@ -28,6 +28,8 @@ const SAFE_PASSIVE_LAYOUT_PRESERVED_MARKER =
     '[sync] safe passive sync preserved the current tmux layout because';
 const SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER =
     '[sync] safe_passive_layout_preserved_reselected_focus';
+const SAFE_PASSIVE_LOCK_CONTENTION_RETRY_MARKER =
+    '[sync] safe_passive_sync_lock_contention_retry';
 
 export function shouldReplayQueuedTabChange(startedGeneration: number, latestGeneration: number): boolean {
     return latestGeneration > startedGeneration;
@@ -53,6 +55,9 @@ export function analyzeTabSyncCommandResult(
         if (output.includes(SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER)) {
             return { applied: true, shouldRetry: false };
         }
+        return { applied: false, shouldRetry: true };
+    }
+    if (command.kind === 'sync' && output.includes(SAFE_PASSIVE_LOCK_CONTENTION_RETRY_MARKER)) {
         return { applied: false, shouldRetry: true };
     }
     return { applied: true, shouldRetry: false };

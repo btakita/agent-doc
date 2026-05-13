@@ -287,6 +287,19 @@ describe('buildTabChangeCommand', () => {
         assert.deepStrictEqual(result, { applied: false, shouldRetry: true });
     });
 
+    it('keeps safe-passive sync lock contention pending for the latest retry', () => {
+        const result = analyzeTabSyncCommandResult(
+            {
+                kind: 'sync',
+                args: ['sync', '--col', 'tasks/software/tsift.md', '--focus', 'tasks/software/tsift.md', '--no-autostart'],
+            },
+            0,
+            '[sync] safe_passive_sync_lock_contention_retry phase=sync_lock_wait elapsed_ms=101 budget_ms=100 status=over_budget coalesced=skipped_stale action=retry',
+        );
+
+        assert.deepStrictEqual(result, { applied: false, shouldRetry: true });
+    });
+
     it('treats preserve-layout sync as applied when the focused pane was reselected', () => {
         const result = analyzeTabSyncCommandResult(
             {

@@ -158,7 +158,8 @@ class LayoutChangeDetector(private val project: Project) {
                 // to a non-agent-doc file. Only structural changes (splits opened/closed, tab
                 // drags that change window count) should trigger LayoutChangeDetector sync.
                 // EditorTabSyncListener.selectionChanged handles .md file navigation separately.
-                val windowCount = FileEditorManagerEx.getInstanceEx(project).windows.size
+                val manager = FileEditorManagerEx.getInstanceEx(project)
+                val windowCount = manager.windows.size
                 val hash = if (layout != null) {
                     "cols=${layout.columns.size},wins=$windowCount"
                 } else {
@@ -174,10 +175,49 @@ class LayoutChangeDetector(private val project: Project) {
                 val locked = lib?.agent_doc_sync_try_lock()
                     ?: fallbackSyncing.compareAndSet(false, true)
                 if (!locked) return@invokeLater
+                val selectedFiles = manager.selectedFiles
+                val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(selectedFiles)
+                val focusedVFile = manager.selectedTextEditor?.virtualFile
+                    ?.takeIf { it.name.endsWith(".md") }
+                    ?: selectedFiles.firstOrNull { it.name.endsWith(".md") }
+                if (visibleMdFiles.isEmpty() || focusedVFile == null) {
+                    lib?.agent_doc_sync_unlock() ?: fallbackSyncing.set(false)
+                    return@invokeLater
+                }
+                val focusedFile = focusedVFile.path
+                val (focusedProjectRoot, _) = TerminalUtil.resolveProject(project, focusedVFile)
+                val projectRoot = SyncLayoutAction.chooseSyncProjectRoot(
+                    project.basePath,
+                    focusedProjectRoot,
+                    visibleMdFiles,
+                )
+                val agentDoc = TerminalUtil.resolveAgentDoc(projectRoot)
+                val syncLayout = SyncLayoutAction.absolutizeEditorLayout(
+                    projectRoot,
+                    SyncLayoutAction.normalizeEditorLayout(
+                        project.basePath,
+                        projectRoot,
+                        layout,
+                    ),
+                )
+                val cmd = SyncLayoutAction.buildSyncCommand(
+                    agentDoc = agentDoc,
+                    visibleMdFiles = visibleMdFiles,
+                    editorLayout = syncLayout,
+                    focusedFile = focusedFile,
+                    noAutostart = true,
+                    exactVisible = true,
+                )
                 // CLI call on background thread to avoid blocking EDT
                 Thread({
                     try {
-                        SyncLayoutAction.syncLayout(project, notify = false, noAutostart = true)
+                        val result = SyncLayoutAction.runCommandWithTimeout(
+                            cmd,
+                            projectRoot,
+                        )
+                        LOG.info(
+                            "[layout] sync exit=${result.exitCode} timedOut=${result.timedOut} cmd=${cmd.joinToString(" ")} output=${result.output.take(500)}"
+                        )
                     } finally {
                         lib?.agent_doc_sync_unlock() ?: fallbackSyncing.set(false)
                         if (!isCurrentGeneration(lib, requestedGeneration)) {

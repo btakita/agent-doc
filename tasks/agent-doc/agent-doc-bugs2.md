@@ -34,11 +34,7 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): corky.md pane popup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3cc2e3ba -->
-<!-- /agent:exchange -->
-###
-<!--
-Please investigate + fix this issue. spec-test-build-install-commit-push
+❯ Please investigate + fix this issue. spec-test-build-install-commit
 ```
 resync: stash pane %13 is registered in its own project root — skipping kill
 resync: stash pane %19 is registered in its own project root — skipping kill
@@ -48,6 +44,50 @@ resync: stash pane %28 is registered in its own project root — skipping kill
 [route] Rescued pane %15 via join-pane
 Error: authoritative actor generation 57 for tasks/software/corky.md owns pane %15 but route will not inject a new trigger because the authoritative actor is still starting (waited 15s for opencode startup). Wait for the pane to reach an idle prompt, then rerun `agent-doc tasks/software/corky.md`. If the pane stays stuck, restart the owner with `agent-doc start tasks/software/corky.md`.
 ```
+### Re: OpenCode idle splash routing — gpt-5
+
+Fixed the OpenCode startup/routing miss. Root cause was that OpenCode 1.14 can show an idle composer as splash chrome (`Ask anything...`, build-plan text, footer hints, cwd/version status) without rendering either a standalone `>` prompt or the older `context ... % used` footer. The route/start/session-status readiness path rejected that pane as not prompt-ready, so the supervisor stayed in `starting` and route timed out after the 15s OpenCode wait even though the pane could accept input.
+
+Implemented shared OpenCode idle-splash recognition in `src/agent-doc/src/harness.rs` and covered all consumers that depend on it:
+
+- route prompt detection: `ready_prompt_candidate_accepts_opencode_idle_splash_without_prompt_glyph`
+- supervisor/start prompt detection: `current_child_prompt_visible_accepts_opencode_idle_splash_without_prompt_glyph`
+- session status prompt detection: `live_pane_prompt_ready_accepts_opencode_idle_splash_without_prompt_glyph`
+- harness-level chrome filtering: `idle_chrome_only_output_accepts_opencode_idle_splash_without_prompt_glyph`
+
+Updated specs in `specs/05-agent-backend.md` and `specs/08-session-routing.md`, and added an Unreleased note in `VERSIONS.md`.
+
+Verification completed:
+
+- `cargo test opencode_idle_splash`
+- `make check`
+- `make build`
+- `make install`
+- Latest parent CI `Agent Doc` run `25780225104`: `tmux-ci` job passed on 2026-05-13T05:34:55Z, so no local `make tmux-ci` rerun was needed.
+
+Install completed for `agent-doc v0.33.16` and `libagent_doc-0.33.16.so`. After install, the live Corky session accepted a new dispatch-only reopen and now reports supervisor `actor_state=ready`, which is the expected recovery signal for this bug.
+
+Commits:
+
+- `ba11a50` in `src/agent-doc`: `fix: recognize opencode idle splash`
+- `2a27a2427` in the parent repo: `agent-doc: recognize opencode idle splash`
+
+No actionable follow-up items.
+&lt;!-- /agent:exchange --&gt;
+<!-- agent:boundary:555a4b98 -->
+<!-- /agent:exchange -->
+###
+<!--
+JB `Run Agent Doc` on corky.md (opencode) error:
+```
+resync: stash pane %28 is registered in its own project root — skipping kill
+resync: stash pane %19 is registered in its own project root — skipping kill
+resync: stash pane %13 is registered in its own project root — skipping kill
+[route] target tmux session: 0
+[route] opencode ready after 1.0s (2 polls)
+Error: dispatch-only opencode reopen refused to inject into pane %15 for tasks/software/corky.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+```
+spec-test-build-install-commit
 ---
 JB `Run Agent Doc` on root.md with `agent: claude` sends an incorrect command
 ```

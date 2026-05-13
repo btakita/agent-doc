@@ -34,11 +34,59 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): #codexpatchbodyloop; #opencodecapfail
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ec339ec3 -->
+❯ do [#directrunpfx]. spec-test-build-install-commit-push
+### Re: direct run prompt prefixes — gpt-5
+
+Implemented and shipped `#directrunpfx`.
+
+The direct `agent-doc <file>` path now normalizes raw prompt-bearing exchange additions before precommit, using the stored snapshot to add canonical `❯` prefixes to user prompt lines such as `Read the image.` and Markdown image lines. The template response write path also reuses that prompt-prefix normalization before structural validation, so direct-run patchback cannot leave the original unprefixed user prompt in the committed document.
+
+I also tightened the debounce timing regression that was red in the latest parent CI `check` job: the test now asserts the tracked-file behavior directly instead of depending on an exact wall-clock `>= 200ms` boundary.
+
+Commits pushed:
+
+- `2cf1aa01` in `btakita/agent-doc` on `20260422/codex-agent-backend`: `fix: normalize direct-run prompt prefixes`
+- `fb11b3d86` in `btakita/agent-loop` on `main`: `chore: update agent-doc submodule`
+
+Verification passed:
+
+- `cargo fmt`
+- `cargo test apply_template_response_prefixes_direct_run_prompt_with_image_line`
+- `cargo test direct_run`
+- `cargo test run_stops_before_child_dispatch_when_precommit_consumes_stale_repair_diff`
+- `cargo test await_idle_respects_tracked_state`
+- `cargo test -- --test-threads=1`
+- `cargo build`
+- `cargo install --path . --force`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `make check`
+- GitHub Actions `Agent Doc` run `25776058679`: `check` passed in 5m24s and `tmux-ci` passed in 7m55s
+
+No follow-up work remains for this item.
+<!-- agent:boundary:36eb2d05 -->
 <!-- /agent:exchange -->
 ###
 <!--
-The Codex output is too verbose. See monsterrodholders.md
+JB `Run Agent Doc` after closing Codex session and opening Claude session.
+```
+resync: stash pane %31 is registered in its own project root — skipping kill
+resync: stash pane %16 is registered in its own project root — skipping kill
+resync: stash pane %15 is registered in its own project root — skipping kill
+resync: stash pane %21 is registered in its own project root — skipping kill
+resync: stash pane %24 is registered in its own project root — skipping kill
+resync: stash pane %13 is registered in its own project root — skipping kill
+[route] target tmux session: 0
+Error: authoritative actor record for tasks/root.md is bound to harness codex, not claude-code
+
+```
+---
+With the latest supply chain attacks on npm and pypi, should agent-doc should run in a docker container? Should all software written run in a docker container?
+---
+JB `Restart Supervisor Process` error:
+```
+agent-doc command failed (exit 1): Error: session_restart refused for /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="⏵⏵ bypass permissions on (shift+tab to cycle)"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
+```
+spec-test-build-install-commit-push
 ---
 Move JB `Copy Session Diagnostics` outside the numeric shortcuts.
 ---
@@ -75,7 +123,6 @@ minor (v0.34.0) release + publish. merge into main
 <!-- agent:backlog -->
 - [ ] [#rspcmt9] #agent-doc-bug: Direct Codex chat answered a Monster Rod Holders session prompt but did not write the response to `src/boost-client/tasks/monsterrodholders.md`; manual `agent-doc write --commit` then committed the submodule response but initially failed the parent pointer closeout on root `.git/index.lock`, requiring `agent-doc commit <file>` recovery. Plan: tasks/agent-doc/plan-direct-chat-response-patchback-required.md
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
-- [ ] [#directrunpfx] #agent-doc-bug: Direct `agent-doc <file>` committed the Monster Rod Holders `Read the image.` prompt and Markdown image line without the canonical `❯ ` prefix before the response block, making user prompt text look like assistant prose. Plan: tasks/agent-doc/plan-direct-run-unprefixed-exchange-prompt.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->
@@ -202,4 +249,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#ipc-timeout-dup] #agent-doc-bug: IPC timeout during finalize causes duplicate response patchback — binary commits to git, plugin independently applies fallback patch, document ends up with two copies of response. Dedupe in write --commit does not cleanly remove duplicate from HEAD. Plan: tasks/agent-doc/plan-ipc-timeout-duplicate-patchback.md
 - 2026-05-12 [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - 2026-05-12 [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
+- 2026-05-12 [#directrunpfx] #agent-doc-bug: Direct `agent-doc <file>` committed the Monster Rod Holders `Read the image.` prompt and Markdown image line without the canonical `❯ ` prefix before the response block, making user prompt text look like assistant prose. Plan: tasks/agent-doc/plan-direct-run-unprefixed-exchange-prompt.md
 <!-- /agent:done -->

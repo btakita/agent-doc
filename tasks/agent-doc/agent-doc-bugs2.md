@@ -29,36 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-040944.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-042726.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #rspcmtdelay
+- Archived 1 response topic(s): OpenCode proof-ready prompt chrome
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ agent-doc managed opencode session running tsift.md is inoperational:
-```
-┃                                                                                                                       ┃  [start] managed opencode capability proof: opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:18812,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:18820
-```
-❯ spec-test-build-install-commit-push
-### Re: OpenCode proof-ready prompt chrome — gpt-5
-
-Fixed the OpenCode startup/readiness failure behind the provided proof line. The reproduced evidence was the same shape as the prompt: `opencode_capability_proof status=proven ... context 0% used`, followed by route timing out because the actor stayed `starting`. The code now treats supervisor capability-proof diagnostics as chrome and, for OpenCode only, accepts an otherwise chrome-only `context ... % used` footer as the idle composer state. Codex keeps its stricter route-dispatch rule: a Codex status footer alone is still not a dispatch-ready prompt.
-
-Changed in `src/agent-doc`:
-- `src/harness.rs`, `src/start.rs`, `src/route.rs`, and `src/session_actor_cmd.rs`: OpenCode readiness detection now ignores proof diagnostics and promotes/dispatches from the status-only idle shape.
-- `SPEC.md`, `specs/05-agent-backend.md`, `README.md`, and `VERSIONS.md`: documented the OpenCode proof-ready prompt contract.
-- Added regressions for harness parsing, start auto-trigger readiness, route promotion, and session status readiness.
-
-Verification passed:
-- `cargo test opencode_status`
-- `cargo test idle_chrome_only_output`
-- `make check`
-- Latest GitHub `CI` run on `main` was green; the current workflow did not expose a separate tmux job in the run metadata, so I also ran local `make tmux-ci`, which passed with 222 live tmux tests.
-- `make install` replaced the local `agent-doc` binary and installed `libagent_doc-0.33.16.so`.
-
-Committed and pushed:
-- `src/agent-doc`: `6e36d281` (`fix: recognize opencode proof-ready prompt chrome`) pushed to `origin/20260422/codex-agent-backend`.
-- parent `agent-loop`: `83d11acf6` (`chore: update agent-doc submodule`) pushed to `origin/main`.
-<!-- agent:boundary:64e971a9 -->
+<!-- agent:boundary:5af321cf -->
 <!-- /agent:exchange -->
 ###
 <!--

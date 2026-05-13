@@ -29,101 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-164109.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-173609.md`*
 
 Compacted content:
-- Archived 1 response topic(s): OpenCode permission arrows
+- Archived 4 response topic(s): orphaned tmux pane cleanup; note; recover root tmux pane; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ There seem to be orphaned tmux panes that are prompting JB with the permissions selection dialog.
-❯ How can we prevent this edge case within agent-doc? #next-steps
-❯ Please clean up the orphaned tmux panes.
-### Re: orphaned tmux pane cleanup — gpt-5.5
-
-Cleaned up the orphaned panes.
-
-Evidence:
-- `agent-doc resync --fix` deregistered stale stash records and purged 10 orphaned agent panes from non-stash windows.
-- Follow-up `agent-doc resync` reports `No session/process issues detected`.
-- Follow-up tmux pane listing now shows only one `agent-doc` pane in the managed session: `%1`, the current `agent-doc-bugs2.md` authoritative pane.
-
-The prevention change I would make in agent-doc is to separate "live pane exists" from "pane is allowed to surface editor prompts." A pane should only be eligible for JB/VSCode permission prompt UI when it is owned by the current document's controller lease, matches the current generation, and belongs to an open cycle. Completed idle panes in stash, or panes whose registry was deregistered but whose supervisor is still alive, should be shut down/reaped or hidden from prompt discovery.
-
-I added a backlog item for that prevention work: `#orphanpromptprune`.
-### Re: note — gpt-5.5
-
-Noted. I kept the cleanup result and the `#orphanpromptprune` prevention item in the document.
-❯ You seem to have reaped too many tmux panes. The root.md tmux pane is lost. JB `Sync Tmux Layout` does not show the panes anymore. Please recover.
-❯ spec-test-build-install-commit-push
-### Re: recover root tmux pane — gpt-5.5
-
-Recovered the lost `src/session-share/tasks/root.md` pane and fixed the cleanup path that caused this class of loss.
-
-Operational recovery:
-- Removed the stale root binding for missing pane `%2` with targeted `agent-doc resync --fix`.
-- Ran a full `agent-doc sync` for `tasks/agent-doc/agent-doc-bugs2.md` plus `src/session-share/tasks/root.md`.
-- `root.md` is now registered on pane `%52` in the `0:agent-doc` window next to the current pane `%1`. `agent-doc session status` shows the root actor ready with healthy supervisor/controller state; the pane is currently alive and running the root session.
-
-Code fix:
-- `src/agent-doc/src/resync.rs` now makes non-stash orphan-agent cleanup check the pane-local project root before killing an apparently unregistered agent pane. It preserves panes that are registered, live-owner-proven, or supervisor-backed in a nested project such as `src/session-share`.
-- Updated `src/agent-doc/SPEC.md` and `src/agent-doc/specs/07-session-tmux-commands.md` with the cross-project orphan cleanup invariant.
-- Added a live tmux regression: `purge_orphan_agent_in_non_stash_preserves_nested_project_owner`.
-
-Verification passed:
-- `cargo test purge_orphan_agent_in_non_stash_preserves_nested_project_owner -- --ignored`
-- `cargo test purge_orphan_agent_in_non_stash_window -- --ignored`
-- `make check`
-- `make tmux-ci` (`225 passed; 0 failed` in the live tmux suite)
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- Latest GitHub CI inspected: run `25773430221`, conclusion `success`.
-
-Commits created:
-- `src/agent-doc`: `9d4b4933 fix: preserve nested agent panes during resync`
-- parent `agent-loop`: `d8cbcd8c0 agent-doc: preserve nested panes during resync`
-
-Per the session-document commit boundary, I will push those commits after this finalize step succeeds.
-❯ When I navigate the editor to tsift.md and JB `Sync Tmux Layout`, JB shows an error. It seems the manual reap killed the active tmux panes and now agent-doc cannot recover to sync the document. This issues happens with all documents where the tmux pane was killed. agent-doc sync should be more durable and recover tmux panes that crashed or were externally killed.
-```
-Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.
-```
-❯ spec-test-build-install-commit-push
-### Re: durable editor sync after killed panes — gpt-5
-
-Implemented and shipped the fix.
-
-What changed:
-- JetBrains manual and automatic layout sync now run `agent-doc sync` with a bounded subprocess timeout. If a sync stalls after dead/stale tmux pane state, the plugin terminates that subprocess, releases its local sync guard, and leaves the latest selection pending so retry can run binary recovery instead of permanently showing `Sync deferred: another tmux layout sync is already running`.
-- VS Code sync paths now use the same bounded timeout for manual sync and automatic tab sync.
-- Updated shared editor specs, JetBrains specs, and plugin specs for the timeout/retry invariant.
-- Bumped local plugin builds: JetBrains `0.2.118`, VS Code `0.2.17`.
-
-Local recovery evidence:
-- `agent-doc sync --col ...tasks/software/tsift.md --focus ...tasks/software/tsift.md` recovered the killed `tsift.md` binding by starting replacement pane `%57` and reconciling layout.
-
-Verification passed:
-- `./gradlew test`
-- `npm test`
-- `make check`
-- `make tmux-ci` (`225 passed; 0 failed` live tmux tests)
-- `make install`
-- `./gradlew buildPlugin signPlugin`
-- `npm run package`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-CI inspected:
-- Latest completed parent `Agent Doc` workflow before this push had a green `tmux-ci` job and red `check` job.
-- Latest submodule `CI` workflow inspected was green: run `25773430221`.
-- New parent run for this push started: `25815706822`.
-
-Local install/package:
-- Installed CLI and `libagent_doc.so` via `make install`.
-- Installed JetBrains plugin `0.2.118` into both IntelliJIdea2026.1 plugin directories. Restart IntelliJ to load it.
-- Built VS Code package: `src/agent-doc/editors/vscode/agent-doc-0.2.17.vsix`.
-
-Commits pushed:
-- `src/agent-doc`: `ff8aae13 fix: bound editor sync subprocesses`
-- parent `agent-loop`: `e701994af agent-doc: bound editor sync subprocesses`
-<!-- agent:boundary:b31ded48 -->
+<!-- agent:boundary:ce33c962 -->
 <!-- /agent:exchange -->
 ###
 <!--

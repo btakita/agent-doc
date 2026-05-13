@@ -35,7 +35,24 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): xcst
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:eb2bb757 -->
+❯ do [#xlog]. spec-test-build-install-commit-push
+### Re: xlog — gpt-5
+
+Implemented and pushed `#xlog` in `src/tsift`.
+
+`log-digest` now classifies agent-doc runtime failure/churn lines as signal groups instead of leaving them only as symbol refs. It reuses the shared `runtime_churn` classifier, adds warning signals for restart churn families and `commit_already_current` closeout churn, and adds error signals for nonzero `claude_exit` / `codex_exit` events. I also updated `SPEC.md`, `VERSIONS.md`, the direct unit coverage, and the compiled CLI regression.
+
+Verification completed:
+
+- Focused regressions: `log_digest_classifies_agent_doc_runtime_churn_as_signals`, `restart_churn_detects_requested_families`, `log_digest_classifies_agent_doc_runtime_events_as_signals`.
+- Full local CI target: `make ci-full` passed, including clippy, 589 unit tests, 107 integration tests, and the ignored SimWorld medium corpus.
+- Build/install: `cargo build --manifest-path src/tsift/Cargo.toml` passed; `cargo install --path src/tsift --force` replaced the local binary; `tsift --version` reports `tsift 0.1.42`.
+- Real-log check: installed `tsift log-digest` on `.agent-doc/logs/tsift-v0.1.log` now reports `signal_groups: 8`, including closeout churn, restart churn, timeout, and nonzero exit signals.
+
+Committed and pushed `ed742d2 fix: classify agent-doc log churn signals` to `btakita/tsift` `main`.
+
+Remote GitHub Actions did start a new run (`25824241991`) but the job failed before running steps. The check-run annotation says the job was not started because recent account payments failed or the spending limit needs to be increased, so there were no CI logs to inspect beyond that external billing blocker.
+<!-- agent:boundary:e8714f68 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +61,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xlog] Teach tsift log-digest to classify agent-doc runtime/churn/failure events as signals; current tsift-v0.1.log digest reports signals:0 even though session-digest finds claude_exit, auto_trigger_timeout, fresh_restart, ctrl_d_restart_loop, and closeout churn.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -57,4 +73,5 @@ Compacted content:
 
 <!-- agent:done -->
 - 2026-05-13 [#xcst] Fix session-cost/log guardrail wording for agent-doc logs so restart_loop warnings are only emitted when restart churn is actually present; ops.log currently reports fresh_restart=0 auto_trigger_timeout=0 ctrl_d_restart_loop=0 while still warning restart churn detected.
+- 2026-05-13 [#xlog] Teach tsift log-digest to classify agent-doc runtime/churn/failure events as signals; current tsift-v0.1.log digest reports signals:0 even though session-digest finds claude_exit, auto_trigger_timeout, fresh_restart, ctrl_d_restart_loop, and closeout churn.
 <!-- /agent:done -->

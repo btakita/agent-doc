@@ -7,6 +7,8 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import java.io.File
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import javax.swing.SwingUtilities
 
 /**
@@ -29,9 +31,57 @@ class SyncLayoutAction : AnAction() {
             "Sync deferred: another visible agent-doc pane is mid-closeout, so the current tmux layout was preserved. Try again after that closeout finishes."
         internal const val SYNC_ALREADY_RUNNING_WARNING =
             "Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly."
+        internal const val SYNC_PROCESS_TIMEOUT_MS = 30_000L
 
         private val PROTECTED_PANES_PATTERN =
             Regex("""visible protected pane\(s\) (.+?) cannot be detached safely""")
+
+        internal data class SyncProcessResult(
+            val exitCode: Int,
+            val output: String,
+            val timedOut: Boolean,
+        )
+
+        internal fun runCommandWithTimeout(
+            cmd: List<String>,
+            projectRoot: String,
+            timeoutMs: Long = SYNC_PROCESS_TIMEOUT_MS,
+        ): SyncProcessResult {
+            val process = ProcessBuilder(cmd)
+                .directory(File(projectRoot))
+                .redirectErrorStream(true)
+                .start()
+            val outputFuture = CompletableFuture.supplyAsync {
+                process.inputStream.bufferedReader().readText()
+            }
+            if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+                process.destroy()
+                if (!process.waitFor(500, TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly()
+                    process.waitFor(500, TimeUnit.MILLISECONDS)
+                }
+                val output = try {
+                    outputFuture.get(1, TimeUnit.SECONDS)
+                } catch (_: Exception) {
+                    ""
+                }
+                return SyncProcessResult(
+                    exitCode = 124,
+                    output = output.trim(),
+                    timedOut = true,
+                )
+            }
+            val output = try {
+                outputFuture.get(1, TimeUnit.SECONDS)
+            } catch (_: Exception) {
+                ""
+            }
+            return SyncProcessResult(
+                exitCode = process.exitValue(),
+                output = output.trim(),
+                timedOut = false,
+            )
+        }
 
         internal fun isPreservedLayoutOutput(output: String): Boolean =
             output
@@ -255,19 +305,21 @@ class SyncLayoutAction : AnAction() {
                     if (notify) {
                         TerminalUtil.showHint(project, TerminalUtil.formatLayoutSummary(cmd))
                     }
-                    val process = ProcessBuilder(cmd)
-                        .directory(java.io.File(projectRoot))
-                        .redirectErrorStream(true)
-                        .start()
-                    val output = process.inputStream.bufferedReader().readText().trim()
-                    val exitCode = process.waitFor()
+                    val result = runCommandWithTimeout(cmd, projectRoot)
+                    val output = result.output
+                    val exitCode = result.exitCode
                     LOG.info("[sync] exit=$exitCode cmd=${cmd.joinToString(" ")}")
                     if (output.isNotEmpty()) {
                         // Log first 500 chars of output for debugging
                         LOG.info("[sync] output: ${output.take(500)}")
                     }
                     if (notify && exitCode != 0) {
-                        TerminalUtil.notifyError(project, "Sync failed (exit $exitCode):\n$output")
+                        val reason = if (result.timedOut) {
+                            "Sync timed out after ${SYNC_PROCESS_TIMEOUT_MS / 1000}s; the local sync guard was released so retry can run binary recovery."
+                        } else {
+                            "Sync failed (exit $exitCode):"
+                        }
+                        TerminalUtil.notifyError(project, "$reason\n$output")
                     } else if (notify) {
                         val warning = preservedLayoutWarning(output)
                         if (warning != null) {

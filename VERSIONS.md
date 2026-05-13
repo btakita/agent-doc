@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Editor sync guards no longer stay wedged after a dead-pane sync stalls.** JetBrains and VS Code now bound plugin-spawned layout-sync subprocesses. If one stalls while the binary is dealing with killed or stale tmux panes, the plugin terminates that subprocess, releases its local sync guard, and leaves the latest selection pending so a retry can run the binary recovery path instead of permanently showing `Sync deferred: another tmux layout sync is already running`. Updated shared editor specs and bumped local plugin builds to JetBrains `0.2.118` and VS Code `0.2.17`.
+
 - **Managed OpenCode permission arrows no longer leak escape text.** While the supervisor sees an active OpenCode `Allow once` / `Allow always` / `Reject` permission prompt, legacy arrow-key escape sequences from stdin are translated to the prompt footer's Tab/BackTab selector controls before they reach OpenCode. Normal OpenCode prompt editing remains unchanged, and the regression covers the `^[[C` / `^[[D` leak shape from a live permission dialog.
 
 - **Editor prompt answers now run from the owning session cwd.** `agent-doc prompt --all` entries include `cwd`, and the JetBrains/VS Code prompt UIs use that root when calling `prompt --answer` instead of assuming the current IDE workspace root. Failed answer submissions now clear the temporary suppression key so the still-active prompt can reappear. Added process-level JetBrains coverage for the prompt-answer command cwd and a live tmux integration regression proving OpenCode answers send Tab rather than a raw left/right arrow escape. Bumped local plugin builds to JetBrains `0.2.117` and VS Code `0.2.16`.

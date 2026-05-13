@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class SyncLayoutActionTest {
 
@@ -34,6 +35,18 @@ class SyncLayoutActionTest {
         )
 
         assertFalse(cmd.contains("--no-autostart"))
+    }
+
+    @Test
+    fun `sync subprocess timeout returns and marks timed out`() {
+        val result = SyncLayoutAction.runCommandWithTimeout(
+            listOf("sh", "-c", "sleep 2"),
+            File(".").absolutePath,
+            timeoutMs = 50,
+        )
+
+        assertEquals(124, result.exitCode)
+        assertTrue(result.timedOut)
     }
 
     @Test

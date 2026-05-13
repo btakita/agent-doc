@@ -40,6 +40,7 @@ import {
 // ---------------------------------------------------------------------------
 
 let resolvedAgentDoc: string | null = null;
+const SYNC_CLI_TIMEOUT_MS = 30_000;
 
 function resolveAgentDoc(): string {
     if (resolvedAgentDoc) return resolvedAgentDoc;
@@ -116,11 +117,20 @@ function resolveProject(
 }
 
 /** Run an agent-doc CLI command. Returns stdout on success. */
-function runCli(args: string[], cwd: string): Promise<string> {
+function runCli(args: string[], cwd: string, options?: { timeoutMs?: number }): Promise<string> {
     const bin = resolveAgentDoc();
     return new Promise((resolve, reject) => {
-        execFile(bin, args, { cwd, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        execFile(bin, args, {
+            cwd,
+            maxBuffer: 1024 * 1024,
+            timeout: options?.timeoutMs,
+            killSignal: 'SIGTERM',
+        }, (err, stdout, stderr) => {
             if (err) {
+                if ((err as any).killed && options?.timeoutMs) {
+                    reject(new Error(`timed out after ${Math.ceil(options.timeoutMs / 1000)}s\n${stdout.trim()}`.trim()));
+                    return;
+                }
                 reject(new Error(stderr?.trim() || err.message));
             } else {
                 resolve(stdout.trim());
@@ -773,7 +783,7 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
 
     try {
         const args = buildSyncLayoutCommand(visibleColumns, focusFile, noAutostart);
-        const output = await runCli(args, root);
+        const output = await runCli(args, root, { timeoutMs: SYNC_CLI_TIMEOUT_MS });
         if (notify) {
             if (isPreservedLayoutOutput(output)) {
                 const warning = output
@@ -888,7 +898,7 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
                     const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
                     output = await runCli(['focus', rel], cwd);
                 } else {
-                    output = await runCli(execution.planned.command.args, execution.root);
+                    output = await runCli(execution.planned.command.args, execution.root, { timeoutMs: SYNC_CLI_TIMEOUT_MS });
                 }
                 const result = analyzeTabSyncCommandResult(
                     execution.planned.command,

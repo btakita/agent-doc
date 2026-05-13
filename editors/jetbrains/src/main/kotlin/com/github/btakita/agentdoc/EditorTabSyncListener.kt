@@ -392,13 +392,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 val cmd = execution.command
                 log("exec: ${cmd.joinToString(" ")}")
                 TerminalUtil.showHint(project, TerminalUtil.formatLayoutSummary(cmd))
-                val process = ProcessBuilder(cmd)
-                    .directory(java.io.File(execution.projectRoot))
-                    .redirectErrorStream(true)
-                    .start()
-                val output = process.inputStream.bufferedReader().readText()
-                val exitCode = process.waitFor()
+                val processResult = SyncLayoutAction.runCommandWithTimeout(cmd, execution.projectRoot)
+                val output = processResult.output
+                val exitCode = processResult.exitCode
                 log("result: exit=$exitCode output=${output.trim()}")
+                if (processResult.timedOut) {
+                    log("timeout: sync command exceeded ${SyncLayoutAction.SYNC_PROCESS_TIMEOUT_MS}ms; released guard for latest retry")
+                }
                 val result = AutomaticCommandPlanner.analyzeCommandResult(
                     kind = execution.plan.kind,
                     exitCode = exitCode,

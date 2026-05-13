@@ -320,8 +320,21 @@ fn attempt_stop_closeout(
         return Ok(StopCloseAttempt::StillOpen { note });
     }
 
-    if crate::write::complete_required_closeout(file)? {
-        note.push_str(" The hook finished the commit boundary automatically.");
+    match crate::write::complete_required_closeout(file) {
+        Ok(true) => {
+            note.push_str(" The hook finished the commit boundary automatically.");
+        }
+        Ok(false) => {}
+        Err(err) => {
+            crate::ops_log::log_op(
+                file,
+                &format!("codex_stop_auto_close_closeout_failed err={err}"),
+            );
+            note.push_str(&format!(
+                " The hook wrote or recovered the response but could not finish the required commit boundary: {err}."
+            ));
+            return Ok(StopCloseAttempt::StillOpen { note });
+        }
     }
     crate::ops_log::log_op(file, "codex_stop_auto_close_success");
     Ok(StopCloseAttempt::Closed)
@@ -797,6 +810,33 @@ mod tests {
             .unwrap();
     }
 
+    fn git(dir: &Path, args: &[&str]) {
+        let output = ProcessCommand::new("git")
+            .current_dir(dir)
+            .args([
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test User",
+                "-c",
+                "init.defaultBranch=main",
+                "-c",
+                "protocol.file.allow=always",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: stdout={} stderr={}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn write_doc(dir: &tempfile::TempDir) -> PathBuf {
         let doc = dir.path().join("task.md");
         let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
@@ -1101,6 +1141,114 @@ agent-doc {}\n",
             }
             other => panic!("expected committed session-check status, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn stop_blocks_when_parent_submodule_pointer_closeout_fails() {
+        let parent_dir = tempfile::tempdir().unwrap();
+        let sub_src_dir = tempfile::tempdir().unwrap();
+        let parent = parent_dir.path().canonicalize().unwrap();
+        let sub_src = sub_src_dir.path().canonicalize().unwrap();
+
+        git(&sub_src, &["init"]);
+        fs::write(sub_src.join("README.md"), "sub").unwrap();
+        git(&sub_src, &["add", "README.md"]);
+        git(&sub_src, &["commit", "-m", "init", "--no-verify"]);
+
+        git(&parent, &["init"]);
+        fs::write(parent.join("README.md"), "parent").unwrap();
+        git(&parent, &["add", "README.md"]);
+        git(&parent, &["commit", "-m", "init", "--no-verify"]);
+        git(
+            &parent,
+            &[
+                "submodule",
+                "add",
+                sub_src.to_string_lossy().as_ref(),
+                "src/submodule",
+            ],
+        );
+        git(&parent, &["commit", "-m", "add submodule", "--no-verify"]);
+
+        let submodule_root = parent.join("src/submodule");
+        fs::create_dir_all(submodule_root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(submodule_root.join(".agent-doc/state/cycles")).unwrap();
+        let doc = submodule_root.join("session.md");
+        let original = concat!(
+            "---\n",
+            "agent_doc_session: sid\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Are the false positives fixed now?\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, original).unwrap();
+        crate::snapshot::save(&doc, original).unwrap();
+        git(&submodule_root, &["add", "session.md"]);
+        git(&submodule_root, &["commit", "-m", "add doc", "--no-verify"]);
+        git(&parent, &["add", "src/submodule"]);
+        git(
+            &parent,
+            &["commit", "-m", "record doc commit", "--no-verify"],
+        );
+
+        let parent_git_dir = ProcessCommand::new("git")
+            .current_dir(&parent)
+            .args(["rev-parse", "--absolute-git-dir"])
+            .output()
+            .unwrap();
+        assert!(parent_git_dir.status.success());
+        let parent_git_dir = PathBuf::from(String::from_utf8_lossy(&parent_git_dir.stdout).trim());
+        fs::write(parent_git_dir.join("index.lock"), "held by test").unwrap();
+
+        track_doc(&parent_dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: parent.display().to_string(),
+            last_assistant_message: concat!(
+                "<!-- patch:exchange -->\n",
+                "### Re: false-positive status — gpt-5\n\n",
+                "Yes, the direct-chat answer was written through the Stop hook.\n",
+                "<!-- /patch:exchange -->\n",
+            )
+            .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(
+                    reason.contains("could not finish the required commit boundary"),
+                    "block reason should name closeout failure, got: {reason}"
+                );
+                assert!(
+                    reason.contains("parent submodule pointer is not committed"),
+                    "block reason should name the missing parent layer, got: {reason}"
+                );
+                assert!(
+                    reason.contains("agent-doc commit"),
+                    "block reason should prescribe idempotent parent recovery, got: {reason}"
+                );
+            }
+            other => panic!("expected recoverable block response, got {other:?}"),
+        }
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("direct-chat answer was written through the Stop hook"));
+        assert!(
+            crate::git::submodule_pointer_drift(&doc).unwrap().is_some(),
+            "parent gitlink should remain stale while index.lock is held"
+        );
+        let root = project_root_for(&doc).unwrap();
+        assert!(
+            load_state(&root, "codex-session").unwrap().is_some(),
+            "hook state must remain so a retry can finish closeout"
+        );
     }
 
     #[test]

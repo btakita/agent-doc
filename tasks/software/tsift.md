@@ -35,7 +35,19 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #stok
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:e42754d7 -->
+❯ do [#slock]. spec-test-build-install-commit-push
+### Re: #slock — gpt-5
+
+Implemented `#slock`.
+
+Added deterministic WAL-without-`index.lock` regressions for the direct `tsift index`, `tsift search`, and `tsift status` paths. The tests now lock the case where SQLite WAL/SHM sidecars are live but the tsift-owned writer sidecar reports no active holder, preserving WAL-aware snapshot fallback and recovery guidance instead of raw `database is locked` failures or rollback-journal-only diagnostics.
+
+Updated `SPEC.md` and `VERSIONS.md` with the recovery invariant, extended the search post-precheck test hook so it can inject either rollback-journal or WAL contention, and installed the rebuilt local binary.
+
+Verification: targeted new regressions passed; `cargo fmt --check`; `make check`; `cargo build`; `cargo install --path .`; `tsift --version` -> `tsift 0.1.42`; latest GitHub Actions CI run `25781168424` was green.
+
+Pushed commits: `src/tsift` `38e16b3` (`test: cover WAL lock recovery paths`) and superproject `c7e9e079e` (`chore: update tsift submodule`).
+<!-- agent:boundary:3700133b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +56,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#slock] Add deterministic lock-contention coverage for tsift index/search/status paths and recovery guidance; historical review surfaced 34 database file is locked failures while tsift locks can report no writer lock with live WAL/SHM sidecars, so snapshot fallback and diagnostics need regression coverage.
 - [ ] [#sfile] Filter empty or non-file file references from log-digest / session-digest; .agent-doc/logs/tsift-v0.1.log produced an empty path file group with 132 occurrences, degrading anchors and downstream next-context file lists.
 <!-- /agent:backlog -->
 
@@ -68,6 +79,7 @@ k
 - 2026-05-13 [#sctx] Fix tsift session-review / context-pack --next-context active-context scoping so prompt targets, files, and failures come from the current unresolved tail instead of historical assistant text, presets, examples, or unrelated matched sessions; regression should reject stale do-hash prompts, Re summaries, prompt-preset text, and bogus paths like /! from tasks/software/tsift.md review output.
 - 2026-05-13 [#sfail] Tighten tsift session-review failure extraction so it reports command/test/log failures with command and session anchors, not instruction text or source snippets like After finalize, panic snippets, or generic command exited with code 1; preserve real failing assertions and cargo exits separately.
 - 2026-05-13 [#stok] Audit Codex/Claude token accounting in tsift session-review and session-cost for cumulative-usage double counting and cross-session duplication; the 12-session tasks/software/tsift.md review reported about 1.4B prompt tokens and a 1.4M-token largest turn, which needs a deterministic fixture.
+- 2026-05-13 [#slock] Add deterministic lock-contention coverage for tsift index/search/status paths and recovery guidance; historical review surfaced 34 database file is locked failures while tsift locks can report no writer lock with live WAL/SHM sidecars, so snapshot fallback and diagnostics need regression coverage.
 <!-- /agent:done -->
 
 ## Completed / Reaped

@@ -29,54 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-175816.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-181854.md`*
 
 Compacted content:
-- Archived 2 response topic(s): log review; ops log summary
+- Archived 2 response topic(s): Clear Session Context live-busy guard; JetBrains sync and clear follow-ups
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#q97c]. spec-test-build-install-commit
-### Re: Clear Session Context live-busy guard — gpt-5
-
-Implemented `#q97c`.
-
-`agent-doc session clear <FILE>` now fails closed when direct live-pane evidence classifies the pane as `alive-busy`; it no longer sends `/clear` after logging `session_clear_live_busy_guard_bypassed`. The refusal now logs `session_clear_live_busy_guard_refused` with the pane/source/current-command evidence and tells the operator to retry after `agent-doc session status <FILE>` proves idle, or to use `agent-doc session interrupt-clear <FILE>` for an explicit interrupt-and-clear discard.
-
-The existing stronger idle-proof path remains intact: status/footer-only Codex/OpenCode chrome and recognized idle placeholder prompts still reconcile stale busy projections to ready before clear proceeds. I updated `SPEC.md`, the session tmux command spec, ops summary documentation/reporting, and `VERSIONS.md`.
-
-Verification:
-- `cargo test clear_live_busy_refusal_points_to_interrupt_clear`
-- `cargo test ops_summary_groups_tracked_events_by_file_and_session`
-- `cargo test live_pane_prompt_ready_accepts_codex_status_chrome_only_output`
-- `cargo fmt`
-- `make check`
-- `make build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- GitHub Actions: latest `CI` run `25773430221` succeeded; it has a `check` job only and no tmux job/workflow.
-- `make tmux-ci` passed locally: 225 ignored tmux tests, 0 failed.
-
-Commits:
-- `src/agent-doc`: `4040c05f` (`fix: refuse clear on live busy panes`)
-- parent repo: `d3cdc6d14` (`agent-doc: refuse clear on live busy panes`)
-
-Unrelated dirty paths left untouched: `mail`, `src/session-share`, and `tasks/software/corky.md`.
-❯ JB `Sync Tmux Layout` when corky.md error. Please ensure `agent-doc sync` is reliable. Should we support a `--force` option? If yes, the error in the plugins should have a force link/button. #next-steps
-```
-Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.
-```
-❯ ---
-❯ JB `Clear Session Context` on this document. #next-steps
-```
-Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 59% used
-```
-### Re: JetBrains sync and clear follow-ups — gpt-5
-
-For `Sync Tmux Layout`: yes, `agent-doc sync` should be reliable without making the user reason about an internal lock. The current deferred message is acceptable only if the retry is guaranteed to apply the latest editor selection quickly. If it can strand the UI on an older document, then the sync path needs coalescing/superseding semantics first.
-
-I would support `--force`, but narrowly: it should replace a stale or queued sync request, not blindly bypass active-turn safety or pane ownership checks. In the plugins, the error should become typed UI with a force action only when the backend says force is valid; otherwise it should remain a wait/retry/status message.
-
-For `Clear Session Context`: the busy-pane refusal is the right default for a pane currently running `agent-doc`. The next UX work is to make the plugin actions precise: `Refresh` should recompute live pane evidence, `Status` should expose controller-vs-pane disagreement, and `Interrupt and clear` should be an explicit destructive action. I captured both follow-ups in the backlog.
-<!-- agent:boundary:2dc9ea0e -->
+<!-- agent:boundary:0c335b37 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -1876,8 +1876,8 @@ fn spawn_reader_thread(
             let mut filtered = Vec::with_capacity(8192);
             let stdout = std::io::stdout();
             let debug_filter = std::env::var("AGENT_DOC_DEBUG_FILTER").is_ok();
-            // Stateful filter — carries partial escape sequences across reads
-            let mut pty_filter = crate::supervisor::pty::PtyFilter::new();
+            // Stateful filter — carries partial escape sequences across reads.
+            let mut pty_filter = crate::supervisor::pty::PtyFilter::for_harness(&harness);
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,

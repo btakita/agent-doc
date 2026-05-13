@@ -6,7 +6,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
-- **OpenCode permission prompts now answer horizontal options correctly.** `agent-doc prompt` detects OpenCode's `Permission required` prompt row with `Allow once`, `Allow always`, and `Reject`, and `prompt --answer` uses OpenCode's printable `h`/`l` horizontal bindings instead of Claude Code's Up/Down menu movement or arrow escape sequences. `Allow always` now also accepts OpenCode's follow-up confirmation prompt, and route busy detection treats this OpenCode prompt as an active permission blocker instead of injecting a rerun over it.
+- **OpenCode permission prompts now preserve real keyboard navigation.** The OpenCode supervisor preserves OpenTUI's Kitty keyboard-mode sequences instead of stripping them with terminal query noise, so arrow/tab selection keys can reach OpenCode permission prompts without leaking literal `^[[...` text. `agent-doc prompt --answer` now uses OpenCode's horizontal Left/Right movement, parses the highlighted OpenCode option from ANSI captures, and still accepts the `Allow always` follow-up confirmation prompt.
 
 - **OpenCode dispatch-only startup probes now use the OpenCode redraw budget.** JetBrains `Run Agent Doc` can hit an OpenCode pane just after the controller has seen the idle splash but before the second startup-window guard catches the same prompt. Dispatch-only routing now gives OpenCode the longer harness-specific prompt/recovery budget instead of the short Codex-style boot probe, avoiding false `latest run is still booting` refusals after OpenCode is already accepting input.
 

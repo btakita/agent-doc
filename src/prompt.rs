@@ -4,7 +4,7 @@
 //! - Detects active Claude Code and OpenCode permission/question prompts in a tmux pane and surfaces them as JSON.
 //! - `run(file)` — resolves the session's tmux pane from the document frontmatter, captures pane content, parses for prompt patterns, and prints a `PromptInfo` JSON object to stdout.
 //! - `run_all()` — iterates every entry in `sessions.json`, skips dead panes, and prints a JSON array of `PromptAllEntry` objects (one per live session with its prompt state).
-//! - `answer(file, option_index)` — navigates the prompt TUI to the target option using the prompt's axis (Claude Code: Up/Down, OpenCode: h/l; 30 ms between presses) then sends Enter. OpenCode `Allow always` sends a second Enter to accept the follow-up confirmation prompt. Validates that a prompt is active and the index is in range before sending keys.
+//! - `answer(file, option_index)` — navigates the prompt TUI to the target option using the prompt's axis (Claude Code: Up/Down, OpenCode: Left/Right; 30 ms between presses) then sends Enter. OpenCode `Allow always` sends a second Enter to accept the follow-up confirmation prompt. Validates that a prompt is active and the index is in range before sending keys.
 //! - Claude prompt detection anchors on the footer pattern `"Esc to cancel"` (searched bottom-up), then scans upward for options in bracket format (`[N] label`) or numbered list format (`N. label`), then identifies the question as the first non-empty, non-option line above.
 //! - OpenCode prompt detection anchors on the horizontal control footer (`"select"` + `"enter confirm"`) and parses the `Allow once`, `Allow always`, and `Reject` options rendered on the same row.
 //! - ANSI escape codes are stripped before pattern matching; `strip_ansi` is `pub(crate)` for reuse.
@@ -25,7 +25,7 @@
 //! - parse_yes_no_prompt: two-option prompt → active, 2 options
 //! - markdown_list_not_prompt: numbered markdown list above `Esc to cancel` → inactive (not detected as options)
 //! - parse_opencode_permission_prompt: horizontal OpenCode permission prompt → active, 3 options, selected=0
-//! - navigation_keys_for_opencode_permission_prompt: OpenCode prompt uses horizontal h/l movement
+//! - navigation_keys_for_opencode_permission_prompt: OpenCode prompt uses horizontal Left/Right movement
 //! - opencode_allow_always_requires_confirmation: OpenCode `Allow always` is followed by a confirmation prompt
 //! - strip_ansi_basic: bold/reset escape sequence → plain text without escape codes
 //! - parse_option_line_with_cursor: `❯ [2] label` → index=2, label extracted
@@ -226,9 +226,9 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
     }
 
     // Navigate to the selected option and press Enter. Claude Code uses a
-    // vertical menu. OpenCode's permission prompt binds both Left/Right and h/l,
-    // but h/l survives terminal/tmux forwarding paths where arrow escape
-    // sequences can leak into the composer literally.
+    // vertical menu. OpenCode's permission prompt is a horizontal OpenTUI
+    // widget, so use the semantic arrow keys and let the supervisor preserve
+    // OpenCode's keyboard-mode negotiation.
     let current = info.selected.unwrap_or(0);
     let target = option_index - 1; // convert to 0-based
     let keys = navigation_keys_for_prompt(&pane_content);
@@ -347,7 +347,8 @@ fn parse_claude_prompt(content: &str) -> PromptInfo {
 }
 
 fn parse_opencode_prompt(content: &str) -> PromptInfo {
-    let lines: Vec<String> = content.lines().map(strip_ansi).collect();
+    let raw_lines: Vec<&str> = content.lines().collect();
+    let lines: Vec<String> = raw_lines.iter().map(|line| strip_ansi(line)).collect();
     let footer_idx = lines.iter().rposition(|line| {
         let lower = line.to_ascii_lowercase();
         lower.contains("enter confirm") && lower.contains("select")
@@ -364,14 +365,12 @@ fn parse_opencode_prompt(content: &str) -> PromptInfo {
     }
 
     let question = opencode_question(&lines[..footer_idx]);
+    let selected = opencode_selected_option_from_ansi(raw_lines[footer_idx], &options).or(Some(0));
     PromptInfo {
         active: true,
         question,
         options: Some(options),
-        // OpenCode permission prompts initially focus the first horizontal
-        // option. The TUI does not expose a stable text marker after ANSI
-        // stripping, so callers can move right from the initial state.
-        selected: Some(0),
+        selected,
     }
 }
 
@@ -390,8 +389,8 @@ fn navigation_keys_for_prompt(content: &str) -> PromptNavigationKeys {
             next: "Down",
         },
         PromptNavigationAxis::Horizontal => PromptNavigationKeys {
-            prev: "h",
-            next: "l",
+            prev: "Left",
+            next: "Right",
         },
     }
 }
@@ -431,6 +430,27 @@ fn parse_opencode_option_row(line: &str) -> Vec<PromptOption> {
         }
     }
     options
+}
+
+fn opencode_selected_option_from_ansi(row: &str, options: &[PromptOption]) -> Option<usize> {
+    for (index, option) in options.iter().enumerate() {
+        let Some(label_start) = row.find(&option.label) else {
+            continue;
+        };
+        let prefix = &row[..label_start];
+        let Some(bg_start) = prefix.rfind("\x1b[48;2;") else {
+            continue;
+        };
+        let bg = &prefix[bg_start..];
+        let Some(bg_end) = bg.find('m') else {
+            continue;
+        };
+        let bg = &bg[..=bg_end];
+        if bg.contains("245;167;66") {
+            return Some(index);
+        }
+    }
+    None
 }
 
 fn opencode_question(lines: &[String]) -> Option<String> {
@@ -720,13 +740,23 @@ Bash command
         assert_eq!(
             navigation_keys_for_prompt(content),
             PromptNavigationKeys {
-                prev: "h",
-                next: "l"
+                prev: "Left",
+                next: "Right"
             }
         );
         assert!(!opencode_option_requires_confirmation(&opts[0]));
         assert!(opencode_option_requires_confirmation(&opts[1]));
         assert!(!opencode_option_requires_confirmation(&opts[2]));
+    }
+
+    #[test]
+    fn parse_opencode_selected_option_from_ansi() {
+        let content = "\
+\x1b[48;2;10;10;10m  \x1b[38;2;245;167;66m\x1b[48;2;20;20;20m┃\x1b[38;2;255;255;255m\x1b[48;2;30;30;30m   \x1b[38;2;128;128;128mAllow once\x1b[38;2;255;255;255m   \x1b[48;2;245;167;66m \x1b[38;2;10;10;10mAllow always\x1b[38;2;255;255;255m  \x1b[48;2;30;30;30mReject\x1b[38;2;238;238;238m ⇆ \x1b[38;2;128;128;128mselect\x1b[38;2;238;238;238m enter \x1b[38;2;128;128;128mconfirm\n";
+
+        let info = parse_prompt(content);
+        assert!(info.active);
+        assert_eq!(info.selected, Some(1));
     }
 
     #[test]

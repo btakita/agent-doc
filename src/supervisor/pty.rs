@@ -378,7 +378,7 @@ impl PtySession {
 /// prevents the outer terminal from generating responses in the first place.
 /// Stripping responses is defense-in-depth for any that leak through.
 ///
-/// This filter strips:
+/// This filter strips by default:
 ///
 /// **Outgoing queries (from child → outer terminal):**
 /// - CSI `c` with no prefix (DA1 query: `\x1b[c` or `\x1b[0c`)
@@ -394,6 +394,10 @@ impl PtySession {
 /// - CSI `<` sequences ending in `u` (Kitty keyboard pop: `\x1b[<u`)
 /// - DCS strings (`\x1b P....\x1b\` — e.g. `\x1bP>|tmux 3.6a\x1b\`)
 ///
+/// OpenCode is the exception for Kitty keyboard sequences: OpenTUI depends on
+/// those mode transitions for real arrow/tab key handling, so the OpenCode
+/// supervisor preserves them while still suppressing unrelated terminal queries.
+///
 /// Normal escape sequences (SGR colors, cursor movement, etc.) pass through.
 ///
 /// **Stateful across reads:** Partial escape sequences at read boundaries are
@@ -401,12 +405,22 @@ impl PtySession {
 /// escape sequence leaks when an ESC byte lands at the end of one read buffer.
 pub(crate) struct PtyFilter {
     carryover: Vec<u8>,
+    preserve_kitty_keyboard: bool,
 }
 
 impl PtyFilter {
+    #[allow(dead_code)] // default constructor used by filter unit-test wrappers
     pub(crate) fn new() -> Self {
         Self {
             carryover: Vec::new(),
+            preserve_kitty_keyboard: false,
+        }
+    }
+
+    pub(crate) fn for_harness(harness: &crate::harness::HarnessConfig) -> Self {
+        Self {
+            carryover: Vec::new(),
+            preserve_kitty_keyboard: harness.binary == "opencode",
         }
     }
 
@@ -464,10 +478,12 @@ impl PtyFilter {
                             b'c' if no_prefix => true,
                             // CSI ? ... n (DSR), c (DA1 response), h/l (DEC private mode set/reset)
                             b'n' | b'c' | b'h' | b'l' if has_question => true,
-                            // CSI > ... c (DA2), q (XTVERSION), u (Kitty push), m (Kitty progressive)
-                            b'c' | b'q' | b'u' | b'm' if has_gt => true,
+                            // CSI > ... c (DA2), q (XTVERSION)
+                            b'c' | b'q' if has_gt => true,
+                            // CSI > ... u (Kitty push), m (Kitty progressive)
+                            b'u' | b'm' if has_gt => !self.preserve_kitty_keyboard,
                             // CSI < ... u (Kitty keyboard pop)
-                            b'u' if has_lt => true,
+                            b'u' if has_lt => !self.preserve_kitty_keyboard,
                             _ => false,
                         };
                         if should_filter {
@@ -853,6 +869,31 @@ mod tests {
         assert!(
             out.is_empty(),
             "Kitty progressive enhancement should be stripped"
+        );
+    }
+
+    #[test]
+    fn filter_preserves_kitty_keyboard_for_opencode() {
+        let mut filter = PtyFilter::for_harness(&crate::harness::HarnessConfig::opencode());
+        let input = b"\x1b[>1u\x1b[>4;2mkeys\x1b[<u";
+        let mut out = Vec::new();
+        filter.filter(input, &mut out);
+        assert_eq!(
+            out, input,
+            "OpenCode relies on Kitty keyboard mode for permission prompt keys"
+        );
+    }
+
+    #[test]
+    fn opencode_filter_still_strips_terminal_queries() {
+        let mut filter = PtyFilter::for_harness(&crate::harness::HarnessConfig::opencode());
+        let input = b"\x1b[?997;1n\x1b[>q\x1bP>|tmux 3.6a\x1b\\\x1b[>1u";
+        let mut out = Vec::new();
+        filter.filter(input, &mut out);
+        assert_eq!(
+            out,
+            b"\x1b[>1u".to_vec(),
+            "OpenCode preserves keyboard mode but not terminal query noise"
         );
     }
 

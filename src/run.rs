@@ -167,10 +167,12 @@ pub fn run(
 
     // Ensure the document has a session UUID (for tmux routing)
     let raw_content = std::fs::read_to_string(file)?;
-    let (content_original, session_id) = frontmatter::ensure_session_for_file(&raw_content, file)?;
+    let (mut content_original, session_id) =
+        frontmatter::ensure_session_for_file(&raw_content, file)?;
     if content_original != raw_content {
         std::fs::write(file, &content_original)?;
     }
+    content_original = normalize_direct_run_prompt_prefixes(file, &content_original, &the_diff)?;
     let (fm, _body) = frontmatter::parse_for_file(&content_original, file)?;
     let run_mode = RunMode::from_frontmatter(&fm);
 
@@ -662,7 +664,13 @@ fn apply_template_response(
 
     let content_ours = template::apply_patches(baseline, &patches, &unmatched, file)
         .context("failed to apply template patches")?;
-    let content_ours = write::normalize_template_structure_or_fail(&content_ours, file)?;
+    let snapshot_doc = snapshot::load(file).ok().flatten();
+    let content_ours = normalize_direct_run_template_content(
+        file,
+        baseline,
+        snapshot_doc.as_deref(),
+        &content_ours,
+    )?;
 
     let content_current = std::fs::read_to_string(file)?;
     let (final_content, crdt_state) = if content_current == baseline {
@@ -685,7 +693,12 @@ fn apply_template_response(
             None,
         )
     };
-    let final_content = write::normalize_template_structure_or_fail(&final_content, file)?;
+    let final_content = normalize_direct_run_template_content(
+        file,
+        baseline,
+        snapshot_doc.as_deref(),
+        &final_content,
+    )?;
 
     snapshot::save(file, &final_content)?;
     if let Some(state) = crdt_state {
@@ -694,6 +707,55 @@ fn apply_template_response(
     atomic_write(file, &final_content)?;
     drop(doc_lock);
     Ok(())
+}
+
+fn normalize_direct_run_prompt_prefixes(
+    file: &Path,
+    content: &str,
+    diff_text: &str,
+) -> Result<String> {
+    let has_prompt_bearing_user_drift = diff::classify_prompt_bearing_changes(diff_text)
+        .into_iter()
+        .any(|change| {
+            matches!(
+                change.kind,
+                diff::PromptBearingChangeKind::PromptTarget
+                    | diff::PromptBearingChangeKind::ContentEdit
+            )
+        });
+    if !has_prompt_bearing_user_drift {
+        return Ok(content.to_string());
+    }
+
+    let Some(snapshot_doc) = snapshot::load(file).ok().flatten() else {
+        return Ok(content.to_string());
+    };
+    let boundary_normalized = template::reposition_boundary_to_end_clean(content);
+    let normalized = write::normalize_user_prompts_in_exchange_safe(
+        &boundary_normalized,
+        &boundary_normalized,
+        &snapshot_doc,
+        file,
+    );
+    if normalized != content {
+        atomic_write(file, &normalized)?;
+        eprintln!("[run] normalized direct-run user prompt prefixes");
+    }
+    Ok(normalized)
+}
+
+fn normalize_direct_run_template_content(
+    file: &Path,
+    baseline: &str,
+    snapshot: Option<&str>,
+    content: &str,
+) -> Result<String> {
+    let normalized = if let Some(snapshot_doc) = snapshot {
+        write::normalize_user_prompts_in_exchange_safe(content, baseline, snapshot_doc, file)
+    } else {
+        content.to_string()
+    };
+    write::normalize_template_structure_or_fail(&normalized, file)
 }
 
 fn update_resume_id(file: &Path, session_id: &str) -> Result<()> {
@@ -966,6 +1028,108 @@ mod tests {
         assert!(updated.contains("- [ ] [#new1] Verify direct rerun completed cleanly"));
         assert!(updated.contains("- [ ] [#yckq] [#ss01] ShipStation fix"));
         assert!(updated.contains("- [ ] [#2gdt] [#wpmem] WP memory limits"));
+    }
+
+    #[test]
+    fn apply_template_response_prefixes_direct_run_prompt_with_image_line() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:old -->\n",
+            "Read the image.\n",
+            "![img_7.png](img_7.png)\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: image read — gpt-5\n\n",
+            "The image line was handled.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        apply_template_response(&doc, baseline, response, false)
+            .expect("direct-run template write should normalize prompt lines");
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("❯ Read the image.\n❯ ![img_7.png](img_7.png)\n"),
+            "raw direct-run prompt block must be prefixed:\n{updated}"
+        );
+        assert!(
+            updated.contains("### Re: image read — gpt-5 (HEAD)\n\nThe image line was handled."),
+            "assistant response should be preserved:\n{updated}"
+        );
+        assert!(
+            !updated.contains("❯ ### Re: image read"),
+            "assistant response heading must not receive prompt prefix:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn normalize_direct_run_prompt_prefixes_updates_baseline_before_precommit() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:old -->\n",
+            "Read the image.\n",
+            "![img_7.png](img_7.png)\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+
+        let diff_text = crate::diff::unified_diff_from_contents(snapshot, baseline)
+            .expect("snapshot and baseline differ");
+        let normalized = normalize_direct_run_prompt_prefixes(&doc, baseline, &diff_text)
+            .expect("direct-run baseline prompt normalization should succeed");
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(normalized, on_disk);
+        assert!(
+            on_disk.contains("❯ Read the image.\n❯ ![img_7.png](img_7.png)\n"),
+            "precommit baseline should be written with prompt prefixes:\n{on_disk}"
+        );
     }
 
     #[test]

@@ -427,11 +427,15 @@ mod tests {
         let tracked_file = "/tmp/tracked-await.md";
         document_changed(tracked_file);
         assert!(is_tracked(tracked_file));
+        assert!(!await_idle(tracked_file, 500, 100));
+
+        document_changed(tracked_file);
 
         // await_idle should wait for debounce even though tracked
         let start = Instant::now();
         assert!(await_idle(tracked_file, 200, 5000));
-        assert!(start.elapsed().as_millis() >= 200);
+        assert!(start.elapsed().as_millis() >= 100);
+        assert!(is_idle(tracked_file, 200));
     }
 
     // ── GAP 3: Hash Collision Risk ──

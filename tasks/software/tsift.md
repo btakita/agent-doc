@@ -47,7 +47,19 @@ Implemented `#frwr`.
 Verification passed: `cargo fmt --check`, `cargo test rewrite_`, `make check`, `cargo build`, `cargo install --path . --force`, `tsift --version`, and a live `tsift rewrite "cat src/main.rs"` check. Latest GitHub Actions CI run `25784555160` was already green (`clippy + test`, `Full CI suite` step succeeded); the tsift repo has no `tmux-ci`/`tmux-test` target to run locally.
 
 Commits: tsift submodule `894ee7c` pushed to `btakita/tsift`, and superproject submodule pointer commit `ccbd9c93b` is ready to push after this document closeout.
-<!-- agent:boundary:cd0a6e3e -->
+❯ do [#ftok]. spec-test-build-install-commit-push
+### Re: #ftok source-read token-savings fixture — gpt-5
+
+Implemented `#ftok`.
+
+- Added `source_read_inputs` support to the `token-savings` fixture schema, including compact source-read envelope rows and fail-closed validation that every `required_line_anchors` entry remains inside the bounded window.
+- Extended `fixtures/real-session-token-savings.json` with a `source-read` case covering full-file `cat` and `bat`, plus oversized `sed`, `head`, and `tail` reads. The case has a 70% fail-under threshold and currently passes at 73.2% savings; the full real-session fixture now reports 83.1% savings overall, about 4,174 estimated tokens saved.
+- Updated unit and compiled CLI tests, `SPEC.md`, and `VERSIONS.md` so the source-read token-savings contract is documented and enforced.
+
+Verification passed: `cargo fmt --check`, focused `cargo test token_savings`, full `cargo test`, `make check`, `cargo build`, `cargo install --path . --force`, installed `tsift --version`, installed `tsift token-savings --fixture fixtures/real-session-token-savings.json --fail-under --json`, and live `tsift rewrite "cat src/main.rs"`. Latest GitHub Actions `CI` run `25804248849` was green; this repo has no `tmux-ci` or `tmux-test` target in its Makefile.
+
+Commits: tsift submodule `7aaee2e` (`test: cover source-read token savings`) pushed to `btakita/tsift`; superproject pointer commit `7f655229e` (`chore: update tsift source-read fixture`) is committed and will be pushed after this document closeout so the session commit is included.
+<!-- agent:boundary:79a61f47 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,7 +68,6 @@ Commits: tsift submodule `894ee7c` pushed to `btakita/tsift`, and superproject s
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ftok] Add a real-session token-savings fixture for repeated source-file reads, including full-file cat/bat, oversized sed/head/tail windows, and a fail-under threshold proving the bounded source-read workflow saves tokens without hiding required line anchors.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -84,6 +95,7 @@ k
 - 2026-05-13 [#fwin] Add a bounded source-file read/window command that returns line-range previews, stable handles, symbol/summary refs, and explicit expand commands so agents can inspect files incrementally instead of re-reading whole files.
 - 2026-05-13 [#frpt] Add session-review/session-cost repeated-file-read diagnostics that group file-read tool calls by path/range, estimate duplicate tokens, and emit concrete tsift follow-up commands instead of generic harness advice.
 - 2026-05-13 [#frwr] Teach tsift rewrite to intercept large ordinary source reads inside indexed repos and route them to the bounded source-read surface, while preserving small explicit windows and non-source files as passthrough.
+- 2026-05-13 [#ftok] Add a real-session token-savings fixture for repeated source-file reads, including full-file cat/bat, oversized sed/head/tail windows, and a fail-under threshold proving the bounded source-read workflow saves tokens without hiding required line anchors.
 <!-- /agent:done -->
 
 ## Completed / Reaped

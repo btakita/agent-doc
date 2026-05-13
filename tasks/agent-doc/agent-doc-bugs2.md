@@ -34,7 +34,29 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): Hybrid pty log review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:369b7d67 -->
+❯ do [#startreadytimeout]. spec-test-build-install-commit-push
+### Re: startreadytimeout — gpt-5
+Implemented `#startreadytimeout`.
+
+Route now stops waiting immediately when a `starting` authoritative actor refreshes to a terminal `closed` or `blocked` state, logs `route_authoritative_actor_starting_terminal`, and surfaces the terminal actor diagnostic instead of timing out against stale `starting` state.
+
+Updated specs/docs and added coverage:
+- SimWorld deterministic coverage for a starting actor that closes before a ready prompt.
+- Route unit coverage for terminal wait states.
+- Live tmux route regression proving the closed refresh fails closed without sending a reopen.
+
+Verification:
+- `cargo test route_sim_blocks_starting_actor_that_closes_before_ready_prompt`
+- `cargo test authoritative_actor_start_wait_terminal_state_only_for_terminal_states`
+- `cargo test route_refreshes_closed_starting_authoritative_actor_without_start_timeout -- --ignored`
+- `make check`
+- Latest GitHub Actions `Agent Doc` run 25832239425 had red `tmux-ci`, so I reproduced locally with `make tmux-ci`; local result passed, 227 live tmux tests.
+- `make install` completed and installed `agent-doc 0.33.16` plus `libagent_doc.so` locally.
+
+Committed and pushed:
+- `btakita/agent-doc` `20260422/codex-agent-backend`: `bfe47ed4` (`fix: refresh closed starting actors`)
+- `btakita/agent-loop` `main`: `785a41418` (`chore: update agent-doc submodule`)
+<!-- agent:boundary:10d61969 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,14 +131,13 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#startreadytimeout] #agent-doc-bug: Starting authoritative actors repeatedly miss the 8s route readiness window after owned/hybrid pty startup; logs show repeated route_authoritative_actor_starting_not_ready for Codex panes before eventual prompt readiness, and sometimes against a closed actor. Make starting-state routing fail closed with a single actionable diagnostic, refresh closed actors immediately, and cover with SimWorld plus tmux-router tests.
+- [ ] [#multiplexertrait] Evaluate Multiplexer trait abstraction over tmux to reduce coupling (785 tmux references across 43 files). Would allow future Zellij backend and make the tmux surface testable via mock backend. [recommended]
 - [ ] [#directsubmitbudget] #agent-doc-bug: Direct pane submit telemetry reports 5.18s timeouts / over-budget sends even when dispatch_start_proof later proves the prompt was consumed. Split input-acceptance latency from dispatch-start proof, avoid false timeout language after consumed proof, and tune the owned/hybrid pty submit budget around actual tmux/control-mode behavior.
 - [ ] [#latefallbackloop] #agent-doc-bug: Late fallback patch writes keep firing after a cycle is already committed; logs show repeated late_fallback_patch_rejected reason=already_committed, ipc_write_consumed, commit_already_current, and one resume_commit_blocked_drift with an unresolved prompt-only tail. Stop fallback writers at terminal commit state or rebind them to the next cycle before accepting IPC patches.
 - [ ] [#clearstartingrace] #agent-doc-bug: Clear/restart commands can race starting owned panes; logs show session_clear_sent while generation 170 was still starting, followed by protected-input refusals, commits, and repeated starting_not_ready. Gate clear/restart on dispatch-ready or clean-exit prompt state and document-dirty state before sending literal Enter into the pane.
 - [ ] [#ownedreapbusy] #agent-doc-bug: Owned pane reap decisions are noisy and often keep panes alive from spinner tails like Working/escape-title fragments instead of a stable idle/busy signal. Normalize screen-tail sampling or prefer supervisor prompt state so route_owned_reap_decision does not preserve panes based on transient renderer text.
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
 - [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.
-- [ ] [#multiplexertrait] Evaluate Multiplexer trait abstraction over tmux to reduce coupling (785 tmux references across 43 files). Would allow future Zellij backend and make the tmux surface testable via mock backend. [recommended]
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->

@@ -35,7 +35,29 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #sops
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:09dae422 -->
+❯ do [#snav]. spec-test-build-install-commit-push
+### Re: #snav — gpt-5
+
+Implemented and committed the stale-instruction release regression for `tsift status --fix`.
+
+What changed:
+- Added a compiled CLI regression proving `tsift status --fix --json` rewrites a stale `<!-- tsift:code-navigation v=0.1.41 -->` marker to the installed binary version and reports `instructions.state=current`.
+- Updated `SPEC.md` and `VERSIONS.md` to document that release-bump regression.
+- Fixed the current red CI clippy failure in `src/log_digest.rs` by collapsing the guarded `file`/`path` match arm.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test --test exit_code status_fix_refreshes_stale_instructions_after_version_bump_in_json`
+- `make check`
+- `make ci-full`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.42`
+- Latest GitHub Actions CI before this work was red in the single `clippy + test` job on `src/log_digest.rs:649`; the local `make ci-full` run covers that failure path after the fix. This repo has no separate `tmux-test` workflow or `tmux-ci` target.
+
+Commits created locally:
+- `1240d83` in `src/tsift`: `test: cover status fix instruction refresh`
+- `b5faaf675` in the parent repo: `chore: bump tsift submodule`
+<!-- agent:boundary:aad532a1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +66,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -63,6 +84,7 @@ k
 - 2026-05-12 [#sprm] Tighten `tsift session-review --next-context` prompt-target extraction so frontmatter prompt presets, examples, archived/resolved prompts, and repeated historical directives do not appear as active prompt targets.
 - 2026-05-13 [#t275] [recommended] Prototype a tsift-local deterministic SimWorld for session/rewrite/status state-machine coverage before extracting any shared simulation crate.
 - 2026-05-13 [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
+- 2026-05-13 [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
 <!-- /agent:done -->
 
 ## Completed / Reaped

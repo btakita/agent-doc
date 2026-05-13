@@ -49,6 +49,7 @@ class PromptPanelTest {
 
     @Test
     fun `buildPromptControlsRow uses non wrapping horizontal layout and compact detail control`() {
+        val answers = mutableListOf<Int>()
         val controls = buildPromptControlsRow(
             options = listOf(
                 PromptOption(1, "Yes"),
@@ -56,13 +57,38 @@ class PromptPanelTest {
             ),
             buttonFont = Font(Font.SANS_SERIF, Font.PLAIN, 12),
             totalActive = 2,
-            onAnswer = {},
+            onAnswer = { answers.add(it) },
         )
 
         assertTrue(controls.layout is BoxLayout)
         val children = controls.components.toList()
         assertTrue(children.any { it is JButton && it.toolTipText == "[1] Yes" })
         assertTrue(children.any { it is JLabel && it.toolTipText?.contains("2 prompts pending") == true })
+
+        val yesButton = children.filterIsInstance<JButton>().first { it.toolTipText == "[1] Yes" }
+        yesButton.doClick()
+        assertEquals(listOf(1), answers)
+    }
+
+    @Test
+    fun `buildPromptControlsRow answers by one based option position not display index`() {
+        val answers = mutableListOf<Int>()
+        val controls = buildPromptControlsRow(
+            options = listOf(
+                PromptOption(4, "Allow once"),
+                PromptOption(7, "Reject"),
+            ),
+            buttonFont = Font(Font.SANS_SERIF, Font.PLAIN, 12),
+            totalActive = 1,
+            onAnswer = { answers.add(it) },
+        )
+
+        val rejectButton = controls.components
+            .filterIsInstance<JButton>()
+            .first { it.toolTipText == "[7] Reject" }
+        rejectButton.doClick()
+
+        assertEquals(listOf(2), answers)
     }
 
     @Test

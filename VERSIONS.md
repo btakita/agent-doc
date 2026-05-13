@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Editor prompt answers now use the `prompt --answer` positional contract.** JetBrains and VS Code prompt UIs accept flat `agent-doc prompt --all` entries with `selected`, keep the selected state in their prompt item model, and send the selected option's one-based position to `agent-doc prompt --answer` instead of forwarding the displayed TUI option number. Bumped the local-testing plugin builds to JetBrains `0.2.116` and VS Code `0.2.15`.
+
 - **OpenCode permission prompt answers now use the actual TUI selector state.** `agent-doc prompt --answer` now captures OpenCode panes with ANSI attributes before parsing, so it can read the highlighted `Allow once` / `Allow always` / `Reject` option instead of falling back to option 0. OpenCode automation now moves with the prompt footer's Tab/BackTab selector contract rather than arrow keys, matching the live failure evidence where arrows leaked into the prompt as literal `^[[C` / `^[[D` text.
 
 - **OpenCode permission prompts now preserve keyboard negotiation.** The OpenCode supervisor preserves OpenTUI's Kitty keyboard-mode sequences instead of stripping them with terminal query noise. The prompt-answer path relies on the prompt footer's Tab/BackTab selector contract and still accepts the `Allow always` follow-up confirmation prompt.

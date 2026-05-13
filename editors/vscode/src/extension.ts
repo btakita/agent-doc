@@ -19,6 +19,11 @@ import {
     buildPrimaryPopupMenuItems,
 } from './popupMenu';
 import {
+    buildPromptQuickPickItems,
+    normalizePromptEntries,
+    type PromptAllEntry,
+} from './promptPolling';
+import {
     analyzeTabSyncCommandResult,
     buildImmediateFocusCommandArgs,
     buildSyncCommandArgs,
@@ -944,24 +949,6 @@ function onTabChanged(): void {
 // Feature 5: Prompt Polling
 // ---------------------------------------------------------------------------
 
-interface PromptOption {
-    index: number;
-    label: string;
-}
-
-interface PromptInfo {
-    active: boolean;
-    question?: string;
-    options?: PromptOption[];
-    selected?: number;
-}
-
-interface PromptAllEntry {
-    session_id: string;
-    file: string;
-    info: PromptInfo;
-}
-
 let promptPollInterval: ReturnType<typeof setInterval> | undefined;
 let promptPollRoot: string | undefined;
 let currentPromptKey: string | undefined;
@@ -1017,20 +1004,7 @@ async function pollPrompts(root: string): Promise<void> {
         return;
     }
 
-    // Normalize entries to have an info field
-    const normalized: Array<{ file: string; key: string; info: PromptInfo }> = [];
-    for (const entry of entries) {
-        // The CLI may return the info fields at the top level or nested
-        const info: PromptInfo = entry.info ?? {
-            active: (entry as any).active ?? false,
-            question: (entry as any).question,
-            options: (entry as any).options,
-            selected: (entry as any).selected,
-        };
-        if (!info.active || !info.options || info.options.length === 0) continue;
-        const key = `${entry.file}:${info.question}`;
-        normalized.push({ file: entry.file, key, info });
-    }
+    const normalized = normalizePromptEntries(entries);
 
     // Clear answered key if it's no longer in the active set
     if (answeredPromptKey && !normalized.some(e => e.key === answeredPromptKey)) {
@@ -1063,10 +1037,7 @@ async function pollPrompts(root: string): Promise<void> {
     const question = `${prefix}${next.info.question || 'Permission required'}${suffix}`;
 
     const options = next.info.options!;
-    const items = options.map(opt => ({
-        label: `[${opt.index}] ${opt.label}`,
-        index: opt.index,
-    }));
+    const items = buildPromptQuickPickItems(options, next.info.selected);
 
     const selected = await vscode.window.showQuickPick(items, {
         title: 'Agent Doc Prompt',
@@ -1077,7 +1048,7 @@ async function pollPrompts(root: string): Promise<void> {
         answeredPromptKey = currentPromptKey;
         currentPromptKey = undefined;
         try {
-            await runCli(['prompt', '--answer', selected.index.toString(), next.file], root);
+            await runCli(['prompt', '--answer', selected.answerIndex.toString(), next.file], root);
         } catch (err: any) {
             showError(`prompt --answer failed: ${err.message}`);
         }

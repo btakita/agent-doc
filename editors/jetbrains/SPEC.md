@@ -93,6 +93,7 @@ Two strategies for detecting the file's position in the editor split:
 
 - `PluginLifecycleListener` handles `projectOpened`/`projectClosing`.
 - `disposeAll()` cleans up prompt panels and pollers on project close or plugin unload.
+- `PromptPoller` accepts the flat `agent-doc prompt --all` entry shape, including the optional 0-based `selected` field, and answers prompts with the one-based option position expected by `agent-doc prompt --answer`.
 
 ## Keybindings
 

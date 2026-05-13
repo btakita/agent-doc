@@ -442,7 +442,7 @@ data class PromptAllEntry(
 // JSON parsing for `agent-doc prompt --all` (JSON array)
 // ---------------------------------------------------------------------------
 
-private fun parsePromptAllJson(json: String): List<PromptAllEntry>? {
+internal fun parsePromptAllJson(json: String): List<PromptAllEntry>? {
     return try {
         val trimmed = json.trim()
         if (!trimmed.startsWith("[")) return null

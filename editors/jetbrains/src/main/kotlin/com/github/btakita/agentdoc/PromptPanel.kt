@@ -89,12 +89,13 @@ internal fun buildPromptControlsRow(
     for ((index, opt) in options.withIndex()) {
         val fullText = "[${opt.index}] ${opt.label}"
         val display = truncateSingleLineText(fullText, MAX_OPTION_LABEL_LEN)
+        val answerIndex = index + 1
         val btn = JButton(display.displayText).apply {
             isFocusable = false
             font = font.deriveFont(buttonFont.size2D)
             toolTipText = display.tooltipText ?: fullText
             margin = Insets(2, 8, 2, 8)
-            addActionListener { onAnswer(opt.index) }
+            addActionListener { onAnswer(answerIndex) }
         }
         controls.add(btn)
         if (index != options.lastIndex) {
@@ -215,9 +216,9 @@ object PromptPanel {
             override fun keyPressed(e: KeyEvent) {
                 if (e.keyChar in '1'..'9') {
                     val idx = e.keyChar - '0'
-                    val opt = options.find { it.index == idx }
+                    val opt = options.withIndex().find { it.value.index == idx }
                     if (opt != null) {
-                        onAnswer(opt.index)
+                        onAnswer(opt.index + 1)
                         dismiss(project)
                     }
                 }
@@ -266,9 +267,9 @@ object PromptPanel {
             )
             actionMap.put(actionKey, object : AbstractAction() {
                 override fun actionPerformed(e: java.awt.event.ActionEvent?) {
-                    val opt = options.find { it.index == idx }
+                    val opt = options.withIndex().find { it.value.index == idx }
                     if (opt != null) {
-                        onAnswer(opt.index)
+                        onAnswer(opt.index + 1)
                         dismiss(project)
                     }
                 }

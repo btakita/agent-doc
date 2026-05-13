@@ -42,10 +42,27 @@ Done. I changed `agent-doc` closeout diagnostics so an already-committed respons
 Updated the regression coverage plus closeout docs/spec/README/CLAUDE/VERSIONS. Code is committed in `src/agent-doc` as `7bde9db` and the parent gitlink is committed as `2d11a59`; per the session closeout ordering, I will push after this binary-owned document commit.
 
 Verification passed: latest GitHub Actions CI run `25773430221` is green and includes `make tmux-ci`; local `make check`, `cargo build`, `make install`, and `cargo run --quiet -- audit-docs` all passed.
-<!-- agent:boundary:d0de9321 -->
+❯ do [#opencodecapfail]. spec-test-build-install-commit-push
+### Re: #opencodecapfail — gpt-5
+
+Done. I implemented the OpenCode managed capability proof gate and marked `#opencodecapfail` complete.
+
+The fix is in `src/agent-doc` commit `ea697e50` and parent pointer commit `bd0a48d1b`. OpenCode managed sessions now require `opencode_capability_proof` for SSH-gated documents, run bounded `opencode run --format json` child probes for SSH/network checks, classify child `socket: Operation not permitted` as managed OpenCode SSH denial, and keep route/session-status proof checks harness-aware so OpenCode is not held to Codex writable-root contracts. I also updated README/SPEC/backend spec/VERSIONS for the new contract.
+
+Verification passed:
+- `make check`
+- `cargo build`
+- `make install`
+- `cargo run --quiet -- audit-docs`
+- `make tmux-ci` (`222 passed; 0 failed` ignored/live tmux tests)
+
+CI review: latest GitHub Actions `CI` run `25773430221` on `main` is green. Its log did not show the current tmux leg, so I used the local `make tmux-ci` result as the tmux evidence for this turn.
+<!-- agent:boundary:a329eac6 -->
 <!-- /agent:exchange -->
 ###
 <!--
+The Codex output is too verbose. See monsterrodholders.md
+---
 Move JB `Copy Session Diagnostics` outside the numeric shortcuts.
 ---
 I don't have a good track on the lifecycle logic that starts panes, kills panes, edge cases, etc.
@@ -79,7 +96,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
 <!-- /agent:backlog -->
 
@@ -204,4 +220,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#va0j] [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.113, then re-test Clear Session Context against the stale-busy Codex status-only pane.
 - 2026-05-12 [#ipc-timeout-dup] #agent-doc-bug: IPC timeout during finalize causes duplicate response patchback — binary commits to git, plugin independently applies fallback patch, document ends up with two copies of response. Dedupe in write --commit does not cleanly remove duplicate from HEAD. Plan: tasks/agent-doc/plan-ipc-timeout-duplicate-patchback.md
 - 2026-05-12 [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
+- 2026-05-12 [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 <!-- /agent:done -->

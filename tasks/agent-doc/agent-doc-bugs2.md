@@ -106,7 +106,45 @@ Commits:
 
 - `c2f0a0f6` in `src/agent-doc`: `fix: preserve opencode permission keys`
 - `ac1a8bd20` in the parent repo: `agent-doc: preserve opencode permission keys`
-<!-- agent:boundary:0dc243ff -->
+❯ Did you verify the fix works? Because it still doesn't work on my end.
+### Re: OpenCode prompt verification — gpt-5.5
+
+No. The prior fix was not verified end to end against the live permission prompt; it only proved the startup keyboard negotiation path. Your repro was valid.
+
+I found two concrete failures:
+
+- `agent-doc prompt --answer` claimed it parsed the highlighted OpenCode option from ANSI, but the capture path used plain `tmux capture-pane -p`, which strips ANSI attributes. In practice it often fell back to `selected=0`, so choosing an IDE option could move from the wrong starting point.
+- The live OpenCode 1.14.48 pane showed arrow keys leaking into the prompt as literal `^[[C` / `^[[D`. OpenCode's permission footer advertises Tab selection, so automating with Left/Right was the wrong contract for this prompt.
+
+Fixes made:
+
+- `src/agent-doc/src/sessions.rs`: added `capture_pane_with_ansi()` for prompt parsing.
+- `src/agent-doc/src/prompt.rs`: `prompt`, `prompt --all`, and `prompt --answer` now capture ANSI when parsing prompt state; OpenCode answers now move with `Tab` / `BTab` and still send the second Enter for `Allow always`.
+- `src/agent-doc/specs/07-core-commands.md` and `src/agent-doc/VERSIONS.md`: updated the OpenCode prompt-answer contract.
+
+Live verification:
+
+- Started OpenCode 1.14.48 in the currently registered Corky pane `%15`.
+- Triggered the same external-directory permission prompt for `/home/brian/work/btakita/corky/.github/workflows/*.yml`.
+- Ran the patched `prompt` path and it detected `selected: 0` with `Allow once`, `Allow always`, and `Reject`.
+- Ran patched `prompt --answer 2`; it selected `Allow always`, accepted the follow-up confirmation, and OpenCode proceeded to list the five workflow files. I interrupted the test run afterward and the pane returned to the shell prompt.
+
+Verification run:
+
+- `cargo test prompt::tests`
+- `cargo test supervisor::pty::tests`
+- `make check`
+- Latest GitHub `CI` run checked: `25773430221`, green on `main` at 2026-05-13T01:55:57Z.
+- `make tmux-ci`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits:
+
+- `20df1bf` in `src/agent-doc`: `fix: answer opencode prompts with tab selector`
+- `79bd81f45` in the parent repo: `agent-doc: answer opencode prompts with tab selector`
+<!-- agent:boundary:ce53addc -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -2,7 +2,7 @@
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
 agent_doc_format: template
 agent_doc_write: crdt
-agent: opencode
+agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -92,7 +92,19 @@ prompt_presets:
 Compacted content:
 - Archived 2 response topic(s): oauth callback URL decode; release + publish
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:a7468e12 -->
+❯ Review logs for corky issues. #next-steps
+### Re: Corky log review — gpt-5
+
+Reviewed the Corky session log, the compacted Corky archive, repo-local log files, user-level Corky cache/config locations, and the user systemd Corky timer/service journal.
+
+Findings:
+- I did not find an active Corky runtime log failure. The old `corky-send-kevin` user service/timer is inactive and has no journal entries since May 12, 2026.
+- The compacted release log shows `corky v0.28.2` was published to crates.io and `v0.28.1` should be treated as superseded.
+- The real unresolved release issue is PyPI: the wheel matrix passed, but publish failed with PyPI `invalid-publisher` for `repo:btakita/corky:environment:pypi`; PyPI still reports latest `corky` as `0.27.0`.
+- The current status block still says `crates.io publish — needs token refresh`, which is stale relative to the release log.
+
+Added the follow-up backlog in priority order. Top backlog item: `#pypi-trusted-publisher`.
+<!-- agent:boundary:5536695f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,6 +113,10 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi, rerun the PyPI workflow, and verify the PyPI latest version matches the released crate.
+- [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
+- [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
+- [ ] [#google-docs-sheets-integration] Add Google Docs/Sheets integration for Corky: required OAuth scopes, read/write Google Docs, read Google Sheets, docs, and tests.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped

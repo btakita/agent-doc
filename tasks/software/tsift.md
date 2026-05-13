@@ -76,17 +76,35 @@ Verification:
 - GitHub Actions CI run `25775922451` is green (`clippy + test`). This repo's CI workflow has no separate tmux-test job.
 
 I left unrelated dirty parent-repo entries untouched. The `src/tsift` submodule worktree itself is clean at the pushed commit.
-<!-- agent:boundary:e28c3652 -->
+❯ Please survey the logs to see the effectiveness of tsift. #next-steps
+❯ Please find bugs from the logs. #next-steps
+### Re: tsift log survey — gpt-5
+
+I surveyed the tsift session doc, related Codex/Claude transcripts, and `.agent-doc/logs/ops.log` using the installed `tsift 0.1.42` digest surfaces.
+
+Effectiveness signal: `tsift session-review tasks/software/tsift.md --json` found 12 matching sessions out of 3,826 considered, plus the related agent-doc logs. It produced useful rollups without replaying the full logs: 25,365 command groups, 97,281 file groups, 130,010 symbol groups, token/cached-input totals, restart/no-op closeout guardrails, and the biggest prompt turns. The key cost signal is strong: about 1.377B total tokens with 96.73% cached input, and a largest prompt turn of 1,443,819 tokens. `session-cost` on the agent-doc ops log also surfaced operational churn directly: `commit_already_current` appeared 4,095 times, max restart count was 9, and it recommended compacting/avoiding no-op reopen cycles.
+
+The log surfaces are useful, but the bug signals are noisy enough that the next work should focus on precision:
+
+- `session-review --next-context` reported successful filtered test summaries like `test result: ok. 0 passed; 0 failed...` as unresolved failures. That makes the failure list look worse than the actual session state and hides real failures such as assertions or nonzero exits.
+- Prompt-target extraction is too broad. The active target list includes frontmatter preset text, examples, and older resolved directives rather than just the live exchange tail/current unresolved prompts.
+- `log-digest` compacted the 99,637-line ops log into a small signal set, but it reported `file_ref_groups=0` and `no file anchors detected` even though the records contain structured `file=...` fields. That limits its usefulness for routing from a log signal back to the responsible document/session.
+- Local `tsift status --json` reports the installed binary is usable but the repo instructions are stale: Code Navigation found `0.1.41`, expected `0.1.42`. That should be covered by a release/status regression so the first command in future sessions does not immediately erode trust.
+
+I added those items to the backlog in priority order. Top backlog item: `#sflt`.
+<!-- agent:boundary:df460a68 -->
 <!-- /agent:exchange -->
 ###
 <!--
-Please survey the logs to see the effectiveness of tsift. #next-steps
-Please find bugs from the logs. #next-steps
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sflt] Fix session-review/session-digest failure classification so successful test summaries and generic instruction text like `failures:` are not reported as unresolved failures; preserve real failing assertions/exits with command and session anchors.
+- [ ] [#sprm] Tighten `tsift session-review --next-context` prompt-target extraction so frontmatter prompt presets, examples, archived/resolved prompts, and repeated historical directives do not appear as active prompt targets.
+- [ ] [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
+- [ ] [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

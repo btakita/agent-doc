@@ -35,7 +35,35 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): xctx
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:d6e7c6ad -->
+❯ do [#xcst]. spec-test-build-install-commit-push
+### Re: xcst — gpt-5
+
+Done.
+
+Implemented the `session-cost` restart-loop guardrail fix in `src/tsift`: `max_restart_count` is now contextual detail only and no longer emits `restart_loop` by itself when `fresh_restart`, `auto_trigger_timeout`, and `ctrl_d_restart_loop` churn counts are absent.
+
+Updated:
+- `src/session_cost.rs`: removed the `max_restart_count >= 2` standalone trigger and added a direct guardrail regression.
+- `tests/exit_code.rs`: added compiled CLI coverage for `agent-doc-log` input with only `mode=continue restart_count=...`, proving no `restart_loop` guardrail is emitted.
+- `SPEC.md`: documented that `max_restart_count` must not trigger restart-loop warnings by itself.
+- `VERSIONS.md`: added the unreleased changelog entry.
+
+Verification:
+- `cargo test derive_guardrails_ignores_restart_count_without_churn` passed.
+- `cargo test session_cost_does_not_warn_restart_loop_for_continue_restart_count` passed.
+- `make check` passed.
+- `cargo build` passed.
+- `cargo install --path .` passed and installed `tsift 0.1.42`.
+- `make ci-full` passed locally, including the ignored SimWorld corpus.
+- Installed-binary repro passed: continue-only restart-count logs report `restart_churn_groups:0`, `max_restart_count:3`, and no guardrails.
+
+CI:
+- Latest tsift GitHub Actions CI run for this push (`25820542857`) is red because the job was not started due to account billing/spend-limit blocking, not because tests failed. Local `make ci-full` covered the CI-owned ignored corpus.
+
+Commits pushed:
+- `btakita/tsift` `4b237ba fix: suppress false restart-loop guardrails`
+- `btakita/agent-loop` `c3d5fd544 chore: update tsift submodule`
+<!-- agent:boundary:e12bbff7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +72,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xcst] Fix session-cost/log guardrail wording for agent-doc logs so restart_loop warnings are only emitted when restart churn is actually present; ops.log currently reports fresh_restart=0 auto_trigger_timeout=0 ctrl_d_restart_loop=0 while still warning restart churn detected.
 - [ ] [#xlog] Teach tsift log-digest to classify agent-doc runtime/churn/failure events as signals; current tsift-v0.1.log digest reports signals:0 even though session-digest finds claude_exit, auto_trigger_timeout, fresh_restart, ctrl_d_restart_loop, and closeout churn.
 <!-- /agent:backlog -->
 
@@ -57,30 +84,5 @@ Compacted content:
 ## Completed / Reaped
 
 <!-- agent:done -->
-- 2026-05-09 [#ctxp] Add context-pack to the token-savings fixture/regression, including diff/test/log/next-context inputs and a fail-under threshold for its envelope preview.
-- 2026-05-10 [#real] Add a real-session token-savings benchmark from recent tsift/agent-doc transcripts, covering session-review and context-pack paths that dominate actual prompt volume.
-- 2026-05-10 [#budg] Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
-- 2026-05-12 [#686r] Add a DCI-style tsift benchmark: compare exact/chained rg, lexical BM25, and hybrid search on multi-hop code/repo tasks, tracking localization, tool calls, latency, and token budget.
-- 2026-05-12 [#s1k1] Add a composable search workflow surface or documented recipes that preserve result handles across search --exact, search, explain, summarize, and digest expansion steps.
-- 2026-05-12 [#v6y3] Add breadth/scale guards to search envelopes: high-hit warnings, corpus-size/tool-budget signals, and concrete next-narrowing commands before agents fan out too broadly.
-- 2026-05-12 [#sflt] Fix session-review/session-digest failure classification so successful test summaries and generic instruction text like `failures:` are not reported as unresolved failures; preserve real failing assertions/exits with command and session anchors.
-- 2026-05-12 [#sprm] Tighten `tsift session-review --next-context` prompt-target extraction so frontmatter prompt presets, examples, archived/resolved prompts, and repeated historical directives do not appear as active prompt targets.
-- 2026-05-13 [#t275] [recommended] Prototype a tsift-local deterministic SimWorld for session/rewrite/status state-machine coverage before extracting any shared simulation crate.
-- 2026-05-13 [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
-- 2026-05-13 [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
-- 2026-05-13 [#sctx] Fix tsift session-review / context-pack --next-context active-context scoping so prompt targets, files, and failures come from the current unresolved tail instead of historical assistant text, presets, examples, or unrelated matched sessions; regression should reject stale do-hash prompts, Re summaries, prompt-preset text, and bogus paths like /! from tasks/software/tsift.md review output.
-- 2026-05-13 [#sfail] Tighten tsift session-review failure extraction so it reports command/test/log failures with command and session anchors, not instruction text or source snippets like After finalize, panic snippets, or generic command exited with code 1; preserve real failing assertions and cargo exits separately.
-- 2026-05-13 [#stok] Audit Codex/Claude token accounting in tsift session-review and session-cost for cumulative-usage double counting and cross-session duplication; the 12-session tasks/software/tsift.md review reported about 1.4B prompt tokens and a 1.4M-token largest turn, which needs a deterministic fixture.
-- 2026-05-13 [#slock] Add deterministic lock-contention coverage for tsift index/search/status paths and recovery guidance; historical review surfaced 34 database file is locked failures while tsift locks can report no writer lock with live WAL/SHM sidecars, so snapshot fallback and diagnostics need regression coverage.
-- 2026-05-13 [#sfile] Filter empty or non-file file references from log-digest / session-digest; .agent-doc/logs/tsift-v0.1.log produced an empty path file group with 132 occurrences, degrading anchors and downstream next-context file lists.
-- 2026-05-13 [#fwin] Add a bounded source-file read/window command that returns line-range previews, stable handles, symbol/summary refs, and explicit expand commands so agents can inspect files incrementally instead of re-reading whole files.
-- 2026-05-13 [#frpt] Add session-review/session-cost repeated-file-read diagnostics that group file-read tool calls by path/range, estimate duplicate tokens, and emit concrete tsift follow-up commands instead of generic harness advice.
-- 2026-05-13 [#frwr] Teach tsift rewrite to intercept large ordinary source reads inside indexed repos and route them to the bounded source-read surface, while preserving small explicit windows and non-source files as passthrough.
-- 2026-05-13 [#ftok] Add a real-session token-savings fixture for repeated source-file reads, including full-file cat/bat, oversized sed/head/tail windows, and a fail-under threshold proving the bounded source-read workflow saves tokens without hiding required line anchors.
-- 2026-05-13 [#rgls] Fix tsift rewrite handling for file-listing commands such as rg --files and find: preserve listing semantics, multiple roots, and shell safety, or pass through with an explanatory no-rewrite result instead of rewriting rg --files src/tsift to exact text search.
-- 2026-05-13 [#sfpx] Add a deterministic session-digest/session-review regression for failure false positives from assistant progress or CI-status prose; the current rollout classified my assessment sentence and prior status updates mentioning failure/red/check as failure groups even though --next-context correctly reported zero unresolved failures.
-- 2026-05-13 [#fref] Tighten codex-jsonl file-reference extraction so conversational fragments and shell syntax are not reported as touched files; the current session-digest surfaced false paths like 2>/dev/null, agent-doc/tsift, digest/session, progress/CI-status, and version/preflight.
-- 2026-05-13 [#scst] Calibrate session-review/session-cost aggregate token reporting so cached multi-session totals are separated from per-session cost; current review reports 57,615,403 total tokens and largest turn 186,897 across 12 matched sessions, while the latest single-session cost is 518,391 total with largest turn 67,644.
-- 2026-05-13 [#rwno] Make tsift rewrite unsupported-command outcomes explicit: commands with shell redirection or find predicates currently exit 1 with no explanation, so rewrite should either pass through safely or emit a bounded no-rewrite reason for agents.
-- 2026-05-13 [#xctx] Fix session-review --next-context active-tail scoping after compaction/template boundaries: current tasks/software/tsift.md has a live user prompt, but next-context reports prompts:0 and carries historical files/failures from unrelated sessions.
+- 2026-05-13 [#xcst] Fix session-cost/log guardrail wording for agent-doc logs so restart_loop warnings are only emitted when restart churn is actually present; ops.log currently reports fresh_restart=0 auto_trigger_timeout=0 ctrl_d_restart_loop=0 while still warning restart churn detected.
 <!-- /agent:done -->

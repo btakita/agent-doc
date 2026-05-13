@@ -1275,7 +1275,7 @@ fn spawn_managed_capability_proof_thread(
                 &harness_binary,
             ) {
                 Ok(Some(event)) => {
-                    eprintln!("[start] managed {} capability proof: {}", harness_binary, event);
+                    surface_managed_capability_proof_status(&shared, &harness_binary, &event);
                     shared.set_capability_proof_gate(CapabilityProofGate::Proven, None);
                     log_event(&mut session_log, &event);
                 }
@@ -1299,17 +1299,59 @@ fn spawn_managed_capability_proof_thread(
                     );
                     log_event(
                         &mut session_log,
-                        &format!("{}_capability_proof status=failed error={detail:?}", harness_binary),
+                        &format!(
+                            "{}_capability_proof status=failed error={detail:?}",
+                            harness_binary
+                        ),
                     );
-                    eprintln!(
-                        "[start] managed {} capability proof failed; terminating unusable child session: {detail}",
-                        harness_binary
+                    surface_managed_capability_proof_status(
+                        &shared,
+                        &harness_binary,
+                        &format!(
+                            "{}_capability_proof status=failed error={detail:?}",
+                            harness_binary
+                        ),
                     );
                     shared.kill_child();
                 }
             }
         })
         .expect("spawn capability proof thread")
+}
+
+fn managed_capability_proof_status_message(harness_binary: &str, event: &str) -> String {
+    format!("[start] managed {harness_binary} capability proof: {event}")
+}
+
+fn display_managed_capability_proof_status(
+    tmux: &sessions::Tmux,
+    pane_id: &str,
+    harness_binary: &str,
+    event: &str,
+) -> Result<()> {
+    let message = managed_capability_proof_status_message(harness_binary, event);
+    tmux.raw_cmd(&["display-message", "-t", pane_id, "-d", "5000", &message])?;
+    Ok(())
+}
+
+fn surface_managed_capability_proof_status(
+    shared: &SupervisorShared,
+    harness_binary: &str,
+    event: &str,
+) {
+    let message = managed_capability_proof_status_message(harness_binary, event);
+    let Some(pane_id) = shared.inject_pane.as_deref() else {
+        eprintln!("{message}");
+        return;
+    };
+    let tmux = sessions::Tmux::default_server();
+    if let Err(err) = display_managed_capability_proof_status(&tmux, pane_id, harness_binary, event)
+    {
+        eprintln!(
+            "[start] warning: failed to surface managed {} capability proof in tmux status for pane {}: {}",
+            harness_binary, pane_id, err
+        );
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -4559,6 +4601,38 @@ Done.
     }
 
     #[test]
+    fn managed_capability_proof_status_message_names_harness() {
+        let message = managed_capability_proof_status_message(
+            "opencode",
+            "opencode_capability_proof status=proven network=proven",
+        );
+
+        assert_eq!(
+            message,
+            "[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn managed_capability_proof_status_uses_tmux_message_not_pane_output() {
+        let tmp = TempDir::new().unwrap();
+        let iso = IsolatedTmux::new("start-capability-proof-status");
+        let pane = iso.new_session("test", tmp.path()).unwrap();
+        let event = "opencode_capability_proof status=proven network=proven";
+
+        display_managed_capability_proof_status(&iso, &pane, "opencode", event)
+            .expect("proof status should be surfaced through tmux display-message");
+        std::thread::sleep(Duration::from_millis(150));
+
+        let captured = iso.capture_pane(&pane, Some(20)).unwrap();
+        assert!(
+            !captured.contains(event),
+            "tmux display-message must not write proof diagnostics into pane output: {captured}"
+        );
+    }
+
+    #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn dispatch_submit_text_to_tmux_uses_pane_submit_path() {
         let tmp = TempDir::new().unwrap();
@@ -4773,13 +4847,9 @@ Done.
     }
 
     #[test]
-    fn current_child_prompt_visible_accepts_opencode_status_chrome_after_proof() {
+    fn current_child_prompt_visible_accepts_opencode_status_chrome_without_proof_output() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = crate::harness::HarnessConfig::opencode();
-        record_recent_output(
-            &shared,
-            "opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:18812,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:18820\n".as_bytes(),
-        );
         record_recent_output(
             &shared,
             "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n".as_bytes(),

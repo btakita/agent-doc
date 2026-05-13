@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Managed capability proof results now use tmux status messages.** Successful and failed Codex/OpenCode/Claude managed proof diagnostics still go to the session log, but `start` now surfaces the user-visible `[start] managed ... capability proof` line with `tmux display-message` targeted at the owned pane instead of writing it into the agent pane transcript. This keeps proof diagnostics from interfering with TUI prompt detection or the next agent input.
+
 - **OpenCode proof output no longer strands startup in `starting`.** OpenCode prompt readiness now ignores supervisor capability-proof diagnostics and treats an otherwise chrome-only `context ... % used` footer as an idle composer. That lets route/start promote a proven OpenCode actor to `ready` and dispatch the trigger instead of timing out with `route_authoritative_actor_starting_not_ready` after `opencode_capability_proof status=proven`.
 
 - **Strict closeout now reports slow commit phases and fails explicitly on stale parent gitlinks.** `finalize` / strict `write --commit` record a `closeout_latency` diagnostic when response durability crosses the closeout budget, with per-phase timings for commit retries, cycle-state checks, session-check, and cleanup. Submodule-hosted documents now fail closed after the bounded parent-pointer retry if the parent `HEAD:<submodule>` still differs from the submodule `HEAD`, naming `agent-doc commit <FILE>` as the idempotent recovery. This closes `#rspcmtdelay` in `tasks/agent-doc/agent-doc-bugs2.md`.

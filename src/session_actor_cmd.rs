@@ -1357,12 +1357,12 @@ mod tests {
     }
 
     #[test]
-    fn live_pane_prompt_ready_accepts_opencode_status_chrome_after_proof() {
+    fn live_pane_prompt_ready_accepts_opencode_status_chrome_without_proof_output() {
         let harness = crate::harness::HarnessConfig::opencode();
 
         assert!(live_pane_prompt_ready(
             &harness,
-            "[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:18812,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:18820\nzai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n"
+            "zai/glm-5 · ~/work/btakita/agent-loop · context 0% used\n"
         ));
     }
 

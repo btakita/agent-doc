@@ -8085,15 +8085,14 @@ Starting codex...
     }
 
     #[test]
-    fn ready_prompt_candidate_accepts_opencode_status_after_capability_proof() {
+    fn ready_prompt_candidate_accepts_opencode_status_without_proof_output() {
         let harness = HarnessConfig::opencode();
         let content = "\
-[start] managed opencode capability proof: opencode_capability_proof status=proven network=proven network_probe=child_dns_https ssh_targets=0 writable_roots=0 timings_ms=network_host_dns:8,network_child:18812,ssh:not_required,writable_launcher:not_required,writable_child:not_required,total:18820
 zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 ";
         assert!(
             ready_prompt_candidate(content, &harness).is_some(),
-            "OpenCode can render an idle composer as status chrome after proof output"
+            "OpenCode can render an idle composer as status chrome with proof output kept out of the pane"
         );
     }
 

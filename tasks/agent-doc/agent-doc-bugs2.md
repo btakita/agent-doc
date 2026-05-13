@@ -29,64 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-222126.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-225324.md`*
 
 Compacted content:
-- Archived 1 response topic(s): tmuxcontrolmode
+- Archived 2 response topic(s): tmuxhybridpty; tmuxhybridpty
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Re [#tmuxhybridpty]: Can we avoid the Kitty vs non-Kitty protocol mapping layer? Does [#tmuxcontrolmode] allow for send-keys to bypass any translation layers we have that cause corrupted inputs?
-❯ Is [#ownedpty] still relevant given we are implementing[#tmuxcontrolmode] and [#tmuxhybridpty]?
-### Re: tmuxhybridpty — gpt-5
-
-Short answer: control mode helps a lot, but it does not by itself avoid the Kitty vs non-Kitty input mapping layer.
-
-`#tmuxcontrolmode` gives us an event-driven tmux control channel: pane output events, pane death/exit notifications, and a long-lived way to send tmux commands without repeatedly polling `capture-pane`. That is useful for lifecycle and observation. But when the command being sent is still `send-keys`, tmux remains the input synthesizer. The bytes that reach the child process are still shaped by tmux's key model, the pane's terminal modes, and the child TUI's keyboard protocol expectations.
-
-That means control mode can replace some fragile `capture-pane` polling and can make routing/state transitions easier to prove, but it does not bypass the translation layer that caused the OpenCode submit corruption. The current code already shows this boundary: `tmux-router::Tmux::send_keys()` sends literal text, sleeps, then sends named `Enter`, while OpenCode needs a separate `send_keys_with_kitty_return()` path that writes the Kitty Return sequence. Agent-doc mirrors that in `sessions.rs` for managed OpenCode panes. Those branches would still exist if the command was delivered through a control-mode client, because the target operation would still be tmux `send-keys`.
-
-So the right shape is:
-
-- `#tmuxcontrolmode`: use for tmux lifecycle/events and to avoid stale snapshot polling.
-- `pipe-pane` or control-mode `%output`: use for streaming output where possible, so we stop depending on lossy `capture-pane` views for live state.
-- Small harness input adapter: keep only the minimum mapping needed for tmux-backed input, ideally centralized around submit/navigation primitives rather than scattered conditionals.
-- `#ownedpty`: keep as the escape hatch for byte-exact managed harness input, not as a blanket replacement for tmux layout management.
-
-`#ownedpty` is still relevant, but narrower than the backlog wording can imply. It is not needed to replace all tmux usage. Tmux is still valuable for panes, layout, attach/detach, stash behavior, and operator-visible sessions. Owned PTY matters when the requirement is: agent-doc must inject or mediate input as the actual terminal endpoint, without asking tmux to reinterpret a key. That is the only path that can truly eliminate the Kitty/non-Kitty `send-keys` distinction for managed panes, because agent-doc can negotiate or emulate the terminal protocol and write the exact byte stream to the child PTY.
-
-I would treat `#tmuxhybridpty` as the umbrella architecture and `#ownedpty` as its phase-3 backend for managed panes where input correctness is still not provable through tmux. We should not delete `#ownedpty`; we should keep it scoped to managed Claude/OpenCode/Codex panes and avoid using it as a general-purpose tmux replacement.
-❯ do [#tmuxhybridpty]. spec-test-build-install-commit-push
-### Re: tmuxhybridpty — gpt-5
-
-Implemented `#tmuxhybridpty` as the shared hybrid policy layer instead of replacing tmux wholesale.
-
-What landed:
-
-- `tmux-router` now has `src/hybrid.rs` with explicit lifecycle/output/input policy:
-  - lifecycle/events: control mode
-  - live output stream: `pipe-pane`
-  - tmux-backed submit fallback: normal Enter or OpenCode Kitty Return
-  - owned PTY: scoped to managed Claude/OpenCode input where byte-exact delivery matters
-- `tmux-router` exposes `strategy_for_harness`, `submit_text_for_harness`, and an RAII `TmuxPipePane` guard for `pipe-pane` file streaming.
-- `agent-doc` now delegates harness-aware tmux submission through `tmux-router::submit_text_for_harness`, removing the duplicated OpenCode Kitty-return implementation from `sessions.rs`.
-- Specs now document the hybrid architecture boundary in the session tmux commands, routing, supervisor, and tmux-router concepts docs.
-- Cleaned the `tmux-router` clippy blockers in `sync.rs` so the crate can pass `cargo clippy -- -D warnings` on this toolchain.
-
-Verification:
-
-- `make check` from repo root: passed.
-- `make tmux-ci` from `src/agent-doc`: first run hit one live tmux flake in `fresh_restart_retry_preserves_absolute_reopen_path_for_relative_docs`; the isolated rerun passed, and a full second `make tmux-ci` passed with 226 ignored live tests.
-- `cargo test` from `src/tmux-router`: passed, including the new hybrid policy and `pipe-pane` stream tests.
-- `cargo clippy -- -D warnings` from `src/tmux-router`: passed.
-- Focused live tests passed for control-mode output, `pipe-pane` streaming, and OpenCode Kitty-return submission.
-- Latest GitHub `Agent Doc` run on `main` was red for both `check` and `tmux-ci`, but GitHub returned no retained step logs; local tmux evidence above is green.
-- `make install` from `src/agent-doc`: installed the local `agent-doc` binary and `libagent_doc-0.33.16.so`.
-
-Committed and pushed:
-
-- `tmux-router` `cc4ebfb` (`main`): `feat: add hybrid pane policy`
-- `agent-doc` `13e49ce` (`20260422/codex-agent-backend`): `feat: centralize hybrid tmux submit policy`
-- root `agent-loop` `9a57813`: `feat: update hybrid tmux architecture`
-<!-- agent:boundary:be1468cb -->
+<!-- agent:boundary:34e2ad7a -->
 <!-- /agent:exchange -->
 ###
 <!--

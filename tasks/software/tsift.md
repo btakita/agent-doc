@@ -30,45 +30,18 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-162600.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-163528.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #sfpx failure meta prose
+- Archived 1 response topic(s): #fref
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#fref]. spec-test-build-install-commit-push
-### Re: #fref — gpt-5
-Implemented `#fref` in `src/tsift`.
-
-What changed:
-- Tightened `session-digest` file-reference extraction so Codex JSONL conversational fragments and shell syntax are not promoted to touched files.
-- Rejected shell redirection fragments such as `2>/dev/null`, existing directories, and slash-separated labels without a real file, known filename, or supported extension.
-- Added direct and compiled-CLI regressions for the exact false positives: `2>/dev/null`, `agent-doc/tsift`, `digest/session`, `progress/CI-status`, and `version/preflight`.
-- Updated the session-review stale `/!` expectation to preserve the corrected behavior.
-- Updated `SPEC.md` and `VERSIONS.md`.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test session_digest --quiet`
-- `cargo test session_review_next_context_prefers_live_exchange_prompt_targets --quiet`
-- `make check` passed: clippy plus all non-ignored tests.
-- `cargo build`
-- `cargo install --path .`
-- `tsift --version` reports `tsift 0.1.42`.
-
-Commits pushed:
-- `btakita/tsift` `main`: `75fe503` `fix: filter codex session file refs`
-- `btakita/agent-loop` `main`: `24eb2d719` `chore: update tsift submodule`
-
-CI status at closeout:
-- `btakita/tsift` CI for `fix: filter codex session file refs` is `in_progress`.
-- `btakita/agent-loop` Agent Doc workflow for `chore: update tsift submodule` is `queued`.
-<!-- agent:boundary:26f90c6d -->
+<!-- agent:boundary:7a3a8422 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-## Pending / Not Built
+## Backlog
 
 <!-- agent:backlog -->
 - [ ] [#scst] Calibrate session-review/session-cost aggregate token reporting so cached multi-session totals are separated from per-session cost; current review reports 57,615,403 total tokens and largest turn 186,897 across 12 matched sessions, while the latest single-session cost is 518,391 total with largest turn 67,644.

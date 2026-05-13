@@ -51,18 +51,14 @@ Clear Session Context is blocked for tasks/agent-doc/agent-doc-bugs2.md. Pane %1
 - `specs/07-session-tmux-commands.md` — documented the harness inference rule
 
 **Verification:** 2592 tests pass. Pre-existing `codex_bare_run_inside_owning_pane` failure is unrelated. Built, installed, committed, pushed.
-<!-- agent:boundary:e7f79da6 -->
-<!-- /agent:exchange -->
-###
-<!--
-agent-doc running opencode still has input issues with the prompt mode...caused by the supervisor:
-- Enter
-- All arrow keys
-- Selecting and submitting prompts
+❯ agent-doc running opencode still has input issues with the prompt mode...caused by the supervisor:
+❯ - Enter
+❯ - All arrow keys
+❯ - Selecting and submitting prompts
 
-Please add ample logging and hook detection to debug the issue. These issues keep on reoccurring and take many turns to fix. The majority of my development on agent-doc is fixing issues between agent-doc and tmux. The issue seems architectural.
+❯ Please add ample logging and hook detection to debug the issue. These issues keep on reoccurring and take many turns to fix. The majority of my development on agent-doc is fixing issues between agent-doc and tmux. The issue seems architectural.
 
-Why is the test suite passing yet the product has critical regressions over and over and over and over and over again?
+❯ Why is the test suite passing yet the product has critical regressions over and over and over and over and over again?
 
 Is tmux itself causing complications with the inputs? Is there a better tiled terminal emulator than tmux that has an api?
 
@@ -71,7 +67,60 @@ Would a Rust port of https://github.com/tmux-python/libtmux help with the issues
 Or is this an issue with the supervisor?
 
 #next-steps
----
+### Re: OpenCode input issues & tmux architecture — opus-4-6
+
+#### The input problem
+
+The supervisor has three separate input paths for OpenCode, each with its own failure modes:
+
+1. **Stdin forwarding** (`start.rs`) — supervisor captures raw stdin bytes and forwards them to the PTY. It intercepts arrow keys during permission prompts and translates them to Tab/BackTab. If `opencode_permission_prompt_active()` misdetects state, normal arrow keys get swallowed or mistranslated.
+
+2. **Send-keys dispatch** (`sessions.rs`, `tmux.rs`) — text submission uses `send-keys -l <text>` + 50ms delay + Kitty Return (`\x1b[13u`). The delay is a race against OpenCode's composer. Too short = dropped submit. Too long = visible lag.
+
+3. **Kitty keyboard protocol** (`supervisor/pty.rs`) — OpenCode's TUI depends on Kitty keyboard protocol sequences. The PTY filter has a `preserve_kitty_keyboard` flag that must be true for OpenCode. If this flag is wrong, or if the filter strips/mangles sequences, all special keys break.
+
+Each path has per-harness branching. When one of these three is slightly off, you get exactly the symptoms you described: Enter doesn't submit, arrows don't navigate, prompts can't be selected.
+
+#### Why the test suite passes while the product breaks
+
+The tests verify logic, not I/O. SimWorld tests mock tmux's response surface — they call functions like `translate_opencode_permission_arrow_keys()` with known byte sequences and assert the output. What they don't test:
+
+- **Actual tmux `send-keys` timing** — the 50ms delay is a heuristic. Real terminal I/O is nondeterministic.
+- **PTY filter state machines under real traffic** — the Kitty keyboard filter sees synthetic sequences in tests, never real terminal negotiation.
+- **Permission prompt detection against live OpenCode output** — the regex/heuristic matches test fixtures, not the evolving OpenCode TUI.
+
+This is the classic mock-prod divergence: the test suite validates the model, but the model doesn't capture the actual tmux IPC surface. Every OpenCode TUI update or tmux version change can shift the timing or output patterns enough to break detection without touching any tested code path.
+
+#### Is tmux the problem?
+
+Partly. tmux's `send-keys` is fundamentally fire-and-forget — there's no acknowledgment that the target pane received or processed the input. The 50ms delay between text and submit is a best-effort workaround for this. tmux also interposes its own input processing layer between the supervisor and the child process, adding another state machine that can eat or reinterpret key sequences.
+
+That said, **every terminal multiplexer has this problem**. Zellij has a similar `write-chars` command with no ack. Wezterm's mux doesn't expose send-keys at all. The Kitty terminal has direct keyboard protocol support but isn't a multiplexer.
+
+The better framing: tmux is the *only* multiplexer with a rich enough CLI API to build this on. The issue isn't tmux per se — it's that **programmatic input injection into terminal applications is inherently unreliable** regardless of multiplexer.
+
+#### Would a Rust port of libtmux help?
+
+No. libtmux is a Python wrapper around `tmux` CLI commands — it shells out to `tmux send-keys`, `tmux list-panes`, etc. A Rust port would be `tmux-router` (which you already have). The limitation is tmux's CLI surface itself, not the language binding.
+
+#### Is this the supervisor's fault?
+
+The supervisor adds necessary complexity (harness detection, permission prompt interception, Kitty protocol filtering) but each layer is a new place for state to desync. The root tension:
+
+- OpenCode needs Kitty keyboard protocol → supervisor must preserve those sequences
+- Permission prompts need arrow→Tab translation → supervisor must detect prompt state
+- Submission needs Kitty Return → supervisor must know which harness is running
+- All of this runs through tmux's fire-and-forget `send-keys`
+
+The supervisor is doing the right things, but **the detection heuristics are fragile** because they pattern-match against terminal output that changes with every harness update.
+
+#### Next steps
+
+The highest-leverage fix is adding structured diagnostic logging across all three input paths so that the next regression can be diagnosed from logs in one turn instead of many. Second priority is real tmux integration tests that catch the mock-prod gap. I've added both to the backlog along with a recommended longer-term Multiplexer trait evaluation.
+<!-- agent:boundary:089d0544 -->
+<!-- /agent:exchange -->
+###
+<!--
 Autosync on editor file change + `Sync Tmux Layout` lands on a 1 tmux pane and 3 tmux pane layout with 2 editor panes.
 spec-test-build-install-commit-push
 ---
@@ -145,6 +194,9 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
+- [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.
+- [ ] [#multiplexertrait] Evaluate Multiplexer trait abstraction over tmux to reduce coupling (785 tmux references across 43 files). Would allow future Zellij backend and make the tmux surface testable via mock backend. [recommended]
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->

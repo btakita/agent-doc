@@ -294,6 +294,25 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `session status exposes projection and live pane evidence for stale busy diagnosis`() {
+        val output = """
+            document: /repo/tasks/root.md
+            actor: generation=41 pane=%2 window=@1 state=busy
+            live_pane: state=alive-idle pane=%2 source=authoritative_actor current_command=agent-doc prompt_ready=true tail=>
+            supervisor: health=healthy state=healthy actor_state=busy restart_count=0 socket=/tmp/sup.sock
+            controller_lease: generation=41 pid=100 runtime_state=busy heartbeat=2026-05-12T00:00:00Z socket=/tmp/sup.sock
+        """.trimIndent()
+
+        val message = TerminalUtil.sessionStatusSuccessMessage("tasks/root.md", output)
+
+        assertEquals(output, message)
+        assertTrue(message.contains("actor:"))
+        assertTrue(message.contains("live_pane: state=alive-idle"))
+        assertTrue(message.contains("supervisor:"))
+        assertTrue(message.contains("controller_lease:"))
+    }
+
+    @Test
     fun `restart supervisor uses explicit supervisor session command`() {
         assertEquals(
             listOf(

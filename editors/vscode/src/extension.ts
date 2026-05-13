@@ -8,10 +8,13 @@ import { consumeClaimedPatch, isPatchAlreadyApplied } from './patchGuard';
 import { isPureRepositionSignal } from './patchPlan';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
+    buildBusySessionClearBlockedMessage,
     buildRouteFailurePresentation,
     buildSessionCommandArgs,
     buildSessionStatusPresentation,
     buildSessionSuccessHint,
+    parseBusySessionClearRefusal,
+    sessionStatusShowsIdleDirectPane,
     type SessionCommandName,
 } from './sessionUi';
 import {
@@ -558,6 +561,7 @@ async function runSessionCommandForActiveFile(
     command: SessionCommandName,
     onSuccess: (output: string, relativePath: string) => void,
     onErrorLabel: string,
+    onFailure?: (errorMessage: string, relativePath: string, cwd: string) => Promise<void> | void,
 ): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return;
@@ -568,12 +572,20 @@ async function runSessionCommandForActiveFile(
         return;
     }
 
+    let rel = '';
+    let cwd = root;
     try {
         await editor.document.save();
-        const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
+        const resolved = resolveProject(root, editor.document.uri.fsPath);
+        cwd = resolved.cwd;
+        rel = resolved.relativePath;
         const output = await runCli(buildSessionCommandArgs(command, rel), cwd);
         onSuccess(output, rel);
     } catch (err: any) {
+        if (onFailure) {
+            await onFailure(err.message, rel, cwd);
+            return;
+        }
         showError(`${onErrorLabel}: ${err.message}`);
     }
 }
@@ -669,7 +681,58 @@ async function clearSessionContextAction(): Promise<void> {
             showHint(buildSessionSuccessHint('clear', rel, output));
         },
         'session clear failed',
+        async (errorMessage, rel, cwd) => {
+            const refusal = parseBusySessionClearRefusal(errorMessage);
+            if (!refusal) {
+                showError(`session clear failed: ${errorMessage}`);
+                return;
+            }
+            const action = await vscode.window.showWarningMessage(
+                buildBusySessionClearBlockedMessage(rel, refusal),
+                { modal: false },
+                'Refresh and retry',
+                'Interrupt and clear',
+                'Show status',
+                'Copy details',
+            );
+            if (action === 'Refresh and retry') {
+                await refreshAndRetryClearSessionContext(cwd, rel);
+            } else if (action === 'Interrupt and clear') {
+                await interruptAndClearSessionContext(cwd, rel);
+            } else if (action === 'Show status') {
+                await showSessionStatusFor(cwd, rel);
+            } else if (action === 'Copy details') {
+                await vscode.env.clipboard.writeText(errorMessage);
+                showHint(`Copied busy session details for ${rel}`);
+            }
+        },
     );
+}
+
+async function showSessionStatusFor(cwd: string, rel: string): Promise<string> {
+    const output = await runCli(buildSessionCommandArgs('status', rel), cwd);
+    const presentation = buildSessionStatusPresentation(rel, output);
+    showSessionOutput(presentation.title, presentation.body);
+    showHint(presentation.hint);
+    return output;
+}
+
+async function refreshAndRetryClearSessionContext(cwd: string, rel: string): Promise<void> {
+    const output = await showSessionStatusFor(cwd, rel);
+    if (!sessionStatusShowsIdleDirectPane(output)) return;
+    const clearOutput = await runCli(buildSessionCommandArgs('clear', rel), cwd);
+    showHint(buildSessionSuccessHint('clear', rel, clearOutput));
+}
+
+async function interruptAndClearSessionContext(cwd: string, rel: string): Promise<void> {
+    const decision = await vscode.window.showWarningMessage(
+        'Interrupt the running agent-doc turn and clear its session context? Unsaved work in the terminal session may be discarded.',
+        { modal: true },
+        'Interrupt and clear',
+    );
+    if (decision !== 'Interrupt and clear') return;
+    const output = await runCli(buildSessionCommandArgs('interrupt-clear', rel), cwd);
+    showHint(output || `Interrupted and cleared session context for ${rel}`);
 }
 
 async function copySessionDiagnosticsAction(): Promise<void> {

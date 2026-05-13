@@ -34,18 +34,47 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 3 response topic(s): opencode prompt plugins; editor prompt cwd and OpenCode prompt tests; incorrect JB user prompts
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:0367cf1e -->
-<!-- /agent:exchange -->
-###
-<!--
-The arrow keys with opencode still corrupts user arrow keys when the permissions dialog is surfaced. The arrow keys work on the initial prompt. We have used several turns where you reported success in error. Please actually test a running opencode instance to verify.
+❯ The arrow keys with opencode still corrupts user arrow keys when the permissions dialog is surfaced. The arrow keys work on the initial prompt. We have used several turns where you reported success in error. Please actually test a running opencode instance to verify.
 ```
   ┃                                                                                                                       ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
   ┃                                                                                                                                                                                                                                             ^[[C^[[C^[[D^[[D^[[A^[[A^[[B^[[B	
 ```
-spec-test-build-install-commit-push
----
+❯ spec-test-build-install-commit-push
+### Re: OpenCode permission arrows — gpt-5
+Fixed the managed OpenCode permission-dialog arrow leak.
+
+What changed:
+- `src/agent-doc/src/start.rs` now detects when the managed supervisor's recent child output is the OpenCode horizontal permission prompt (`Allow once` / `Allow always` / `Reject`). In that narrow state only, legacy arrow escape input is translated before forwarding to OpenCode: right/down become Tab, left/up become BackTab. Normal OpenCode composer arrow editing is left unchanged.
+- Added regressions for the translation and for the gating that keeps non-permission prompts and non-OpenCode harnesses untouched.
+- Updated `src/agent-doc/SPEC.md`, `src/agent-doc/specs/supervisor.md`, and `src/agent-doc/VERSIONS.md` with the new supervisor stdin contract.
+
+Live verification:
+- Started a real OpenCode 1.14.48 TUI in tmux with `permission.bash=ask` and drove it to the actual `Permission required` dialog for `$ pwd`.
+- Sent the reported arrow escape shape and Tab/BackTab selector keys while the dialog was visible; the pane stayed clean with no literal `^[[C` / `^[[D` text.
+- Also ran the existing ignored live tmux regression `answer_opencode_prompt_sends_tab_not_arrow_escape`.
+
+Verification completed:
+- `cargo fmt`
+- `cargo test opencode_permission_prompt`
+- `cargo test`
+- `cargo build`
+- `make check`
+- `cargo test answer_opencode_prompt_sends_tab_not_arrow_escape -- --ignored`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest GitHub `CI` run inspected: `25773430221`, success on `main`.
+
+Commits pushed:
+- `src/agent-doc`: `5d2b958bd` (`fix: translate OpenCode permission arrows`) pushed to `origin/20260422/codex-agent-backend`.
+- parent repo: `0059780ec` (`agent-doc: update OpenCode permission arrows`) pushed to `origin/main`.
+<!-- agent:boundary:24d22b7a -->
+<!-- /agent:exchange -->
+###
+<!--
 The agent:done tag should support an attribute to link to a sepate "done" file (*.done.md) so the document does not become bloated. Plan so we agree on the attribute name.
+---
+`--pending-only` should be renamed to `--backlog-only`.
+spec-test-build-install-commit-push
 ---
 Please ensure the JB opencode fixes are propagated to the VSCode plugin. Ensure the specs are updated for all editor plugins. Should we implement in the ffi plugin?
 #next-steps

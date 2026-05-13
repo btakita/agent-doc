@@ -35,7 +35,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): scst
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:7fa94ca9 -->
+❯ do [#rwno]. spec-test-build-install-commit-push
+### Re: rwno — gpt-5
+
+Done. `tsift rewrite` no-rewrite outcomes are now explicit without changing the rewrite protocol's stdout contract.
+
+What changed:
+- `tsift rewrite` still exits `1` with empty stdout when no rewrite exists, so hook callers can continue treating it as pass-through.
+- The CLI now writes a bounded stderr reason for no-rewrite exits, with specific messages for shell metacharacters/redirection and file-listing commands such as `find`, `rg --files`, and `rg --type-list`.
+- `tsift rewrite --run` keeps failing closed for no-rewrite commands and now explains that `--run` only executes rewritten commands.
+- `SPEC.md` documents the stdout/stderr/exit-code behavior.
+- Regression coverage now checks generic no-rewrite, `rg --files`, `find`, and redirection diagnostics.
+- I also fixed the deterministic `session_review_separates_aggregate_and_latest_session_cost` fixture ordering that full verification exposed.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test rewrite_`
+- `cargo test --test exit_code session_review_separates_aggregate_and_latest_session_cost`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- Installed binary reports `tsift 0.1.42`
+- Latest GitHub Actions CI run checked: `25816043148`, conclusion `success`, job `clippy + test` success. This repo has no `tmux-ci` or `tmux-test` target/workflow entry to inspect.
+
+Commits pushed:
+- `btakita/tsift@5ebedbe` - `fix: explain tsift rewrite passthroughs`
+- `btakita/agent-loop@4fab24c2c` - `chore: update tsift submodule`
+<!-- agent:boundary:8fae8674 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +70,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#rwno] Make tsift rewrite unsupported-command outcomes explicit: commands with shell redirection or find predicates currently exit 1 with no explanation, so rewrite should either pass through safely or emit a bounded no-rewrite reason for agents.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -56,6 +81,9 @@ Compacted content:
 ## Completed / Reaped
 
 <!-- agent:done -->
+- 2026-05-09 [#ctxp] Add context-pack to the token-savings fixture/regression, including diff/test/log/next-context inputs and a fail-under threshold for its envelope preview.
+- 2026-05-10 [#real] Add a real-session token-savings benchmark from recent tsift/agent-doc transcripts, covering session-review and context-pack paths that dominate actual prompt volume.
+- 2026-05-10 [#budg] Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
 - 2026-05-12 [#686r] Add a DCI-style tsift benchmark: compare exact/chained rg, lexical BM25, and hybrid search on multi-hop code/repo tasks, tracking localization, tool calls, latency, and token budget.
 - 2026-05-12 [#s1k1] Add a composable search workflow surface or documented recipes that preserve result handles across search --exact, search, explain, summarize, and digest expansion steps.
 - 2026-05-12 [#v6y3] Add breadth/scale guards to search envelopes: high-hit warnings, corpus-size/tool-budget signals, and concrete next-narrowing commands before agents fan out too broadly.
@@ -77,15 +105,5 @@ Compacted content:
 - 2026-05-13 [#sfpx] Add a deterministic session-digest/session-review regression for failure false positives from assistant progress or CI-status prose; the current rollout classified my assessment sentence and prior status updates mentioning failure/red/check as failure groups even though --next-context correctly reported zero unresolved failures.
 - 2026-05-13 [#fref] Tighten codex-jsonl file-reference extraction so conversational fragments and shell syntax are not reported as touched files; the current session-digest surfaced false paths like 2>/dev/null, agent-doc/tsift, digest/session, progress/CI-status, and version/preflight.
 - 2026-05-13 [#scst] Calibrate session-review/session-cost aggregate token reporting so cached multi-session totals are separated from per-session cost; current review reports 57,615,403 total tokens and largest turn 186,897 across 12 matched sessions, while the latest single-session cost is 518,391 total with largest turn 67,644.
+- 2026-05-13 [#rwno] Make tsift rewrite unsupported-command outcomes explicit: commands with shell redirection or find predicates currently exit 1 with no explanation, so rewrite should either pass through safely or emit a bounded no-rewrite reason for agents.
 <!-- /agent:done -->
-
-## Completed / Reaped
-
-<!-- agent:pending-done -->
-- 2026-05-09 [#ctxp] Add context-pack to the token-savings fixture/regression, including diff/test/log/next-context inputs and a fail-under threshold for its envelope preview.
-- 2026-05-10 [#real] Add a real-session token-savings benchmark from recent tsift/agent-doc transcripts, covering session-review and context-pack paths that dominate actual prompt volume.
-- 2026-05-10 [#budg] Tune the response-budget presets and auto caps against measured token-savings data so envelope previews stay compact without hiding required follow-up commands.
-<!-- /agent:pending-done -->
-
-<!--
--->

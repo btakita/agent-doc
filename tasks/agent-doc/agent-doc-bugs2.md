@@ -34,9 +34,24 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 5 response topic(s): JB Clear Session Context harness mismatch; OpenCode input issues & tmux architecture; non-Kitty terminal issues; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-- Trailing prompt/context: Let's explore Option 2. Would ratatui allow embedding Claude, Codex, Opencode sessions in separate panes?
-Let's explore Option 2. Would ratatui allow embedding Claude, Codex, Opencode sessions in separate panes?
-<!-- agent:boundary:6a5ddfd8 -->
+❯ - Trailing prompt/context: Let's explore Option 2. Would ratatui allow embedding Claude, Codex, Opencode sessions in separate panes?
+❯ Let's explore Option 2. Would ratatui allow embedding Claude, Codex, Opencode sessions in separate panes?
+### Re: ratatui pane embedding for harness sessions — opus-4-6
+
+Yes, but with an important distinction: ratatui renders *your own* TUI widgets, it doesn't embed arbitrary terminal applications inside its layout. To host Claude/Codex/OpenCode as live panes, you need **ratatui for layout + a terminal emulator library for each pane's content**.
+
+Each managed pane is a `portable-pty` child process. The child writes VT escape sequences to its PTY. You parse those bytes through `alacritty_terminal` (or `vt100` crate) which maintains a virtual screen buffer. Then ratatui renders that buffer as a widget inside its layout.
+
+**Key crates:** portable-pty (PTY allocation), alacritty_terminal (VT parser), ratatui (layout + render), crossterm (input events).
+
+**Input routing:** crossterm captures key → agent-doc checks focused pane → writes bytes directly to that pane's PTY fd. No send-keys, no tmux, no heuristics. File descriptor writes are synchronous and reliable.
+
+**zellij** already proves this pattern — it's a Rust terminal multiplexer built on portable-pty + vt100 + its own layout engine. Agent-doc could use the same crate stack or embed zellij via its WASM plugin API.
+
+**Minimal viable scope:** PTY spawn/resize/kill (exists), VT parsing per pane (exists), tiled layout with focus (ratatui, needs pane abstraction), input routing (straightforward), session persistence (new but simple). The hard parts are solved crates; the novel work is agent-doc integration.
+
+The `#multiplexertrait` backlog item is the right first step — it draws the abstraction boundary for developing the new backend alongside tmux.
+<!-- agent:boundary:96437d5f -->
 <!-- /agent:exchange -->
 ###
 <!--

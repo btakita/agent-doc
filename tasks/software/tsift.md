@@ -35,7 +35,25 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #fref
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:7a3a8422 -->
+❯ do [#scst]. spec-test-build-install-commit-push
+### Re: scst — gpt-5
+
+Completed `#scst`.
+
+I tightened the `session-review` cost-scope regression so it models the reported shape directly: 12 matched sessions with `aggregate_cost.total_tokens = 57,615,403` and `aggregate_cost.largest_turn_total_tokens = 186,897`, while `latest_session_cost` stays separated at `518,391` total and `67,644` largest turn. I also updated `SPEC.md` to define the aggregate-vs-latest session cost contract and adjusted `VERSIONS.md` to make the release note explicit.
+
+Verification completed:
+- `cargo test --test exit_code session_review_separates_aggregate_and_latest_session_cost`
+- `make check` (`cargo clippy --all-targets -- -D warnings`, `cargo test`: 586 unit passed / 1 ignored, 103 compiled CLI tests passed)
+- `cargo build --release`
+- `cargo install --path .` installed `tsift 0.1.42`
+- `tsift status --fix` refreshed the local tsift index
+- Latest GitHub Actions `CI` run `25813096408` was green; job `clippy + test` completed successfully.
+
+Commits pushed:
+- `btakita/tsift` `main`: `8e31494` (`test: cover session-review latest cost scope`)
+- `btakita/agent-loop` `main`: `704b1aaa3` (`chore: update tsift submodule`)
+<!-- agent:boundary:4ac7afba -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +62,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#scst] Calibrate session-review/session-cost aggregate token reporting so cached multi-session totals are separated from per-session cost; current review reports 57,615,403 total tokens and largest turn 186,897 across 12 matched sessions, while the latest single-session cost is 518,391 total with largest turn 67,644.
 - [ ] [#rwno] Make tsift rewrite unsupported-command outcomes explicit: commands with shell redirection or find predicates currently exit 1 with no explanation, so rewrite should either pass through safely or emit a bounded no-rewrite reason for agents.
 <!-- /agent:backlog -->
 
@@ -77,6 +94,7 @@ Compacted content:
 - 2026-05-13 [#rgls] Fix tsift rewrite handling for file-listing commands such as rg --files and find: preserve listing semantics, multiple roots, and shell safety, or pass through with an explanatory no-rewrite result instead of rewriting rg --files src/tsift to exact text search.
 - 2026-05-13 [#sfpx] Add a deterministic session-digest/session-review regression for failure false positives from assistant progress or CI-status prose; the current rollout classified my assessment sentence and prior status updates mentioning failure/red/check as failure groups even though --next-context correctly reported zero unresolved failures.
 - 2026-05-13 [#fref] Tighten codex-jsonl file-reference extraction so conversational fragments and shell syntax are not reported as touched files; the current session-digest surfaced false paths like 2>/dev/null, agent-doc/tsift, digest/session, progress/CI-status, and version/preflight.
+- 2026-05-13 [#scst] Calibrate session-review/session-cost aggregate token reporting so cached multi-session totals are separated from per-session cost; current review reports 57,615,403 total tokens and largest turn 186,897 across 12 matched sessions, while the latest single-session cost is 518,391 total with largest turn 67,644.
 <!-- /agent:done -->
 
 ## Completed / Reaped

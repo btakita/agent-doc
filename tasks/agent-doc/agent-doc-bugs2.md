@@ -52,10 +52,46 @@ I added a backlog item for that prevention work: `#orphanpromptprune`.
 ### Re: note — gpt-5.5
 
 Noted. I kept the cleanup result and the `#orphanpromptprune` prevention item in the document.
-<!-- agent:boundary:09104758 -->
+❯ You seem to have reaped too many tmux panes. The root.md tmux pane is lost. JB `Sync Tmux Layout` does not show the panes anymore. Please recover.
+❯ spec-test-build-install-commit-push
+### Re: recover root tmux pane — gpt-5.5
+
+Recovered the lost `src/session-share/tasks/root.md` pane and fixed the cleanup path that caused this class of loss.
+
+Operational recovery:
+- Removed the stale root binding for missing pane `%2` with targeted `agent-doc resync --fix`.
+- Ran a full `agent-doc sync` for `tasks/agent-doc/agent-doc-bugs2.md` plus `src/session-share/tasks/root.md`.
+- `root.md` is now registered on pane `%52` in the `0:agent-doc` window next to the current pane `%1`. `agent-doc session status` shows the root actor ready with healthy supervisor/controller state; the pane is currently alive and running the root session.
+
+Code fix:
+- `src/agent-doc/src/resync.rs` now makes non-stash orphan-agent cleanup check the pane-local project root before killing an apparently unregistered agent pane. It preserves panes that are registered, live-owner-proven, or supervisor-backed in a nested project such as `src/session-share`.
+- Updated `src/agent-doc/SPEC.md` and `src/agent-doc/specs/07-session-tmux-commands.md` with the cross-project orphan cleanup invariant.
+- Added a live tmux regression: `purge_orphan_agent_in_non_stash_preserves_nested_project_owner`.
+
+Verification passed:
+- `cargo test purge_orphan_agent_in_non_stash_preserves_nested_project_owner -- --ignored`
+- `cargo test purge_orphan_agent_in_non_stash_window -- --ignored`
+- `make check`
+- `make tmux-ci` (`225 passed; 0 failed` in the live tmux suite)
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest GitHub CI inspected: run `25773430221`, conclusion `success`.
+
+Commits created:
+- `src/agent-doc`: `9d4b4933 fix: preserve nested agent panes during resync`
+- parent `agent-loop`: `d8cbcd8c0 agent-doc: preserve nested panes during resync`
+
+Per the session-document commit boundary, I will push those commits after this finalize step succeeds.
+<!-- agent:boundary:5ec300d0 -->
 <!-- /agent:exchange -->
 ###
 <!--
+When I navigate the editor to tsift.md and JB `Sync Tmux Layout`, JB shows an error. It seems the manual reap killed the active tmux panes and now agent-doc cannot recover to sync the document. This issues happens with all documents where the tmux pane was killed. agent-doc sync should be more durable and recover tmux panes that crashed or were externally killed.
+```
+Sync deferred: another tmux layout sync is already running; the latest editor selection will retry shortly.
+```
+spec-test-build-install-commit-push
+---
 The agent:done tag should support an attribute to link to a sepate "done" file (*.done.md) so the document does not become bloated. Plan so we agree on the attribute name.
 ---
 The sandbox check tmux prompt should be terse and more "human readable" on a single line. Explain the status without the extra information.

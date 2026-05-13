@@ -117,7 +117,27 @@ The supervisor is doing the right things, but **the detection heuristics are fra
 #### Next steps
 
 The highest-leverage fix is adding structured diagnostic logging across all three input paths so that the next regression can be diagnosed from logs in one turn instead of many. Second priority is real tmux integration tests that catch the mock-prod gap. I've added both to the backlog along with a recommended longer-term Multiplexer trait evaluation.
-<!-- agent:boundary:089d0544 -->
+❯ Will there be additional issues on non-kitty terminals?
+### Re: non-Kitty terminal issues — opus-4-6
+
+Yes. The Kitty keyboard protocol is opt-in — terminals that don't support it (most of them) fall back to legacy VT escape sequences for special keys. The supervisor currently has two code paths split on this:
+
+**Kitty-capable terminals** (Kitty, WezTerm, Ghostty, foot): OpenCode negotiates Kitty keyboard mode (`\x1b[>1u`) at startup. The supervisor's PTY filter preserves these sequences (`preserve_kitty_keyboard = true`). Submit uses Kitty Return (`\x1b[13u`). Arrow keys, Enter, Tab all transmit unambiguous CSI-u sequences.
+
+**Legacy terminals** (GNOME Terminal, Terminal.app, xterm, Alacritty <0.13): No Kitty protocol negotiation happens. Arrow keys send ambiguous `\x1b[A`/`\x1bOA` sequences that overlap with Alt+key combos. Enter sends `\r` or `\n` depending on terminal mode. The supervisor's permission-prompt arrow→Tab translation uses pattern matching on these sequences — and the same byte `\x1bOA` means "Up arrow" in application mode but could be "Alt+O then A" in normal mode.
+
+**Concrete risks on non-Kitty terminals:**
+
+1. **Enter may not submit** — if OpenCode's TUI expects Kitty Return but only gets `\r`, the composer might insert a newline instead of submitting. The supervisor's `send_keys_with_kitty_return()` sends the Kitty sequence regardless of whether the terminal negotiated it — tmux passes the bytes through, but OpenCode may ignore an unrequested Kitty sequence and wait for plain Enter.
+
+2. **Arrow key ambiguity** — the `\x1bOA` vs `\x1b[A` distinction depends on terminal mode (application vs normal cursor keys). The supervisor's translation table handles both forms, but if the terminal switches modes mid-session (e.g., OpenCode enables application mode for the composer then disables it), the translation can fire on the wrong sequence.
+
+3. **Modifier keys break** — Ctrl+arrow, Shift+Tab, and other modified keys have wildly different encodings across non-Kitty terminals. The supervisor hardcodes specific sequences; a terminal that sends `\x1b[1;5C` for Ctrl+Right vs `\x1b[5C` will get different behavior.
+
+4. **tmux itself can remap sequences** — tmux has its own `terminal-features` and `extended-keys` settings that can strip, rewrite, or add escape sequences before the supervisor's PTY filter ever sees them. A non-Kitty terminal behind tmux with `extended-keys on` creates a third hybrid state.
+
+The `#opencodeinputdiag` logging would catch all of these — every key event logged with raw bytes, detected terminal protocol, and transform applied. Without that, non-Kitty regressions are silent until a user on GNOME Terminal or Alacritty hits them.
+<!-- agent:boundary:7c1abc7a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -30,79 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-033937.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-042107.md`*
 
 Compacted content:
-- Archived 4 response topic(s): #s1k1 search workflow; #v6y3 search scale guards; tsift log survey; 1 more
+- Archived 3 response topic(s): #sprm; SimWorld extraction; #t275
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#sprm]. spec-test-build-install-commit-push
-### Re: #sprm — gpt-5
-
-Done. Implemented `#sprm` in `src/tsift` and pushed the tsift submodule commit.
-
-`session-review --next-context` now derives active prompt targets for agent-doc template documents from the live `agent:exchange` tail after the latest response boundary, instead of treating historical transcript aggregates as current work. The prompt-target filters also ignore frontmatter prompt presets, copied slash-command examples, and completed backlog archive rows, so prompt presets, compacted/resolved prompts, and repeated old `do ...` directives do not reappear as active next-context work.
-
-I documented the contract in `SPEC.md` and added regressions for markdown/session-digest filtering, copied Codex frontmatter prompt presets, and session-review preferring the live exchange prompt over repeated historical transcript prompts.
-
-Verification:
-- `cargo test` passed: 562 unit tests and 92 integration tests.
-- `make check` passed: clippy with `-D warnings`, then the full test target.
-- `cargo build --release` passed.
-- `cargo install --path . --force` installed `tsift 0.1.42` locally.
-- `tsift session-review --next-context --json /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` now reports only `do [#sprm]. spec-test-build-install-commit-push` in `active_prompt_targets`.
-- GitHub CI `25777027413` passed (`clippy + test`). There is no tmux CI leg in the tsift workflow.
-
-Commits:
-- tsift: `df3133e` (`fix: keep next-context prompts live`), pushed to `origin/main`.
-- agent-loop: `103eb91bd` (`chore: update tsift submodule`) committed locally; parent push follows this binary-owned document closeout so the session document stays out of the manual repo commit.
-❯ agent-doc has SimWorld. Should SimWorld be extracted so tsift can use it to speed up test suites? What library would be a good candidate? tmux-router? Does tsift use tmux-router? Should the shared SimWorld be a standalone library?
-### Re: SimWorld extraction — gpt-5
-
-Short answer: do not extract `agent-doc`'s `SimWorld` wholesale for `tsift` yet. The useful part is the pattern, not the current domain model.
-
-What I found:
-- `agent-doc`'s `SimWorld` is strongly tied to agent-doc closeout state: template documents, response capture/write/commit phases, backlog guards, route actor lifecycle, and sync-layout ownership projections.
-- `tsift` does not use `tmux-router`. `src/tsift/Cargo.toml` has no `tmux-router` dependency, and `cargo tree -p tsift --invert tmux-router` reports no matching package. The `tmux-router` entry in `src/tsift/Cargo.lock` is only an unused workspace patch marker.
-- `agent-doc` does use `tmux-router`, and its SimWorld has sync-layout cases because agent-doc owns tmux pane/session behavior. That does not map cleanly to tsift's main risk surface.
-
-For `tsift`, the best candidate for SimWorld-style acceleration is a local deterministic test harness around pure workflow state, especially:
-- session transcript classification: `session-digest`, `session-cost`, `session-review`, `context-pack`;
-- workspace/index status state: missing/stale/fresh scoped indexes, lock states, summary cache states;
-- rewrite/digest-runner routing decisions.
-
-That would let most matrix coverage run in memory with fixed seeds and compact traces, while keeping a smaller number of CLI integration tests for real subprocess, filesystem, sqlite, git, and timeout behavior. It should reduce suite cost more directly than bringing in tmux-router.
-
-If we extract anything, the right shape is a tiny standalone dev/test crate that provides only generic simulation machinery: deterministic RNG, command schedule runner, seed corpus budgets, trace formatting, and coverage counters. The domain worlds should stay in each consumer (`agent-doc` closeout world, `tsift` index/session/rewrite world, maybe later `tmux-router` layout world). I would only create that standalone crate after a `tsift`-local prototype proves the same runner API is useful in both projects.
-
-So the sequence I would use is:
-1. Build a `tsift`-local `sim_world` for the session/rewrite/status state machines.
-2. Move expensive CLI matrix tests behind a smaller smoke set only after the in-memory model covers the same decision invariants.
-3. Extract a shared crate only for the generic runner once both `agent-doc` and `tsift` have near-identical harness code.
-
-`tmux-router` is a good separate candidate for its own SimWorld-style layout projection tests, but it is not the right shared library for tsift.
-❯ do [#t275]. Ensure full edge case coverage that the tmux tests perform. Ignore the tmux tests for local dev and run full suite including tmux tests on github actions. In the agent harness files, ensure the local test step checks CI for the last CI run and fixes any breaking tests.
-❯ spec-test-build-install-commit-push
-### Re: #t275 — gpt-5
-
-Done. Implemented `#t275` in `src/tsift`, pushed the tsift commit, and updated the parent submodule pointer.
-
-The main change is a tsift-local deterministic `SimWorld` in `src/sim_world.rs`. It covers the edge classes that matter for tsift's agent workflow surface without requiring live tmux: live session prompt extraction versus copied instruction ballast, long/short session-read rewrite routing, test/log/diff digest rewrites, shell metacharacter passthrough, and missing/stale/current Code Navigation status recommendations. The fast corpus runs in normal `cargo test`; the wider ignored corpus now runs through `make ci-full` on GitHub Actions.
-
-I also updated `Makefile`, CI, release verification, `SPEC.md`, `VERSIONS.md`, and the generated harness guidance in `AGENTS.md` / `CLAUDE.md` / `src/init.rs`. Local dev stays on `make check`; GitHub Actions owns the full `make ci-full` suite, including ignored deterministic simulator coverage. The harness guidance now tells agents to check the latest CI run with `gh run list --workflow CI --limit 1` and fix red CI before calling work complete.
-
-Verification:
-- `cargo test sim_world` passed.
-- `make check` passed: clippy plus 564 unit tests and 92 integration tests.
-- `make ci-full` passed locally, including `sim_world_medium_seed_corpus_runs_wider_deterministic_budget` via `cargo test -- --ignored`.
-- `cargo build --release` passed.
-- `cargo install --path . --force` installed `tsift 0.1.42` locally.
-- `tsift status` reports a fresh index and current Code Navigation instructions.
-- GitHub Actions CI run `25777739556` passed on `main` for `test: add deterministic sim world`, exercising the new `make ci-full` path.
-
-Commits:
-- tsift: `f0da300` (`test: add deterministic sim world`), pushed to `origin/main`.
-- agent-loop: `41690431b` (`chore: update tsift submodule`), pushed to `origin/main`.
-<!-- agent:boundary:26b50dbe -->
+<!-- agent:boundary:b1527034 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -29,42 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-050731.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-052846.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Managed capability proof status
+- Archived 1 response topic(s): corky.md pane popup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ The corky.md pane is incorrectly popping up when I switch the editor away from corky.md
-❯ spec-test-build-install-commit-push
-### Re: corky.md pane popup — gpt-5
-
-Fixed the editor-sync path that could bring `tasks/software/corky.md` back into the tmux layout after switching away from it.
-
-Root cause: automatic editor tab sync sent a one-file `sync --no-autostart --col <focused>` command, and the Rust sync layer treated that as a focus-only event that could expand from remembered column state. If `corky.md` was still in `.agent-doc/last_layout.json`, that stale remembered sibling could be reintroduced even though the editor no longer showed it.
-
-Change made:
-- Added `agent-doc sync --exact-visible` for editor snapshots that already represent the full visible markdown projection.
-- JetBrains and VS Code automatic tab-sync now pass `--exact-visible` with `--no-autostart`.
-- Plain focus-only safe-passive sync keeps the old remembered-sibling behavior for integrations that cannot report the full visible projection.
-- Updated specs/docs and bumped the JetBrains plugin version to `0.2.115`.
-
-Verification:
-- `cargo test exact_visible_projection_does_not_expand_from_remembered_focus_only_layout -- --test-threads=1`
-- `./gradlew test --tests com.github.btakita.agentdoc.SyncLayoutActionTest`
-- `npm test -- --test-name-pattern "buildTabChangeCommand|buildSyncCommandArgs"`
-- `make check`
-- `git -C src/agent-doc diff --check`
-- Latest GitHub Actions CI run inspected: `25773430221` on `main` was green; the current workflow jobs expose `check` only, with no separate tmux leg to reproduce.
-
-Build/install:
-- `make install` installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so` locally.
-- Built JetBrains plugin `agent-doc-jetbrains-0.2.115.zip`.
-- Installed the local JetBrains plugin into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IntelliJIdea2026.1 to activate it.
-
-Commits:
-- `src/agent-doc`: `2cdf92c fix: keep exact editor sync projection`
-- parent repo: `26ac9b6d7 fix: update agent-doc exact editor sync`
-<!-- agent:boundary:bc6287a2 -->
+<!-- agent:boundary:3cc2e3ba -->
 <!-- /agent:exchange -->
 ###
 <!--

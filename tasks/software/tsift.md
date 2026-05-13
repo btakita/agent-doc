@@ -35,7 +35,39 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:829d0e5f -->
+❯ do [#fwin]. spec-test-build-install-commit-push
+### Re: #fwin bounded source windows — gpt-5
+
+Implemented `#fwin` in `src/tsift`.
+
+What changed:
+- Added `tsift source-read <file>` with 1-based `--start` / `--lines` / `--end` bounded previews.
+- JSON/envelope output now emits stable `swin-*` window handles, line-numbered preview rows, explicit `before` / `after` / full-file expansion commands, and budget caps for preview text.
+- When an index is available, the command adds intersecting `ssym-*` symbol refs with `tsift --envelope explain ...` expansion commands.
+- When `.tsift/summaries.db` has cached rows for the file, it adds `sum-*` summary refs with `tsift summarize ...` expansion commands.
+- Missing index/summary stores do not block source inspection; enrichment failures are surfaced as warnings.
+- Updated `SPEC.md` and added integration coverage for handles, expansion commands, and cached summary refs.
+
+Commits pushed:
+- `btakita/tsift` `main`: `14799bc feat: add bounded source read`
+- parent `btakita/agent-loop` `main`: `385b88dd0 tsift: add bounded source read`
+
+Verification passed:
+- `cargo fmt --check`
+- `cargo test source_read --test exit_code`
+- `make check`
+- `make ci-full`
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.42`
+- smoke: `tsift --envelope source-read src/main.rs --path . --start 1 --lines 5 --budget normal --json`
+
+CI/tmux evidence:
+- Latest `btakita/tsift` GitHub Actions `CI` run `25782061824` is green.
+- The tsift workflow has `CI` and `Release` only, and `CI` runs `make ci-full`; there is no tmux-test/tmux-ci leg for this repo to reproduce.
+
+No follow-up backlog item was added for this task.
+<!-- agent:boundary:8f24262c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +76,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#fwin] Add a bounded source-file read/window command that returns line-range previews, stable handles, symbol/summary refs, and explicit expand commands so agents can inspect files incrementally instead of re-reading whole files.
 - [ ] [#frpt] Add session-review/session-cost repeated-file-read diagnostics that group file-read tool calls by path/range, estimate duplicate tokens, and emit concrete tsift follow-up commands instead of generic harness advice.
 - [ ] [#frwr] Teach tsift rewrite to intercept large ordinary source reads inside indexed repos and route them to the bounded source-read surface, while preserving small explicit windows and non-source files as passthrough.
 - [ ] [#ftok] Add a real-session token-savings fixture for repeated source-file reads, including full-file cat/bat, oversized sed/head/tail windows, and a fail-under threshold proving the bounded source-read workflow saves tokens without hiding required line anchors.
@@ -72,6 +103,7 @@ k
 - 2026-05-13 [#stok] Audit Codex/Claude token accounting in tsift session-review and session-cost for cumulative-usage double counting and cross-session duplication; the 12-session tasks/software/tsift.md review reported about 1.4B prompt tokens and a 1.4M-token largest turn, which needs a deterministic fixture.
 - 2026-05-13 [#slock] Add deterministic lock-contention coverage for tsift index/search/status paths and recovery guidance; historical review surfaced 34 database file is locked failures while tsift locks can report no writer lock with live WAL/SHM sidecars, so snapshot fallback and diagnostics need regression coverage.
 - 2026-05-13 [#sfile] Filter empty or non-file file references from log-digest / session-digest; .agent-doc/logs/tsift-v0.1.log produced an empty path file group with 132 occurrences, degrading anchors and downstream next-context file lists.
+- 2026-05-13 [#fwin] Add a bounded source-file read/window command that returns line-range previews, stable handles, symbol/summary refs, and explicit expand commands so agents can inspect files incrementally instead of re-reading whole files.
 <!-- /agent:done -->
 
 ## Completed / Reaped

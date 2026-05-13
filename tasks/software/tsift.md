@@ -47,16 +47,33 @@ Updated `SPEC.md` and `VERSIONS.md` with the recovery invariant, extended the se
 Verification: targeted new regressions passed; `cargo fmt --check`; `make check`; `cargo build`; `cargo install --path .`; `tsift --version` -> `tsift 0.1.42`; latest GitHub Actions CI run `25781168424` was green.
 
 Pushed commits: `src/tsift` `38e16b3` (`test: cover WAL lock recovery paths`) and superproject `c7e9e079e` (`chore: update tsift submodule`).
-<!-- agent:boundary:3700133b -->
+❯ do [#sfile]. spec-test-build-install-commit-push
+### Re: #sfile — gpt-5
+
+Implemented `#sfile`.
+
+`log-digest` and `session-digest` now reject structured runtime path fields when they normalize to an empty display path or point at an existing directory. That removes `cwd_resolved path=<project-root> source=project_root` from file anchors and next-context file lists while preserving real `file=...` / `path=...` document anchors.
+
+Added regressions for both digest paths, updated `SPEC.md` and `VERSIONS.md`, and verified the real `.agent-doc/logs/tsift-v0.1.log` case: both `log-digest` and `session-digest --source agent-doc-log` now report only `tasks/software/tsift.md` and `tasks/tsift.md`, with no empty file group.
+
+Verification: targeted regressions passed; `cargo fmt --check`; `make check`; `cargo build`; `cargo install --path .`; `tsift --version` -> `tsift 0.1.42`; tsift GitHub Actions CI run `25782061824` was green. Superproject `Agent Doc` run `25782075410` had green `tmux-ci`; its separate `check` job remained red on `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails` in `src/agent-doc`, outside the tsift change surface.
+
+Pushed commits: `src/tsift` `9f97992` (`fix: filter non-file digest anchors`) and superproject `1071f58c6` (`chore: update tsift submodule`).
+<!-- agent:boundary:4fe0fb83 -->
 <!-- /agent:exchange -->
 ###
 <!--
+```
+Suggestions
+ℹ File reads using 15.9k tokens (8%) → save ~4.8k
+  If you are re-reading files, consider referencing earlier reads. Use offset/limit for large files.
+```
+spec-test-build-install-commit-push
 -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sfile] Filter empty or non-file file references from log-digest / session-digest; .agent-doc/logs/tsift-v0.1.log produced an empty path file group with 132 occurrences, degrading anchors and downstream next-context file lists.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -80,6 +97,7 @@ k
 - 2026-05-13 [#sfail] Tighten tsift session-review failure extraction so it reports command/test/log failures with command and session anchors, not instruction text or source snippets like After finalize, panic snippets, or generic command exited with code 1; preserve real failing assertions and cargo exits separately.
 - 2026-05-13 [#stok] Audit Codex/Claude token accounting in tsift session-review and session-cost for cumulative-usage double counting and cross-session duplication; the 12-session tasks/software/tsift.md review reported about 1.4B prompt tokens and a 1.4M-token largest turn, which needs a deterministic fixture.
 - 2026-05-13 [#slock] Add deterministic lock-contention coverage for tsift index/search/status paths and recovery guidance; historical review surfaced 34 database file is locked failures while tsift locks can report no writer lock with live WAL/SHM sidecars, so snapshot fallback and diagnostics need regression coverage.
+- 2026-05-13 [#sfile] Filter empty or non-file file references from log-digest / session-digest; .agent-doc/logs/tsift-v0.1.log produced an empty path file group with 132 occurrences, degrading anchors and downstream next-context file lists.
 <!-- /agent:done -->
 
 ## Completed / Reaped

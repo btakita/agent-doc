@@ -34,7 +34,7 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): Codex Resume Writable Roots; CI Follow-up
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:8c7d454d -->
+<!-- agent:boundary:b45b9c29 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -71,7 +71,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#va0j] [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.113, then re-test Clear Session Context against the stale-busy Codex status-only pane.
+- [ ] [#ipc-timeout-dup] #agent-doc-bug: IPC timeout during finalize causes duplicate response patchback — binary commits to git, plugin independently applies fallback patch, document ends up with two copies of response. Dedupe in write --commit does not cleanly remove duplicate from HEAD. Plan: tasks/agent-doc/plan-ipc-timeout-duplicate-patchback.md
 - [ ] [#codexpatchbodyloop] #next-steps: Re-open Codex response-body recovery for current agent-doc-bugs2 evidence: ops.log still shows prior_patchback_without_response_body, out_of_band_write, and post_commit_local_drift after committed cycles, causing child dispatch/recovery churn. Plan: tasks/agent-doc/plan-empty-response-repair-write.md and tasks/agent-doc/plan-response-patchback-uncommitted.md
 - [ ] [#opencodecapfail] #next-steps: Re-open OpenCode startup/capability gating with current logs: opencode_capability_proof fails by printing opencode help, auto-trigger times out or pty_write fails, and route still direct-submits into busy/starting OpenCode panes with over-budget submits. Plan: tasks/agent-doc/plan-opencode-harness-ssh-capability-proof.md and tasks/agent-doc/plan-route-starting-actor-race-after-restart.md
 - [ ] [#rspcmt8] #agent-doc-bug: OpenCode agent-doc response written into exchange section but finalize/closeout did NOT commit the session document. boost-client/tasks/monsterrodholders.md session a9421282, GLM-5.1 agent — the shopcozi mobile CSS fix v0.4.9 response was patched into the exchange section but `tasks/monsterrodholders.md` remained dirty (uncommitted). User had to manually request "commit the document." Same class as #rspcmt2-#rspcmt7. Plan: extend tasks/agent-doc/plan-response-patchback-uncommitted.md with evidence that OpenCode finalize consistently skips the git commit step after patchback.
@@ -195,4 +195,5 @@ minor (v0.34.0) release + publish. merge into main
 - 2026-05-12 [#4w5x] [recommended] Evaluate extending dispatch-only prompt gating beyond startup-window reroutes after collecting ready-actor accepted-but-unproven Codex route logs; current fix gates startup/latest-run and starting-authoritative actor paths only.
 - 2026-05-12 [#tmuxroutesync] #next-steps: Implement the current tmux route/sync plan: typed actor_binding protocol, current-generation ready-prompt barrier before dispatch, safe-passive sync burst coalescing/cache, and deterministic plus real-tmux route/sync coverage. Plan: tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md
 - 2026-05-12 [#codexresumegitdir] #agent-doc-bug: Managed Codex writable-root proof is still insufficient for reused/resumed actors. Monster Rod Holders shipping-rule turn could edit `src/boost-client/src/monsterrodholders-dev` but could not update local `.git/modules/...` metadata, so it committed from a temporary clone and left the local checkout dirty. Agent-doc must prove the live actor generation has the exact gitdir/superproject writable roots before dispatch, and fresh-start instead of `codex exec resume` when roots are missing because resume strips `--add-dir`. Plan: tasks/agent-doc/plan-codex-resume-writable-root-contract.md
+- 2026-05-12 [#va0j] [recommended] Restart IntelliJIdea2026.1 to activate locally installed agent-doc JetBrains plugin 0.2.113, then re-test Clear Session Context against the stale-busy Codex status-only pane.
 <!-- /agent:done -->

@@ -11,6 +11,7 @@
 //! - `env` — parent-env cascade + frontmatter overlay + unset, resolved once
 //!   per supervisor lifetime and reused across every restart.
 //! - `pty` — pty allocation, child spawn, stdin/stdout forwarding threads.
+//! - `screen` — alacritty_terminal-backed screen state for owned PTY output.
 //! - `resize` — SIGWINCH handling (Unix) for terminal resize propagation.
 //! - `state` — crash classifier, restart history ring buffer, state machine.
 //! - `ipc` — per-session Unix-domain socket for lifecycle control.
@@ -20,4 +21,5 @@ pub mod env;
 pub mod ipc;
 pub mod pty;
 pub mod resize;
+pub mod screen;
 pub mod state;

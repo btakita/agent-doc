@@ -1088,6 +1088,27 @@ fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
     }
 }
 
+fn record_terminal_screen(shared: &SupervisorShared, bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    shared.terminal_screen.lock().unwrap().push(bytes);
+}
+
+fn reset_terminal_screen(shared: &SupervisorShared, size: PtySize) {
+    shared.terminal_screen.lock().unwrap().reset(size);
+}
+
+fn child_output_for_detection(shared: &SupervisorShared) -> String {
+    let screen = shared.terminal_screen.lock().unwrap().visible_text();
+    if screen.trim().is_empty() {
+        let recent = shared.recent_output.lock().unwrap();
+        String::from_utf8_lossy(&recent).into_owned()
+    } else {
+        screen
+    }
+}
+
 fn prompt_visible_requires_ready_transition(shared: &SupervisorShared) -> bool {
     let first_prompt_for_child = !shared.prompt_visible_once.swap(true, Ordering::Relaxed);
     if first_prompt_for_child {
@@ -1104,17 +1125,14 @@ fn latest_prompt_candidate_line(
     shared: &SupervisorShared,
     harness: &crate::harness::HarnessConfig,
 ) -> Option<String> {
-    let recent = shared.recent_output.lock().unwrap();
-    let output = String::from_utf8_lossy(&recent);
-    harness.last_prompt_candidate(&output)
+    harness.last_prompt_candidate(&child_output_for_detection(shared))
 }
 
 fn current_child_prompt_visible(
     shared: &SupervisorShared,
     harness: &crate::harness::HarnessConfig,
 ) -> bool {
-    let recent = shared.recent_output.lock().unwrap();
-    let output = String::from_utf8_lossy(&recent);
+    let output = child_output_for_detection(shared);
     if harness.binary == "opencode" && harness.is_idle_chrome_only_output(&output) {
         return true;
     }
@@ -1126,8 +1144,7 @@ fn current_child_prompt_visible(
 }
 
 fn opencode_permission_prompt_active(shared: &SupervisorShared) -> bool {
-    let recent = shared.recent_output.lock().unwrap();
-    let output = String::from_utf8_lossy(&recent);
+    let output = child_output_for_detection(shared);
     let prompt = crate::prompt::parse_prompt(&output);
     if !prompt.active {
         return false;
@@ -1188,9 +1205,7 @@ fn is_help_screen_visible(
     shared: &SupervisorShared,
     harness: &crate::harness::HarnessConfig,
 ) -> bool {
-    let recent = shared.recent_output.lock().unwrap();
-    let output = String::from_utf8_lossy(&recent);
-    harness.is_help_screen_output(&output)
+    harness.is_help_screen_output(&child_output_for_detection(shared))
 }
 
 fn spawn_auto_trigger_thread(
@@ -1696,6 +1711,8 @@ struct SupervisorShared {
     inject_pane: Option<String>,
     /// Filtered output emitted by the current child process.
     recent_output: Mutex<Vec<u8>>,
+    /// Alacritty-backed visible screen for the current child process.
+    terminal_screen: Mutex<crate::supervisor::screen::OwnedPtyScreen>,
     /// Child PID for IPC `pid` queries and `kill` on restart/stop.
     child_pid: AtomicU32,
     /// Flag: IPC requested a restart.
@@ -1754,6 +1771,7 @@ impl SupervisorShared {
             inject_writer: Mutex::new(None),
             inject_pane,
             recent_output: Mutex::new(Vec::new()),
+            terminal_screen: Mutex::new(crate::supervisor::screen::OwnedPtyScreen::default()),
             child_pid: AtomicU32::new(0),
             restart_requested: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
@@ -1991,6 +2009,7 @@ fn spawn_reader_thread(
                         if filtered.is_empty() {
                             continue;
                         }
+                        record_terminal_screen(&shared, &filtered);
                         record_recent_output(&shared, &filtered);
                         if current_child_prompt_visible(&shared, &harness) {
                             if prompt_visible_requires_ready_transition(&shared) {
@@ -2755,6 +2774,7 @@ pub(crate) fn run_with_reap_policy(
             .suppress_stale_ctrl_d_until_prompt
             .store(suppress_stale_ctrl_d_until_prompt, Ordering::Relaxed);
         shared.recent_output.lock().unwrap().clear();
+        reset_terminal_screen(&shared, initial_size);
 
         // Spawn I/O forwarding threads
         let reader_thread = spawn_reader_thread(shared.clone(), harness.clone(), pty_reader);
@@ -2788,7 +2808,9 @@ pub(crate) fn run_with_reap_policy(
             rw.stop();
         }
         let resize_handle = session.resize_handle()?;
+        let resize_shared = shared.clone();
         resize_watcher = resize::ResizeWatcher::spawn(move |size| {
+            resize_shared.terminal_screen.lock().unwrap().resize(size);
             if let Err(e) = resize_handle.resize(size) {
                 eprintln!("[supervisor::resize] resize error: {e}");
             }

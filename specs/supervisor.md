@@ -24,6 +24,7 @@ The supervisor graduates `start.rs` into a process that **owns** claude as a chi
 |-----------|--------|-------|
 | `supervisor/cwd.rs` | **landed** | Deterministic CWD resolution and source tagging are active in production. |
 | `supervisor/pty.rs` | **landed** | `agent-doc start` now spawns the harness behind the supervisor-owned pty and forwards stdin/stdout through it. |
+| `supervisor/screen.rs` | **landed** | The supervisor feeds filtered owned-PTY output into an `alacritty_terminal` screen model, so prompt/help/permission detection can inspect the current child viewport without relying on tmux `capture-pane` output. |
 | `supervisor/resize.rs` | **landed** | Terminal resize events are forwarded to the child pty during the supervised session. |
 | `supervisor/state.rs` | **landed** | Crash classification, restart cadence, waiting-input prompts, and halted-state handling are live. |
 | `supervisor/ipc.rs` | **landed** | Per-session supervisor IPC serves `inject`, `restart`, `state`, `pid`, and `stop`. |
@@ -107,6 +108,11 @@ The supervisor is a single process that:
 ### Pty lifecycle
 - Pty is allocated before claude spawns and destroyed after claude exits + IPC socket closes.
 - SIGWINCH on the tmux pane → forwarded to the pty master so claude sees resize.
+- Filtered child output is also fed into an `alacritty_terminal` screen model
+  owned by the supervisor. Readiness, help-screen, and protected-prompt checks
+  prefer that current viewport text and only fall back to the byte ring when the
+  screen is empty, so cursor rewrites and line clears are interpreted as terminal
+  state instead of append-only scrollback.
 - On supervisor exit (user `q`), pty slave closes, claude gets SIGHUP.
 - OpenCode permission prompts are a guarded stdin exception: when recent child
   output parses as the horizontal `Allow once` / `Allow always` / `Reject`

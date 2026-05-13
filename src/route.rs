@@ -7563,7 +7563,7 @@ mod tests {
         let script = bin_dir.join("agent-doc");
         std::fs::write(
             &script,
-            "#!/bin/sh\nprintf \"> \\n\"\nwhile IFS= read -r CMD; do\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
+            "#!/bin/sh\nprintf \"> \\n\"\nwhile IFS= read -r CMD; do\n  [ -z \"$CMD\" ] && continue\n  printf 'GOT:%s\\n' \"$CMD\"\ndone\n",
         )
         .unwrap();
         let mut perms = std::fs::metadata(&script).unwrap().permissions();

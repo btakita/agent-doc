@@ -30,32 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-054340.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-055736.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #sfail
+- Archived 1 response topic(s): #stok
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#stok]. spec-test-build-install-commit-push
-### Re: #stok — gpt-5
-
-Completed `#stok`.
-
-Changed `src/tsift` so Codex token accounting prefers `info.last_token_usage` when present, skips duplicate cumulative snapshots, and keeps cumulative-delta fallback for older transcripts. That fixes the interleaved cumulative-stream case that produced fake million-token turns.
-
-Also bounded `session-review` aggregation to the same newest matched session rows it emits, so hidden older matches cannot inflate a 12-row review into a billion-token aggregate. Updated `SPEC.md` and `VERSIONS.md`, and added deterministic compiled CLI fixtures for both the Codex `last_token_usage` case and bounded session-review aggregation.
-
-Verification passed:
-
-- `cargo fmt -- --check`
-- focused `session-cost` and `session-review` regressions
-- `make check`
-- latest GitHub Actions `CI`: `completed success` for `fix: anchor session failure extraction`
-- `cargo build --release`
-- `cargo install --path . --force`
-- real `tasks/software/tsift.md` sanity check now reports largest turn around `207,715` total tokens and bounded 12-row total around `64.1M`, not the prior `1.4B` / `1.4M` outlier shape.
-
-Committed and pushed the tsift submodule commit `8384b35` (`fix: bound session review token accounting`). Committed the parent submodule pointer as `aa0878da7` (`chore: advance tsift submodule`); parent push follows this document finalization.
-<!-- agent:boundary:7285cac5 -->
+<!-- agent:boundary:e42754d7 -->
 <!-- /agent:exchange -->
 ###
 <!--

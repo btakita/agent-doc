@@ -30,30 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-163528.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-174631.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #fref
+- Archived 1 response topic(s): scst
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#scst]. spec-test-build-install-commit-push
-### Re: scst — gpt-5
-
-Completed `#scst`.
-
-I tightened the `session-review` cost-scope regression so it models the reported shape directly: 12 matched sessions with `aggregate_cost.total_tokens = 57,615,403` and `aggregate_cost.largest_turn_total_tokens = 186,897`, while `latest_session_cost` stays separated at `518,391` total and `67,644` largest turn. I also updated `SPEC.md` to define the aggregate-vs-latest session cost contract and adjusted `VERSIONS.md` to make the release note explicit.
-
-Verification completed:
-- `cargo test --test exit_code session_review_separates_aggregate_and_latest_session_cost`
-- `make check` (`cargo clippy --all-targets -- -D warnings`, `cargo test`: 586 unit passed / 1 ignored, 103 compiled CLI tests passed)
-- `cargo build --release`
-- `cargo install --path .` installed `tsift 0.1.42`
-- `tsift status --fix` refreshed the local tsift index
-- Latest GitHub Actions `CI` run `25813096408` was green; job `clippy + test` completed successfully.
-
-Commits pushed:
-- `btakita/tsift` `main`: `8e31494` (`test: cover session-review latest cost scope`)
-- `btakita/agent-loop` `main`: `704b1aaa3` (`chore: update tsift submodule`)
-<!-- agent:boundary:4ac7afba -->
+<!-- agent:boundary:7fa94ca9 -->
 <!-- /agent:exchange -->
 ###
 <!--

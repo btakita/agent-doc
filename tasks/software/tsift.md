@@ -35,7 +35,25 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): xlog
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:9817af44 -->
+❯ Evaluate logs to assess the effectiveness and issues with tsift. #next-steps
+### Re: tsift log review — gpt-5
+
+I evaluated `.agent-doc/logs/tsift-v0.1.log` with the tsift commands that should explain this workflow: `log-digest`, `session-digest`, `session-cost`, `session-review`, `session-review --next-context`, `context-pack`, and `status`.
+
+The good news: the earlier `signals:0` gap is fixed in the current code path. `log-digest` now reports `signal_groups: 8` from the 1,710-line log and correctly surfaces agent-doc closeout churn, restart churn, timeout, and nonzero-exit signals. It also extracts `file_ref_groups: 2` and `symbol_ref_groups: 144`, so the log is no longer treated as inert text.
+
+The current log still shows real operational churn: `commit_already_current` dominates with 639 closeout-churn signal occurrences, plus `fresh_restart=28`, `quit_after_eof=17`, `ctrl_d_restart_loop=8`, `auto_trigger_timeout=5`, `claude_exit code=1` three times, and `claude_exit code=143` once. `session-cost` independently flags `restart_loop` and `noop_closeout`, with `commit_already_current` appearing 146 times in this log-level cost view.
+
+The broader `session-review` is useful but also shows why this needs follow-up. Across 12 matched sessions it found 74,275,063 total tokens, 98.03% cached input, a largest turn of 220,368 tokens, and guardrails for prompt budget, cache resend, restart loop, and noop closeout. The latest matched session alone is much smaller at 686,248 tokens, so the aggregate and latest-session split is working and avoids misrepresenting historic spend as the active turn.
+
+Main issue: `session-review --next-context` reports `unresolved_failures: []` even though the review and log digest both have actionable guardrails. That makes the resumable handoff too optimistic. The next context should carry guardrail/action-item signals forward so the following agent sees the restart/noop churn without needing to rediscover it.
+
+Secondary issue: `quit_after_eof` is grouped as restart churn. Some of those may be clean user exits rather than a harness loop, so tsift should separate clean EOF/user quit from actual retry/fresh-restart loops. Otherwise the warning can be directionally right but noisy.
+
+Repository status also needs attention: `tsift status . --json` reports the index is stale with 8 stale files and no summary cache. That does not invalidate the log assessment, but it means search/graph/symbol enrichment is weaker until the index is refreshed.
+
+I added prioritized follow-up backlog items. Top backlog id: `#srgd`.
+<!-- agent:boundary:dcfe5929 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,6 +62,9 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#srgd] Promote session-review/log guardrails into next-context unresolved failures or action items; current review/logs report restart/noop churn while next-context says unresolved_failures is empty.
+- [ ] [#qtoe] Tune agent-doc log-digest restart-churn classification to separate clean user quits/EOF from actual restart loops/timeouts, so quit_after_eof does not overstate risk.
+- [ ] [#idxf] Refresh stale tsift index state and add a lightweight status/context-pack reminder when the tsift repo index is stale; status currently reports 8 stale files and no summaries.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

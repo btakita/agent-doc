@@ -49,7 +49,7 @@ The remaining bugs are still important. `session-review --next-context` missed t
 I added prioritized follow-ups to the backlog. Top backlog item: `#xctx`.
 
 No repo code changed, so I did not run the tsift test suite.
-<!-- agent:boundary:b2c4edcd -->
+<!-- agent:boundary:75da11dc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,9 +58,9 @@ No repo code changed, so I did not run the tsift test suite.
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xlog] Teach tsift log-digest to classify agent-doc runtime/churn/failure events as signals; current tsift-v0.1.log digest reports signals:0 even though session-digest finds claude_exit, auto_trigger_timeout, fresh_restart, ctrl_d_restart_loop, and closeout churn.
-- [ ] [#xcst] Fix session-cost/log guardrail wording for agent-doc logs so restart_loop warnings are only emitted when restart churn is actually present; ops.log currently reports fresh_restart=0 auto_trigger_timeout=0 ctrl_d_restart_loop=0 while still warning restart churn detected.
 - [ ] [#xctx] Fix session-review --next-context active-tail scoping after compaction/template boundaries: current tasks/software/tsift.md has a live user prompt, but next-context reports prompts:0 and carries historical files/failures from unrelated sessions.
+- [ ] [#xcst] Fix session-cost/log guardrail wording for agent-doc logs so restart_loop warnings are only emitted when restart churn is actually present; ops.log currently reports fresh_restart=0 auto_trigger_timeout=0 ctrl_d_restart_loop=0 while still warning restart churn detected.
+- [ ] [#xlog] Teach tsift log-digest to classify agent-doc runtime/churn/failure events as signals; current tsift-v0.1.log digest reports signals:0 even though session-digest finds claude_exit, auto_trigger_timeout, fresh_restart, ctrl_d_restart_loop, and closeout churn.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

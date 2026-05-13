@@ -30,45 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-043627.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260513-052929.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #snav
+- Archived 2 response topic(s): tsift log review; #sctx
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ Review the logs for tsift effectiveness + issues. #next-steps
-### Re: tsift log review — gpt-5
-
-Reviewed the tsift-related logs with `log-digest`, `session-digest`, `session-review`, `session-cost`, `context-pack`, and `locks`.
-
-Effectiveness: `log-digest` is now useful on `.agent-doc/logs/tsift-v0.1.log`: it found 1,512 non-empty lines, 3 file-ref groups, 143 symbol-ref groups, and no warning/error signal lines. That is a concrete improvement over the earlier file-anchor issue. `session-digest` on the same log also stayed cleaner than the aggregate review: 0 prompt targets, concrete restart/timeout failures, 43 runtime-event groups, and closeout/restart churn summaries.
-
-Main issues: `session-review` and `context-pack --next-context` still overreach. The aggregate review matched 12 sessions, but then surfaced stale historical prompts, prompt-preset text, examples, unrelated file paths, and `/!` as context. Its failure extraction is also too broad: instruction text like the finalize rule, source snippets like `_ => panic!(...)`, generic exit strings, and old test failures are mixed together as active failures. That makes next-context noisy even though the lower-level `session-digest` for the current log had 0 prompt targets.
-
-Operational signals: `session-cost` found restart/no-op churn in the tsift session log: 28 fresh restarts, 8 ctrl-D restart-loop events, 5 auto-trigger timeouts, and 123 `commit_already_current` events. The wider review also reported `commit_already_current` 4306 times. `tsift locks` reported no writer lock for the root index but did find live WAL/SHM sidecars and recommended inspecting for a wedged writer before reindexing.
-
-I added five backlog items in priority order. Top backlog item: `#sctx`.
-❯ do [#sctx]. spec-test-build-install-commit-push
-### Re: #sctx — gpt-5
-
-Implemented and shipped #sctx.
-
-Changed tsift so `session-review --next-context` derives active prompt targets, touched files/symbols, and unresolved failures from the live unresolved `agent:exchange` tail for agent-doc template documents. Aggregate review still keeps historical hotspots for triage; next-context falls back to aggregates only when no live tail exists.
-
-Updated `src/tsift/SPEC.md`, `src/tsift/src/session_review.rs`, `src/tsift/src/session_digest.rs`, and `src/tsift/tests/exit_code.rs`. Added unit and compiled CLI regressions for stale `do [#...]` prompts, `### Re:` summaries, prompt-preset/completed-backlog ballast, and stale `/!` file/failure context.
-
-Verification:
-- `cargo test session_review_next_context`
-- `cargo test context_pack_json_composes_next_context_and_optional_digests`
-- `make check`
-- `cargo build --release`
-- `cargo install --path . --locked`; installed `/home/brian/.cargo/bin/tsift`, `tsift 0.1.42`
-- live smoke: `tsift session-review --next-context --json tasks/software/tsift.md` now reports only `do [#sctx]...`, empty touched files, and empty unresolved failures
-- GitHub CI `25779577313` passed `make ci-full`; no `tmux-ci` target or tmux-test leg exists in this tsift repo, and `.github/workflows/ci.yml` runs `make ci-full`
-
-Committed and pushed:
-- `btakita/tsift` `d4435be` (`fix: scope next-context to live session tail`)
-- `btakita/agent-loop` `a0179169f` (`chore: bump tsift submodule`)
-<!-- agent:boundary:03139289 -->
+<!-- agent:boundary:d7d11065 -->
 <!-- /agent:exchange -->
 ###
 <!--

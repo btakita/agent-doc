@@ -35,7 +35,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): #sprm; SimWorld extraction; #t275
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:b1527034 -->
+❯ do [#sops]. spec-test-build-install-commit-push
+### Re: #sops — gpt-5
+
+Done. `tsift log-digest` now treats structured agent-doc runtime fields as anchors:
+
+- `file=...` and `path=...` become file refs even when they have no line number.
+- timestamped runtime event names plus `event=...`, `pane=...`, and `session=...` become structured symbol refs.
+- signal rows that only carry `file=...` now attach that path to the signal.
+
+Updated the spec and version notes, and added direct plus compiled CLI regressions for agent-doc runtime-style log lines.
+
+Verification:
+
+- `cargo fmt --check`
+- `cargo test log_digest`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- installed `tsift --version` -> `tsift 0.1.42`
+- live ops-log check with installed binary: `.agent-doc/logs/ops.log` now reports `file_ref_groups=243` and includes `tasks/software/tsift.md` among the top file refs, replacing the prior `file_ref_groups=0` failure mode.
+- Latest GitHub Actions `CI` run for tsift was green: `25777739556` on `main`. There is no tsift tmux CI leg; the wider ignored SimWorld suite is owned by the tsift `CI` workflow.
+
+Commits pushed:
+
+- `btakita/tsift@fbbaa5c` — `fix: anchor agent-doc log fields in log digest`
+- `btakita/agent-loop@a023ce8af` — `chore: update tsift submodule`
+<!-- agent:boundary:45ccb92d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +70,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
 - [ ] [#snav] Add a status/release regression proving `tsift status --fix` refreshes stale Code Navigation instructions after a binary version bump; current local status reports instructions at 0.1.41 while the installed binary is 0.1.42.
 <!-- /agent:backlog -->
 
@@ -63,6 +88,7 @@ k
 - 2026-05-12 [#sflt] Fix session-review/session-digest failure classification so successful test summaries and generic instruction text like `failures:` are not reported as unresolved failures; preserve real failing assertions/exits with command and session anchors.
 - 2026-05-12 [#sprm] Tighten `tsift session-review --next-context` prompt-target extraction so frontmatter prompt presets, examples, archived/resolved prompts, and repeated historical directives do not appear as active prompt targets.
 - 2026-05-13 [#t275] [recommended] Prototype a tsift-local deterministic SimWorld for session/rewrite/status state-machine coverage before extracting any shared simulation crate.
+- 2026-05-13 [#sops] Teach `tsift log-digest` to parse structured agent-doc `file=...`, event, pane, and session fields as anchors; the 99,637-line ops log currently reports `file_ref_groups=0` and `no file anchors detected` despite path-bearing records.
 <!-- /agent:done -->
 
 ## Completed / Reaped

@@ -59,7 +59,29 @@ Implemented `#ftok`.
 Verification passed: `cargo fmt --check`, focused `cargo test token_savings`, full `cargo test`, `make check`, `cargo build`, `cargo install --path . --force`, installed `tsift --version`, installed `tsift token-savings --fixture fixtures/real-session-token-savings.json --fail-under --json`, and live `tsift rewrite "cat src/main.rs"`. Latest GitHub Actions `CI` run `25804248849` was green; this repo has no `tmux-ci` or `tmux-test` target in its Makefile.
 
 Commits: tsift submodule `7aaee2e` (`test: cover source-read token savings`) pushed to `btakita/tsift`; superproject pointer commit `7f655229e` (`chore: update tsift source-read fixture`) is committed and will be pushed after this document closeout so the session commit is included.
-<!-- agent:boundary:79a61f47 -->
+❯ Read through the logs to assess the effectiveness and find issues with tsift.
+❯ #next-steps
+### Re: tsift log effectiveness and next steps — gpt-5
+
+I reviewed the current `tsift-v0.1` and `ops` logs through tsift itself, plus the live token-savings fixture and rewrite/source-read behavior.
+
+Effectiveness is real but uneven:
+
+- `tsift token-savings --fixture fixtures/real-session-token-savings.json --fail-under --json` passes at 83.1% overall savings. The new source-read case passes at 73.2%, above its 70% floor.
+- `tsift source-read src/main.rs` returns a bounded 80-line window, stable handles, nearby symbols, and explicit expand commands instead of dumping the 18,472-line file.
+- `tsift log-digest --input .agent-doc/logs/ops.log` now finds 243 file-reference groups and 540 symbol-reference groups; that is a clear improvement over the older zero-file-anchor failure recorded in the completed backlog.
+- `tsift session-review tasks/software/tsift.md --next-context` scoped the active tail correctly: only `#next-steps`, no touched files, and no unresolved failures.
+
+The issues I found are mostly about precision and command rewriting:
+
+- Highest priority: `tsift rewrite` changes the meaning of file-listing commands. `rg --files src/tsift` rewrites to `tsift --envelope search "src/tsift" --exact ...`, and `rg --files .agent-doc logs src/tsift` rewrites to a search for `.agent-doc` under `logs`, dropping `src/tsift` and the listing semantics.
+- Failure extraction still has false positives. The current session digest classified my own progress sentence about noisy failures as a `failure`, and full `session-review` still includes assistant CI/status prose as failure groups, even though `--next-context` correctly reports no unresolved failures.
+- File-reference extraction in codex JSONL still admits non-path fragments. I saw `2>/dev/null`, `agent-doc/tsift`, `digest/session`, `progress/CI-status`, and `version/preflight` appear as touched files.
+- Cost reporting is directionally useful but still easy to misread. Full `session-review` reports 57,615,403 total tokens across 12 matched sessions with a largest turn of 186,897, while the latest single-session `session-cost` reports 518,391 total tokens and largest turn 67,644. The aggregate/cached/per-session distinction needs clearer output.
+- Unsupported rewrite cases are opaque: commands with shell redirection or `find` predicates can exit 1 without a pass-through command or no-rewrite explanation.
+
+I reordered the follow-up backlog by priority. Top backlog item: `#rgls`.
+<!-- agent:boundary:5a1b0cc4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,6 +90,11 @@ Commits: tsift submodule `7aaee2e` (`test: cover source-read token savings`) pus
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rgls] Fix tsift rewrite handling for file-listing commands such as rg --files and find: preserve listing semantics, multiple roots, and shell safety, or pass through with an explanatory no-rewrite result instead of rewriting rg --files src/tsift to exact text search.
+- [ ] [#sfpx] Add a deterministic session-digest/session-review regression for failure false positives from assistant progress or CI-status prose; the current rollout classified my assessment sentence and prior status updates mentioning failure/red/check as failure groups even though --next-context correctly reported zero unresolved failures.
+- [ ] [#fref] Tighten codex-jsonl file-reference extraction so conversational fragments and shell syntax are not reported as touched files; the current session-digest surfaced false paths like 2>/dev/null, agent-doc/tsift, digest/session, progress/CI-status, and version/preflight.
+- [ ] [#scst] Calibrate session-review/session-cost aggregate token reporting so cached multi-session totals are separated from per-session cost; current review reports 57,615,403 total tokens and largest turn 186,897 across 12 matched sessions, while the latest single-session cost is 518,391 total with largest turn 67,644.
+- [ ] [#rwno] Make tsift rewrite unsupported-command outcomes explicit: commands with shell redirection or find predicates currently exit 1 with no explanation, so rewrite should either pass through safely or emit a bounded no-rewrite reason for agents.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

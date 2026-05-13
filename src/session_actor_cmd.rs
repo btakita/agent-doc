@@ -275,7 +275,7 @@ pub fn clear(file: &Path) -> Result<()> {
     ensure_supervisor_socket(&ctx)?;
     let tmux = Tmux::default_server();
     if let Some((pane, pane_source)) = resolve_direct_submit_pane(&ctx, &tmux) {
-        send_clear_to_pane(&tmux, &pane, &ctx.canonical_file)?;
+        send_clear_to_pane(&tmux, &pane, &ctx.canonical_file, &ctx.harness)?;
         crate::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
@@ -450,14 +450,16 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
     }
 }
 
-fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path) -> Result<()> {
-    crate::sessions::send_submitted_text(tmux, pane, "/clear").with_context(|| {
-        format!(
-            "failed to send `/clear` to authoritative pane {} for {}",
-            pane,
-            file.display()
-        )
-    })
+fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {
+    crate::sessions::send_submitted_text_for_harness(tmux, pane, "/clear", harness).with_context(
+        || {
+            format!(
+                "failed to send `/clear` to authoritative pane {} for {}",
+                pane,
+                file.display()
+            )
+        },
+    )
 }
 
 fn send_operator_interrupt_sequence(tmux: &Tmux, pane: &str, harness: &str) -> Result<()> {
@@ -1687,7 +1689,7 @@ mod tests {
         .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(150));
 
-        send_clear_to_pane(&iso, &pane, Path::new("/tmp/doc.md")).unwrap();
+        send_clear_to_pane(&iso, &pane, Path::new("/tmp/doc.md"), "claude").unwrap();
         for _ in 0..40 {
             if done_path.exists() {
                 break;

@@ -1010,7 +1010,8 @@ fn auto_trigger_inject_command(
     );
     let submitted_text = crate::supervisor::ipc::normalize_submit_text(trigger_cmd);
     if let Some(pane_id) = shared.inject_pane.as_deref() {
-        return match dispatch_submit_text_to_pane(pane_id, &submitted_text) {
+        return match dispatch_submit_text_to_pane(pane_id, &submitted_text, &shared.harness_binary)
+        {
             Ok(()) => AutoTriggerOutcome::Sent,
             Err(_) => AutoTriggerOutcome::SendFailed,
         };
@@ -1064,14 +1065,15 @@ fn dispatch_submit_text_to_tmux(
     tmux: &crate::sessions::Tmux,
     pane: &str,
     text: &str,
+    harness: &str,
 ) -> Result<()> {
-    crate::sessions::send_submitted_text(tmux, pane, text)
+    crate::sessions::send_submitted_text_for_harness(tmux, pane, text, harness)
         .with_context(|| format!("failed to inject submitted input into pane {}", pane))
 }
 
-fn dispatch_submit_text_to_pane(pane: &str, text: &str) -> Result<()> {
+fn dispatch_submit_text_to_pane(pane: &str, text: &str, harness: &str) -> Result<()> {
     let tmux = crate::sessions::Tmux::default_server();
-    dispatch_submit_text_to_tmux(&tmux, pane, text)
+    dispatch_submit_text_to_tmux(&tmux, pane, text, harness)
 }
 
 fn record_recent_output(shared: &SupervisorShared, bytes: &[u8]) {
@@ -1686,6 +1688,8 @@ struct SupervisorShared {
     running: AtomicBool,
     /// CWD source tag for IPC `state` responses.
     cwd_source: &'static str,
+    /// Harness binary for harness-specific tmux submit behavior.
+    harness_binary: String,
     /// Writer handle for IPC `inject`. Replaced on each spawn, cleared between restarts.
     inject_writer: SharedWriter,
     /// Claimed tmux pane that should receive supervisor-owned injected input.
@@ -1719,12 +1723,20 @@ struct SupervisorShared {
 impl SupervisorShared {
     #[cfg(test)]
     fn new(cwd_source: &'static str, supervisor_instance_id: String) -> Self {
-        Self::with_actor_runtime(cwd_source, supervisor_instance_id, None, None, None)
+        Self::with_actor_runtime(
+            cwd_source,
+            supervisor_instance_id,
+            "claude",
+            None,
+            None,
+            None,
+        )
     }
 
     fn with_actor_runtime(
         cwd_source: &'static str,
         supervisor_instance_id: String,
+        harness_binary: &str,
         actor_runtime: Option<SessionActorRuntime>,
         actor_state: Option<crate::session_actor::ActorState>,
         inject_pane: Option<String>,
@@ -1738,6 +1750,7 @@ impl SupervisorShared {
             restart_count: AtomicU32::new(0),
             running: AtomicBool::new(false),
             cwd_source,
+            harness_binary: harness_binary.to_string(),
             inject_writer: Mutex::new(None),
             inject_pane,
             recent_output: Mutex::new(Vec::new()),
@@ -1878,7 +1891,8 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
                 return IpcResponse::err(reason);
             }
             let injected = if let Some(pane_id) = shared.inject_pane.as_deref() {
-                dispatch_submit_text_to_pane(pane_id, &bytes).map_err(|e| e.to_string())
+                dispatch_submit_text_to_pane(pane_id, &bytes, &shared.harness_binary)
+                    .map_err(|e| e.to_string())
             } else {
                 let guard = shared.inject_writer.lock().unwrap();
                 match guard.as_ref() {
@@ -2554,6 +2568,7 @@ pub(crate) fn run_with_reap_policy(
     let shared = Arc::new(SupervisorShared::with_actor_runtime(
         resolved_cwd.source.as_str(),
         supervisor_instance_id,
+        &harness.binary,
         Some(actor_runtime),
         Some(crate::session_actor::ActorState::Starting),
         Some(pane_id.clone()),
@@ -4719,7 +4734,8 @@ Done.
         .unwrap();
         std::thread::sleep(Duration::from_millis(150));
 
-        dispatch_submit_text_to_tmux(&iso, &pane, "agent-doc tasks/software/tsift.md\n").unwrap();
+        dispatch_submit_text_to_tmux(&iso, &pane, "agent-doc tasks/software/tsift.md\n", "claude")
+            .unwrap();
         for _ in 0..40 {
             if done_path.exists() {
                 break;
@@ -4760,6 +4776,7 @@ Done.
         let shared = Arc::new(SupervisorShared::with_actor_runtime(
             "test",
             "test-instance".to_string(),
+            "claude",
             None,
             Some(crate::session_actor::ActorState::Ready),
             Some(pane.clone()),

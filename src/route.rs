@@ -4310,7 +4310,7 @@ fn send_command_once_unchecked(
         eprintln!("[route] warning: display-message failed: {}", e);
     }
 
-    crate::sessions::send_submitted_text(tmux, pane, &payload)?;
+    crate::sessions::send_submitted_text_for_harness(tmux, pane, &payload, &harness.binary)?;
     if let Err(e) = tmux.select_pane(pane) {
         eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
     }

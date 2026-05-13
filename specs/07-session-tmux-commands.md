@@ -325,8 +325,13 @@ single-owner actor controls:
 - Any tmux-bound command submit in this surface (`route --dispatch-only`,
   file-scoped `session clear`, queued slash-command dispatch, supervisor-owned
   reopen inject) must normalize trailing line endings once and use exactly one
-  tmux literal-text submit plus short delayed `Enter` submission. These paths must not layer
-  follow-up synthetic `Enter` retries on top of the first submit.
+  tmux literal-text submit plus one delayed submit keystroke. By default that
+  submit keystroke is tmux's named `Enter`. These paths must not layer follow-up
+  synthetic `Enter` retries on top of the first submit.
+- For OpenCode managed panes, the submit keystroke must use the Kitty keyboard
+  protocol Return sequence after the literal text instead of tmux's named
+  `Enter` key. OpenCode distinguishes `return` from `ctrl+j` in its TUI keymap,
+  and a bare carriage-return submit can be interpreted as newline input.
 - `agent-doc session doctor <FILE> [--repair]` reports actor/registry/supervisor
   drift plus controller projection and recent command-stage failures in one
   read-only summary, with `--repair` explicitly escalating into the destructive

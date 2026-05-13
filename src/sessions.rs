@@ -79,6 +79,7 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 // Re-export Tmux types from tmux-router.
 #[cfg(test)]
@@ -88,6 +89,8 @@ pub use tmux_router::Tmux;
 pub use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock};
 
 const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
+const OPENCODE_SUBMIT_DELAY: Duration = Duration::from_millis(50);
+const KITTY_RETURN_SEQUENCE: &str = "\x1b[13u";
 
 /// Return the path to the sessions registry file (relative to CWD).
 pub fn registry_path() -> PathBuf {
@@ -231,6 +234,46 @@ pub fn send_key(tmux: &Tmux, pane_id: &str, key: &str) -> Result<()> {
 pub fn send_submitted_text(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()> {
     tmux.send_keys(pane_id, text)
         .with_context(|| format!("failed to submit input to pane {}", pane_id))
+}
+
+/// Submit a single-line command through a harness-aware tmux submit path.
+///
+/// OpenCode's TUI can treat a bare carriage return as newline input when its
+/// enhanced keyboard protocol is active, so managed OpenCode panes receive the
+/// Kitty Return sequence instead of tmux's named `Enter` key.
+pub fn send_submitted_text_for_harness(
+    tmux: &Tmux,
+    pane_id: &str,
+    text: &str,
+    harness: &str,
+) -> Result<()> {
+    if harness == "opencode" {
+        send_opencode_submitted_text(tmux, pane_id, text)
+    } else {
+        send_submitted_text(tmux, pane_id, text)
+    }
+}
+
+fn send_opencode_submitted_text(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()> {
+    let text = text.trim_end_matches(['\r', '\n']);
+    let status = tmux
+        .cmd()
+        .args(["send-keys", "-t", pane_id, "-l", text])
+        .status()
+        .context("failed to run tmux send-keys (OpenCode literal)")?;
+    if !status.success() {
+        anyhow::bail!("tmux send-keys failed for OpenCode pane {}", pane_id);
+    }
+    std::thread::sleep(OPENCODE_SUBMIT_DELAY);
+    let status = tmux
+        .cmd()
+        .args(["send-keys", "-t", pane_id, "-l", KITTY_RETURN_SEQUENCE])
+        .status()
+        .context("failed to run tmux send-keys (OpenCode return)")?;
+    if !status.success() {
+        anyhow::bail!("tmux send-keys OpenCode return failed for pane {}", pane_id);
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1235,6 +1278,41 @@ mod tests {
 
         let pane_id = t.new_session("test", tmp.path()).unwrap();
         t.send_keys(&pane_id, "echo hello").unwrap();
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn opencode_submit_uses_kitty_return_sequence() {
+        let t = IsolatedTmux::new("agent-doc-test-opencode-kitty-return");
+        let tmp = TempDir::new().unwrap();
+        let pane_id = t.new_session("test", tmp.path()).unwrap();
+        let output_path = tmp.path().join("input.bin");
+        let done_path = tmp.path().join("done");
+        let expected = b"agent-doc plan.md\x1b[13u";
+
+        t.send_keys(
+            &pane_id,
+            &format!(
+                "sh -lc 'stty raw -echo; dd bs=1 count={} of=\"{}\" 2>/dev/null; touch \"{}\"'",
+                expected.len(),
+                output_path.display(),
+                done_path.display()
+            ),
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+
+        send_submitted_text_for_harness(&t, &pane_id, "agent-doc plan.md\n", "opencode").unwrap();
+
+        for _ in 0..40 {
+            if done_path.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        assert!(done_path.exists(), "expected raw reader to finish");
+        assert_eq!(std::fs::read(output_path).unwrap(), expected);
     }
 
     #[test]

@@ -224,6 +224,43 @@ fn test_cli_audit_docs_clean_project() {
 }
 
 #[test]
+fn test_cli_ops_summary_groups_ops_log_events() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    fs::write(
+        root.join(".agent-doc/logs/ops.log"),
+        format!(
+            "\
+[100] ipc_write_consumed file={} patches=1
+[101] commit_success file={}
+[102] route_dispatch_only_sent file=tasks/b.md pane=%2 harness=opencode proof=accepted proof_scope=accepted_only
+[103] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
+",
+            root.join("tasks/a.md").display(),
+            root.join("tasks/a.md").display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.args([
+        "ops",
+        "summary",
+        "--project-root",
+        root.to_str().unwrap(),
+        "--limit",
+        "0",
+    ]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("write ipc consumed"))
+        .stdout(predicate::str::contains("tasks/a.md"))
+        .stdout(predicate::str::contains("accepted-only route proof"))
+        .stdout(predicate::str::contains("sync over budget"));
+}
+
+#[test]
 fn test_cli_audit_docs_finds_claude_md() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();

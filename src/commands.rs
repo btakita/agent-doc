@@ -185,6 +185,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Audit instruction files against codebase",
     ));
     cmds.push(cmd(
+        "/agent-doc ops summary",
+        "[--project-root DIR] [--limit N] [--json]",
+        "Summarize high-signal ops.log events by document/session",
+    ));
+    cmds.push(cmd(
         "/agent-doc skill install",
         "",
         "Install Claude Code skill definition",

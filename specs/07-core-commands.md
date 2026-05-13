@@ -94,6 +94,15 @@ Two modes:
 - Discovery prunes heavy skip directories before descent so audit time is spent on real instruction surfaces.
 - Generated agent-doc instruction surfaces are audited as release artifacts: if a root `AGENTS.md`, `.codex/AGENTS.md`, `.opencode/skills/agent-doc/SKILL.md`, or `.claude/skills/agent-doc/SKILL.md` still carries the agent-doc managed frontmatter/sections, it must match the content rendered by the running binary. Custom root instruction files that do not look agent-doc-managed remain user-owned and are not rewritten or failed for content mismatch.
 
+## ops summary
+
+`agent-doc ops summary [--project-root DIR] [--limit N] [--json]`
+
+- Reads `.agent-doc/logs/ops.log` and groups high-signal operational events by document path and session id when the log line provides them.
+- The tracked event families are `ipc_write_consumed`, `commit_success`, `route_dispatch_start_proven`, `post_commit_local_drift`, `session_clear_live_busy_guard_bypassed`, `route_authoritative_actor_starting_not_ready`, dispatch-only route lines with `proof_scope=accepted_only`, and `sync_latency` entries with `status=over_budget`.
+- `--limit` scans only the trailing N log lines, defaulting to a bounded recent tail; `--limit 0` scans the full log.
+- Human output is optimized for quick operator review. `--json` emits the same buckets for editor plugins or dashboards.
+
 ## prompt
 
 `agent-doc prompt <FILE>`

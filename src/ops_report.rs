@@ -1,0 +1,322 @@
+//! Operational log reports for `.agent-doc/logs/ops.log`.
+
+use anyhow::{Context, Result};
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+const DEFAULT_LIMIT: usize = 1000;
+const MAX_SAMPLES_PER_BUCKET: usize = 3;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OpsSummaryReport {
+    pub log_path: PathBuf,
+    pub scanned_lines: usize,
+    pub matched_events: usize,
+    pub buckets: Vec<OpsSummaryBucket>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OpsSummaryBucket {
+    pub category: String,
+    pub file: String,
+    pub session: String,
+    pub count: usize,
+    pub latest_timestamp: Option<u64>,
+    pub samples: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct BucketKey {
+    category: String,
+    file: String,
+    session: String,
+}
+
+#[derive(Debug, Clone)]
+struct ClassifiedEvent {
+    timestamp: Option<u64>,
+    category: &'static str,
+    file: Option<String>,
+    session: Option<String>,
+    detail: String,
+}
+
+pub fn run_summary(project_root: Option<&Path>, limit: usize, json: bool) -> Result<()> {
+    let cwd = std::env::current_dir()?;
+    let root = match project_root {
+        Some(root) => root.to_path_buf(),
+        None => crate::snapshot::find_project_root(&cwd).unwrap_or(cwd),
+    };
+    let log_path = root.join(".agent-doc/logs/ops.log");
+    let contents = std::fs::read_to_string(&log_path)
+        .with_context(|| format!("failed to read {}", log_path.display()))?;
+    let report = summarize_ops_log(&contents, &root, limit, log_path);
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_human_summary(&report);
+    }
+    Ok(())
+}
+
+pub fn summarize_ops_log(
+    contents: &str,
+    project_root: &Path,
+    limit: usize,
+    log_path: PathBuf,
+) -> OpsSummaryReport {
+    let all_lines: Vec<&str> = contents.lines().collect();
+    let start = if limit == 0 || limit >= all_lines.len() {
+        0
+    } else {
+        all_lines.len() - limit
+    };
+    let lines = &all_lines[start..];
+
+    let mut buckets: BTreeMap<BucketKey, OpsSummaryBucket> = BTreeMap::new();
+    let mut matched_events = 0;
+
+    for line in lines {
+        let Some(event) = classify_line(line, project_root) else {
+            continue;
+        };
+        matched_events += 1;
+
+        let key = BucketKey {
+            category: event.category.to_string(),
+            file: event.file.unwrap_or_else(|| "<global>".to_string()),
+            session: event.session.unwrap_or_else(|| "-".to_string()),
+        };
+        let bucket = buckets
+            .entry(key.clone())
+            .or_insert_with(|| OpsSummaryBucket {
+                category: key.category,
+                file: key.file,
+                session: key.session,
+                count: 0,
+                latest_timestamp: None,
+                samples: Vec::new(),
+            });
+
+        bucket.count += 1;
+        if event.timestamp > bucket.latest_timestamp {
+            bucket.latest_timestamp = event.timestamp;
+        }
+        if bucket.samples.len() == MAX_SAMPLES_PER_BUCKET {
+            bucket.samples.remove(0);
+        }
+        bucket.samples.push(event.detail);
+    }
+
+    let mut buckets: Vec<OpsSummaryBucket> = buckets.into_values().collect();
+    buckets.sort_by(|a, b| {
+        b.latest_timestamp
+            .cmp(&a.latest_timestamp)
+            .then_with(|| a.category.cmp(&b.category))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.session.cmp(&b.session))
+    });
+
+    OpsSummaryReport {
+        log_path,
+        scanned_lines: lines.len(),
+        matched_events,
+        buckets,
+    }
+}
+
+fn print_human_summary(report: &OpsSummaryReport) {
+    println!(
+        "ops summary: {} (matched {} events across {} scanned lines)",
+        report.log_path.display(),
+        report.matched_events,
+        report.scanned_lines
+    );
+    if report.buckets.is_empty() {
+        println!("no tracked events found");
+        return;
+    }
+
+    let mut current_category = "";
+    for bucket in &report.buckets {
+        if bucket.category != current_category {
+            current_category = &bucket.category;
+            println!("\n{}", current_category);
+        }
+        let latest = bucket
+            .latest_timestamp
+            .map(|ts| ts.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        println!(
+            "  {} session={} count={} latest={}",
+            bucket.file, bucket.session, bucket.count, latest
+        );
+        for sample in &bucket.samples {
+            println!("    - {}", sample);
+        }
+    }
+}
+
+fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
+    let (timestamp, message) = parse_log_line(line);
+    let event_name = message.split_whitespace().next()?;
+    let fields = parse_fields(message);
+
+    let category = match event_name {
+        "ipc_write_consumed" => "write ipc consumed",
+        "commit_success" => "commit success",
+        "route_dispatch_start_proven" => "route dispatch proven",
+        "post_commit_local_drift" => "post-commit local drift",
+        "session_clear_live_busy_guard_bypassed" => "busy clear bypassed",
+        "route_authoritative_actor_starting_not_ready" => "starting actor not ready",
+        "route_dispatch_start_unproven_but_accepted" => "accepted-only route proof",
+        "route_dispatch_only_sent" if field_eq(&fields, "proof_scope", "accepted_only") => {
+            "accepted-only route proof"
+        }
+        "sync_latency" if field_eq(&fields, "status", "over_budget") => "sync over budget",
+        _ => return None,
+    };
+
+    Some(ClassifiedEvent {
+        timestamp,
+        category,
+        file: fields
+            .get("file")
+            .map(|file| normalize_file_for_report(file, project_root)),
+        session: fields.get("session").cloned(),
+        detail: render_detail(event_name, &fields),
+    })
+}
+
+fn parse_log_line(line: &str) -> (Option<u64>, &str) {
+    if let Some(rest) = line.strip_prefix('[')
+        && let Some((ts, message)) = rest.split_once("] ")
+    {
+        return (ts.parse::<u64>().ok(), message);
+    }
+    (None, line)
+}
+
+fn parse_fields(message: &str) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
+    for token in message.split_whitespace().skip(1) {
+        let Some((key, value)) = token.split_once('=') else {
+            continue;
+        };
+        fields.insert(key.to_string(), trim_field_value(value).to_string());
+    }
+    fields
+}
+
+fn trim_field_value(value: &str) -> &str {
+    value.trim_matches(',').trim_matches('"').trim_matches('\'')
+}
+
+fn field_eq(fields: &BTreeMap<String, String>, key: &str, expected: &str) -> bool {
+    fields.get(key).is_some_and(|value| value == expected)
+}
+
+fn normalize_file_for_report(file: &str, project_root: &Path) -> String {
+    let path = Path::new(file);
+    if path.is_absolute()
+        && let Ok(relative) = path.strip_prefix(project_root)
+    {
+        return relative.to_string_lossy().to_string();
+    }
+    file.to_string()
+}
+
+fn render_detail(event_name: &str, fields: &BTreeMap<String, String>) -> String {
+    let mut parts = vec![event_name.to_string()];
+    for key in [
+        "kind",
+        "pane",
+        "harness",
+        "proof",
+        "proof_scope",
+        "phase",
+        "mode",
+        "elapsed_ms",
+        "budget_ms",
+        "patches",
+        "generation",
+        "actor_state",
+    ] {
+        if let Some(value) = fields.get(key) {
+            parts.push(format!("{key}={value}"));
+        }
+    }
+    parts.join(" ")
+}
+
+pub const fn default_summary_limit() -> usize {
+    DEFAULT_LIMIT
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ops_summary_groups_tracked_events_by_file_and_session() {
+        let root = Path::new("/repo");
+        let log = "\
+[100] ipc_write_consumed file=/repo/tasks/a.md patches=1
+[101] commit_success file=/repo/tasks/a.md
+[102] route_dispatch_start_proven file=tasks/a.md pane=%1 harness=codex proof=consumed timeout_secs=10
+[103] route_dispatch_only_sent file=tasks/b.md pane=%2 harness=opencode proof=accepted proof_scope=accepted_only
+[104] post_commit_local_drift file=/repo/tasks/a.md kind=user_follow_up basis=head
+[105] session_clear_live_busy_guard_bypassed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[106] route_authoritative_actor_starting_not_ready file=tasks/c.md pane=%3 harness=codex generation=9 actor_state=starting
+[107] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
+[108] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
+";
+
+        let report =
+            summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
+
+        assert_eq!(report.scanned_lines, 9);
+        assert_eq!(report.matched_events, 8);
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "write ipc consumed"
+                    && bucket.file == "tasks/a.md"
+                    && bucket.count == 1
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "accepted-only route proof"
+                    && bucket.file == "tasks/b.md"
+                    && bucket.samples[0].contains("proof_scope=accepted_only")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "sync over budget"
+                    && bucket.file == "<global>"
+                    && bucket.samples[0].contains("phase=prune_stash_panes")
+            }),
+            "{report:#?}"
+        );
+    }
+
+    #[test]
+    fn ops_summary_limit_scans_tail_only() {
+        let root = Path::new("/repo");
+        let log = "\
+[100] commit_success file=old.md
+[101] commit_success file=new.md
+";
+
+        let report = summarize_ops_log(log, root, 1, PathBuf::from("ops.log"));
+
+        assert_eq!(report.scanned_lines, 1);
+        assert_eq!(report.matched_events, 1);
+        assert_eq!(report.buckets[0].file, "new.md");
+    }
+}

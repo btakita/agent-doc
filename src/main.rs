@@ -79,6 +79,7 @@ mod lib_install;
 mod migrate;
 mod mode;
 mod notify;
+mod ops_report;
 mod orchestrate;
 mod outline;
 mod parallel;
@@ -318,6 +319,11 @@ enum Commands {
     Log {
         /// Path to the session document
         file: PathBuf,
+    },
+    /// Inspect operational logs
+    Ops {
+        #[command(subcommand)]
+        action: OpsAction,
     },
     /// Show document content at a specific point in git history
     Show {
@@ -1024,6 +1030,22 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+enum OpsAction {
+    /// Summarize high-signal ops.log events by document/session
+    Summary {
+        /// Project root to inspect (defaults to nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Number of trailing ops.log lines to scan; 0 scans the full file
+        #[arg(long, default_value_t = ops_report::default_summary_limit())]
+        limit: usize,
+        /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum ControllerAction {
     /// Show project controller status as JSON
     Status {
@@ -1415,6 +1437,13 @@ fn main() -> anyhow::Result<()> {
             None => history::list(&file),
         },
         Commands::Log { file } => history::log(&file),
+        Commands::Ops { action } => match action {
+            OpsAction::Summary {
+                project_root,
+                limit,
+                json,
+            } => ops_report::run_summary(project_root.as_deref(), limit, json),
+        },
         Commands::Show {
             file,
             back,

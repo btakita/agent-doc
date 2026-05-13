@@ -29,24 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-232202.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-232745.md`*
 
 Compacted content:
+- Archived 1 response topic(s): Hybrid pty log review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-- Trailing prompt/context: Read recent logs since the hybrid pty was implemented.
-❯ Read logs since the hybrid pty was implemented. Note the issues. #next-tasks
-### Re: Hybrid pty log review — gpt-5
-
-Read the recent `ops.log`, `debug.log.2026-05-13`, and the `b26b9957...` session log after the hybrid/owned-pty work. I added backlog items for the concrete issues that showed up:
-
-- Starting actor readiness loops repeatedly timing out before the pane becomes route-ready, including stale/closed actor cases.
-- Direct pane submit latency being reported as timed out or over budget even when dispatch-start proof later shows the prompt was consumed.
-- Late fallback patch writes continuing after a cycle has already committed, eventually leading to drift/session-check interruption around an unresolved prompt-only tail.
-- Clear/restart racing a starting owned pane and sending input before the actor is ready.
-- Reap decisions relying on noisy spinner/screen-tail fragments instead of stable prompt state.
-
-No code was changed and I did not run the test suite for this cycle; this was log review plus next-task capture.
-<!-- agent:boundary:b0bdc06d -->
+<!-- agent:boundary:369b7d67 -->
 <!-- /agent:exchange -->
 ###
 <!--

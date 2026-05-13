@@ -75,12 +75,48 @@ Verification passed:
 - `make tmux-ci`
 
 Committed `src/agent-doc` as `54c2992a fix: answer prompts from owning cwd`, then committed the parent repo gitlink as `0fe48b052 fix: answer editor prompts from session cwd`. Existing unrelated parent worktree changes were left alone.
-<!-- agent:boundary:51f2b4be -->
+❯ I'm seeing incorrect JB user prompts. spec-test-build-install-commit-push
+❯ ![img_8.png](img_8.png)
+### Re: incorrect JB user prompts — gpt-5
+
+Fixed the JetBrains prompt label path by changing the CLI parser that feeds editor prompt polling. OpenCode horizontal permission prompts now use an explicit `← ...` question line when one exists, and otherwise fall back to the neutral label `Permission required`; they no longer reuse prior terminal content like shell `printf` / ANSI fixture text as the user-facing question.
+
+Updated the regression surface in `src/agent-doc`:
+
+- `src/prompt.rs` now normalizes OpenCode prompts without explicit questions and has a regression test for the raw ANSI/shell-command case from the screenshot.
+- Editor and CLI docs/specs now record the normalized prompt-label contract for JetBrains, VSCode, and the shared editor spec.
+- A timing-sensitive live tmux route test was stabilized by waiting for the mock prompt to become ready before probing supervisor-owner fallback.
+
+Verification completed:
+
+- `cargo test prompt::tests:: -- --test-threads=1`
+- `cargo test answer_opencode_prompt_sends_tab_not_arrow_escape -- --ignored --test-threads=1`
+- `npm test` in `src/agent-doc/editors/vscode`
+- `npm run package` in `src/agent-doc/editors/vscode` (only the existing LICENSE warning)
+- `./gradlew test` in `src/agent-doc/editors/jetbrains`
+- `./gradlew buildPlugin` in `src/agent-doc/editors/jetbrains`
+- `make check` in `src/agent-doc`
+- `make tmux-ci` in `src/agent-doc`
+- `make install` in `src/agent-doc`; installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so`
+
+CI/tmux evidence: latest GitHub Actions run `25773430221` for `btakita/agent-doc` was green; that workflow exposes the normal `check` job and no separate tmux-test job, so local `make tmux-ci` is the tmux evidence for this cycle.
+
+Commits:
+
+- `src/agent-doc`: `39223238` (`fix: normalize opencode prompt labels`), pushed to `origin/20260422/codex-agent-backend`.
+- parent repo: `c58cf2845` (`chore: update agent-doc prompt labels`), with only the `src/agent-doc` gitlink staged in the manual commit. The parent branch push follows this binary-owned session closeout so it includes the session response commit too.
+<!-- agent:boundary:bfe4cf1e -->
 <!-- /agent:exchange -->
 ###
 <!--
-I'm seeing incorrect JB user prompts. spec-test-build-install-commit-push
-![img_8.png](img_8.png)
+The arrow keys with opencode still corrupts user arrow keys when the permissions dialog is surfaced. The arrow keys work on the initial prompt. We have used several turns where you reported success in error. Please actually test a running opencode instance to verify.
+```
+  ┃                                                                                                                       ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
+  ┃                                                                                                                                                                                                                                             ^[[C^[[C^[[D^[[D^[[A^[[A^[[B^[[B	
+```
+spec-test-build-install-commit-push
+---
+The agent:done tag should support an attribute to link to a sepate "done" file (*.done.md) so the document does not become bloated. Plan so we agree on the attribute name.
 ---
 Please ensure the JB opencode fixes are propagated to the VSCode plugin. Ensure the specs are updated for all editor plugins. Should we implement in the ffi plugin?
 #next-steps

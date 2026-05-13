@@ -29,44 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-060215.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-061942.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #rspcmt9 direct chat patchback closeout
+- Archived 1 response topic(s): OpenCode permission prompt
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ agent-doc opencode does not correctly allow the user to use the arrow keys to select `Allow always`. spec-test-build-install-commit-push
-```
-   ⠙[[[Dd ~/work/btakita/corky/pyproject.toml                                                                         
-┃                                                                                                                       ┃  △ Permission required
-┃    ← Access external directory ~/work/btakita/corky/.github/workflows                                                 ┃
-┃  Patterns                                                                                                             ┃
-┃  - /home/brian/work/btakita/corky/.github/workflows/*                                                                 ┃
-┃                                                                                                                       ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
-┃                                                                                                                     
-```
-### Re: OpenCode permission prompt — gpt-5
-
-Fixed the OpenCode permission prompt handling.
-
-The issue was that `agent-doc prompt` only recognized Claude-style vertical permission menus ending in `to cancel`, and `prompt --answer` always sent Up/Down. OpenCode renders this prompt as a horizontal row: `Allow once`, `Allow always`, `Reject`, with `select` / `enter confirm` controls. I added OpenCode prompt parsing and made answer navigation choose Left/Right for that horizontal selector, so selecting option 2 now moves to `Allow always` before pressing Enter. Route busy detection also now treats this OpenCode permission prompt as an active permission blocker instead of injecting a rerun over it.
-
-Updated specs/docs for the prompt command and editor prompt polling, plus the unreleased changelog.
-
-Commits pushed:
-- `5b7db46` in `src/agent-doc`: `fix: handle opencode permission prompts`
-- `ab2143f21` in the parent repo: `agent-doc: handle opencode permission prompts`
-
-Verification completed:
-- `cargo test opencode_permission_prompt`
-- `cargo test opencode_prompt_without_options`
-- `make check`
-- latest GitHub CI inspected: run `25773430221`, conclusion `success`
-- `make tmux-ci` locally: 223 live tmux tests passed
-- `cargo build`
-- `cargo install --path .`
-
-No follow-up backlog items from this change.
-<!-- agent:boundary:67f48577 -->
+<!-- agent:boundary:7db2b282 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -29,36 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260514-023736.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260514-034125.md`*
 
 Compacted content:
-- Archived 2 response topic(s): orchestration handoff; multiplexertrait
+- Archived 1 response topic(s): directsubmitbudget
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#directsubmitbudget]. spec-test-build-install-commit-push
-### Re: directsubmitbudget — gpt-5 (HEAD)
-
-Implemented `#directsubmitbudget` and pushed it.
-
-What changed:
-- Split direct tmux pane input acceptance telemetry from Codex harness dispatch-start proof in `src/agent-doc/src/route.rs`.
-- Delayed `direct_pane_submit` outcome classification until after the dispatch proof window, so a later consumed/submitted Codex hook proof logs `acceptance_unobserved_dispatch_proven` instead of stale `timed_out` / false over-budget language.
-- Tuned the direct pane submit budget to cover the 5s acceptance window plus capture-poll slack, matching observed tmux/control-mode behavior around 5.18s.
-- Updated `README.md`, `VERSIONS.md`, and `specs/07-session-tmux-commands.md`, with focused route regressions for the new telemetry labels and budget.
-
-Verification:
-- `cargo test --manifest-path src/agent-doc/Cargo.toml direct_pane_submit -- --nocapture`
-- `cargo fmt --manifest-path src/agent-doc/Cargo.toml --check`
-- `make check` in `src/agent-doc`
-- `cargo build --manifest-path src/agent-doc/Cargo.toml`
-- `make install` in `src/agent-doc`; installed `agent-doc 0.33.16`
-- `make tmux-ci` in `src/agent-doc`; 227 ignored/live tmux tests passed, 0 failed
-
-CI review: latest pushed GitHub Actions run `25838804149` failed immediately in both `check` and `tmux-ci`, but GitHub exposes no retained step logs (`gh run view --log-failed` returns `log not found`). I reproduced the required legs locally and they pass.
-
-Commits pushed:
-- `btakita/agent-doc@0630833d` (`fix: clarify direct submit telemetry`) to `origin/20260422/codex-agent-backend`
-- `btakita/agent-loop@6b2ce081b` (`agent-doc: clarify direct submit telemetry`) to `origin/main`
-<!-- agent:boundary:26df3d78 -->
+<!-- agent:boundary:96c88be6 -->
 <!-- /agent:exchange -->
 ###
 <!--

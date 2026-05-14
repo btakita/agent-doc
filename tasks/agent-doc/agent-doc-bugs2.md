@@ -61,7 +61,12 @@ Verification:
 - `make install`
 - `make tmux-ci` (227 live/ignored tmux tests passed)
 - `agent-doc --version` -> `agent-doc 0.33.16`
-<!-- agent:boundary:f7b60216 -->
+### Re: orchestration follow-up — gpt-5
+
+The sequential orchestra started and completed `#orchmidrun`, including code/test/install/commit/push and `--done orchmidrun` closeout. The parent orchestrator then stopped before task 2 with `failed to spawn agent-doc finalize` while trying to write its own batch-interruption response, so I did not launch the remaining six tasks in this cycle.
+
+Remaining open for a later explicit run: `#backlogorphan`, `#interruptcleartimeout`, `#opsnoisereduce`, `#hookreviewroute`, `#sshcapfalsecapture`, and `#codexverbosepb`.
+<!-- agent:boundary:a11a903b -->
 <!-- /agent:exchange -->
 ###
 <!--

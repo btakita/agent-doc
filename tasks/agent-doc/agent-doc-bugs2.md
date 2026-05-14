@@ -244,7 +244,33 @@ Commits:
 - parent `agent-loop` `1bad7f370` (`agent-doc: scope required ssh drift to live commands`) prepared with the updated `src/agent-doc` pointer.
 
 Per the session-document closeout ordering, I will push the parent repo after this finalize commit lands.
-<!-- agent:boundary:9789af4f -->
+
+❯ update spec + tests. build + install for local testing. commit + push. do [#codexverbosepb]
+### Re: #codexverbosepb — gpt-5
+
+Implemented `#codexverbosepb`.
+
+What changed:
+- Non-streaming Codex child response capture now keeps only the final `item.completed` `agent_message` before `turn.completed` instead of concatenating every assistant message into the patchback body.
+- Multiple Codex `agent_message` payloads without a `turn.completed` boundary now fail closed as ambiguous, so transcript-shaped progress chatter is not committed as a durable response.
+- Updated `SPEC.md`, `specs/05-agent-backend.md`, `VERSIONS.md`, and Codex backend tests.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc send_ -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest GitHub `CI` run inspected: `25773430221`, green on `main`.
+- Local `make tmux-ci` passed with 227 live tmux tests.
+
+Commits:
+- `src/agent-doc` `40bbb66d` (`fix: filter codex progress patchbacks`), pushed to `20260422/codex-agent-backend`.
+- parent `agent-loop` `b95118858` (`agent-doc: filter codex progress patchbacks`) prepared with the updated `src/agent-doc` pointer.
+
+Per the session-document closeout ordering, I will push the parent repo after this finalize commit lands.
+<!-- agent:boundary:55821063 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -319,7 +345,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

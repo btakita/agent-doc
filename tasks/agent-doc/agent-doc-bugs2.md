@@ -34,7 +34,28 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 6 response topic(s): latefallbackloop; orchestration subagents; patch:exchange requirement; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:52c1fe18 -->
+❯ do [#orchplainresp]. spec-test-build-install-commit-push
+### Re: #orchplainresp — gpt-5
+
+Implemented and pushed the orchestrate plain-response closeout fix.
+
+Changes:
+- `write` now allows orchestrate-origin template closeout to synthesize a clean single assistant response into `agent:exchange`.
+- Patch-bearing orchestrate responses still require `patch:exchange`, and transcript prompt lines, transcript headings, full-document component markers, mixed patch/unmatched content, and multiple plain `### Re:` responses still fail closed.
+- Updated orchestration/closeout specs, changelog, unit regressions, and run integration coverage.
+
+Verification:
+- `cargo test orchestrate_contract -- --test-threads=2`
+- `cargo test --test run_integration orchestrate_ -- --test-threads=2`
+- `make check`
+- Latest root Agent Doc CI `tmux-ci` was red with no downloadable job log or steps; local `make tmux-ci` passed.
+- `make build`
+- `make install` and `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits / push:
+- `agent-doc` submodule: `88751d3b fix: accept clean orchestrate responses`, pushed to `origin/20260422/codex-agent-backend`.
+- parent repo gitlink: `91e8c9b3a agent-doc: accept clean orchestrate responses`, pushed to `origin/main`.
+<!-- agent:boundary:568551b1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,7 +130,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#orchplainresp] #agent-doc-bug: Orchestration currently requires child template responses to emit patch:exchange for single-turn responses. Let orchestrate synthesize an exchange append for clean plain assistant output while still rejecting transcript-shaped, mixed patch/unmatched, full-document dump, or multi-component output without explicit structure. Add specs/tests and keep explicit patch blocks for intentional multi-component writes.
 - [ ] [#clearstartingrace] #agent-doc-bug: Clear/restart commands can race starting owned panes; logs show session_clear_sent while generation 170 was still starting, followed by protected-input refusals, commits, and repeated starting_not_ready. Gate clear/restart on dispatch-ready or clean-exit prompt state and document-dirty state before sending literal Enter into the pane.
 - [ ] [#ownedreapbusy] #agent-doc-bug: Owned pane reap decisions are noisy and often keep panes alive from spinner tails like Working/escape-title fragments instead of a stable idle/busy signal. Normalize screen-tail sampling or prefer supervisor prompt state so route_owned_reap_decision does not preserve panes based on transient renderer text.
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.

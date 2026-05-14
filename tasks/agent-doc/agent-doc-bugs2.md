@@ -64,7 +64,34 @@ Commits prepared:
 - parent repo `1c05f9836` (`agent-doc: guard clear during starting actor windows`)
 
 I will push after this finalize/session-check boundary so the session closeout commit is included in the parent push.
-<!-- agent:boundary:60bc9c32 -->
+
+❯ do [#ownedreapbusy]
+### Re: #ownedreapbusy — gpt-5
+
+Implemented `#ownedreapbusy`.
+
+Route-owned completion no longer keeps a one-shot pane alive just because the visible tail still contains transient renderer text. The reap guard now treats the supervisor actor's stable `ready` prompt state as proof that the committed child is idle, while still preserving panes for explicit blocking states such as queued drafts, permission prompts, hook-review prompts, history search, and clean-exit restart prompts. I also stripped OSC title updates in the managed PTY filter so title fragments like `Working ... esc to interrupt` cannot enter prompt sampling.
+
+Updated the route-owned docs/specs and `VERSIONS.md`, and added regressions for stale Codex `Working...` tails, blocking queued-composer state, and split OSC title sequences.
+
+Verification passed:
+- `cargo test route_owned_live_pane_busy -- --nocapture`
+- `cargo test filter_strips_osc_title_updates -- --nocapture`
+- `cargo test filter_stateful_osc_split_across_reads -- --nocapture`
+- `cargo fmt --check`
+- `make check`
+- `make build`
+- `make install && agent-doc --version` -> `agent-doc 0.33.16`
+- `make tmux-ci` -> 227 live/ignored tmux tests passed
+
+CI review: the latest GitHub Actions run on `main` was already red for both `check` and `tmux-ci`, but `gh run view --log-failed` returned `log not found` for both failed job IDs, so I could not retrieve hosted failure logs. The local full `check` and `tmux-ci` suites are green for this change.
+
+Commits prepared:
+- `src/agent-doc` `0d98e96a` (`fix: reap route-owned panes after ready prompt state`)
+- parent repo `5d99d6c28` (`agent-doc: reap route-owned panes after ready state`)
+
+I will push after this finalize/session-check boundary so the session closeout commit is included in the parent push.
+<!-- agent:boundary:baf33457 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -139,7 +166,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ownedreapbusy] #agent-doc-bug: Owned pane reap decisions are noisy and often keep panes alive from spinner tails like Working/escape-title fragments instead of a stable idle/busy signal. Normalize screen-tail sampling or prefer supervisor prompt state so route_owned_reap_decision does not preserve panes based on transient renderer text.
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
 - [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md

@@ -116,6 +116,26 @@ struct DagMetadata {
 struct ResolvedTaskBatch {
     tasks: Vec<String>,
     requested_presets: Vec<String>,
+    exchange_source: Option<ExchangeTaskSourceFingerprint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExchangeTaskSourceFingerprint {
+    tasks: Vec<String>,
+    requested_presets: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExchangeTaskSourceBlock {
+    tasks: Vec<String>,
+    requested_presets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OrderedTaskRunOptions<'a> {
+    exchange_source: Option<&'a ExchangeTaskSourceFingerprint>,
+    agent_override: Option<&'a str>,
+    model_override: Option<&'a str>,
 }
 
 trait LifecycleOps {
@@ -411,8 +431,11 @@ fn run_with_dependencies(
             run_ordered_tasks_internal(
                 file,
                 &execution_tasks,
-                config.agent.as_deref(),
-                config.model.as_deref(),
+                OrderedTaskRunOptions {
+                    exchange_source: batch.exchange_source.as_ref(),
+                    agent_override: config.agent.as_deref(),
+                    model_override: config.model.as_deref(),
+                },
                 global_config,
                 lifecycle,
                 agent_runner,
@@ -509,8 +532,11 @@ fn run_with_dependencies(
             run_ordered_tasks_internal(
                 file,
                 &execution_tasks,
-                config.agent.as_deref(),
-                config.model.as_deref(),
+                OrderedTaskRunOptions {
+                    exchange_source: None,
+                    agent_override: config.agent.as_deref(),
+                    model_override: config.model.as_deref(),
+                },
                 global_config,
                 lifecycle,
                 agent_runner,
@@ -522,13 +548,12 @@ fn run_with_dependencies(
 fn run_ordered_tasks_internal(
     file: &Path,
     tasks: &[ExecutionTask],
-    agent_override: Option<&str>,
-    model_override: Option<&str>,
+    options: OrderedTaskRunOptions<'_>,
     global_config: &Config,
     lifecycle: &impl LifecycleOps,
     agent_runner: &impl FreshAgentRunner,
 ) -> Result<()> {
-    let mut effective_model: Option<String> = model_override.map(String::from);
+    let mut effective_model: Option<String> = options.model_override.map(String::from);
     let dispatch_ctx = build_dispatch_context(file);
 
     for (idx, task) in tasks.iter().enumerate() {
@@ -552,12 +577,21 @@ fn run_ordered_tasks_internal(
                 run_ordered_task_step(
                     file,
                     &task.prompt,
-                    agent_override,
+                    options.agent_override,
                     effective_model.as_deref(),
                     global_config,
                     lifecycle,
                     agent_runner,
                 )?;
+                if idx + 1 < tasks.len()
+                    && options
+                        .exchange_source
+                        .map(|source| exchange_task_source_changed(file, source))
+                        .transpose()?
+                        .unwrap_or(false)
+                {
+                    finalize_orchestration_batch_changed(file, idx + 1, tasks.len(), lifecycle)?;
+                }
             }
         }
     }
@@ -1055,12 +1089,36 @@ fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<Resolve
             .with_context(|| format!("failed to read {}", file.display()))?;
         let full_exchange = exchange_text(&doc)?;
         let scoped = scope_exchange_for_tasks(full_exchange, file);
-        extend_task_batch_from_text(&mut batch, &scoped);
+        let mut exchange_batch = ResolvedTaskBatch::default();
+        extend_task_batch_from_text(&mut exchange_batch, &scoped);
+        if !exchange_batch.tasks.is_empty() {
+            batch.exchange_source = Some(ExchangeTaskSourceFingerprint {
+                tasks: exchange_batch.tasks.clone(),
+                requested_presets: exchange_batch.requested_presets.clone(),
+            });
+        }
+        merge_task_batch(&mut batch, exchange_batch);
     }
 
     canonicalize_prompt_preset_requests(file, &mut batch.requested_presets)?;
+    if let Some(source) = &mut batch.exchange_source {
+        canonicalize_prompt_preset_requests(file, &mut source.requested_presets)?;
+    }
 
     Ok(batch)
+}
+
+fn merge_task_batch(target: &mut ResolvedTaskBatch, source: ResolvedTaskBatch) {
+    target.tasks.extend(source.tasks);
+    for preset in source.requested_presets {
+        if !target
+            .requested_presets
+            .iter()
+            .any(|existing| existing == &preset)
+        {
+            target.requested_presets.push(preset);
+        }
+    }
 }
 
 fn canonicalize_prompt_preset_requests(
@@ -1105,6 +1163,105 @@ fn exchange_text(doc: &str) -> Result<&str> {
         .find(|comp| comp.name == "exchange")
         .ok_or_else(|| anyhow::anyhow!("document has no `agent:exchange` component"))?;
     Ok(exchange.content(doc))
+}
+
+fn exchange_task_source_changed(
+    file: &Path,
+    original: &ExchangeTaskSourceFingerprint,
+) -> Result<bool> {
+    let doc =
+        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let exchange = exchange_text(&doc)?;
+    Ok(match find_exchange_task_source(exchange, original) {
+        Some(current) => current != *original,
+        None => true,
+    })
+}
+
+fn find_exchange_task_source(
+    exchange: &str,
+    original: &ExchangeTaskSourceFingerprint,
+) -> Option<ExchangeTaskSourceFingerprint> {
+    if original.tasks.is_empty() {
+        return None;
+    }
+    let mut candidates = collect_markdown_list_source_blocks(exchange)
+        .into_iter()
+        .filter(|block| contains_ordered_subsequence(&block.tasks, &original.tasks))
+        .collect::<Vec<_>>();
+
+    let candidate = candidates
+        .iter()
+        .rev()
+        .find(|block| block.requested_presets == original.requested_presets)
+        .cloned()
+        .or_else(|| candidates.pop())?;
+
+    Some(ExchangeTaskSourceFingerprint {
+        tasks: candidate.tasks,
+        requested_presets: candidate.requested_presets,
+    })
+}
+
+fn collect_markdown_list_source_blocks(text: &str) -> Vec<ExchangeTaskSourceBlock> {
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut blocks = Vec::new();
+    let mut idx = 0usize;
+
+    while idx < lines.len() {
+        let Some(first_task) = parse_list_item(lines[idx]) else {
+            idx += 1;
+            continue;
+        };
+
+        let list_start = idx;
+        let mut tasks = vec![first_task];
+        idx += 1;
+        while idx < lines.len() {
+            let Some(task) = parse_list_item(lines[idx]) else {
+                break;
+            };
+            tasks.push(task);
+            idx += 1;
+        }
+        let list_end = idx;
+
+        let mut context_start = list_start;
+        while context_start > 0 {
+            let previous = lines[context_start - 1].trim();
+            if previous.is_empty()
+                || previous.starts_with("### ")
+                || previous.starts_with("## ")
+                || previous.starts_with("<!-- agent:boundary:")
+            {
+                break;
+            }
+            context_start -= 1;
+        }
+        let source_text = lines[context_start..list_end].join("\n");
+        blocks.push(ExchangeTaskSourceBlock {
+            tasks,
+            requested_presets: diff::extract_prompt_preset_requests_from_text(&source_text),
+        });
+    }
+
+    blocks
+}
+
+fn contains_ordered_subsequence(haystack: &[String], needle: &[String]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let mut cursor = 0usize;
+    for item in haystack {
+        if item == &needle[cursor] {
+            cursor += 1;
+            if cursor == needle.len() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Scope exchange text to the user's latest additions by comparing against
@@ -1219,6 +1376,40 @@ fn print_plan(tasks: &[ExecutionTask]) {
         }
         eprintln!("[orchestrate] --- end prompt ---");
     }
+}
+
+fn finalize_orchestration_batch_changed(
+    file: &Path,
+    completed_steps: usize,
+    total_steps: usize,
+    lifecycle: &impl LifecycleOps,
+) -> Result<()> {
+    eprintln!(
+        "[orchestrate] source task list changed after step {}/{}; stopping before next step",
+        completed_steps, total_steps
+    );
+    let preflight = lifecycle.preflight(file)?;
+    let doc =
+        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let (fm, _) = frontmatter::parse(&doc)?;
+    let response = format!(
+        "<!-- patch:exchange -->\n\
+### Re: orchestration batch changed — gpt-5\n\n\
+Stopped sequential orchestration after {completed_steps} of {total_steps} step(s) because the source task list changed while the batch was running. The remaining and newly added tasks are still open for the next explicit orchestration run.\n\
+<!-- /patch:exchange -->\n"
+    );
+    lifecycle.finalize(
+        file,
+        preflight.baseline_file.as_deref(),
+        &response,
+        fm.resolve_mode(),
+    )?;
+    lifecycle.session_check(file)?;
+    anyhow::bail!(
+        "orchestration batch changed during run after {}/{} step(s); stopped before launching the next step",
+        completed_steps,
+        total_steps
+    );
 }
 
 fn extract_tasks_from_text(text: &str) -> Vec<String> {
@@ -1624,6 +1815,11 @@ mod tests {
         streaming_chunks: Option<Vec<StreamChunk>>,
     }
 
+    struct MutatingAgentRunner {
+        fresh_calls: RefCell<usize>,
+        response: String,
+    }
+
     impl FreshAgentRunner for FakeAgentRunner {
         fn send_fresh(
             &self,
@@ -1656,6 +1852,30 @@ mod tests {
             self.prompts.borrow_mut().push(prompt.to_string());
             self.envs.borrow_mut().push(_env);
             Ok(Some(Box::new(chunks.clone().into_iter().map(Ok))))
+        }
+    }
+
+    impl FreshAgentRunner for MutatingAgentRunner {
+        fn send_fresh(
+            &self,
+            file: &Path,
+            _prompt: &str,
+            _agent_name: &str,
+            _agent_config: Option<&AgentConfig>,
+            _env: Vec<(String, Option<String>)>,
+            _model: Option<&str>,
+        ) -> Result<String> {
+            let mut calls = self.fresh_calls.borrow_mut();
+            *calls += 1;
+            if *calls == 1 {
+                let doc = fs::read_to_string(file)?;
+                let updated = doc.replace(
+                    "- do #first\n- do #second",
+                    "- do #first\n- do #inserted\n- do #second",
+                );
+                fs::write(file, updated)?;
+            }
+            Ok(self.response.clone())
         }
     }
 
@@ -1812,6 +2032,47 @@ mod tests {
     }
 
     #[test]
+    fn exchange_task_source_fingerprint_detects_list_mutations() {
+        let original = ExchangeTaskSourceFingerprint {
+            tasks: vec!["do #first".to_string(), "do #second".to_string()],
+            requested_presets: vec!["#spec".to_string()],
+        };
+        let source = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #first\n- do #second\n<!-- agent:boundary:keep -->\n",
+            &original,
+        )
+        .unwrap();
+        assert_eq!(source, original);
+
+        let boundary_only = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #first\n- do #second\n<!-- agent:boundary:new -->\n",
+            &source,
+        )
+        .unwrap();
+        assert_eq!(boundary_only, source);
+
+        let inserted = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #first\n- do #inserted\n- do #second\n",
+            &source,
+        )
+        .unwrap();
+        assert_ne!(inserted, source);
+
+        let reordered = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #second\n- do #first\n",
+            &source,
+        );
+        assert!(reordered.is_none());
+
+        let quoted_later = find_exchange_task_source(
+            "sync orchestra\npreset #spec\n- do #first\n- do #second\n\n### Re: response — gpt-5\n\n- do #first\n- do #extra\n- do #second\n",
+            &source,
+        )
+        .unwrap();
+        assert_eq!(quoted_later, source);
+    }
+
+    #[test]
     fn inject_prompt_inserts_before_boundary() {
         let updated = inject_prompt_into_doc(&template_doc(), "do #gkke").unwrap();
         let prompt_pos = updated.find("❯ do #gkke").unwrap();
@@ -1924,8 +2185,11 @@ mod tests {
         run_ordered_tasks_internal(
             &doc,
             &tasks,
-            None,
-            Some("gpt-5"),
+            OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
             &Config::default(),
             &lifecycle,
             &agent,
@@ -1983,8 +2247,11 @@ mod tests {
         run_ordered_tasks_internal(
             &doc,
             &tasks,
-            None,
-            Some("gpt-5"),
+            OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
             &Config::default(),
             &lifecycle,
             &agent,
@@ -2057,6 +2324,67 @@ mod tests {
         let prompt = agent.prompts.borrow()[0].clone();
         assert!(prompt.contains("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean."));
         assert!(prompt.contains("❯ (preset #1)\nToday is 2026-04-25."));
+    }
+
+    #[test]
+    fn sequential_orchestration_stops_when_exchange_task_list_changes() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsync orchestra\npreset #spec\n- do #first\n- do #second\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, content).unwrap();
+        fs::write(&baseline, content).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = MutatingAgentRunner {
+            fresh_calls: RefCell::new(0),
+            response: "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n"
+                .to_string(),
+        };
+        let tasks = vec![
+            ExecutionTask {
+                label: "do #first".to_string(),
+                prompt: "do #first".to_string(),
+            },
+            ExecutionTask {
+                label: "do #second".to_string(),
+                prompt: "do #second".to_string(),
+            },
+        ];
+        let source = ExchangeTaskSourceFingerprint {
+            tasks: vec!["do #first".to_string(), "do #second".to_string()],
+            requested_presets: vec!["#spec".to_string()],
+        };
+
+        let err = run_ordered_tasks_internal(
+            &doc,
+            &tasks,
+            OrderedTaskRunOptions {
+                exchange_source: Some(&source),
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+        )
+        .unwrap_err()
+        .to_string();
+
+        let final_doc = fs::read_to_string(&doc).unwrap();
+        assert!(err.contains("orchestration batch changed during run"));
+        assert!(final_doc.contains("- do #inserted"));
+        assert!(final_doc.contains("### Re: first — gpt-5"));
+        assert!(final_doc.contains("### Re: orchestration batch changed — gpt-5"));
+        assert!(!final_doc.contains("❯ do #second"));
+        assert_eq!(*agent.fresh_calls.borrow(), 1);
+        assert_eq!(lifecycle.finalize_calls.borrow().len(), 2);
+        assert_eq!(*lifecycle.session_checks.borrow(), 2);
     }
 
     #[test]
@@ -2139,8 +2467,11 @@ mod tests {
         run_ordered_tasks_internal(
             &doc,
             &tasks,
-            None,
-            Some("gpt-5"),
+            OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
             &Config::default(),
             &lifecycle,
             &agent,
@@ -2272,8 +2603,11 @@ mod tests {
         run_ordered_tasks_internal(
             &doc,
             &execution,
-            None,
-            Some("gpt-5"),
+            OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
             &Config::default(),
             &lifecycle,
             &agent,

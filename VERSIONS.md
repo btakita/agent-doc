@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Sequential orchestration now freezes exchange task lists.** `agent-doc orchestrate --mode sequential --from-exchange` records the source markdown task list at parent start and rechecks it after each child closeout. If the live list is edited mid-run, the parent writes a deterministic interruption response, leaves remaining and newly added tasks open for the next explicit run, and exits before launching the next step instead of hanging. This closes `#orchmidrun` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Interrupt-and-clear now recovers Vim/Neovim prompts.** The explicit `agent-doc session interrupt-clear <FILE>` discard path now watches the managed pane after sending harness interrupt keys. If the interrupt opens Vim/Neovim, it sends one forced `:qa!` recovery before continuing the idle/closed wait; if the pane still does not settle, the timeout names the last observed command and gives an exact manual recovery action. Editor specs now keep that recovery in the binary-owned path. This closes `#clearinterruptvim` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Supervisor-to-tmux input now has raw end-to-end coverage.** The live tmux suite now includes a supervisor IPC test that drives the real tmux pane input path into a raw harness process and asserts the submitted prompt text, Enter delivery, arrow-key escape sequences, and final Enter bytes. This closes `#tmuxe2etests` in `tasks/agent-doc/agent-doc-bugs2.md`.

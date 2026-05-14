@@ -319,11 +319,21 @@ Created and committed the comprehensive plan document at `tasks/agent-doc/plan-l
 The plan covers the control-plane split between agent-doc and worker job packets, routing policy for lower versus medium/high agents, job packet schema, operation docs, token-savings metrics, safety invariants, regression coverage, and a phased implementation path. It includes the tsift workstream explicitly: context packs, source handles, diff/test/log digests, session review, index freshness, routing history, new content types, and JSON CLI contracts.
 
 I marked the existing lower-agent orchestration design backlog item complete and added the implementation follow-up against the new plan. No code changed in this cycle, so I did not run the Rust test suite.
-<!-- agent:boundary:1433344b -->
+❯ What are the #next-steps to implement tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md?
+### Re: lower-agent orchestration next steps — gpt-5
+
+The right next step is to implement the MVP in thin, verifiable layers instead of starting with autonomous worker dispatch.
+
+1. Land the manual protocol first: spec the job packet and worker result schemas, add a runbook for creating packets from an agent-doc session, and include examples for search, test triage, small patch, and spec update jobs. This gives us the contract before we automate it.
+2. Add the tsift context-packet contracts next: JSON envelopes for `context-pack`, `source-read`, `diff-digest`, `test-digest`, `index-status`, stable handles, freshness checks, and token estimates. Keep tsift optional, but make stale/missing context explicit.
+3. Extend `agent-doc plan` after that: emit `task_class`, `dispatch_candidate`, `model_tier`, `context_budget`, `write_scope`, `required_proof`, and fallback behavior when tsift is unavailable.
+4. Add binary-owned job packet commands: `agent-doc jobs create`, `list`, `status`, and `collect`, with generated packets under `.agent-doc/jobs/<cycle>/` and preservation on failure or audit mode.
+5. Only then add operation docs and runner behavior: operation docs should record multi-job audit evidence; the runner should collect structured worker envelopes for parent review, not blindly apply worker output.
+6. Add the learning loop last: record routing outcomes in tsift and adjust lower-agent promotion by task class only after deterministic evidence.
+
+I added backlog items for phases 1 through 4 so the implementation can proceed in order from the plan. No code changed in this cycle, so I did not run the Rust test suite.
+<!-- agent:boundary:ae812706 -->
 <!-- /agent:exchange -->
-###
-<!--
--->
 
 <!-- agent:queue -->
 <!-- /agent:queue -->
@@ -331,6 +341,10 @@ I marked the existing lower-agent orchestration design backlog item complete and
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
+- [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
+- [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
+- [ ] [#rafe] [recommended] Phase 4 for lower-agent orchestration: implement agent-doc jobs create/list/status/collect plus optional operation-doc generation and closeout links. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ek86] Implement the lower-agent orchestration MVP from tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md, starting with manual job packets plus tsift context packets.
 - [ ] [#ajx2] Investigate and fix live-typing duplicate insertion in agent-doc; plan: tasks/agent-doc/plan-live-typing-duplicate-insertion.md
 - [ ] [#fwjw] Define the agent-doc taxonomy for agent docs, job packets, operation docs, runbooks, and plans.

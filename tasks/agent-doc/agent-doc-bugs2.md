@@ -73,7 +73,34 @@ CI / publish evidence:
 - Commit pushed: `src/agent-doc` `0cf58582 fix: normalize orchestrate prompt presets` to `origin/20260422/codex-agent-backend`.
 
 No new backlog item was added; the existing batch items remain open.
-<!-- agent:boundary:1054f0f5 -->
+❯ do [#multiplexertrait]. spec-test-build-install-commit-push
+### Re: multiplexertrait — gpt-5
+
+Implemented the first Multiplexer boundary in `src/agent-doc` and completed the requested spec/test/build/install/commit/push cycle.
+
+What changed:
+- Added `sessions::Multiplexer` as the pane/window/session boundary for metadata queries, geometry listing, liveness checks, capture, single-key input, and harness-aware submitted text.
+- Implemented the trait for `tmux_router::Tmux` and routed the existing `sessions` helpers through it: pane PID/window/current pane, position lookup, capture, `send_key`, and submitted text.
+- Moved claim liveness checks onto the new trait boundary.
+- Added mock-backed unit tests for active pane/PID/window queries, backend-independent geometry selection, and invalid position errors.
+- Added `specs/multiplexer-backend.md` and linked it from the direct terminal plan.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test multiplexer_`
+- `cargo test claim`
+- `make check`
+- `make tmux-ci`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+CI / publish evidence:
+- Latest GitHub `CI` run on `main` was green: `25773430221`; the workflow includes `make check` and `make tmux-ci`.
+- Commit pushed: `src/agent-doc` `fc0938ed feat: add multiplexer session boundary` to `origin/20260422/codex-agent-backend`.
+
+No new backlog item was added. `#multiplexertrait` is marked done by this closeout.
+<!-- agent:boundary:dcbe4374 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -148,7 +175,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#multiplexertrait] Evaluate Multiplexer trait abstraction over tmux to reduce coupling (785 tmux references across 43 files). Would allow future Zellij backend and make the tmux surface testable via mock backend. [recommended]
 - [ ] [#directsubmitbudget] #agent-doc-bug: Direct pane submit telemetry reports 5.18s timeouts / over-budget sends even when dispatch_start_proof later proves the prompt was consumed. Split input-acceptance latency from dispatch-start proof, avoid false timeout language after consumed proof, and tune the owned/hybrid pty submit budget around actual tmux/control-mode behavior.
 - [ ] [#latefallbackloop] #agent-doc-bug: Late fallback patch writes keep firing after a cycle is already committed; logs show repeated late_fallback_patch_rejected reason=already_committed, ipc_write_consumed, commit_already_current, and one resume_commit_blocked_drift with an unresolved prompt-only tail. Stop fallback writers at terminal commit state or rebind them to the next cycle before accepting IPC patches.
 - [ ] [#clearstartingrace] #agent-doc-bug: Clear/restart commands can race starting owned panes; logs show session_clear_sent while generation 170 was still starting, followed by protected-input refusals, commits, and repeated starting_not_ready. Gate clear/restart on dispatch-ready or clean-exit prompt state and document-dirty state before sending literal Enter into the pane.

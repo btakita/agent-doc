@@ -147,6 +147,15 @@ Later phases may refine caller values without changing the field names.
   `sessions.json` as a projection; restart and clear record an
   `operator_<state>` acceptance or stage-specific rejection before touching the
   supervisor socket or tmux input.
+- Operator clear/restart must add a second startup-window guard after
+  controller acceptance and before any pane input or supervisor mutation. If
+  the actor record, matching supervisor runtime, legacy session-scoped
+  supervisor runtime, or matching supervisor lease is still `starting`, clear
+  may proceed only with direct dispatch-ready composer evidence, while restart
+  may proceed with either dispatch-ready composer evidence or the harness
+  clean-exit restart prompt. Both commands must fail closed when the session
+  document changed after the last committed response cycle, so a post-commit
+  prompt edit cannot race a newly starting owned pane.
 - Operator diagnostics must preserve the failed stage. Missing actors,
   blocked/closed actor states, stale projections, and recent failed operator
   attempts are durable controller diagnostics that editor plugins can display

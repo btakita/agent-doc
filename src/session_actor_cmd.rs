@@ -42,6 +42,25 @@ impl RestartMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OperatorAction {
+    Clear,
+    Restart,
+}
+
+impl OperatorAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Clear => "session_clear",
+            Self::Restart => "session_restart",
+        }
+    }
+
+    fn allows_clean_exit_prompt(self) -> bool {
+        matches!(self, Self::Restart)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SupervisorHealth {
     Healthy,
@@ -233,7 +252,9 @@ pub fn restart(file: &Path, mode: RestartMode) -> Result<()> {
         &ctx.canonical_file,
         "session_restart",
     )?;
-    guard_destructive_operator_on_live_busy_pane(&ctx, "session_restart")?;
+    let tmux = Tmux::default_server();
+    guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Restart)?;
+    guard_destructive_operator_on_live_busy_pane(&ctx, &tmux, "session_restart")?;
     ensure_supervisor_socket(&ctx)?;
     let response = crate::supervisor::ipc::send_command(
         &ctx.supervisor_socket,
@@ -271,9 +292,10 @@ pub fn clear(file: &Path) -> Result<()> {
         &ctx.canonical_file,
         "session_clear",
     )?;
-    reconcile_idle_projection_before_clear(&ctx)?;
-    ensure_supervisor_socket(&ctx)?;
     let tmux = Tmux::default_server();
+    guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Clear)?;
+    reconcile_idle_projection_before_clear(&ctx, &tmux)?;
+    ensure_supervisor_socket(&ctx)?;
     if let Some((pane, pane_source)) = resolve_direct_submit_pane(&ctx, &tmux) {
         send_clear_to_pane(&tmux, &pane, &ctx.canonical_file, &ctx.harness)?;
         crate::ops_log::log_op(
@@ -331,13 +353,12 @@ pub fn clear(file: &Path) -> Result<()> {
     Ok(())
 }
 
-fn reconcile_idle_projection_before_clear(ctx: &SessionContext) -> Result<()> {
-    let tmux = Tmux::default_server();
-    let evidence = live_pane_evidence(ctx, &tmux);
+fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> Result<()> {
+    let evidence = live_pane_evidence(ctx, tmux);
     if evidence.state == LivePaneState::AliveIdle {
         reconcile_idle_projection_from_evidence(ctx, &evidence)?;
     } else if evidence.state == LivePaneState::AliveBusy {
-        if let Some(reason) = protected_clear_input_reason(ctx, &tmux, &evidence) {
+        if let Some(reason) = protected_clear_input_reason(ctx, tmux, &evidence) {
             let log_reason = reason.replace(char::is_whitespace, "_");
             crate::ops_log::log_op(
                 &ctx.canonical_file,
@@ -371,6 +392,140 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext) -> Result<()> {
     Ok(())
 }
 
+fn guard_starting_actor_operator_command(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    action: OperatorAction,
+) -> Result<()> {
+    if !operator_command_has_starting_actor(ctx) {
+        return Ok(());
+    }
+
+    let evidence = live_pane_evidence(ctx, tmux);
+    let dirty = document_dirty_after_committed_cycle(&ctx.canonical_file)?;
+    let clean_exit_prompt = pane_shows_clean_exit_prompt(ctx, tmux, &evidence);
+    let dispatch_ready =
+        evidence.state == LivePaneState::AliveIdle && evidence.prompt_ready == Some(true);
+
+    if dispatch_ready && !dirty {
+        reconcile_idle_projection_from_evidence(ctx, &evidence)?;
+        return Ok(());
+    }
+
+    if action.allows_clean_exit_prompt() && clean_exit_prompt && !dirty {
+        return Ok(());
+    }
+
+    let reason = starting_operator_guard_reason(action, dirty, dispatch_ready, clean_exit_prompt);
+    crate::ops_log::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "session_operator_starting_guard_refused kind={} file={} pane={} source={} reason={} actor_state={} supervisor_state={} lease_state={} prompt_ready={} tail={:?}",
+            action.as_str(),
+            ctx.canonical_file.display(),
+            evidence.pane_id.as_deref().unwrap_or("unknown"),
+            evidence.source,
+            reason.replace(char::is_whitespace, "_"),
+            ctx.actor_record
+                .as_ref()
+                .map(|record| record.state.as_str())
+                .unwrap_or("none"),
+            ctx.supervisor_runtime
+                .actor_state
+                .map(|state| state.as_str())
+                .unwrap_or("unknown"),
+            ctx.operator_status
+                .supervisor_lease
+                .as_ref()
+                .and_then(|lease| lease.runtime_state.as_deref())
+                .unwrap_or("unknown"),
+            evidence.prompt_ready.unwrap_or(false),
+            evidence.tail.as_deref().unwrap_or("unknown")
+        ),
+    );
+    anyhow::bail!(
+        "{} refused for {} because the authoritative actor is still starting and {}. Wait for a dispatch-ready prompt and retry, or run `agent-doc session status {}` to inspect the pane.",
+        action.as_str(),
+        ctx.canonical_file.display(),
+        reason,
+        ctx.canonical_file.display()
+    )
+}
+
+fn starting_operator_guard_reason(
+    action: OperatorAction,
+    dirty: bool,
+    dispatch_ready: bool,
+    clean_exit_prompt: bool,
+) -> String {
+    if dirty {
+        return "the document changed after the last committed cycle".to_string();
+    }
+    if clean_exit_prompt && !action.allows_clean_exit_prompt() {
+        return "the pane is at a clean-exit restart prompt, not a dispatch-ready composer"
+            .to_string();
+    }
+    if dispatch_ready {
+        return "the ready prompt could not be reconciled".to_string();
+    }
+    "the pane has not reached a dispatch-ready prompt".to_string()
+}
+
+fn operator_command_has_starting_actor(ctx: &SessionContext) -> bool {
+    let Some(record) = ctx.actor_record.as_ref() else {
+        return false;
+    };
+    if supervisor_runtime_applies_to_record(ctx)
+        && let Some(state) = ctx.supervisor_runtime.actor_state
+    {
+        return state == ActorState::Starting;
+    }
+    if let Some(state) = ctx
+        .operator_status
+        .supervisor_lease
+        .as_ref()
+        .filter(|lease| lease.generation == record.generation)
+        .and_then(|lease| lease.runtime_state.as_deref())
+    {
+        return state == ActorState::Starting.as_str();
+    }
+    record.state == ActorState::Starting
+}
+
+fn supervisor_runtime_matches_record(ctx: &SessionContext) -> bool {
+    let Some(record) = ctx.actor_record.as_ref() else {
+        return false;
+    };
+    ctx.supervisor_runtime.actor_session_id.as_deref() == Some(record.session_id.as_str())
+        && ctx.supervisor_runtime.actor_pane_id.as_deref() == Some(record.pane_id.as_str())
+        && ctx.supervisor_runtime.actor_generation == Some(record.generation)
+}
+
+fn supervisor_runtime_applies_to_record(ctx: &SessionContext) -> bool {
+    if supervisor_runtime_matches_record(ctx) {
+        return true;
+    }
+    ctx.supervisor_runtime.actor_session_id.is_none()
+        && ctx.supervisor_runtime.actor_pane_id.is_none()
+        && ctx.supervisor_runtime.actor_generation.is_none()
+        && matches!(ctx.supervisor_runtime.health, SupervisorHealth::Healthy)
+}
+
+fn document_dirty_after_committed_cycle(file: &Path) -> Result<bool> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(false);
+    };
+    if state.phase != crate::cycle_state::CyclePhase::Committed {
+        return Ok(true);
+    }
+    let Some(hash) = state.file_hash.as_deref() else {
+        return Ok(false);
+    };
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    Ok(crate::ops_log::content_hash(&content) != hash)
+}
+
 fn protected_clear_input_reason(
     ctx: &SessionContext,
     tmux: &Tmux,
@@ -378,12 +533,34 @@ fn protected_clear_input_reason(
 ) -> Option<String> {
     let pane = evidence.pane_id.as_deref()?;
     let captured = crate::sessions::capture_pane(tmux, pane).ok()?;
-    let harness = evidence
+    let harness = harness_for_evidence(ctx, evidence);
+    harness.protected_prompt_input_reason(&captured)
+}
+
+fn pane_shows_clean_exit_prompt(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    evidence: &LivePaneEvidence,
+) -> bool {
+    let Some(pane) = evidence.pane_id.as_deref() else {
+        return false;
+    };
+    let Ok(captured) = crate::sessions::capture_pane(tmux, pane) else {
+        return false;
+    };
+    let harness = harness_for_evidence(ctx, evidence);
+    harness.dispatch_blocker_reason(&captured).as_deref() == Some("clean-exit restart prompt")
+}
+
+fn harness_for_evidence(
+    ctx: &SessionContext,
+    evidence: &LivePaneEvidence,
+) -> crate::harness::HarnessConfig {
+    evidence
         .current_command
         .as_deref()
         .and_then(crate::harness::HarnessConfig::from_pane_command)
-        .unwrap_or_else(|| crate::harness::HarnessConfig::from_agent_name(&ctx.harness));
-    harness.protected_prompt_input_reason(&captured)
+        .unwrap_or_else(|| crate::harness::HarnessConfig::from_agent_name(&ctx.harness))
 }
 
 fn protected_clear_refusal_message(
@@ -553,10 +730,16 @@ fn resolve_direct_submit_pane(
         .map(|pane| (pane.to_string(), DirectSubmitPaneSource::Registry))
 }
 
-fn guard_destructive_operator_on_live_busy_pane(ctx: &SessionContext, action: &str) -> Result<()> {
-    let tmux = Tmux::default_server();
-    let evidence = live_pane_evidence(ctx, &tmux);
+fn guard_destructive_operator_on_live_busy_pane(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    action: &str,
+) -> Result<()> {
+    let evidence = live_pane_evidence(ctx, tmux);
     if evidence.state == LivePaneState::AliveBusy {
+        if action == "session_restart" && pane_shows_clean_exit_prompt(ctx, tmux, &evidence) {
+            return Ok(());
+        }
         let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
         let command = evidence.current_command.as_deref().unwrap_or("unknown");
         let tail = evidence.tail.as_deref().unwrap_or("unknown");
@@ -653,14 +836,24 @@ fn idle_projection_needs_reconciliation(ctx: &SessionContext, evidence: &LivePan
     if evidence.pane_id.as_deref() != Some(record.pane_id.as_str()) {
         return false;
     }
-    record.state == ActorState::Busy
-        || ctx.supervisor_runtime.actor_state == Some(ActorState::Busy)
+    matches!(record.state, ActorState::Starting | ActorState::Busy)
+        || (supervisor_runtime_matches_record(ctx)
+            && matches!(
+                ctx.supervisor_runtime.actor_state,
+                Some(ActorState::Starting | ActorState::Busy)
+            ))
         || ctx
             .operator_status
             .supervisor_lease
             .as_ref()
+            .filter(|lease| lease.generation == record.generation)
             .and_then(|lease| lease.runtime_state.as_deref())
-            == Some("busy")
+            .is_some_and(|state| {
+                matches!(
+                    state,
+                    s if s == ActorState::Starting.as_str() || s == ActorState::Busy.as_str()
+                )
+            })
 }
 
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
@@ -1395,6 +1588,74 @@ mod tests {
         }
     }
 
+    fn test_actor_record(state: ActorState) -> crate::session_actor::ActorRecord {
+        crate::session_actor::ActorRecord {
+            document_id: "/tmp/doc.md".to_string(),
+            session_id: "session-1".to_string(),
+            generation: 7,
+            pane_id: "%7".to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state,
+            last_transition: crate::session_actor::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "test".to_string(),
+                timestamp: 1,
+                prior_generation: 7,
+                new_generation: 7,
+            },
+        }
+    }
+
+    fn test_supervisor_runtime(actor_state: Option<ActorState>) -> SupervisorRuntime {
+        SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state,
+            actor_session_id: Some("session-1".to_string()),
+            actor_pane_id: Some("%7".to_string()),
+            actor_generation: Some(7),
+            supervisor_state: Some("healthy".to_string()),
+            restart_count: 0,
+            supervisor_pid: Some(100),
+            supervisor_instance_id: Some("sup-1".to_string()),
+            child_pid: Some(101),
+            cwd_source: Some("config".to_string()),
+        }
+    }
+
+    fn test_session_context(
+        record: crate::session_actor::ActorRecord,
+        runtime: SupervisorRuntime,
+        lease_state: Option<&str>,
+    ) -> SessionContext {
+        let lease = lease_state.map(|state| crate::project_controller::SupervisorLeaseStatus {
+            generation: 7,
+            supervisor_pid: Some(100),
+            supervisor_socket: Some("/tmp/supervisor.sock".to_string()),
+            last_heartbeat: Some(1),
+            runtime_state: Some(state.to_string()),
+        });
+        SessionContext {
+            canonical_file: PathBuf::from("/tmp/doc.md"),
+            base_dir: PathBuf::from("/tmp"),
+            session_id: "session-1".to_string(),
+            harness: "codex".to_string(),
+            actor_record: Some(record.clone()),
+            operator_status: crate::project_controller::SessionOperatorStatus {
+                record: Some(record),
+                transitions: Vec::new(),
+                supervisor_lease: lease,
+                dispatch_attempts: Vec::new(),
+                projection_diagnostics: Vec::new(),
+            },
+            registry_entry: None,
+            startup_miss: None,
+            log_status: None,
+            supervisor_runtime: runtime,
+            supervisor_socket: PathBuf::from("/tmp/supervisor.sock"),
+        }
+    }
+
     #[test]
     fn parse_actor_state_handles_known_values() {
         assert_eq!(parse_actor_state("ready"), Some(ActorState::Ready));
@@ -1481,6 +1742,85 @@ mod tests {
         assert!(message.contains("pane %7 contains protected prompt input"));
         assert!(message.contains("reason=drafted prompt input"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    #[test]
+    fn operator_starting_guard_sees_supervisor_runtime_starting() {
+        let record = test_actor_record(ActorState::Ready);
+        let ctx = test_session_context(
+            record,
+            test_supervisor_runtime(Some(ActorState::Starting)),
+            None,
+        );
+
+        assert!(operator_command_has_starting_actor(&ctx));
+    }
+
+    #[test]
+    fn operator_starting_guard_lets_matching_runtime_ready_override_stale_record() {
+        let record = test_actor_record(ActorState::Starting);
+        let ctx = test_session_context(
+            record,
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            Some("ready"),
+        );
+
+        assert!(!operator_command_has_starting_actor(&ctx));
+    }
+
+    #[test]
+    fn operator_starting_guard_accepts_legacy_session_scoped_runtime_ready() {
+        let record = test_actor_record(ActorState::Starting);
+        let mut runtime = test_supervisor_runtime(Some(ActorState::Ready));
+        runtime.actor_session_id = None;
+        runtime.actor_pane_id = None;
+        runtime.actor_generation = None;
+        let ctx = test_session_context(record, runtime, Some("starting"));
+
+        assert!(!operator_command_has_starting_actor(&ctx));
+    }
+
+    #[test]
+    fn operator_starting_guard_sees_supervisor_lease_starting() {
+        let record = test_actor_record(ActorState::Ready);
+        let ctx = test_session_context(record, test_supervisor_runtime(None), Some("starting"));
+
+        assert!(operator_command_has_starting_actor(&ctx));
+    }
+
+    #[test]
+    fn starting_operator_guard_reason_blocks_clear_at_clean_exit_prompt() {
+        assert_eq!(
+            starting_operator_guard_reason(OperatorAction::Clear, false, false, true),
+            "the pane is at a clean-exit restart prompt, not a dispatch-ready composer"
+        );
+        assert_eq!(
+            starting_operator_guard_reason(OperatorAction::Restart, false, false, true),
+            "the pane has not reached a dispatch-ready prompt"
+        );
+    }
+
+    #[test]
+    fn document_dirty_after_committed_cycle_detects_post_commit_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/doc.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let committed = "---\nagent_doc_session: session-1\n---\n\nDone.\n";
+        std::fs::write(&doc, committed).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+
+        assert!(!document_dirty_after_committed_cycle(&doc).unwrap());
+
+        std::fs::write(&doc, format!("{committed}\nnew prompt\n")).unwrap();
+
+        assert!(document_dirty_after_committed_cycle(&doc).unwrap());
     }
 
     #[test]

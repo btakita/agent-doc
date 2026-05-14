@@ -298,7 +298,11 @@ single-owner actor controls:
   heuristics. Before contacting the supervisor, it must record a controller
   operator-command acceptance or fail with the rejected stage. If direct tmux
   evidence classifies the resolved pane as `alive-busy`, restart must fail
-  closed before mutating the session.
+  closed before mutating the session, except when the pane is visibly at the
+  harness clean-exit restart prompt. A `starting` actor generation is also a
+  restart guard: restart may proceed only after the pane shows a
+  dispatch-ready prompt or that clean-exit restart prompt, and the document has
+  not changed after the last committed response cycle.
 - `agent-doc session clear <FILE>` injects the harness-native `/clear`
   equivalent into the authoritative session through the same canonical
   single-line submit command used by routed reopen and queued slash-command
@@ -330,6 +334,12 @@ single-owner actor controls:
   `closed` actor generation must still accept this explicit clear operator
   command, because closed only blocks duplicate reopen dispatch; it must not
   prevent clearing the live harness context before the next run.
+- A `starting` actor generation is not an ordinary active/status pane for
+  operator clear. Even after controller acceptance, clear must fail closed
+  before direct tmux submit or supervisor inject unless the resolved pane shows
+  a dispatch-ready composer and the document still matches the last committed
+  cycle hash. A clean-exit restart prompt is not a clear target; operators must
+  restart or wait for the composer before clearing.
 - Any tmux-bound command submit in this surface (`route --dispatch-only`,
   file-scoped `session clear`, queued slash-command dispatch, supervisor-owned
   reopen inject) must normalize trailing line endings once and use exactly one

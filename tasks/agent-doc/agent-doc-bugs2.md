@@ -91,7 +91,35 @@ Commits prepared:
 - parent repo `5d99d6c28` (`agent-doc: reap route-owned panes after ready state`)
 
 I will push after this finalize/session-check boundary so the session closeout commit is included in the parent push.
-<!-- agent:boundary:baf33457 -->
+
+❯ do [#opencodeinputdiag]
+### Re: #opencodeinputdiag — gpt-5
+
+Implemented `#opencodeinputdiag`.
+
+Added structured `tmux_input_event` diagnostics across the tmux/supervisor input paths: route direct pane submits, route supervisor IPC submits, queue dispatch via supervisor and tmux, harness-aware tmux submit helpers, supervisor IPC/auto-trigger injection, stdin forwarding transforms, OpenCode permission prompt arrow translation, and Kitty keyboard protocol preserve/drop decisions. Text payloads are logged as byte length plus SHA-256 rather than raw prompt text, while each event names source, destination, transform, key, byte count, and harness when known.
+
+Updated the supervisor/session-tmux specs and `VERSIONS.md` for the new diagnostic contract.
+
+Verification passed:
+- `cargo test input_diag -- --nocapture`
+- `cargo test opencode_permission_prompt_translates_legacy_arrows_to_tab_controls -- --nocapture`
+- `cargo test filter_preserves_kitty_keyboard_for_opencode -- --nocapture`
+- `cargo test opencode_submit_uses_kitty_return_sequence -- --ignored --nocapture`
+- `cargo fmt --check`
+- `make check`
+- `make build`
+- `make install && agent-doc --version` -> `agent-doc 0.33.16`
+- `make tmux-ci` -> 227 live/ignored tmux tests passed
+
+CI review: latest hosted `CI` run on `main` (`25773430221`, May 13, 2026) is green for its `check` job. I did not find a separate recent hosted tmux job, so the required tmux evidence is the local `make tmux-ci` run above.
+
+Commits prepared:
+- `src/agent-doc` `abfa2357` (`feat: add tmux input diagnostics`)
+- parent repo `ba2da7e1c` (`agent-doc: add tmux input diagnostics`)
+
+I will push after this finalize/session-check boundary so the session closeout commit is included in the parent push.
+<!-- agent:boundary:a0d69c5e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -166,7 +194,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
 - [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md

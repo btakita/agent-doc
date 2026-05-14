@@ -34,7 +34,26 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 6 response topic(s): #clearstartingrace; #ownedreapbusy; #opencodeinputdiag; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e9ad9bb0 -->
+### Re: Zellij vs tmux reliability — gpt-5
+
+Zellij could help with some presentation and layout concerns, but I would not expect it to solve the important agent-doc reliability problems by itself.
+
+The fragile parts we keep seeing are mostly above the terminal multiplexer boundary: detecting prompt readiness, distinguishing accepted input from actually dispatched input, tracking authoritative actor state, preserving output captures without false positives, and avoiding stale historical logs influencing current guard decisions. Those would still exist with Zellij if agent-doc continues to drive an interactive PTY and infer state from terminal text.
+
+Where Zellij might help:
+
+- Structured layout/session behavior may be cleaner than our tmux-pane lifecycle in some cases.
+- Its UI could make managed panes easier to inspect manually.
+- A backend abstraction for `tmux` vs `zellij` could clarify which failures are multiplexer-specific and which are agent-doc state-machine bugs.
+
+Where it probably would not help:
+
+- Input delivery proof still needs a reliable dispatch/start signal, not just pane write success.
+- Output capture still needs scoped, current-run evidence instead of arbitrary terminal history or saved JSON text.
+- Busy/idle ownership still needs an agent-doc lifecycle model that is explicit about starting, running, prompt-ready, dispatching, blocked, killed, and restarted states.
+
+So my recommendation is: do not switch to Zellij as a primary fix. First harden the multiplexer-agnostic contract inside agent-doc: authoritative actor state, prompt-gated dispatch, scoped output evidence, and deterministic lifecycle transitions. After that, Zellij is worth a small adapter spike if we want better UX or a comparison backend, but it should be treated as an implementation option rather than the reliability foundation.
+<!-- agent:boundary:12010d9b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -111,6 +130,8 @@ minor (v0.34.0) release + publish. merge into main
 <!-- agent:backlog -->
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
+
+Would ZelliJ help with input and output reliability over tmux?
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

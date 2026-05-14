@@ -34,6 +34,10 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): Zellij vs tmux reliability; log evaluation and next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
+
+❯ (preset #spec-test-build-install-commit-push)
+update spec + tests. build + install for local testing. commit + push
+do [#opsreadinessrace]
 sync orchestra
 preset #spec-test-build-install-commit-push
 - do [#opsreadinessrace]
@@ -117,6 +121,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#backlogorphan] #agent-doc-bug: Backlog-section prompts leave orphan text after patchback — finalize writes response to exchange but does not clean up the original prompt text from backlog, making it look like the patchback was never written. Plan: tasks/agent-doc/plan-backlog-prompt-patchback-orphan.md
 - [ ] [#opsreadinessrace] Tighten route readiness handling: avoid dispatch/clear attempts while the authoritative actor is `starting`; surface a single actionable wait/retry state until `prompt_ready=true`.
 - [ ] [#interruptcleartimeout] Investigate `session_interrupt_clear_settled outcome=timed_out` after protected clear and make interrupt-clear report the blocking state and last command deterministically.
 - [ ] [#opsnoisereduce] Reduce `post_commit_local_drift` / `commit_noop` noise by separating expected user follow-up edits from anomalous drift in `agent-doc ops summary`.

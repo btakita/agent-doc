@@ -34,13 +34,37 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): #orchplainresp
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-synch orchestra
-dispatch #spec-test-build-install-commit-push
-- do [#clearstartingrace]
-- do [#ownedreapbusy]
-- do [#opencodeinputdiag]
-- do [#tmuxe2etests]
-<!-- agent:boundary:8ce0ab93 -->
+
+❯ do [#clearstartingrace]
+❯ synch orchestra
+❯ dispatch #spec-test-build-install-commit-push
+❯ - do [#clearstartingrace]
+❯ - do [#ownedreapbusy]
+❯ - do [#opencodeinputdiag]
+❯ - do [#tmuxe2etests]
+### Re: #clearstartingrace — gpt-5
+
+Implemented `#clearstartingrace`.
+
+Clear/restart now run a startup-window guard after controller acceptance and before any pane input or supervisor mutation. If the actor record, matching or legacy session-scoped supervisor runtime, or matching supervisor lease still reports `starting`, `session clear` only proceeds with a dispatch-ready composer and a clean post-commit document hash; `session restart` can also proceed at the clean-exit restart prompt. Refusals log `session_operator_starting_guard_refused` and avoid sending literal Enter or `/clear` into a pane that has not reached the right prompt.
+
+I also updated the tmux/session specs and `VERSIONS.md`, and added regressions for stale starting records, live runtime/lease override behavior, legacy supervisor runtime payloads, clean-exit prompt handling, and post-commit document drift.
+
+Verification passed:
+- `cargo test session_actor_cmd::tests::operator_starting_guard`
+- `cargo test session_actor_cmd::tests::clear_falls_back_to_supervisor_inject_when_authoritative_pane_is_not_on_default_tmux -- --ignored --test-threads=1`
+- `make check`
+- `make build`
+- `make install && agent-doc --version` -> `agent-doc 0.33.16`
+- `make tmux-ci` -> 227 live/ignored tmux tests passed
+- Latest GitHub Actions on `main`: `CI/check`, mdBook `build`, and mdBook `deploy` are green; no separate recent hosted tmux job was present, so local `make tmux-ci` is the tmux evidence.
+
+Commits prepared:
+- `src/agent-doc` `720c671c` (`fix: guard clear during starting actor windows`)
+- parent repo `1c05f9836` (`agent-doc: guard clear during starting actor windows`)
+
+I will push after this finalize/session-check boundary so the session closeout commit is included in the parent push.
+<!-- agent:boundary:60bc9c32 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -115,7 +139,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#clearstartingrace] #agent-doc-bug: Clear/restart commands can race starting owned panes; logs show session_clear_sent while generation 170 was still starting, followed by protected-input refusals, commits, and repeated starting_not_ready. Gate clear/restart on dispatch-ready or clean-exit prompt state and document-dirty state before sending literal Enter into the pane.
 - [ ] [#ownedreapbusy] #agent-doc-bug: Owned pane reap decisions are noisy and often keep panes alive from spinner tails like Working/escape-title fragments instead of a stable idle/busy signal. Normalize screen-tail sampling or prefer supervisor prompt state so route_owned_reap_decision does not preserve panes based on transient renderer text.
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
 - [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.

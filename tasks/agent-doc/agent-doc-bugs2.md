@@ -123,7 +123,56 @@ So the architecture I would aim for is:
 If this becomes productized, the clean boundary is `tsift graph-export` or `agent-doc orchestration-export`: emit nodes/edges from the committed document state and tsift indexes, then let Memgraph answer graph questions. Do not put Memgraph in the hot path until the graph queries prove they produce better worker packets or better routing decisions than SQLite-backed tsift alone.
 
 Sources: [Memgraph overview](https://memgraph.com/), [Memgraph Vector Search](https://memgraph.com/vector-search), [Memgraph GraphRAG](https://memgraph.com/graphrag), [Memgraph AI docs](https://www.memgraph.ai/docs).
-<!-- agent:boundary:5fc61f52 -->
+❯ Would either short-lived or long-lived "virtual documents" help with bounded context? These "virtual-documents" can be created on the filesystem. Short-lived "virtual documents" would be deleted once the job is complete. A git commit can be useful for auditing.
+### Re: virtual documents for bounded context — gpt-5
+
+Yes. Virtual documents are a strong fit for bounded context, as long as they are treated as derived job artifacts rather than a second source of truth.
+
+The main agent-doc session document should remain the durable user interface: prompt, response, backlog, done archive, and closeout proof. Virtual documents can sit underneath it as scoped context packets for workers. That gives smaller models a filesystem-native artifact they can read without inheriting the whole parent exchange.
+
+I would use two classes:
+
+1. Short-lived job documents: created under something like `.agent-doc/jobs/<cycle>/<job-id>.md`, handed to a worker, then deleted or archived after the parent cycle finalizes.
+2. Long-lived memory documents: committed under a stable path when the artifact has reuse value, such as a release audit, subsystem map, routing outcome table, failure taxonomy, or benchmark result.
+
+Short-lived virtual documents help most with orchestration. They can contain exactly the worker contract:
+
+- parent document path and cycle id
+- task type and acceptance criteria
+- allowed write scope
+- tsift context-pack/source-read/search handles
+- relevant files and symbol windows
+- commands the worker may run
+- required response schema
+- escalation conditions
+
+That is much cleaner than asking a smaller model to infer its job from the full session document. It also makes retries cheaper: regenerate or amend the job document, rerun the worker, compare outputs.
+
+Long-lived virtual documents help when the output becomes an asset: architecture maps, stable runbooks, model-routing calibration, public release audits, or recurring failure analyses. Those should be committed, because the git history becomes part of the audit trail. A commit answers: what context was handed off, what decision was made, what evidence existed at the time, and how the orchestration policy evolved.
+
+The design rule I would enforce is provenance. Every virtual document should say whether it is ephemeral or retained, what generated it, which source snapshot it summarizes, and whether it is authoritative. Most should be explicitly non-authoritative: "derived from session X, tsift index commit Y, source HEAD Z." That prevents stale packets from silently outranking the live repo or the main session document.
+
+A practical shape:
+
+```text
+.agent-doc/
+  jobs/
+    cycle-123/
+      job-search-auth.md
+      job-fix-router.md
+      job-test-summary.md
+  artifacts/
+    release-audits/
+    routing-calibration/
+    subsystem-maps/
+```
+
+Short-lived job docs should probably be ignored by default, with an option to preserve them on failure or when `--audit-jobs` is set. Long-lived artifacts should be normal tracked files with clear ownership and review.
+
+This also pairs well with tsift. agent-doc can ask tsift for bounded context, write the result into a virtual document, route that document to a smaller model, then finalize only the distilled result back into the main session. That turns context shaping into a visible filesystem protocol rather than hidden prompt assembly.
+
+So yes: virtual documents would help. I would start with short-lived per-job documents for orchestration packets, then add committed long-lived artifacts only for outputs that are useful across cycles. Do not let virtual documents become unbounded transcript dumps; their value is that they are smaller, typed, and easier to audit than the parent context.
+<!-- agent:boundary:c3405bc7 -->
 <!-- /agent:exchange -->
 ###
 <!--

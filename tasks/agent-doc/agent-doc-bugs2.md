@@ -66,7 +66,10 @@ Verification:
 The sequential orchestra started and completed `#orchmidrun`, including code/test/install/commit/push and `--done orchmidrun` closeout. The parent orchestrator then stopped before task 2 with `failed to spawn agent-doc finalize` while trying to write its own batch-interruption response, so I did not launch the remaining six tasks in this cycle.
 
 Remaining open for a later explicit run: `#backlogorphan`, `#interruptcleartimeout`, `#opsnoisereduce`, `#hookreviewroute`, `#sshcapfalsecapture`, and `#codexverbosepb`.
-<!-- agent:boundary:0b036ef8 -->
+### Re: sync orchestra premature stop — gpt-5
+
+Recorded the premature `sync orchestra` stop as a new `#agent-doc-bug` backlog item with plan `tasks/agent-doc/plan-sync-orchestra-premature-stop.md`. The bug is that the parent orchestrator completed the first child task but stopped before task 2 when its own closeout path failed to spawn `agent-doc finalize`.
+<!-- agent:boundary:697036d0 -->
 <!-- /agent:exchange -->
 ###
 <!--

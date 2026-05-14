@@ -108,7 +108,33 @@ Commits prepared before session closeout:
 - parent `agent-loop` `248d8e80e` (`agent-doc: stabilize orchestrate closeout`)
 
 Per the session-document closeout ordering, I will push those commits after this finalize commit lands.
-<!-- agent:boundary:3c3013c0 -->
+
+❯ update spec + tests. build + install for local testing. commit + push. do [#backlogorphan]
+### Re: #backlogorphan — gpt-5
+
+Implemented `#backlogorphan`.
+
+What changed:
+- Template and CRDT write closeout now detect prompt-target lines newly added inside `agent:backlog` / legacy `agent:pending` while the response is being written to `agent:exchange`.
+- After merging the response, the write path removes only those resolved raw prompt-target lines from the backlog component. Normal tracked backlog additions, `--done` state changes, and unrelated non-exchange edits remain intact.
+- Added focused regressions for removing an answered backlog prompt and preserving ordinary tracked backlog edits.
+- Updated `SPEC.md`, `README.md`, `VERSIONS.md`, and `specs/07-closeout-commands.md` with the closeout invariant.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc cleanup_resolved_backlog_prompts -- --nocapture`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- GitHub `CI` run `25773430221` on `main` is green for `check`; it exposes no separate tmux job.
+- `make tmux-ci` -> 227 ignored live tmux tests passed.
+
+Commits prepared before session closeout:
+- `src/agent-doc` `86840eba` (`fix: clean backlog prompt patchbacks`)
+- parent `agent-loop` `6c9eb1975` (`agent-doc: clean backlog prompt patchbacks`)
+
+Per the session-document closeout ordering, I will push those commits after this finalize commit lands.
+<!-- agent:boundary:5d0919de -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -183,7 +209,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#backlogorphan] #agent-doc-bug: Backlog-section prompts leave orphan text after patchback — finalize writes response to exchange but does not clean up the original prompt text from backlog, making it look like the patchback was never written. Plan: tasks/agent-doc/plan-backlog-prompt-patchback-orphan.md
 - [ ] [#interruptcleartimeout] Investigate `session_interrupt_clear_settled outcome=timed_out` after protected clear and make interrupt-clear report the blocking state and last command deterministically.
 - [ ] [#opsnoisereduce] Reduce `post_commit_local_drift` / `commit_noop` noise by separating expected user follow-up edits from anomalous drift in `agent-doc ops summary`.
 - [ ] [#hookreviewroute] Clarify `route_dispatch_only_blocked reason=codex hook review prompt` as a user-facing route blocker with recovery guidance.

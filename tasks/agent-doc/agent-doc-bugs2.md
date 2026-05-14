@@ -294,25 +294,39 @@ Verification:
 - `make check`
 - `make install` (`agent-doc 0.33.16`)
 - Latest GitHub CI run on `main` inspected: `25773430221`, success. I did not observe a red tmux leg in that run, so I did not run local `make tmux-ci`.
-<!-- agent:boundary:1f94057d -->
+❯ agent-doc.md has duplicate content being inserted as I type. Is there an orphaned process writing into the document?
+❯ #agent-doc-bug. Please fix. spec-test-build-install-commit-push
+
+❯ Add #next-steps for:
+❯ - taxonomies
+❯ - operation doc
+❯ - orchestration using lower agents
+❯ - Assign backlog to tsift.md to support agent-doc
+### Re: live typing duplicate insertion plan — gpt-5
+
+I did a bounded check before closeout: `.agent-doc/patches` is empty, and `ps` shows an active route-owned `agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md` process for this document rather than clear proof of a stale fallback patch replay. That does not rule out an orphaned listener or stale writer path, but it means the quick evidence points to an active managed session, not an obvious leftover patch file.
+
+Because `agent-doc plan` classified this turn as `execution_scope=plan_backlog_only`, I did not change implementation code in this cycle. I created and committed the required bug plan at `tasks/agent-doc/plan-live-typing-duplicate-insertion.md` (`25cdc467b`). The plan covers live-typing reproduction, stale IPC/fallback patch checks, orphan-listener diagnostics, idempotent replay guards, and regression tests.
+
+I also added the requested `#next-steps` backlog items for taxonomy, operation docs, lower-agent orchestration, and the tsift support item in `tasks/software/tsift.md`.
+
+Verification: no code changed in this cycle, so I did not run the project test suite.
+<!-- agent:boundary:d1937f8a -->
 <!-- /agent:exchange -->
 ###
 <!--
----
 -->
 
-<!-- agent:queue auto -->
-preset spec-test-build-install-commit-push
-- do [#ds58]
-- do [#djwb]
-- do [#m2hx]
-- do [#ha62]
-- do [#aymr]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ajx2] Investigate and fix live-typing duplicate insertion in agent-doc; plan: tasks/agent-doc/plan-live-typing-duplicate-insertion.md
+- [ ] [#fwjw] Define the agent-doc taxonomy for agent docs, job packets, operation docs, runbooks, and plans.
+- [ ] [#0fcx] Specify operation docs/opdocs as retained audit artifacts and how they relate to job packets.
+- [ ] [#gv32] Design lower-agent orchestration using bounded job packets and model-tier routing.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

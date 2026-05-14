@@ -267,13 +267,38 @@ So the implementation could have paths like:
 ```
 
 I would not lead with `opdoc`, but it is a decent CLI shorthand after the user-facing term is clear: `agent-doc opdoc create`, `agent-doc opdoc preserve`, etc. In prose and specs, call them `job packets` and `operation docs`.
-<!-- agent:boundary:028e7b77 -->
+❯ How does an agent doc fit into the taxonomy? Is an agent doc a collection of job packets or a collection of history + prompts.
+
+❯ If I'm typing into agent:exchange during finalize, the content of finalize are duplicated in the final patchback. Please investigate and fix. #next-steps
+
+❯ When an agent:queue is running, each completed task should have a strikethrough `~...~`. When the entire agent:queue is complete, clear the contents. #next-steps
+### Re: agent-doc taxonomy and closeout fixes — gpt-5
+
+An agent doc is the durable session document, not a collection of job packets. In the taxonomy, it is the parent workflow record: history, live prompts, responses, queue/backlog state, closeout proof, and links to derived work. Job packets are generated child artifacts for one bounded unit of work; operation docs are retained execution records; runbooks are reusable procedure; plans are intended work. So an agent doc can reference or spawn job packets, but it is not defined by them.
+
+I fixed the two implementation issues:
+
+- `run_ipc` timeout fallback now adopts an already-visible response before CRDT merging, so typing into `agent:exchange` while finalize/write is applying through IPC should not duplicate the response block.
+- `agent:queue` now parses `preset ...` directives, tracks completed prompts as `- ~...~` while more prompts remain, skips completed entries for dispatch, and clears the queue body when the final prompt drains.
+
+Updated specs and tests cover the new queue semantics and the IPC fallback invariant.
+
+Verification:
+
+- `cargo fmt`
+- `cargo check`
+- `cargo test queue::tests`
+- `cargo test --test finalize_integration queue`
+- `cargo test response_already_in_current`
+- `cargo test adopt_current_response_without_duplication`
+- `make check`
+- `make install` (`agent-doc 0.33.16`)
+- Latest GitHub CI run on `main` inspected: `25773430221`, success. I did not observe a red tmux leg in that run, so I did not run local `make tmux-ci`.
+<!-- agent:boundary:1f94057d -->
 <!-- /agent:exchange -->
 ###
 <!--
-If I'm typing into agent:exchange during finalize, the content of finalize are duplicated in the final patchback. Please investigate and fix. spec-test-build-install-commit-push
 ---
-When an agent:queue is running, each completed task should have a strikethrough `~...~`. When the entire agent:queue is complete, clear the contents.
 -->
 
 <!-- agent:queue auto -->

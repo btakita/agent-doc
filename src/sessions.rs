@@ -37,6 +37,9 @@
 //! - `capture_pane(tmux, pane_id)` returns visible pane content via
 //!   `tmux capture-pane -p`; `capture_pane_with_ansi` preserves attributes
 //!   for TUI prompt selection parsing.
+//! - `Multiplexer` is the backend boundary for pane/window/session queries,
+//!   capture, and submitted input. `Tmux` is the production implementation;
+//!   unit tests can inject a mock backend without a live tmux server.
 //! - `send_key(tmux, pane_id, key)` sends a single named key (e.g. `"Enter"`,
 //!   `"Up"`) — does NOT append a newline, unlike `Tmux::send_keys`.
 //! - `pane_by_position(position)` resolves a pane in the current window by
@@ -66,6 +69,10 @@
 //!   independently without cross-contamination.
 //! - registry_overwrite_existing_session: inserting the same session_id twice replaces
 //!   the entry; registry length stays at 1.
+//! - multiplexer_queries_support_mock_backend: active pane, pane PID, and window ID
+//!   queries work through the trait without tmux.
+//! - multiplexer_position_selection_is_backend_independent: position selection
+//!   parses multiplexer pane geometry independent of the concrete backend.
 //! - prune_removes_dead_panes: retain entries whose pane is alive removes fabricated
 //!   dead pane IDs, leaving an empty registry.
 //! - register_full_deduplicates_pane: seeding two sessions with the same pane then
@@ -88,6 +95,115 @@ pub use tmux_router::Tmux;
 pub use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock};
 
 const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
+
+/// Multiplexer operations agent-doc needs at the session/pane boundary.
+///
+/// The implementation is tmux-backed today, but callers that only need pane
+/// state or geometry should depend on this trait instead of shelling out to
+/// `tmux` directly. That keeps future backends such as Zellij from inheriting
+/// tmux-specific command formatting throughout the codebase.
+pub trait Multiplexer {
+    fn display_message(&self, target: Option<&str>, format: &str) -> Result<String>;
+    fn list_panes(&self, target: Option<&str>, format: &str) -> Result<String>;
+    fn pane_alive(&self, pane_id: &str) -> bool;
+    fn session_alive(&self, name: &str) -> bool;
+    fn capture_pane_plain(&self, pane_id: &str) -> Result<String>;
+    fn capture_pane_with_ansi(&self, pane_id: &str) -> Result<String>;
+    fn send_key(&self, pane_id: &str, key: &str) -> Result<()>;
+    fn send_submitted_text(&self, pane_id: &str, text: &str) -> Result<()>;
+    fn send_submitted_text_for_harness(
+        &self,
+        pane_id: &str,
+        text: &str,
+        harness: &str,
+    ) -> Result<()>;
+}
+
+impl Multiplexer for Tmux {
+    fn display_message(&self, target: Option<&str>, format: &str) -> Result<String> {
+        let mut cmd = self.cmd();
+        cmd.arg("display-message");
+        if let Some(target) = target {
+            cmd.args(["-t", target]);
+        }
+        let output = cmd
+            .args(["-p", format])
+            .output()
+            .context("failed to run multiplexer display-message")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "multiplexer display-message failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    fn list_panes(&self, target: Option<&str>, format: &str) -> Result<String> {
+        let mut cmd = self.cmd();
+        cmd.arg("list-panes");
+        if let Some(target) = target {
+            cmd.args(["-t", target]);
+        }
+        let output = cmd
+            .args(["-F", format])
+            .output()
+            .context("failed to run multiplexer list-panes")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "multiplexer list-panes failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn pane_alive(&self, pane_id: &str) -> bool {
+        Tmux::pane_alive(self, pane_id)
+    }
+
+    fn session_alive(&self, name: &str) -> bool {
+        Tmux::session_alive(self, name)
+    }
+
+    fn capture_pane_plain(&self, pane_id: &str) -> Result<String> {
+        Tmux::capture_pane(self, pane_id, None)
+    }
+
+    fn capture_pane_with_ansi(&self, pane_id: &str) -> Result<String> {
+        let output = self
+            .cmd()
+            .args(["capture-pane", "-t", pane_id, "-p", "-e"])
+            .output()
+            .context("failed to run multiplexer capture-pane with ANSI")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "multiplexer capture-pane failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn send_key(&self, pane_id: &str, key: &str) -> Result<()> {
+        Tmux::send_key(self, pane_id, key)
+    }
+
+    fn send_submitted_text(&self, pane_id: &str, text: &str) -> Result<()> {
+        Tmux::send_keys(self, pane_id, text)
+            .with_context(|| format!("failed to submit input to pane {}", pane_id))
+    }
+
+    fn send_submitted_text_for_harness(
+        &self,
+        pane_id: &str,
+        text: &str,
+        harness: &str,
+    ) -> Result<()> {
+        tmux_router::submit_text_for_harness(self, pane_id, text, harness)
+            .with_context(|| format!("failed to submit input to {harness} pane {pane_id}"))
+    }
+}
 
 /// Return the path to the sessions registry file (relative to CWD).
 pub fn registry_path() -> PathBuf {
@@ -178,7 +294,7 @@ fn find_registry_key_by_session_id(registry: &SessionRegistry, session_id: &str)
 
 /// Capture the visible content of a tmux pane.
 pub fn capture_pane(tmux: &Tmux, pane_id: &str) -> Result<String> {
-    tmux.capture_pane(pane_id, None)
+    tmux.capture_pane_plain(pane_id)
 }
 
 /// Capture visible pane content while preserving ANSI attributes.
@@ -186,18 +302,7 @@ pub fn capture_pane(tmux: &Tmux, pane_id: &str) -> Result<String> {
 /// Prompt selection parsers need the highlighted option color; the normal
 /// tmux-router capture helper intentionally returns plain text.
 pub fn capture_pane_with_ansi(tmux: &Tmux, pane_id: &str) -> Result<String> {
-    let output = tmux
-        .cmd()
-        .args(["capture-pane", "-t", pane_id, "-p", "-e"])
-        .output()
-        .context("failed to run tmux capture-pane with ANSI")?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "tmux capture-pane failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    tmux.capture_pane_with_ansi(pane_id)
 }
 
 /// Join `src` beside `dst` only if both belong to `expected_session`.
@@ -221,7 +326,7 @@ pub fn join_pane_guarded(
 /// Unlike `Tmux::send_keys` (which sends literal text + Enter), this sends
 /// a single key name like "Up", "Down", "Enter" — used for TUI navigation.
 pub fn send_key(tmux: &Tmux, pane_id: &str, key: &str) -> Result<()> {
-    tmux.send_key(pane_id, key)
+    Multiplexer::send_key(tmux, pane_id, key)
 }
 
 /// Submit a single-line command through a tmux pane's normal text+Enter path.
@@ -229,8 +334,7 @@ pub fn send_key(tmux: &Tmux, pane_id: &str, key: &str) -> Result<()> {
 /// This is the canonical live-pane submission helper for agent-doc-managed
 /// harness commands such as routed reopen triggers and file-scoped `/clear`.
 pub fn send_submitted_text(tmux: &Tmux, pane_id: &str, text: &str) -> Result<()> {
-    tmux.send_keys(pane_id, text)
-        .with_context(|| format!("failed to submit input to pane {}", pane_id))
+    tmux.send_submitted_text(pane_id, text)
 }
 
 /// Submit a single-line command through a harness-aware tmux submit path.
@@ -244,8 +348,7 @@ pub fn send_submitted_text_for_harness(
     text: &str,
     harness: &str,
 ) -> Result<()> {
-    tmux_router::submit_text_for_harness(tmux, pane_id, text, harness)
-        .with_context(|| format!("failed to submit input to {harness} pane {pane_id}"))
+    tmux.send_submitted_text_for_harness(pane_id, text, harness)
 }
 
 // ---------------------------------------------------------------------------
@@ -297,14 +400,13 @@ pub(crate) fn save_in(base_dir: &Path, registry: &SessionRegistry) -> Result<()>
 /// Register a session → pane mapping.
 /// Get the PID of the foreground process in a tmux pane.
 pub fn pane_pid(pane_id: &str) -> Result<u32> {
-    let output = Command::new("tmux")
-        .args(["display-message", "-t", pane_id, "-p", "#{pane_pid}"])
-        .output()
-        .context("failed to query tmux pane PID")?;
-    if !output.status.success() {
-        anyhow::bail!("tmux display-message failed for pane {}", pane_id);
-    }
-    let pid_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    pane_pid_with_mux(&Tmux::default_server(), pane_id)
+}
+
+pub(crate) fn pane_pid_with_mux(mux: &dyn Multiplexer, pane_id: &str) -> Result<u32> {
+    let pid_str = mux
+        .display_message(Some(pane_id), "#{pane_pid}")
+        .with_context(|| format!("failed to query multiplexer pane PID for {}", pane_id))?;
     pid_str
         .parse::<u32>()
         .with_context(|| format!("invalid PID '{}' for pane {}", pid_str, pane_id))
@@ -864,14 +966,12 @@ fn resolve_log_file_path(base_dir: &Path, file: &str) -> PathBuf {
 
 /// Query the tmux window ID for a pane.
 pub fn pane_window(pane_id: &str) -> Result<String> {
-    let output = Command::new("tmux")
-        .args(["display-message", "-t", pane_id, "-p", "#{window_id}"])
-        .output()
-        .context("failed to query tmux window ID")?;
-    if !output.status.success() {
-        anyhow::bail!("tmux display-message failed for pane {}", pane_id);
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    pane_window_with_mux(&Tmux::default_server(), pane_id)
+}
+
+pub(crate) fn pane_window_with_mux(mux: &dyn Multiplexer, pane_id: &str) -> Result<String> {
+    mux.display_message(Some(pane_id), "#{window_id}")
+        .with_context(|| format!("failed to query multiplexer window ID for {}", pane_id))
 }
 
 /// Look up the pane ID for a session.
@@ -902,17 +1002,15 @@ pub fn current_pane() -> Result<String> {
     if let Ok(pane) = std::env::var("TMUX_PANE") {
         return Ok(pane);
     }
-    // Fallback: query tmux for the active pane
-    let output = Command::new("tmux")
-        .args(["display-message", "-p", "#{pane_id}"])
-        .output()
-        .context("failed to query tmux for active pane — is tmux running?")?;
-    if !output.status.success() {
-        anyhow::bail!("tmux display-message failed — not inside tmux and no tmux server found");
-    }
-    let pane = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    current_pane_with_mux(&Tmux::default_server())
+}
+
+pub(crate) fn current_pane_with_mux(mux: &dyn Multiplexer) -> Result<String> {
+    let pane = mux
+        .display_message(None, "#{pane_id}")
+        .context("failed to query multiplexer for active pane")?;
     if pane.is_empty() {
-        anyhow::bail!("tmux returned empty pane ID");
+        anyhow::bail!("multiplexer returned empty pane ID");
     }
     Ok(pane)
 }
@@ -921,18 +1019,20 @@ pub fn current_pane() -> Result<String> {
 /// Queries `tmux list-panes` for the current window and selects the pane
 /// at the requested position based on coordinates.
 pub fn pane_by_position(position: &str) -> Result<String> {
-    let output = Command::new("tmux")
-        .args([
-            "list-panes",
-            "-F",
+    pane_by_position_with_mux(&Tmux::default_server(), position)
+}
+
+pub(crate) fn pane_by_position_with_mux(mux: &dyn Multiplexer, position: &str) -> Result<String> {
+    let text = mux
+        .list_panes(
+            None,
             "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}",
-        ])
-        .output()
-        .context("failed to query tmux panes")?;
-    if !output.status.success() {
-        anyhow::bail!("tmux list-panes failed");
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
+        )
+        .context("failed to query multiplexer panes")?;
+    select_pane_by_position(&text, position, "current multiplexer window")
+}
+
+fn select_pane_by_position(text: &str, position: &str, scope: &str) -> Result<String> {
     let mut panes: Vec<(String, u32, u32, u32, u32)> = Vec::new();
     for line in text.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -946,7 +1046,7 @@ pub fn pane_by_position(position: &str) -> Result<String> {
         }
     }
     if panes.is_empty() {
-        anyhow::bail!("no panes found in current tmux window");
+        anyhow::bail!("no panes found in {}", scope);
     }
     if panes.len() == 1 {
         return Ok(panes[0].0.clone());
@@ -970,52 +1070,21 @@ pub fn pane_by_position(position: &str) -> Result<String> {
 /// Resolve a pane by positional hint within a specific tmux window.
 /// Like `pane_by_position` but scoped to the given window ID (e.g. `@1`).
 pub fn pane_by_position_in_window(position: &str, window: &str) -> Result<String> {
-    let output = Command::new("tmux")
-        .args([
-            "list-panes",
-            "-t",
-            window,
-            "-F",
+    pane_by_position_in_window_with_mux(&Tmux::default_server(), position, window)
+}
+
+pub(crate) fn pane_by_position_in_window_with_mux(
+    mux: &dyn Multiplexer,
+    position: &str,
+    window: &str,
+) -> Result<String> {
+    let text = mux
+        .list_panes(
+            Some(window),
             "#{pane_id} #{pane_left} #{pane_top} #{pane_width} #{pane_height}",
-        ])
-        .output()
-        .context("failed to query tmux panes")?;
-    if !output.status.success() {
-        anyhow::bail!("tmux list-panes failed for window {}", window);
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut panes: Vec<(String, u32, u32, u32, u32)> = Vec::new();
-    for line in text.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 5 {
-            let id = parts[0].to_string();
-            let left: u32 = parts[1].parse().unwrap_or(0);
-            let top: u32 = parts[2].parse().unwrap_or(0);
-            let width: u32 = parts[3].parse().unwrap_or(0);
-            let height: u32 = parts[4].parse().unwrap_or(0);
-            panes.push((id, left, top, width, height));
-        }
-    }
-    if panes.is_empty() {
-        anyhow::bail!("no panes found in tmux window {}", window);
-    }
-    if panes.len() == 1 {
-        return Ok(panes[0].0.clone());
-    }
-    let selected = match position {
-        "left" => panes.iter().min_by_key(|p| p.1),
-        "right" => panes.iter().max_by_key(|p| p.1 + p.3),
-        "top" => panes.iter().min_by_key(|p| p.2),
-        "bottom" => panes.iter().max_by_key(|p| p.2 + p.4),
-        _ => anyhow::bail!(
-            "invalid position '{}' — use left, right, top, or bottom",
-            position
-        ),
-    };
-    match selected {
-        Some(pane) => Ok(pane.0.clone()),
-        None => anyhow::bail!("could not resolve pane for position '{}'", position),
-    }
+        )
+        .with_context(|| format!("failed to query multiplexer panes for window {}", window))?;
+    select_pane_by_position(&text, position, &format!("multiplexer window {}", window))
 }
 
 /// Check if we're inside tmux.
@@ -1039,6 +1108,109 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[derive(Default)]
+    struct MockMultiplexer {
+        active_pane: String,
+        pane_pid: String,
+        pane_window: String,
+        list_panes: String,
+        window_list_panes: String,
+    }
+
+    impl Multiplexer for MockMultiplexer {
+        fn display_message(&self, target: Option<&str>, format: &str) -> Result<String> {
+            match (target, format) {
+                (None, "#{pane_id}") => Ok(self.active_pane.clone()),
+                (Some(_), "#{pane_pid}") => Ok(self.pane_pid.clone()),
+                (Some(_), "#{window_id}") => Ok(self.pane_window.clone()),
+                _ => anyhow::bail!("unexpected display-message query: {target:?} {format}"),
+            }
+        }
+
+        fn list_panes(&self, target: Option<&str>, _format: &str) -> Result<String> {
+            if target.is_some() {
+                Ok(self.window_list_panes.clone())
+            } else {
+                Ok(self.list_panes.clone())
+            }
+        }
+
+        fn pane_alive(&self, _pane_id: &str) -> bool {
+            true
+        }
+
+        fn session_alive(&self, _name: &str) -> bool {
+            true
+        }
+
+        fn capture_pane_plain(&self, _pane_id: &str) -> Result<String> {
+            Ok(String::new())
+        }
+
+        fn capture_pane_with_ansi(&self, _pane_id: &str) -> Result<String> {
+            Ok(String::new())
+        }
+
+        fn send_key(&self, _pane_id: &str, _key: &str) -> Result<()> {
+            Ok(())
+        }
+
+        fn send_submitted_text(&self, _pane_id: &str, _text: &str) -> Result<()> {
+            Ok(())
+        }
+
+        fn send_submitted_text_for_harness(
+            &self,
+            _pane_id: &str,
+            _text: &str,
+            _harness: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn multiplexer_queries_support_mock_backend() {
+        let mux = MockMultiplexer {
+            active_pane: "%active".to_string(),
+            pane_pid: "4242".to_string(),
+            pane_window: "@7".to_string(),
+            ..Default::default()
+        };
+        let mux_ref: &dyn Multiplexer = &mux;
+
+        assert_eq!(current_pane_with_mux(&mux).unwrap(), "%active");
+        assert_eq!(pane_pid_with_mux(&mux, "%active").unwrap(), 4242);
+        assert_eq!(pane_window_with_mux(&mux, "%active").unwrap(), "@7");
+        assert!(mux_ref.pane_alive("%active"));
+        assert!(mux_ref.session_alive("agent-doc"));
+    }
+
+    #[test]
+    fn multiplexer_position_selection_is_backend_independent() {
+        let mux = MockMultiplexer {
+            list_panes: "%left 0 0 80 24\n%right 120 0 80 24\n%bottom 0 24 160 24\n".to_string(),
+            window_list_panes: "%top 0 0 160 12\n%low 0 12 160 36\n".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(pane_by_position_with_mux(&mux, "left").unwrap(), "%left");
+        assert_eq!(pane_by_position_with_mux(&mux, "right").unwrap(), "%right");
+        assert_eq!(
+            pane_by_position_in_window_with_mux(&mux, "bottom", "@1").unwrap(),
+            "%low"
+        );
+    }
+
+    #[test]
+    fn multiplexer_position_rejects_unknown_direction() {
+        let err = select_pane_by_position("%0 0 0 80 24\n%1 80 0 80 24\n", "middle", "test")
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("invalid position 'middle'"));
+    }
 
     #[test]
     fn registry_roundtrip() {

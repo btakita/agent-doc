@@ -7,6 +7,7 @@ Remove tmux as a hard dependency for agent-doc by implementing a `DirectTerminal
 ## Spec
 
 See [terminal-backend.md](terminal-backend.md) for the `TerminalBackend` trait definition, implementation sketches, and integration points.
+See [multiplexer-backend.md](multiplexer-backend.md) for the narrower pane/window/session boundary that already covers tmux-backed query, capture, and submit operations.
 
 ## Phases
 

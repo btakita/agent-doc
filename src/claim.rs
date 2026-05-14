@@ -280,7 +280,7 @@ pub fn run(
 
     // Validate claiming pane is in the configured target session.
     // Reject cross-session claims unless --force is passed.
-    if tmux.pane_alive(&pane_id) {
+    if sessions::Multiplexer::pane_alive(&tmux, &pane_id) {
         let pane_tmux_session = tmux
             .cmd()
             .args(["display-message", "-t", &pane_id, "-p", "#{session_name}"])
@@ -292,7 +292,7 @@ pub fn run(
             && !pane_tmux_session.is_empty()
             && pane_tmux_session != configured
         {
-            let configured_alive = tmux.session_alive(&configured);
+            let configured_alive = sessions::Multiplexer::session_alive(&tmux, &configured);
             enforce_cross_session_claim(
                 &pane_id,
                 &pane_tmux_session,
@@ -311,7 +311,10 @@ pub fn run(
         for (registry_key, entry) in &registry {
             let same_document =
                 registry_entry_matches_claimed_document(file, registry_key, entry, &session_id);
-            if entry.pane == pane_id && !same_document && tmux.pane_alive(&pane_id) {
+            if entry.pane == pane_id
+                && !same_document
+                && sessions::Multiplexer::pane_alive(&tmux, &pane_id)
+            {
                 let existing_label = claimed_session_label(registry_key, entry);
                 if force {
                     eprintln!(
@@ -448,7 +451,7 @@ pub fn run(
     )?;
 
     // Focus the claimed pane (select-window + select-pane for cross-window support)
-    if tmux.pane_alive(&pane_id) {
+    if sessions::Multiplexer::pane_alive(&tmux, &pane_id) {
         if let Err(e) = tmux.select_pane(&pane_id) {
             eprintln!("warning: failed to focus pane {}: {}", pane_id, e);
         } else {
@@ -539,7 +542,7 @@ fn validate_file_claim(file: &Path) {
         .iter()
         .filter(|(registry_key, entry)| {
             registry_entry_matches_claimed_document(file, registry_key, entry, "")
-                && !tmux.pane_alive(&entry.pane)
+                && !sessions::Multiplexer::pane_alive(&tmux, &entry.pane)
         })
         .map(|(k, e)| (k.clone(), e.pane.clone()))
         .collect();

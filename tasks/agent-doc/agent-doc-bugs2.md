@@ -34,7 +34,16 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): #opsreadinessrace; closeout normalization
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c02693b0 -->
+sync orchestra
+preset #spec-test-build-install-commit-push
+- do [#orchmidrun]
+- do [#backlogorphan]
+- do [#interruptcleartimeout]
+- do [#opsnoisereduce]
+- do [#hookreviewroute]
+- do [#sshcapfalsecapture]
+- do [#codexverbosepb]
+<!-- agent:boundary:8c20bd90 -->
 <!-- /agent:exchange -->
 ###
 <!--

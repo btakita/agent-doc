@@ -34,7 +34,31 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): orchestration handoff; multiplexertrait
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:838e446d -->
+❯ do [#directsubmitbudget]. spec-test-build-install-commit-push
+### Re: directsubmitbudget — gpt-5
+
+Implemented `#directsubmitbudget` and pushed it.
+
+What changed:
+- Split direct tmux pane input acceptance telemetry from Codex harness dispatch-start proof in `src/agent-doc/src/route.rs`.
+- Delayed `direct_pane_submit` outcome classification until after the dispatch proof window, so a later consumed/submitted Codex hook proof logs `acceptance_unobserved_dispatch_proven` instead of stale `timed_out` / false over-budget language.
+- Tuned the direct pane submit budget to cover the 5s acceptance window plus capture-poll slack, matching observed tmux/control-mode behavior around 5.18s.
+- Updated `README.md`, `VERSIONS.md`, and `specs/07-session-tmux-commands.md`, with focused route regressions for the new telemetry labels and budget.
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml direct_pane_submit -- --nocapture`
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml --check`
+- `make check` in `src/agent-doc`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `make install` in `src/agent-doc`; installed `agent-doc 0.33.16`
+- `make tmux-ci` in `src/agent-doc`; 227 ignored/live tmux tests passed, 0 failed
+
+CI review: latest pushed GitHub Actions run `25838804149` failed immediately in both `check` and `tmux-ci`, but GitHub exposes no retained step logs (`gh run view --log-failed` returns `log not found`). I reproduced the required legs locally and they pass.
+
+Commits pushed:
+- `btakita/agent-doc@0630833d` (`fix: clarify direct submit telemetry`) to `origin/20260422/codex-agent-backend`
+- `btakita/agent-loop@6b2ce081b` (`agent-doc: clarify direct submit telemetry`) to `origin/main`
+<!-- agent:boundary:26df3d78 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,6 +133,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#directsubmitbudget] #agent-doc-bug: Direct pane submit telemetry reports 5.18s timeouts / over-budget sends even when dispatch_start_proof later proves the prompt was consumed. Split input-acceptance latency from dispatch-start proof, avoid false timeout language after consumed proof, and tune the owned/hybrid pty submit budget around actual tmux/control-mode behavior.
 - [ ] [#latefallbackloop] #agent-doc-bug: Late fallback patch writes keep firing after a cycle is already committed; logs show repeated late_fallback_patch_rejected reason=already_committed, ipc_write_consumed, commit_already_current, and one resume_commit_blocked_drift with an unresolved prompt-only tail. Stop fallback writers at terminal commit state or rebind them to the next cycle before accepting IPC patches.
 - [ ] [#clearstartingrace] #agent-doc-bug: Clear/restart commands can race starting owned panes; logs show session_clear_sent while generation 170 was still starting, followed by protected-input refusals, commits, and repeated starting_not_ready. Gate clear/restart on dispatch-ready or clean-exit prompt state and document-dirty state before sending literal Enter into the pane.
 - [ ] [#ownedreapbusy] #agent-doc-bug: Owned pane reap decisions are noisy and often keep panes alive from spinner tails like Working/escape-title fragments instead of a stable idle/busy signal. Normalize screen-tail sampling or prefer supervisor prompt state so route_owned_reap_decision does not preserve panes based on transient renderer text.

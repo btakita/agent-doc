@@ -38,17 +38,42 @@ Compacted content:
 ❯ (preset #spec-test-build-install-commit-push)
 ❯ update spec + tests. build + install for local testing. commit + push
 ❯ do [#multiplexertrait]
-synchronous orchestra
-preset #spec-test-build-install-commit-push
-- do [#multiplexertrait]
-- do [#startreadytimeout]
-- do [#directsubmitbudget]
-- do [#latefallbackloop]
-- do [#clearstartingrace]
-- do [#ownedreapbusy]
-- do [#opencodeinputdiag]
-- do [#tmuxe2etests]
-<!-- agent:boundary:d7880e56 -->
+❯ synchronous orchestra
+❯ preset #spec-test-build-install-commit-push
+❯ - do [#multiplexertrait]
+❯ - do [#startreadytimeout]
+❯ - do [#directsubmitbudget]
+❯ - do [#latefallbackloop]
+❯ - do [#clearstartingrace]
+❯ - do [#ownedreapbusy]
+❯ - do [#opencodeinputdiag]
+❯ - do [#tmuxe2etests]
+### Re: orchestration handoff — gpt-5
+
+I started the requested synchronous orchestra, but the batch hit two root blockers before the backlog tasks could safely run:
+
+- `preset spec-test-build-install-commit-push` did not resolve to the defined `#spec-test-build-install-commit-push` frontmatter key.
+- After preflight opened the handoff cycle, orchestrate could commit the first injected task into the snapshot before preflight saw it as a prompt-bearing diff, stopping with `orchestration step did not produce a prompt-bearing diff after injection`.
+
+I fixed both in `src/agent-doc`: preset references now canonicalize bare names to hashtag keys when appropriate, and orchestrate now snapshots/abandons an open preflight handoff cycle before injecting the first task. I also updated the orchestration spec and added regressions for bare hashtag preset aliases and the preflight-handoff injection path.
+
+I left `#multiplexertrait` and the remaining batch items open because the requested eight task executions did not finish in this run. The installed local binary contains the fixes, so the batch can be rerun without the two handoff blockers.
+
+Verification:
+- `cargo test prompt_preset`
+- `cargo test close_open_preflight_handoff_cycle_snapshots_before_injection`
+- `make check`
+- `make tmux-ci`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+CI / publish evidence:
+- Latest GitHub `CI` run on `main` was green: `25773430221`.
+- Commit pushed: `src/agent-doc` `0cf58582 fix: normalize orchestrate prompt presets` to `origin/20260422/codex-agent-backend`.
+
+No new backlog item was added; the existing batch items remain open.
+<!-- agent:boundary:1054f0f5 -->
 <!-- /agent:exchange -->
 ###
 <!--

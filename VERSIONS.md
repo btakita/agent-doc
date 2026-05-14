@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Supervisor-to-tmux input now has raw end-to-end coverage.** The live tmux suite now includes a supervisor IPC test that drives the real tmux pane input path into a raw harness process and asserts the submitted prompt text, Enter delivery, arrow-key escape sequences, and final Enter bytes. This closes `#tmuxe2etests` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Tmux input paths now emit structured diagnostics.** Route, queue dispatch, supervisor IPC/auto-trigger injection, harness-aware tmux submits, stdin forwarding transforms, Kitty keyboard-mode preserve/drop decisions, and OpenCode permission-prompt key translations now emit `tmux_input_event` lines with source, destination, transform, key, byte count, and harness where known. Prompt text is represented by length plus SHA-256, giving regressions stable log assertions without leaking raw typed content. This closes `#opencodeinputdiag` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Route-owned reap no longer preserves panes for stale renderer tails.** The route-owned completion guard now trusts the supervisor actor's `ready` prompt state when deciding whether a committed one-shot pane can be reaped, while still preserving panes for explicit blocking prompt states such as queued drafts, permission prompts, hook-review prompts, history search, and clean-exit restart prompts. Managed PTY filtering also strips OSC title updates so transient title text such as `Working ... esc to interrupt` cannot enter prompt sampling. This closes `#ownedreapbusy` in `tasks/agent-doc/agent-doc-bugs2.md`.

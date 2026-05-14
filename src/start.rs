@@ -4882,19 +4882,22 @@ Done.
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn supervisor_ipc_inject_reaches_live_tmux_pane_submit_path() {
+    fn supervisor_ipc_tmux_pipeline_delivers_submit_arrows_and_enter() {
         let _env_guard = crate::test_support::env_lock();
         let tmp = TempDir::new().unwrap();
-        let iso = IsolatedTmux::new("start-ipc-live-supervisor-submit");
+        let iso = IsolatedTmux::new("start-ipc-live-supervisor-input-e2e");
         let pane = iso.new_session("test", tmp.path()).unwrap();
-        let output_path = tmp.path().join("submit.txt");
+        let output_path = tmp.path().join("input.bin");
         let done_path = tmp.path().join("done.txt");
+        let prompt = "agent-doc tasks/software/tsift.md";
+        let expected = format!("{prompt}\n\x1b[A\x1b[B\x1b[D\x1b[C\n").into_bytes();
 
         std::thread::sleep(Duration::from_millis(150));
         iso.send_keys(
             &pane,
             &format!(
-                "sh -lc 'IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"'",
+                "sh -lc 'stty raw -echo; dd bs=1 count={} of=\"{}\" 2>/dev/null; touch \"{}\"'",
+                expected.len(),
                 output_path.display(),
                 done_path.display()
             ),
@@ -4920,11 +4923,17 @@ Done.
         let response = crate::supervisor::ipc::send_command(
             ipc.path(),
             &IpcMethod::Inject {
-                bytes: "agent-doc tasks/software/tsift.md".to_string(),
+                bytes: prompt.to_string(),
             },
         )
         .expect("supervisor IPC inject should succeed");
         assert!(response.ok, "supervisor IPC inject should return ok");
+
+        crate::sessions::send_key(&iso, &pane, "Up").unwrap();
+        crate::sessions::send_key(&iso, &pane, "Down").unwrap();
+        crate::sessions::send_key(&iso, &pane, "Left").unwrap();
+        crate::sessions::send_key(&iso, &pane, "Right").unwrap();
+        crate::sessions::send_key(&iso, &pane, "Enter").unwrap();
 
         for _ in 0..40 {
             if done_path.exists() {
@@ -4938,8 +4947,9 @@ Done.
             "expected supervisor IPC inject to submit through the live tmux pane"
         );
         assert_eq!(
-            std::fs::read_to_string(&output_path).unwrap(),
-            "agent-doc tasks/software/tsift.md"
+            std::fs::read(&output_path).unwrap(),
+            expected,
+            "raw harness should receive prompt submit, arrows, and final Enter"
         );
 
         ipc.stop();

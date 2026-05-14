@@ -134,7 +134,33 @@ Commits prepared before session closeout:
 - parent `agent-loop` `6c9eb1975` (`agent-doc: clean backlog prompt patchbacks`)
 
 Per the session-document closeout ordering, I will push those commits after this finalize commit lands.
-<!-- agent:boundary:5d0919de -->
+
+❯ update spec + tests. build + install for local testing. commit + push. do [#interruptcleartimeout]
+### Re: #interruptcleartimeout — gpt-5
+
+Implemented `#interruptcleartimeout`.
+
+What changed:
+- `agent-doc session interrupt-clear <FILE>` now carries the final live-pane evidence into timeout outcomes instead of keeping only a loose last-command string.
+- Timeout ops logs now include `blocking_state`, `blocking_source`, `prompt_ready`, `last_command`, and the recent pane `tail`.
+- User-facing timeout errors now name the same final blocker evidence and still preserve the Vim/Neovim forced-recovery guidance when editor recovery was attempted.
+- Updated `SPEC.md`, `README.md`, `VERSIONS.md`, and `specs/07-session-tmux-commands.md` for the deterministic interrupt-clear timeout contract.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test -p agent-doc interrupt_clear_timeout -- --nocapture`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- GitHub `Agent Doc` run `25879761954` is red because GitHub did not start either `check` or `tmux-ci`: account billing/spending-limit restriction.
+- `make tmux-ci` -> 227 ignored live tmux tests passed.
+
+Commits prepared before session closeout:
+- `src/agent-doc` `1f802956` (`fix: report interrupt-clear timeout blockers`)
+- parent `agent-loop` `434e8326f` (`agent-doc: report interrupt-clear timeout blockers`)
+
+Per the session-document closeout ordering, I will push those commits after this finalize commit lands.
+<!-- agent:boundary:5fc4be5c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -209,7 +235,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#interruptcleartimeout] Investigate `session_interrupt_clear_settled outcome=timed_out` after protected clear and make interrupt-clear report the blocking state and last command deterministically.
 - [ ] [#opsnoisereduce] Reduce `post_commit_local_drift` / `commit_noop` noise by separating expected user follow-up edits from anomalous drift in `agent-doc ops summary`.
 - [ ] [#hookreviewroute] Clarify `route_dispatch_only_blocked reason=codex hook review prompt` as a user-facing route blocker with recovery guidance.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md

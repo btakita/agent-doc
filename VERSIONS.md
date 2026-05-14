@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Codex non-streaming patchback now filters progress chatter.** Direct Codex child response capture now selects the last `item.completed` `agent_message` before `turn.completed` as the durable response body instead of concatenating every assistant message from the JSONL stream. Multiple assistant messages without a final turn boundary now fail closed as ambiguous, preventing progress/status prose from being committed into template session documents. This closes `#codexverbosepb` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Codex required-SSH drift detection now requires live SSH evidence.** Command-execution parsing no longer treats arbitrary command output that merely mentions a required host plus an old `socket: Operation not permitted` as active SSH capability loss, so searches through `.agent-doc/captures` or logs cannot abort a resumed Codex run. Actual SSH commands still fail closed on bare EPERM output, and failure details now include the command string. This closes `#sshcapfalsecapture` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Codex hook-review route blockers now include recovery guidance.** Dispatch-only reroutes that see `route_dispatch_only_blocked reason=codex hook review prompt` now tell the operator to open `/hooks`, approve or disable the pending hook change, wait for the idle composer, and rerun the route/editor action instead of falling back to a generic idle-prompt hint. Updated route specs and regression coverage. This closes `#hookreviewroute` in `tasks/agent-doc/agent-doc-bugs2.md`.

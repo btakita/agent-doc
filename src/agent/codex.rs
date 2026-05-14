@@ -11,7 +11,8 @@
 //! - Model override: appends `-m <model>`.
 //! - `CODEX_CLI` and `CODEX` env vars are removed from the child process to prevent recursive detection.
 //! - Non-streaming: spawns child, writes prompt to stdin, collects JSONL output, extracts
-//!   `thread_id` from `thread.started` and response text from `item.completed` (type=agent_message).
+//!   `thread_id` from `thread.started` and response text from the final `item.completed`
+//!   (type=agent_message) before `turn.completed`.
 //! - Streaming (`StreamingAgent`): same JSONL, yields `StreamChunk` per line as events arrive.
 //!
 //! ## Codex JSONL Event Schema
@@ -1524,7 +1525,9 @@ impl Codex {
 
         let raw = String::from_utf8_lossy(&output.stdout);
         let mut thread_id: Option<String> = None;
-        let mut response_text = String::new();
+        let mut response_text: Option<String> = None;
+        let mut agent_message_count = 0usize;
+        let mut saw_turn_completed = false;
         let mut saw_resume_capability_drift = false;
         let mut required_ssh_failure = None;
 
@@ -1563,19 +1566,26 @@ impl Codex {
                         && let Some(text) =
                             item.and_then(|i| i.get("text")).and_then(|v| v.as_str())
                     {
-                        if !response_text.is_empty() {
-                            response_text.push('\n');
-                        }
-                        response_text.push_str(text);
+                        agent_message_count += 1;
+                        response_text = Some(text.to_string());
                     }
+                }
+                "turn.completed" => {
+                    saw_turn_completed = true;
                 }
                 _ => {}
             }
         }
 
+        if agent_message_count > 1 && !saw_turn_completed {
+            anyhow::bail!(
+                "ambiguous Codex response: saw {agent_message_count} agent_message items without a turn.completed boundary"
+            );
+        }
+
         Ok(ParsedCodexResponse {
             response: AgentResponse {
-                text: response_text,
+                text: response_text.unwrap_or_default(),
                 session_id: thread_id,
             },
             saw_resume_capability_drift,
@@ -2828,6 +2838,57 @@ printf '%s\n' '{"type":"turn.completed","usage":{}}'
 
         assert_eq!(response.text, "fresh response");
         assert_eq!(response.session_id.as_deref(), Some("fresh-thread"));
+    }
+
+    #[test]
+    fn send_selects_last_agent_message_as_final_closeout() {
+        let (_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+cat >/dev/null
+printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"I am checking the document now.\n"}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"make check","aggregated_output":"ok\n","exit_code":0,"status":"completed"}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"<!-- patch:exchange -->\n### Re: final — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{}}'
+"#,
+        );
+        let codex = Codex::new(Some(script), None);
+
+        let response = codex.send("prompt", None, false, None).unwrap();
+
+        assert_eq!(
+            response.text,
+            "<!-- patch:exchange -->\n### Re: final — gpt-5\n\nImplemented and verified.\n<!-- /patch:exchange -->"
+        );
+        assert!(
+            !response.text.contains("I am checking"),
+            "progress chatter must not be captured in patchback: {}",
+            response.text
+        );
+        assert_eq!(response.session_id.as_deref(), Some("fresh-thread"));
+    }
+
+    #[test]
+    fn send_rejects_multiple_agent_messages_without_final_boundary() {
+        let (_dir, script) = write_fake_codex_script(
+            r#"#!/bin/sh
+cat >/dev/null
+printf '%s\n' '{"type":"thread.started","thread_id":"fresh-thread"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-1","type":"agent_message","text":"progress"}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"msg-2","type":"agent_message","text":"possible final"}}'
+"#,
+        );
+        let codex = Codex::new(Some(script), None);
+
+        let err = match codex.send("prompt", None, false, None) {
+            Ok(response) => panic!("expected ambiguous response error, got {}", response.text),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains("ambiguous Codex response"),
+            "got: {err}"
+        );
     }
 
     #[test]

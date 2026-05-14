@@ -119,7 +119,37 @@ If orchestration receives a clean plain assistant answer, it can synthesize:
 Then the normal write path can still insert that patch at the current boundary. That removes the brittleness without making the boundary marker carry too much meaning.
 
 I would avoid making children target the boundary marker directly because it turns a volatile cursor-like marker into an API. Boundary ids can be stale, rewritten, missing, duplicated during repair, or stripped from snapshots/archives. A child response should not depend on that lifecycle. It should name the component; the binary should choose the current anchor.
-<!-- agent:boundary:73208ed3 -->
+❯ We removed patch:agent because it was being left in the document after single turns. I still am not convinced patch:agent is necessary.
+### Re: patch envelope necessity — gpt-5
+
+I think your objection is basically right if we are talking about agent-facing syntax.
+
+The important distinction is:
+
+- **Patch envelopes as an internal write protocol:** useful.
+- **Patch envelopes as text the child agent must emit:** brittle and probably unnecessary for the common case.
+- **Patch envelopes leaking into the persisted session document:** definitely a bug.
+
+The fact that the old `patch:agent` marker was left in the document is evidence that exposing this syntax at the response surface creates failure modes. Even `patch:exchange` has the same smell if the child has to format it perfectly. It makes orchestration depend on prompt compliance instead of on the binary owning the write protocol.
+
+For ordinary assistant responses in a template session, the binary already has enough context to infer the default target: append the response to `agent:exchange` at the current boundary. The child should be able to return plain final answer text, and orchestration should wrap/synthesize that into the internal equivalent of `patch:exchange` before finalizing.
+
+Where explicit patch blocks still make sense:
+
+- advanced responses that intentionally update multiple components, for example `status` plus `exchange`
+- granular backlog/icebox operations, though those should mostly use CLI flags instead of full component replacement
+- repair/replay paths where the binary needs a strict shape to prove it is not replaying a transcript dump
+
+So I would adjust my earlier answer: I do not think `patch:exchange` should be required from the child for single-turn orchestration responses. The invariant we should keep is not "the agent must emit patch syntax." The invariant is "the binary must know the target component before it mutates the document."
+
+That suggests this rule:
+
+1. If child output has explicit patch blocks, validate and apply them.
+2. If child output is a clean single assistant response with no transcript markers, synthesize an exchange append internally.
+3. If child output looks like a transcript, full document dump, mixed patch/unmatched content, or multiple component mutation without explicit structure, fail closed.
+
+That keeps the safety property without resurrecting the old `patch:agent` leakage problem.
+<!-- agent:boundary:36ae9e47 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -149,7 +149,21 @@ That suggests this rule:
 3. If child output looks like a transcript, full document dump, mixed patch/unmatched content, or multiple component mutation without explicit structure, fail closed.
 
 That keeps the safety property without resurrecting the old `patch:agent` leakage problem.
-<!-- agent:boundary:36ae9e47 -->
+❯ #next-steps
+### Re: next steps — gpt-5
+
+Next step is to turn the conclusion from this design thread into a concrete implementation item, then compact before doing the larger code turn.
+
+I added `#orchplainresp` to the backlog for the actual fix: orchestration should accept clean plain child assistant output and synthesize an exchange append internally, while still failing closed for transcript-shaped output, full document dumps, mixed patch/unmatched content, or implicit multi-component writes.
+
+Recommended execution order:
+
+1. Run `agent-doc compact /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --commit` before the implementation turn. Preflight is now reporting session accretion at block level after repeated short closeouts.
+2. Do `#orchplainresp` with spec + tests + build/install. The likely code surfaces are `src/agent-doc/src/orchestrate.rs`, `src/agent-doc/src/write.rs`'s orchestrate template contract, `src/agent-doc/specs/07-orchestration-commands.md`, and replay/shape-guard tests near the existing `patch:exchange` coverage.
+3. After that, retry the original sequential orchestration batch for the remaining items: `#clearstartingrace`, `#ownedreapbusy`, `#opencodeinputdiag`, and `#tmuxe2etests`.
+
+I would not continue arguing the patch envelope in prose after this. The useful test is an implementation that proves the binary can own the write target without leaking patch syntax into ordinary child responses.
+<!-- agent:boundary:5be7fc8e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -224,6 +238,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#orchplainresp] #agent-doc-bug: Orchestration currently requires child template responses to emit patch:exchange for single-turn responses. Let orchestrate synthesize an exchange append for clean plain assistant output while still rejecting transcript-shaped, mixed patch/unmatched, full-document dump, or multi-component output without explicit structure. Add specs/tests and keep explicit patch blocks for intentional multi-component writes.
 - [ ] [#clearstartingrace] #agent-doc-bug: Clear/restart commands can race starting owned panes; logs show session_clear_sent while generation 170 was still starting, followed by protected-input refusals, commits, and repeated starting_not_ready. Gate clear/restart on dispatch-ready or clean-exit prompt state and document-dirty state before sending literal Enter into the pane.
 - [ ] [#ownedreapbusy] #agent-doc-bug: Owned pane reap decisions are noisy and often keep panes alive from spinner tails like Working/escape-title fragments instead of a stable idle/busy signal. Normalize screen-tail sampling or prefer supervisor prompt state so route_owned_reap_decision does not preserve panes based on transient renderer text.
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.

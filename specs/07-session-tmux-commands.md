@@ -10,6 +10,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 - Starts the configured harness in the current tmux pane and registers the pane as the session owner.
 - Route-owned tmux autostart panes must not automatically restart the child harness after a clean exit. If the newly started child exits before or after surfacing a prompt, `start --route-owned` must surface the local restart/quit prompt instead of immediately spawning another child process.
+- Route-owned reap decisions after a committed cycle may use the supervisor actor's stable `ready` state as prompt proof even when the terminal tail still contains transient renderer text. Explicit blocking prompt states, including queued drafts, permission prompts, hook-review prompts, history search, and clean-exit restart prompts, still preserve the pane.
 - If another alive pane is already bound to the same document session, normal `start` must fail closed instead of reusing, restarting, or replacing it.
 - That failure must print concrete tmux inspection/capture/kill commands so the user can decide which pane to keep and which pane to kill manually.
 - `--force` is the only supported escape hatch for intentionally rebinding the current pane during repair work, and the registry rebind must still record supersession provenance in the session log.

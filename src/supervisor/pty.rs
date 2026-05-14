@@ -393,6 +393,7 @@ impl PtySession {
 /// - CSI `>` sequences ending in `m` (Kitty progressive enhancement: `\x1b[>4;2m`)
 /// - CSI `<` sequences ending in `u` (Kitty keyboard pop: `\x1b[<u`)
 /// - DCS strings (`\x1b P....\x1b\` — e.g. `\x1bP>|tmux 3.6a\x1b\`)
+/// - OSC strings (`\x1b]....\x07` or `\x1b]....\x1b\`), including title updates
 ///
 /// OpenCode is the exception for Kitty keyboard sequences: OpenTUI depends on
 /// those mode transitions for real arrow/tab key handling, so the OpenCode
@@ -522,6 +523,34 @@ impl PtyFilter {
                         i += 1;
                     }
                     continue; // drop the entire DCS string
+                }
+                // ESC ] — OSC string (terminated by BEL or ESC \)
+                if data[i + 1] == b']' {
+                    let start = i;
+                    i += 2; // skip ESC ]
+                    loop {
+                        if i >= len {
+                            // Incomplete OSC — save from OSC start
+                            self.carryover.extend_from_slice(&data[start..]);
+                            return;
+                        }
+                        if data[i] == 0x07 {
+                            i += 1; // skip BEL terminator
+                            break;
+                        }
+                        if data[i] == 0x1b {
+                            if i + 1 >= len {
+                                self.carryover.extend_from_slice(&data[start..]);
+                                return;
+                            }
+                            if data[i + 1] == b'\\' {
+                                i += 2; // skip ST terminator
+                                break;
+                            }
+                        }
+                        i += 1;
+                    }
+                    continue; // drop the entire OSC string
                 }
                 // Unknown ESC sequence — pass ESC + next byte through
             }
@@ -970,6 +999,39 @@ mod tests {
             String::from_utf8_lossy(&out),
             "done",
             "DCS consumed after ST completed across boundary"
+        );
+    }
+
+    #[test]
+    fn filter_strips_osc_title_updates() {
+        let input = b"before\x1b]0;Working (3s - esc to interrupt)\x07after";
+        let mut out = Vec::new();
+        filter_terminal_queries(input, &mut out);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            "beforeafter",
+            "OSC title text should not enter prompt sampling"
+        );
+    }
+
+    #[test]
+    fn filter_stateful_osc_split_across_reads() {
+        let mut f = PtyFilter::new();
+        let mut out = Vec::new();
+
+        f.filter(b"before\x1b]0;Working", &mut out);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            "before",
+            "text before OSC emitted, incomplete OSC buffered"
+        );
+
+        out.clear();
+        f.filter(b" (3s - esc to interrupt)\x1b\\after", &mut out);
+        assert_eq!(
+            String::from_utf8_lossy(&out),
+            "after",
+            "OSC title update stripped after ST completed across boundary"
         );
     }
 

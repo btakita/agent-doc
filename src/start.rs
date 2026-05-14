@@ -694,10 +694,23 @@ fn route_owned_live_pane_busy_reason(
     if !shared.running.load(Ordering::Relaxed) {
         return None;
     }
+    let output = child_output_for_detection(shared);
+    if let Some(reason) = harness.dispatch_blocker_reason(&output) {
+        return Some(format!("live_pane_busy_blocked_prompt reason={reason}"));
+    }
+    if shared
+        .actor_state
+        .lock()
+        .unwrap()
+        .is_some_and(|state| state == crate::session_actor::ActorState::Ready)
+    {
+        return None;
+    }
     if current_child_prompt_visible(shared, harness) {
         return None;
     }
-    let tail = latest_prompt_candidate_line(shared, harness)
+    let tail = harness
+        .last_prompt_candidate(&output)
         .map(|line| line.chars().take(80).collect::<String>())
         .unwrap_or_else(|| "no_recent_output".to_string());
     Some(format!("live_pane_busy_no_idle_prompt tail={tail:?}"))
@@ -1119,13 +1132,6 @@ fn prompt_visible_requires_ready_transition(shared: &SupervisorShared) -> bool {
         .lock()
         .unwrap()
         .is_some_and(|state| state != crate::session_actor::ActorState::Ready)
-}
-
-fn latest_prompt_candidate_line(
-    shared: &SupervisorShared,
-    harness: &crate::harness::HarnessConfig,
-) -> Option<String> {
-    harness.last_prompt_candidate(&child_output_for_detection(shared))
 }
 
 fn current_child_prompt_visible(
@@ -5035,6 +5041,42 @@ Done.
 
         assert!(reason.contains("live_pane_busy_no_idle_prompt"));
         assert!(reason.contains("exploring repository"));
+    }
+
+    #[test]
+    fn route_owned_live_pane_busy_trusts_ready_actor_over_stale_renderer_tail() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(&shared, b"Working...\n");
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
+        );
+
+        assert_eq!(route_owned_live_pane_busy_reason(&shared, &harness), None);
+    }
+
+    #[test]
+    fn route_owned_live_pane_busy_keeps_ready_actor_for_blocking_prompt_state() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = crate::harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        *shared.actor_state.lock().unwrap() = Some(crate::session_actor::ActorState::Ready);
+        record_recent_output(&shared, "›\n".as_bytes());
+        record_recent_output(&shared, b"tab to queue message\n");
+        record_recent_output(
+            &shared,
+            "gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used\n".as_bytes(),
+        );
+
+        let reason = route_owned_live_pane_busy_reason(&shared, &harness)
+            .expect("queued composer state must still block route-owned reap");
+
+        assert!(reason.contains("live_pane_busy_blocked_prompt"));
+        assert!(reason.contains("queued draft in composer"));
     }
 
     #[test]

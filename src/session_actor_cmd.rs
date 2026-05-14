@@ -613,26 +613,30 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
     crate::ops_log::log_op(
         &ctx.canonical_file,
         &format!(
-            "session_interrupt_clear_settled file={} pane={} harness={} outcome={} editor_recovery_attempted={} last_command={}",
+            "session_interrupt_clear_settled file={} pane={} harness={} outcome={} editor_recovery_attempted={} blocking_state={} blocking_source={} prompt_ready={} last_command={} tail={:?}",
             ctx.canonical_file.display(),
             pane,
             ctx.harness,
             outcome.as_str(),
             outcome.editor_recovery_attempted(),
-            outcome.last_command().unwrap_or("unknown")
+            outcome.blocking_state(),
+            outcome.blocking_source(),
+            outcome.prompt_ready(),
+            outcome.last_command().unwrap_or("unknown"),
+            outcome.tail().unwrap_or("none")
         ),
     );
     match outcome {
         InterruptClearSettleOutcome::Idle | InterruptClearSettleOutcome::Closed => clear(file),
         InterruptClearSettleOutcome::TimedOut {
-            last_command,
+            evidence,
             editor_recovery_attempted,
         } => anyhow::bail!(
             "{}",
             interrupt_clear_timeout_message(
                 &ctx.canonical_file,
                 pane,
-                last_command.as_deref(),
+                &evidence,
                 editor_recovery_attempted
             )
         ),
@@ -642,23 +646,39 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
 fn interrupt_clear_timeout_message(
     file: &Path,
     pane: &str,
-    last_command: Option<&str>,
+    evidence: &LivePaneEvidence,
     editor_recovery_attempted: bool,
 ) -> String {
+    let command = evidence.current_command.as_deref().unwrap_or("unknown");
+    let tail = evidence.tail.as_deref().unwrap_or("unknown");
     if editor_recovery_attempted {
         return format!(
-            "session_interrupt_clear timed out for {} because pane {} stayed busy after interrupt and forced editor recovery (last_command={}). Inspect the pane, exit any editor prompt with `:qa!`, then run `agent-doc session status {}` before retrying.",
+            "session_interrupt_clear timed out for {} because pane {} stayed {} after interrupt and forced editor recovery (source={}, current_command={}, prompt_ready={}, tail={:?}). Inspect the pane, exit any editor prompt with `:qa!`, then run `agent-doc session status {}` before retrying.",
             file.display(),
             pane,
-            last_command.unwrap_or("unknown"),
+            evidence.state.as_str(),
+            evidence.source,
+            command,
+            evidence
+                .prompt_ready
+                .map(|ready| ready.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            tail,
             file.display()
         );
     }
     format!(
-        "session_interrupt_clear timed out for {} because pane {} stayed busy after interrupt (last_command={}). Run `agent-doc session status {}` before retrying.",
+        "session_interrupt_clear timed out for {} because pane {} stayed {} after interrupt (source={}, current_command={}, prompt_ready={}, tail={:?}). Run `agent-doc session status {}` before retrying.",
         file.display(),
         pane,
-        last_command.unwrap_or("unknown"),
+        evidence.state.as_str(),
+        evidence.source,
+        command,
+        evidence
+            .prompt_ready
+            .map(|ready| ready.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        tail,
         file.display()
     )
 }
@@ -713,7 +733,7 @@ enum InterruptClearSettleOutcome {
     Idle,
     Closed,
     TimedOut {
-        last_command: Option<String>,
+        evidence: LivePaneEvidence,
         editor_recovery_attempted: bool,
     },
 }
@@ -729,7 +749,38 @@ impl InterruptClearSettleOutcome {
 
     fn last_command(&self) -> Option<&str> {
         match self {
-            Self::TimedOut { last_command, .. } => last_command.as_deref(),
+            Self::TimedOut { evidence, .. } => evidence.current_command.as_deref(),
+            _ => None,
+        }
+    }
+
+    fn blocking_state(&self) -> &'static str {
+        match self {
+            Self::TimedOut { evidence, .. } => evidence.state.as_str(),
+            _ => "none",
+        }
+    }
+
+    fn blocking_source(&self) -> &'static str {
+        match self {
+            Self::TimedOut { evidence, .. } => evidence.source,
+            _ => "none",
+        }
+    }
+
+    fn prompt_ready(&self) -> String {
+        match self {
+            Self::TimedOut { evidence, .. } => evidence
+                .prompt_ready
+                .map(|ready| ready.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            _ => "none".to_string(),
+        }
+    }
+
+    fn tail(&self) -> Option<&str> {
+        match self {
+            Self::TimedOut { evidence, .. } => evidence.tail.as_deref(),
             _ => None,
         }
     }
@@ -753,13 +804,11 @@ fn wait_for_interrupt_clear_settle(
 ) -> InterruptClearSettleOutcome {
     let deadline = Instant::now() + timeout;
     let mut editor_recovery_attempted = false;
-    let mut last_command = None;
     loop {
         if !tmux.pane_alive(pane) {
             return InterruptClearSettleOutcome::Closed;
         }
         let evidence = live_pane_evidence(ctx, tmux);
-        last_command.clone_from(&evidence.current_command);
         if evidence.state == LivePaneState::AliveIdle {
             let _ = reconcile_idle_projection_from_evidence(ctx, &evidence);
             return InterruptClearSettleOutcome::Idle;
@@ -789,7 +838,7 @@ fn wait_for_interrupt_clear_settle(
         }
         if Instant::now() >= deadline {
             return InterruptClearSettleOutcome::TimedOut {
-                last_command,
+                evidence,
                 editor_recovery_attempted,
             };
         }
@@ -1860,23 +1909,69 @@ mod tests {
 
     #[test]
     fn interrupt_clear_timeout_message_reports_editor_recovery() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("vim".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("-- INSERT --".to_string()),
+        };
         let message =
-            interrupt_clear_timeout_message(Path::new("/tmp/doc.md"), "%7", Some("vim"), true);
+            interrupt_clear_timeout_message(Path::new("/tmp/doc.md"), "%7", &evidence, true);
 
         assert!(message.contains("forced editor recovery"));
-        assert!(message.contains("last_command=vim"));
+        assert!(message.contains("stayed alive-busy"));
+        assert!(message.contains("source=authoritative_actor"));
+        assert!(message.contains("current_command=vim"));
+        assert!(message.contains("prompt_ready=false"));
+        assert!(message.contains("tail=\"-- INSERT --\""));
         assert!(message.contains(":qa!"));
         assert!(message.contains("agent-doc session status /tmp/doc.md"));
     }
 
     #[test]
     fn interrupt_clear_timeout_message_reports_last_command_without_editor_recovery() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("codex".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("⏵⏵ bypass permissions on".to_string()),
+        };
         let message =
-            interrupt_clear_timeout_message(Path::new("/tmp/doc.md"), "%7", Some("codex"), false);
+            interrupt_clear_timeout_message(Path::new("/tmp/doc.md"), "%7", &evidence, false);
 
         assert!(!message.contains("forced editor recovery"));
-        assert!(message.contains("last_command=codex"));
+        assert!(message.contains("stayed alive-busy"));
+        assert!(message.contains("source=authoritative_actor"));
+        assert!(message.contains("current_command=codex"));
+        assert!(message.contains("prompt_ready=false"));
+        assert!(message.contains("tail=\"⏵⏵ bypass permissions on\""));
         assert!(message.contains("agent-doc session status /tmp/doc.md"));
+    }
+
+    #[test]
+    fn interrupt_clear_timeout_outcome_reports_final_blocking_evidence() {
+        let outcome = InterruptClearSettleOutcome::TimedOut {
+            evidence: LivePaneEvidence {
+                pane_id: Some("%7".to_string()),
+                source: "authoritative_actor",
+                state: LivePaneState::AliveBusy,
+                current_command: Some("agent-doc".to_string()),
+                prompt_ready: Some(false),
+                tail: Some("reverse-i-search".to_string()),
+            },
+            editor_recovery_attempted: false,
+        };
+
+        assert_eq!(outcome.as_str(), "timed_out");
+        assert_eq!(outcome.blocking_state(), "alive-busy");
+        assert_eq!(outcome.blocking_source(), "authoritative_actor");
+        assert_eq!(outcome.prompt_ready(), "false");
+        assert_eq!(outcome.last_command(), Some("agent-doc"));
+        assert_eq!(outcome.tail(), Some("reverse-i-search"));
     }
 
     #[test]

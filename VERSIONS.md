@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Interrupt-clear timeouts now preserve final blocker evidence.** `agent-doc session interrupt-clear <FILE>` timeout logs and user-facing errors now report the final live-pane state, evidence source, prompt-ready value, current command, and recent pane tail after the protected clear discard path, instead of reducing the result to `outcome=timed_out` plus a loose last command. This closes `#interruptcleartimeout` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Backlog-section prompt patchback cleanup.** Template and CRDT closeout now remove newly-added raw prompt-target lines from `agent:backlog` / legacy `agent:pending` after the response is merged into `agent:exchange`, while preserving normal tracked backlog edits and pending state changes. This closes `#backlogorphan` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Sequential orchestration parent closeout now survives stale binary paths.** Parent-owned lifecycle commands in `agent-doc orchestrate --mode sequential --from-exchange` now resolve a launchable `agent-doc` binary before spawning `preflight`, `finalize`, or `session-check`, falling back when `current_exe()` points at a binary removed during local install work. Spawn failures include binary, cwd, and PATH-presence context, and regressions cover sanitized PATH and stale-current-exe resolution. This closes `#synchorchstop` in `tasks/agent-doc/agent-doc-bugs2.md`.

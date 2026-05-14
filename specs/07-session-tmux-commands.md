@@ -330,9 +330,10 @@ single-owner actor controls:
   idle/closed evidence, and then retries the normal clear path. If the interrupt
   opens a Vim/Neovim editor prompt in the managed pane, the discard path must
   attempt one forced editor quit before continuing the idle/closed wait; if the
-  pane still does not settle, the error must name the last observed command and
-  give an exact manual recovery action instead of leaving the operator with a
-  generic busy timeout. For Codex panes, a capture
+  pane still does not settle, the ops event and error must name the final
+  blocking live-pane state, evidence source, prompt-ready value, last observed
+  command, and recent pane tail, then give an exact manual recovery action
+  instead of leaving the operator with a generic busy timeout. For Codex panes, a capture
   that shows only Codex status/footer chrome such as the model/cwd/context line,
   with no prompt input or busy cue, is direct idle evidence for operator
   clear/status; Codex idle placeholder prompts such as `› Explain this codebase`

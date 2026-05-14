@@ -34,7 +34,13 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): #orchplainresp
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a01bb129 -->
+synch orchestra
+dispatch #spec-test-build-install-commit-push
+- do [#clearstartingrace]
+- do [#ownedreapbusy]
+- do [#opencodeinputdiag]
+- do [#tmuxe2etests]
+<!-- agent:boundary:8ce0ab93 -->
 <!-- /agent:exchange -->
 ###
 <!--

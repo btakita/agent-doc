@@ -66,7 +66,7 @@ Verification:
 The sequential orchestra started and completed `#orchmidrun`, including code/test/install/commit/push and `--done orchmidrun` closeout. The parent orchestrator then stopped before task 2 with `failed to spawn agent-doc finalize` while trying to write its own batch-interruption response, so I did not launch the remaining six tasks in this cycle.
 
 Remaining open for a later explicit run: `#backlogorphan`, `#interruptcleartimeout`, `#opsnoisereduce`, `#hookreviewroute`, `#sshcapfalsecapture`, and `#codexverbosepb`.
-<!-- agent:boundary:8febc7c1 -->
+<!-- agent:boundary:0b036ef8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,7 +141,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#synchorchstop] #agent-doc-bug: sync orchestra prematurely stopped after completing only the first task; parent orchestrator failed while spawning its own finalize closeout (), leaving remaining sequential tasks open instead of continuing or writing a deterministic batch interruption. Plan: tasks/agent-doc/plan-sync-orchestra-premature-stop.md
+- [ ] [#synchorchstop] #agent-doc-bug: sync orchestra prematurely stopped after completing only the first task; parent orchestrator failed while spawning its own finalize closeout (`failed to spawn agent-doc finalize`), leaving remaining sequential tasks open instead of continuing or writing a deterministic batch interruption. Plan: tasks/agent-doc/plan-sync-orchestra-premature-stop.md
 - [ ] [#backlogorphan] #agent-doc-bug: Backlog-section prompts leave orphan text after patchback — finalize writes response to exchange but does not clean up the original prompt text from backlog, making it look like the patchback was never written. Plan: tasks/agent-doc/plan-backlog-prompt-patchback-orphan.md
 - [ ] [#interruptcleartimeout] Investigate `session_interrupt_clear_settled outcome=timed_out` after protected clear and make interrupt-clear report the blocking state and last command deterministically.
 - [ ] [#opsnoisereduce] Reduce `post_commit_local_drift` / `commit_noop` noise by separating expected user follow-up edits from anomalous drift in `agent-doc ops summary`.

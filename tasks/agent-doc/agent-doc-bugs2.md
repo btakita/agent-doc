@@ -29,33 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260514-041700.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260514-043506.md`*
 
 Compacted content:
-- Archived 6 response topic(s): latefallbackloop; orchestration subagents; patch:exchange requirement; 3 more
+- Archived 1 response topic(s): #orchplainresp
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#orchplainresp]. spec-test-build-install-commit-push
-### Re: #orchplainresp — gpt-5
-
-Implemented and pushed the orchestrate plain-response closeout fix.
-
-Changes:
-- `write` now allows orchestrate-origin template closeout to synthesize a clean single assistant response into `agent:exchange`.
-- Patch-bearing orchestrate responses still require `patch:exchange`, and transcript prompt lines, transcript headings, full-document component markers, mixed patch/unmatched content, and multiple plain `### Re:` responses still fail closed.
-- Updated orchestration/closeout specs, changelog, unit regressions, and run integration coverage.
-
-Verification:
-- `cargo test orchestrate_contract -- --test-threads=2`
-- `cargo test --test run_integration orchestrate_ -- --test-threads=2`
-- `make check`
-- Latest root Agent Doc CI `tmux-ci` was red with no downloadable job log or steps; local `make tmux-ci` passed.
-- `make build`
-- `make install` and `agent-doc --version` -> `agent-doc 0.33.16`
-
-Commits / push:
-- `agent-doc` submodule: `88751d3b fix: accept clean orchestrate responses`, pushed to `origin/20260422/codex-agent-backend`.
-- parent repo gitlink: `91e8c9b3a agent-doc: accept clean orchestrate responses`, pushed to `origin/main`.
-<!-- agent:boundary:568551b1 -->
+<!-- agent:boundary:a01bb129 -->
 <!-- /agent:exchange -->
 ###
 <!--

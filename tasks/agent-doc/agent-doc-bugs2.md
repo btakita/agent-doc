@@ -142,7 +142,24 @@ CI review: latest hosted `CI` run on `main` (`25773430221`, May 13, 2026) is gre
 Commits prepared:
 - `src/agent-doc` `7649608` (`test: cover supervisor tmux input e2e`)
 - parent repo `6846e7289` (`agent-doc: cover supervisor tmux input e2e`)
-<!-- agent:boundary:7dbe7a2a -->
+❯ `Clear Session Context` came back with an `Interrupt and Clear` dialog. I ran `Interrupt and Clear` but then vim opened in the terminal.
+❯ Why do we need the `Clear Session Context` guardrail? It has only caused problems with little if any benefit. Waste of time and tokens.
+❯ #next-steps
+### Re: Clear Session Context guardrail — gpt-5
+
+I agree with the direction of the complaint. The guardrail is only justified for one narrow case: when the pane contains protected prompt input that could be destroyed by an automatic `/clear` or restart. Examples are a permission prompt, queued draft, shell/history search, or typed user input sitting in the composer. In those cases, `Clear Session Context` should not silently throw away state; it should require the explicit `Interrupt and clear` path.
+
+But ordinary busy/status chrome should not block clear. The current spec already says that: file-scoped `session clear` is an explicit operator action and must not fail just because direct pane evidence is `alive-busy`; it may refuse only protected prompt-input states. So if you hit `Clear Session Context`, confirmed `Interrupt and Clear`, and then got dropped into vim, that is not useful safety. That is a lifecycle/UX bug in the discard path.
+
+The practical next step is not to remove every guard. It is to make the guard much smaller and more deterministic:
+
+1. `Clear Session Context` should proceed for normal Codex/Claude status/footer/busy-looking panes.
+2. It should show the interrupt confirmation only for real protected input.
+3. After confirmation, `interrupt-clear` must either return the pane to a known harness-ready prompt, handle/avoid editor prompts such as vim, or fail with an exact recovery instruction.
+4. The plugin should not leave the operator guessing after a destructive-confirmation path.
+
+I added a backlog item for the vim/drop-into-editor failure so it can be fixed directly instead of continuing to spend cycles around the same guardrail behavior.
+<!-- agent:boundary:430ae155 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -217,6 +234,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#clearinterruptvim] #agent-doc-bug: Clear Session Context interrupt-clear UX can still land the operator in vim or a confusing terminal state after the explicit discard confirmation; tighten the interrupt-clear path so it exits/avoids editor prompts, waits for a real harness-ready prompt or clean closed state, and reports a precise recovery action instead of leaving the pane in an editor.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->

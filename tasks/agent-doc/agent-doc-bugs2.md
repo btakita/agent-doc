@@ -189,7 +189,34 @@ Commits prepared before push:
 - parent corrective `2bb58f3d9` (`agent-doc: restore plan redirect`) restores `plan.md` to the `origin/main` redirect after an initial wrong-file preflight opened a temporary plan commit.
 
 Per the session-document closeout ordering, I will push the parent commits after this finalize commit lands.
-<!-- agent:boundary:86e24a47 -->
+
+❯ update spec + tests. build + install for local testing. commit + push. do [#hookreviewroute]
+### Re: #hookreviewroute — gpt-5
+
+Implemented `#hookreviewroute`.
+
+What changed:
+- Dispatch-only Codex reroutes that hit `route_dispatch_only_blocked reason=codex hook review prompt` now fail with a specific recovery hint: open `/hooks`, approve or disable the pending hook change, wait for the idle composer, then rerun the dispatch-only route or editor Run Agent Doc action.
+- Updated the route/session specs and Codex support spec so the hook-review prompt is documented as an approval gate, not generic idle chrome.
+- Added regression coverage for the hook-review recovery hint.
+- Added a `VERSIONS.md` entry for the fix.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test hook_review -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest GitHub `CI` run inspected: `25773430221`, green on `main`.
+- Local `make tmux-ci` passed with 227 live tmux tests.
+
+Commits:
+- `src/agent-doc` `7beead71` (`fix: explain codex hook review route blocker`), pushed to `20260422/codex-agent-backend`.
+- parent `agent-loop` `20d8c1ae9` (`agent-doc: explain codex hook review route blocker`) prepared with the updated `src/agent-doc` pointer.
+
+Per the session-document closeout ordering, I will push the parent repo after this finalize commit lands.
+<!-- agent:boundary:3ed646dc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -264,7 +291,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#hookreviewroute] Clarify `route_dispatch_only_blocked reason=codex hook review prompt` as a user-facing route blocker with recovery guidance.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 

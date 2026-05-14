@@ -412,6 +412,164 @@ fn snapshot_content_to_persist<'a>(
     }
 }
 
+fn normalized_prompt_line(line: &str) -> String {
+    line.trim()
+        .strip_prefix('❯')
+        .unwrap_or_else(|| line.trim())
+        .trim()
+        .to_string()
+}
+
+fn prompt_target_lines(target: &str) -> Vec<String> {
+    target
+        .lines()
+        .map(normalized_prompt_line)
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+fn prompt_target_matches_at(
+    segments: &[&str],
+    removed: &[bool],
+    start: usize,
+    target: &[String],
+) -> bool {
+    if start + target.len() > segments.len() {
+        return false;
+    }
+    target.iter().enumerate().all(|(offset, expected)| {
+        let idx = start + offset;
+        !removed[idx] && normalized_prompt_line(segments[idx].trim_end_matches('\n')) == *expected
+    })
+}
+
+fn remove_prompt_target_blocks_from_body(body: &str, targets: &[String]) -> (String, usize) {
+    let segments: Vec<&str> = body.split_inclusive('\n').collect();
+    if segments.is_empty() || targets.is_empty() {
+        return (body.to_string(), 0);
+    }
+
+    let mut removed = vec![false; segments.len()];
+    let mut removed_count = 0usize;
+    let target_lines: Vec<Vec<String>> = targets
+        .iter()
+        .map(|target| prompt_target_lines(target))
+        .filter(|lines| !lines.is_empty())
+        .collect();
+
+    for target in &target_lines {
+        if let Some(start) = (0..segments.len())
+            .rev()
+            .find(|&idx| prompt_target_matches_at(&segments, &removed, idx, target))
+        {
+            for slot in removed.iter_mut().skip(start).take(target.len()) {
+                *slot = true;
+            }
+            removed_count += 1;
+        }
+    }
+
+    if removed_count == 0 {
+        return (body.to_string(), 0);
+    }
+
+    let mut cleaned = String::with_capacity(body.len());
+    for (idx, segment) in segments.iter().enumerate() {
+        if !removed[idx] {
+            cleaned.push_str(segment);
+        }
+    }
+    (cleaned, removed_count)
+}
+
+fn prompt_targets_added_to_backlog(
+    base: &str,
+    current: &str,
+) -> Result<Vec<(String, Vec<String>)>> {
+    let base_components = component::parse(base).context("failed to parse baseline components")?;
+    let current_components =
+        component::parse(current).context("failed to parse current components")?;
+    let mut targets = Vec::new();
+
+    for current_component in current_components
+        .iter()
+        .filter(|component| is_backlog_component(&component.name))
+    {
+        let base_body = base_components
+            .iter()
+            .find(|component| component.name == current_component.name)
+            .map(|component| component.content(base))
+            .unwrap_or("");
+        let current_body = current_component.content(current);
+        let Some(diff_text) = crate::diff::unified_diff_from_contents(base_body, current_body)
+        else {
+            continue;
+        };
+        let component_targets: Vec<String> =
+            crate::diff::classify_prompt_bearing_changes(&diff_text)
+                .into_iter()
+                .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+                .map(|change| change.text)
+                .collect();
+        if !component_targets.is_empty() {
+            targets.push((current_component.name.clone(), component_targets));
+        }
+    }
+
+    Ok(targets)
+}
+
+fn cleanup_resolved_backlog_prompts_after_response(
+    file: &Path,
+    base: &str,
+    current: &str,
+    final_content: &str,
+) -> Result<Option<String>> {
+    let targets = prompt_targets_added_to_backlog(base, current)?;
+    if targets.is_empty() {
+        return Ok(None);
+    }
+
+    let mut result = final_content.to_string();
+    let mut removed_total = 0usize;
+    for (component_name, component_targets) in targets {
+        let components = component::parse(&result)
+            .with_context(|| format!("failed to parse final components in {}", file.display()))?;
+        let Some(component) = components
+            .iter()
+            .find(|component| component.name == component_name)
+        else {
+            continue;
+        };
+        let body = component.content(&result);
+        let (cleaned_body, removed_count) =
+            remove_prompt_target_blocks_from_body(body, &component_targets);
+        if removed_count == 0 {
+            continue;
+        }
+        result = component.replace_content(&result, &cleaned_body);
+        removed_total += removed_count;
+    }
+
+    if removed_total == 0 {
+        return Ok(None);
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "cleanup_resolved_backlog_prompts file={} removed={}",
+            file.display(),
+            removed_total
+        ),
+    );
+    eprintln!(
+        "[write] removed {} resolved prompt target(s) from backlog component(s)",
+        removed_total
+    );
+    Ok(Some(result))
+}
+
 fn shell_quote_cli_arg(arg: &str) -> String {
     if arg.is_empty() {
         return "''".to_string();
@@ -4027,8 +4185,18 @@ pub fn run_template(
         eprintln!("[write] File was modified during response generation. Merging...");
         merge::merge_contents(base, &content_ours, &content_current)?
     };
-    let final_content =
+    let mut final_content =
         normalize_final_template_content(file, base, snapshot_doc.as_deref(), &final_content)?;
+    let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
+        file,
+        base,
+        &content_current,
+        &final_content,
+    )?;
+    let cleaned_resolved_backlog_prompts_applied = cleaned_resolved_backlog_prompts.is_some();
+    if let Some(cleaned) = cleaned_resolved_backlog_prompts {
+        final_content = normalize_template_structure_or_fail(&cleaned, file)?;
+    }
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -4044,13 +4212,17 @@ pub fn run_template(
         return Ok(());
     }
 
-    let snapshot_mode = snapshot_persist_mode_with_current(
-        baseline,
-        base,
-        &content_current,
-        &content_ours,
-        &final_content,
-    );
+    let snapshot_mode = if cleaned_resolved_backlog_prompts_applied {
+        snapshot_persist_mode(baseline, &content_ours, &final_content)
+    } else {
+        snapshot_persist_mode_with_current(
+            baseline,
+            base,
+            &content_current,
+            &content_ours,
+            &final_content,
+        )
+    };
     let snapshot_content =
         snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
 
@@ -4617,7 +4789,7 @@ pub fn run_stream(
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
 
-    let (final_content, crdt_state) = if let Some(repaired_current) =
+    let (final_content, mut crdt_state) = if let Some(repaired_current) =
         adopt_current_response_without_duplication(
             file,
             base,
@@ -4657,8 +4829,19 @@ pub fn run_stream(
             }
         }
     };
-    let final_content =
+    let mut final_content =
         normalize_final_template_content(file, base, snapshot_doc.as_deref(), &final_content)?;
+    let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
+        file,
+        base,
+        &content_current,
+        &final_content,
+    )?;
+    let cleaned_resolved_backlog_prompts_applied = cleaned_resolved_backlog_prompts.is_some();
+    if let Some(cleaned) = cleaned_resolved_backlog_prompts {
+        final_content = normalize_template_structure_or_fail(&cleaned, file)?;
+        crdt_state = crate::crdt::CrdtDoc::from_text(&final_content).encode_state();
+    }
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
     if strip_boundary_for_dedup(&final_content) == strip_boundary_for_dedup(&content_current) {
@@ -4678,13 +4861,17 @@ pub fn run_stream(
         return Ok(());
     }
 
-    let snapshot_mode = snapshot_persist_mode_with_current(
-        baseline,
-        base,
-        &content_current,
-        &content_ours,
-        &final_content,
-    );
+    let snapshot_mode = if cleaned_resolved_backlog_prompts_applied {
+        snapshot_persist_mode(baseline, &content_ours, &final_content)
+    } else {
+        snapshot_persist_mode_with_current(
+            baseline,
+            base,
+            &content_current,
+            &content_ours,
+            &final_content,
+        )
+    };
     let snapshot_content =
         snapshot_content_to_persist(snapshot_mode, &content_ours, &final_content);
     let snapshot_crdt_state = match snapshot_mode {
@@ -10500,6 +10687,80 @@ mod submodule_patch_routing_tests {
         assert!(marker.exists());
         cleanup_legacy_ipc_degraded(root);
         assert!(!marker.exists(), "legacy marker should be removed");
+    }
+
+    #[test]
+    fn cleanup_resolved_backlog_prompts_removes_new_prompt_target_only() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let base = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep this tracked item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep this tracked item\n",
+            "commit + push uncommitted files\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let final_content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Done.\n",
+            "### Re: backlog prompt — gpt-5\n\n",
+            "Committed and pushed.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [x] [#keep1] Keep this tracked item\n",
+            "commit + push uncommitted files\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let cleaned =
+            cleanup_resolved_backlog_prompts_after_response(&doc, base, current, final_content)
+                .unwrap()
+                .expect("prompt target should be cleaned");
+
+        assert!(cleaned.contains("### Re: backlog prompt — gpt-5"));
+        assert!(cleaned.contains("- [x] [#keep1] Keep this tracked item"));
+        assert!(!cleaned.contains("commit + push uncommitted files"));
+    }
+
+    #[test]
+    fn cleanup_resolved_backlog_prompts_preserves_non_prompt_backlog_edits() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let base = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Existing item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Existing item\n",
+            "- [ ] [#new1] Added tracked item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let cleaned =
+            cleanup_resolved_backlog_prompts_after_response(&doc, base, current, current).unwrap();
+        assert!(
+            cleaned.is_none(),
+            "ordinary tracked backlog additions are not prompt cleanup targets"
+        );
     }
 
     #[test]

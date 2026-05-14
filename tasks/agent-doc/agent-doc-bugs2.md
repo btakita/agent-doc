@@ -119,7 +119,30 @@ Commits prepared:
 - parent repo `ba2da7e1c` (`agent-doc: add tmux input diagnostics`)
 
 I will push after this finalize/session-check boundary so the session closeout commit is included in the parent push.
-<!-- agent:boundary:a0d69c5e -->
+
+❯ do [#tmuxe2etests]
+### Re: #tmuxe2etests — gpt-5
+
+Implemented `#tmuxe2etests`.
+
+Added live tmux end-to-end coverage in `src/agent-doc/src/start.rs` by strengthening the supervisor IPC test into a raw byte-capture harness. The test launches a real isolated tmux session, injects a prompt through supervisor IPC into the pane submit path, sends `Up`, `Down`, `Left`, `Right`, and final `Enter` through the actual tmux key path, then asserts the raw harness received the submitted prompt text, Enter delivery, arrow escape sequences, and final Enter bytes.
+
+Updated `src/agent-doc/VERSIONS.md` for the new coverage contract.
+
+Verification passed:
+- `cargo test supervisor_ipc_tmux_pipeline_delivers_submit_arrows_and_enter -- --ignored --nocapture`
+- `cargo fmt --check`
+- `make check`
+- `make build`
+- `make install && agent-doc --version` -> `agent-doc 0.33.16`
+- `make tmux-ci` -> 227 live/ignored tmux tests passed
+
+CI review: latest hosted `CI` run on `main` (`25773430221`, May 13, 2026) is green for its `check` job. I did not find a separate hosted tmux job, so the required tmux evidence is the local `make tmux-ci` run above.
+
+Commits prepared:
+- `src/agent-doc` `7649608` (`test: cover supervisor tmux input e2e`)
+- parent repo `6846e7289` (`agent-doc: cover supervisor tmux input e2e`)
+<!-- agent:boundary:7dbe7a2a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -194,7 +217,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->

@@ -2,7 +2,7 @@
 agent_doc_session: 584ef929-37ee-47f6-b3d8-d4266ad31ee9
 agent_doc_format: template
 agent_doc_write: crdt
-agent: opencode
+agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 claude_model: claude-opus-4-6
@@ -104,8 +104,7 @@ Findings:
 - The current status block still says `crates.io publish — needs token refresh`, which is stale relative to the release log.
 
 Added the follow-up backlog in priority order. Top backlog item: `#pypi-trusted-publisher`.
-<!-- agent:boundary:5536695f -->
-do [#pypi-trusted-publisher]. spec-test-build-install-commit-push
+<!-- agent:boundary:5a180939 -->
 <!-- /agent:exchange -->
 ###
 <!--

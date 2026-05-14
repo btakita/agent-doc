@@ -4273,6 +4273,15 @@ pub fn run_stream(
                 norm_lines_opt,
                 None,
             )?;
+            if ipc_result.skipped_committed_cycle {
+                let elapsed_total = t_total.elapsed().as_millis();
+                if elapsed_total > 0 {
+                    eprintln!("[perf] run_stream total: {}ms", elapsed_total);
+                }
+                drop(doc_lock);
+                repair::clear_pending(file)?;
+                return Ok(());
+            }
             if ipc_result.success {
                 let elapsed_ipc = t_ipc.elapsed().as_millis();
                 if elapsed_ipc > 0 {
@@ -5254,6 +5263,9 @@ pub struct IpcResult {
     /// The patch_id used for this write attempt. Reuse in fallback writes
     /// so the plugin can deduplicate.
     pub patch_id: String,
+    /// True when IPC was intentionally skipped because the current cycle has
+    /// already reached the terminal committed state.
+    pub skipped_committed_cycle: bool,
 }
 
 /// Remove leftover fallback patch files for a document after closeout commits.
@@ -5364,10 +5376,11 @@ pub fn try_ipc(
         );
         cleanup_fallback_patch_files(file);
         return Ok(IpcResult {
-            success: true,
+            success: false,
             patch_id: reuse_patch_id
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            skipped_committed_cycle: true,
         });
     }
 
@@ -5564,6 +5577,7 @@ pub fn try_ipc(
                     return Ok(IpcResult {
                         success: true,
                         patch_id,
+                        skipped_committed_cycle: false,
                     });
                 }
                 // Sidecar timed out — plugin likely applied the patch but the
@@ -5582,6 +5596,26 @@ pub fn try_ipc(
                         file.display()
                     ),
                 );
+                if let Some(ref cycle_id) = cycle_already_committed(file) {
+                    eprintln!(
+                        "[write] socket IPC fallback: cycle {} already committed — skipping file IPC",
+                        cycle_id
+                    );
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "ipc_socket_sidecar_timeout_skip_file_fallback file={} cycle_id={} reason=already_committed",
+                            file.display(),
+                            cycle_id
+                        ),
+                    );
+                    cleanup_fallback_patch_files(file);
+                    return Ok(IpcResult {
+                        success: false,
+                        patch_id,
+                        skipped_committed_cycle: true,
+                    });
+                }
             }
             Ok(None) => {
                 eprintln!("[write] socket IPC sent but no ack — falling back to file IPC");
@@ -5602,6 +5636,28 @@ pub fn try_ipc(
         return Ok(IpcResult {
             success: false,
             patch_id,
+            skipped_committed_cycle: false,
+        });
+    }
+
+    if let Some(ref cycle_id) = cycle_already_committed(file) {
+        eprintln!(
+            "[write] file IPC fallback: cycle {} already committed — skipping patch write",
+            cycle_id
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "file_ipc_fallback_skip file={} cycle_id={} reason=already_committed",
+                file.display(),
+                cycle_id
+            ),
+        );
+        cleanup_fallback_patch_files(file);
+        return Ok(IpcResult {
+            success: false,
+            patch_id,
+            skipped_committed_cycle: true,
         });
     }
 
@@ -5692,7 +5748,11 @@ pub fn try_ipc(
         normalize_prefix_lines,
         &project_root,
     )?;
-    Ok(IpcResult { success, patch_id })
+    Ok(IpcResult {
+        success,
+        patch_id,
+        skipped_committed_cycle: false,
+    })
 }
 
 /// Attempt to write full document content via IPC.
@@ -11853,14 +11913,17 @@ mod pending_patch_normalization_tests {
 
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
-    use super::{cleanup_fallback_patch_files, cycle_already_committed};
+    use super::{cleanup_fallback_patch_files, cycle_already_committed, try_ipc};
     use std::fs;
     use tempfile::TempDir;
 
     fn doc_in_agent_doc_project(tmp: &TempDir, content: &str) -> std::path::PathBuf {
         let agent_doc_dir = tmp.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("state").join("cycles")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         let doc = tmp.path().join("doc.md");
         fs::write(&doc, content).unwrap();
         doc
@@ -11947,5 +12010,65 @@ mod late_fallback_patch_guard_tests {
         let doc =
             doc_in_agent_doc_project(&tmp, "---\nagent_doc_session: test\n---\n\n## Exchange\n");
         cleanup_fallback_patch_files(&doc);
+    }
+
+    #[test]
+    fn try_ipc_marks_committed_cycle_skip_as_not_consumed() {
+        let tmp = TempDir::new().unwrap();
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
+        let doc = doc_in_agent_doc_project(&tmp, content);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "test",
+            Some(content),
+            Some(content),
+            "fake-sha",
+            None,
+        )
+        .unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
+
+        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let stale_patch_path = tmp
+            .path()
+            .join(".agent-doc/patches")
+            .join(format!("{hash}.json"));
+        fs::write(
+            &stale_patch_path,
+            serde_json::json!({"patch_id": "late-patch-123"}).to_string(),
+        )
+        .unwrap();
+
+        let patch = crate::template::PatchBlock::new("exchange", "late response");
+        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+
+        assert!(
+            !result.success,
+            "committed-cycle IPC skip must not look like a consumed write"
+        );
+        assert!(
+            result.skipped_committed_cycle,
+            "caller must be able to stop terminal fallback handling"
+        );
+        assert!(
+            !stale_patch_path.exists(),
+            "stale fallback patch should be removed"
+        );
+        assert!(
+            tmp.path()
+                .join(".agent-doc/claimed-patches/late-patch-123")
+                .exists(),
+            "removed stale patch should be claimed so watchers cannot replay it"
+        );
+
+        let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("late_fallback_patch_rejected"));
+        assert!(
+            !ops_log.contains("ipc_write_consumed"),
+            "terminal skip must not be logged as an IPC consume"
+        );
     }
 }

@@ -125,6 +125,8 @@ The stash system preserves running Claude sessions when the user switches editor
 3. During `agent-doc commit`: (a) the snapshot is cleaned via the clean reposition helper, and (b) a standalone IPC signal with `preserve_head: true` is sent when a live listener exists so the plugin preserves `(HEAD)` in the editor buffer. Without a live listener, the working tree is rewritten with the preserve-head variant.
 4. If no plugin is active, the file is rewritten locally with `reposition_boundary_to_end_preserve_head()`, preserving `(HEAD)` annotations while removing stale boundaries.
 
+**Terminal IPC cycle guard:** Once a document cycle reaches `committed`, response IPC for that cycle is terminal. Late socket/file fallback writers must remove stale queued patch JSON, write a claimed-patch sentinel when a `patch_id` exists, and return an explicit committed-cycle skip that callers do not classify as `ipc_write_consumed`. No fallback path may re-dirty the session document, save a new snapshot, or run another already-current commit for that closed cycle.
+
 ## Pane Lifecycle — Binding Invariant
 
 **The editor-selected document drives pane resolution. It either finds an existing pane that already claims that document, or provisions a new one. It NEVER commandeers another document's pane.**

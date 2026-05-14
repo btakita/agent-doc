@@ -29,3 +29,4 @@
 - 2026-05-14 [#m2hx] Clarify route-owned reap reason for post-commit user follow-up drift; document_dirty_after_commit currently appears after successful commits even when the remaining drift is the next user prompt. #agent-doc-bug
 - 2026-05-14 [#ha62] Reduce Codex managed capability proof startup latency or move it off the readiness path; recent logs show child network proof taking roughly 13-16 seconds before ready. #agent-doc-bug
 - 2026-05-14 [#aymr] Optimize or re-budget passive sync controller_actor_lookup; safe-passive logs repeatedly exceed the 250ms budget while total sync stays barely under 1s. #agent-doc-bug
+- 2026-05-14 [#gv32] Design lower-agent orchestration using bounded job packets and model-tier routing.

@@ -238,7 +238,9 @@ That keeps each artifact from bloating into the others. Plans stay strategic, ru
 <!-- /agent:exchange -->
 ###
 <!--
-If I 'm
+If I'm typing into agent:exchange during finalize, the content of finalize are duplicated in the final patchback.
+---
+
 -->
 
 <!-- agent:queue auto -->

@@ -1,5 +1,6 @@
 # Agent Doc Completed Work
 
+- 2026-05-13 [#donearchiveattr] Implement external completed-work archive support for agent:done using archive=<repo-relative>.done.md. Plan: tasks/agent-doc/plan-external-done-archive-attribute.md
 - 2026-05-13 [#clearsessionmismatch] #agent-doc-bug [done]: Clear Session Context harness mismatch false positive — protected_clear_input_reason inferred wrong harness from document frontmatter instead of pane's actual command. Plan: tasks/agent-doc/plan-clear-session-harness-mismatch-false-positive.md
 - 2026-05-13 [#tmuxcontrolmode] Migrate tmux-router to control mode (tmux -CC) for event-driven pane output and lifecycle notifications, replacing capture-pane polling. Natural fit for existing Tmux struct. [recommended]
 - 2026-05-13 [#tmuxhybridpty] Implement hybrid control-mode + pipe-pane + owned-PTY architecture: control mode for lifecycle events, pipe-pane for output streaming, owned PTY only for managed panes (OpenCode, Claude) where input reliability matters. Depends on #tmuxcontrolmode.
@@ -14,3 +15,4 @@
 - 2026-05-14 [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.
 - 2026-05-14 [#tmuxe2etests] #agent-doc-bug: Create end-to-end tmux input test harness that launches real tmux sessions (in CI-safe headless mode) and verifies Enter, arrow keys, and prompt submit through the actual supervisor→tmux→harness pipeline. Current SimWorld tests verify logic but not the tmux IPC surface.
 - 2026-05-14 [#clearinterruptvim] #agent-doc-bug: Clear Session Context interrupt-clear UX can still land the operator in vim or a confusing terminal state after the explicit discard confirmation; tighten the interrupt-clear path so it exits/avoids editor prompts, waits for a real harness-ready prompt or clean closed state, and reports a precise recovery action instead of leaving the pane in an editor.
+- 2026-05-14 [#opsreadinessrace] Tighten route readiness handling: avoid dispatch/clear attempts while the authoritative actor is `starting`; surface a single actionable wait/retry state until `prompt_ready=true`.

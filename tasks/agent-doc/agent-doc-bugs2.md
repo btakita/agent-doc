@@ -36,7 +36,7 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 
 ❯ (preset #spec-test-build-install-commit-push)
-update spec + tests. build + install for local testing. commit + push
+❯ update spec + tests. build + install for local testing. commit + push
 ❯ do [#opsreadinessrace]
 ❯ sync orchestra
 ❯ preset #spec-test-build-install-commit-push
@@ -47,7 +47,7 @@ update spec + tests. build + install for local testing. commit + push
 ❯ - do [#hookreviewroute]
 ❯ - do [#sshcapfalsecapture]
 ❯ - do [#codexverbosepb]
-### Re: #opsreadinessrace — gpt-5
+### Re: #opsreadinessrace — gpt-5 (HEAD)
 
 Implemented the route-readiness guard in `src/agent-doc`.
 

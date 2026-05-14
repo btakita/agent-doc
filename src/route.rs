@@ -159,6 +159,12 @@ enum CommandDispatchStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CommandDispatchResult {
+    status: CommandDispatchStatus,
+    elapsed: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteMode {
     Managed,
     DispatchOnly,
@@ -297,6 +303,28 @@ fn route_latency_status(elapsed: Duration, budget: Duration) -> &'static str {
         "over_budget"
     } else {
         "ok"
+    }
+}
+
+fn direct_pane_submit_acceptance_timeout() -> Duration {
+    Duration::from_secs(5)
+}
+
+fn direct_pane_submit_acceptance_budget() -> Duration {
+    // tmux/control-mode delivery can spend the whole acceptance window plus a
+    // final capture poll before pane input disappears. Keep the budget above
+    // that window so "over_budget" means slower than the path can observe.
+    Duration::from_secs(6)
+}
+
+fn direct_pane_submit_outcome(
+    status: CommandDispatchStatus,
+    dispatch_start_proof: Option<RoutedDispatchStartProof>,
+) -> &'static str {
+    match (status, dispatch_start_proof) {
+        (CommandDispatchStatus::Accepted, _) => "accepted",
+        (CommandDispatchStatus::TimedOut, Some(_)) => "acceptance_unobserved_dispatch_proven",
+        (CommandDispatchStatus::TimedOut, None) => "acceptance_unobserved",
     }
 }
 
@@ -4285,10 +4313,10 @@ fn send_command_unchecked(
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
-) -> Result<CommandDispatchStatus> {
+) -> Result<CommandDispatchResult> {
     let trigger = send_command_once_unchecked(tmux, pane, file_path, harness)?;
     let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(5);
+    let timeout = direct_pane_submit_acceptance_timeout();
     let poll_interval = std::time::Duration::from_millis(300);
     while start.elapsed() < timeout {
         std::thread::sleep(poll_interval);
@@ -4296,19 +4324,17 @@ fn send_command_unchecked(
             let cmd_still_in_input = recent_lines_contain_trigger(&content, &trigger);
 
             if !cmd_still_in_input {
-                eprintln!(
-                    "[route] Command accepted after single submit ({:.1}s)",
-                    start.elapsed().as_secs_f64()
-                );
-                return Ok(CommandDispatchStatus::Accepted);
+                return Ok(CommandDispatchResult {
+                    status: CommandDispatchStatus::Accepted,
+                    elapsed: start.elapsed(),
+                });
             }
         }
     }
-    eprintln!(
-        "[route] warning: command may not have been accepted after {:.1}s (single-submit path only)",
-        start.elapsed().as_secs_f64()
-    );
-    Ok(CommandDispatchStatus::TimedOut)
+    Ok(CommandDispatchResult {
+        status: CommandDispatchStatus::TimedOut,
+        elapsed: start.elapsed(),
+    })
 }
 
 fn send_command_once_unchecked(
@@ -4773,7 +4799,7 @@ fn send_command_checked(
     pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
-) -> Result<CommandDispatchStatus> {
+) -> Result<CommandDispatchResult> {
     ensure_dispatch_target_matches_file(pane, file_path)?;
     send_command_unchecked(tmux, pane, file_path, harness)
 }
@@ -4808,28 +4834,32 @@ fn dispatch_routed_reopen_with_mode(
     print_unproven_progress: bool,
 ) -> Result<RoutedDispatchStartProof> {
     let tracker = build_routed_dispatch_start_tracker(file, file_path, harness)?;
-    let submit_start = Instant::now();
-    let status = send_command_checked(tmux, pane, file_path, harness)?;
-    let submit_outcome = match status {
-        CommandDispatchStatus::Accepted => "accepted",
-        CommandDispatchStatus::TimedOut => "timed_out",
-    };
-    log_route_latency(
-        file,
-        "direct_pane_submit",
-        submit_start.elapsed(),
-        Duration::from_millis(750),
-        pane,
-        harness,
-        submit_outcome,
-    );
+    let submit_result = send_command_checked(tmux, pane, file_path, harness)?;
     let Some(tracker) = tracker else {
+        log_route_latency(
+            file,
+            "direct_pane_submit",
+            submit_result.elapsed,
+            direct_pane_submit_acceptance_budget(),
+            pane,
+            harness,
+            direct_pane_submit_outcome(submit_result.status, None),
+        );
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);
     };
 
     let timeout = routed_dispatch_start_timeout();
     let proof_start = Instant::now();
     if let Some(proof) = wait_for_routed_dispatch_start(file, &tracker, timeout)? {
+        log_route_latency(
+            file,
+            "direct_pane_submit",
+            submit_result.elapsed,
+            direct_pane_submit_acceptance_budget(),
+            pane,
+            harness,
+            direct_pane_submit_outcome(submit_result.status, Some(proof)),
+        );
         log_route_latency(
             file,
             "dispatch_start_proof",
@@ -4853,7 +4883,16 @@ fn dispatch_routed_reopen_with_mode(
         return Ok(proof);
     }
 
-    match status {
+    log_route_latency(
+        file,
+        "direct_pane_submit",
+        submit_result.elapsed,
+        direct_pane_submit_acceptance_budget(),
+        pane,
+        harness,
+        direct_pane_submit_outcome(submit_result.status, None),
+    );
+    match submit_result.status {
         CommandDispatchStatus::Accepted => {
             log_route_latency(
                 file,
@@ -8560,7 +8599,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         let _ = wait_for_pane_contains(&iso, &pane, "READY", std::time::Duration::from_secs(3));
 
         let status = send_command_checked(&iso, &pane, "test.md", &HarnessConfig::codex()).unwrap();
-        assert_eq!(status, CommandDispatchStatus::Accepted);
+        assert_eq!(status.status, CommandDispatchStatus::Accepted);
     }
 
     #[test]
@@ -8599,7 +8638,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         let _ = wait_for_pane_contains(&iso, &pane, ">", std::time::Duration::from_secs(3));
 
         let status = send_command_checked(&iso, &pane, "test.md", &HarnessConfig::codex()).unwrap();
-        assert_eq!(status, CommandDispatchStatus::Accepted);
+        assert_eq!(status.status, CommandDispatchStatus::Accepted);
 
         let content = wait_for_pane_contains(
             &iso,
@@ -8803,6 +8842,56 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         );
         assert!(slow.contains("status=over_budget"), "{slow}");
         assert!(slow.contains("outcome=unproven_but_accepted"), "{slow}");
+    }
+
+    #[test]
+    fn direct_pane_submit_budget_allows_acceptance_poll_slack() {
+        assert_eq!(
+            direct_pane_submit_acceptance_timeout(),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            direct_pane_submit_acceptance_budget(),
+            Duration::from_secs(6)
+        );
+
+        let message = route_latency_message(
+            "direct_pane_submit",
+            Duration::from_millis(5180),
+            direct_pane_submit_acceptance_budget(),
+            "%1",
+            &HarnessConfig::codex(),
+            direct_pane_submit_outcome(
+                CommandDispatchStatus::TimedOut,
+                Some(RoutedDispatchStartProof::HookPromptMatched),
+            ),
+        );
+
+        assert!(message.contains("status=ok"), "{message}");
+        assert!(
+            message.contains("outcome=acceptance_unobserved_dispatch_proven"),
+            "{message}"
+        );
+        assert!(!message.contains("timed_out"), "{message}");
+    }
+
+    #[test]
+    fn direct_pane_submit_outcome_separates_acceptance_from_dispatch_proof() {
+        assert_eq!(
+            direct_pane_submit_outcome(CommandDispatchStatus::Accepted, None),
+            "accepted"
+        );
+        assert_eq!(
+            direct_pane_submit_outcome(CommandDispatchStatus::TimedOut, None),
+            "acceptance_unobserved"
+        );
+        assert_eq!(
+            direct_pane_submit_outcome(
+                CommandDispatchStatus::TimedOut,
+                Some(RoutedDispatchStartProof::HookStateAdvanced),
+            ),
+            "acceptance_unobserved_dispatch_proven"
+        );
     }
 
     #[test]

@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Direct pane submit telemetry no longer reports proven Codex reroutes as false timeouts.** Route now records direct tmux input acceptance latency separately from the later harness dispatch-start proof, waits to classify the direct-submit outcome until proof is known, and budgets the direct pane submit path around the full tmux/control-mode acceptance window plus capture-poll slack. If Codex proves the routed prompt was consumed after pane-input acceptance was not directly observable, ops logs now say `acceptance_unobserved_dispatch_proven` instead of `timed_out` / `over_budget`. Updated route regressions and session tmux specs. This closes `#directsubmitbudget` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Starting actor reroutes now refresh terminal lifecycle states immediately.** While route is waiting for a `starting` authoritative actor to become dispatch-ready, a supervisor refresh to `closed` or `blocked` now stops the wait and surfaces that terminal actor state instead of burning the startup-ready timeout and reporting stale `starting` state. Updated route specs and added SimWorld plus tmux-backed route coverage. This closes `#startreadytimeout` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **OpenCode live-pane submits now send real Return instead of newline.** Harness-aware tmux submissions use OpenCode's Kitty keyboard Return sequence for routed reopens, supervisor IPC injects, auto-triggers, and file-scoped `/clear`, so OpenCode panes whose TUI keymap distinguishes `return` from `ctrl+j` submit the prompt instead of inserting a blank line. Updated the session tmux spec and tmux-router coverage.

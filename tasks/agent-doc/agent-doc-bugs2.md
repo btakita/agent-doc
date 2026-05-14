@@ -69,16 +69,46 @@ Remaining open for a later explicit run: `#backlogorphan`, `#interruptcleartimeo
 ### Re: sync orchestra premature stop — gpt-5
 
 Recorded the premature `sync orchestra` stop as a new `#agent-doc-bug` backlog item with plan `tasks/agent-doc/plan-sync-orchestra-premature-stop.md`. The bug is that the parent orchestrator completed the first child task but stopped before task 2 when its own closeout path failed to spawn `agent-doc finalize`.
-sync orchestra
-preset #spec-test-build-install-commit-push
-- do [#synchorchstop]
-- do [#backlogorphan]
-- do [#interruptcleartimeout]
-- do [#opsnoisereduce]
-- do [#hookreviewroute]
-- do [#sshcapfalsecapture]
-- do [#codexverbosepb]
-<!-- agent:boundary:60a01f15 -->
+
+❯ (preset #spec-test-build-install-commit-push)
+❯ update spec + tests. build + install for local testing. commit + push
+❯ do [#synchorchstop]
+❯ sync orchestra
+❯ preset #spec-test-build-install-commit-push
+❯ - do [#synchorchstop]
+❯ - do [#backlogorphan]
+❯ - do [#interruptcleartimeout]
+❯ - do [#opsnoisereduce]
+❯ - do [#hookreviewroute]
+❯ - do [#sshcapfalsecapture]
+❯ - do [#codexverbosepb]
+### Re: #synchorchstop — gpt-5
+
+Implemented `#synchorchstop`.
+
+What changed:
+- Sequential orchestration parent lifecycle commands now resolve a launchable `agent-doc` binary through a helper that prefers the live `current_exe()` path but falls back to the invoked command or `agent-doc` on `PATH` when the current executable path is stale after local install work.
+- Parent finalize spawn failures now include binary, cwd, and PATH-presence context, and the batch-change closeout adds completed/total step context around parent closeout failures.
+- Added regressions for sanitized-PATH/current-exe resolution, stale-current-exe fallback, and spawn-context text.
+- Updated `specs/07-orchestration-commands.md` and `VERSIONS.md` for the parent-owned lifecycle command invariant.
+- While satisfying the required tmux review, the live suite exposed a retained-dead-pane test race; I fixed the setup to wait for the pane shell before sending the diagnostic exit command, then reran the live suite successfully.
+
+Verification:
+- `cargo test -p agent-doc orchestrate::tests -- --nocapture`
+- `cargo fmt --check`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- GitHub `CI` run `25773430221` on `main` is green for `check`; it has no separate tmux job exposed.
+- `cargo test -p agent-doc sync::tests::repair_missing_registered_pane_captures_retained_dead_pane_diagnostics -- --ignored --nocapture`
+- `make tmux-ci` -> 227 ignored live tmux tests passed.
+
+Commits prepared before session closeout:
+- `src/agent-doc` `263eb24` (`fix: stabilize orchestrate parent closeout`)
+- parent `agent-loop` `248d8e80e` (`agent-doc: stabilize orchestrate closeout`)
+
+Per the session-document closeout ordering, I will push those commits after this finalize commit lands.
+<!-- agent:boundary:3c3013c0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -153,7 +183,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#synchorchstop] #agent-doc-bug: sync orchestra prematurely stopped after completing only the first task; parent orchestrator failed while spawning its own finalize closeout (`failed to spawn agent-doc finalize`), leaving remaining sequential tasks open instead of continuing or writing a deterministic batch interruption. Plan: tasks/agent-doc/plan-sync-orchestra-premature-stop.md
 - [ ] [#backlogorphan] #agent-doc-bug: Backlog-section prompts leave orphan text after patchback — finalize writes response to exchange but does not clean up the original prompt text from backlog, making it look like the patchback was never written. Plan: tasks/agent-doc/plan-backlog-prompt-patchback-orphan.md
 - [ ] [#interruptcleartimeout] Investigate `session_interrupt_clear_settled outcome=timed_out` after protected clear and make interrupt-clear report the blocking state and last command deterministically.
 - [ ] [#opsnoisereduce] Reduce `post_commit_local_drift` / `commit_noop` noise by separating expected user follow-up edits from anomalous drift in `agent-doc ops summary`.

@@ -1956,6 +1956,25 @@ fn project_authoritative_actor_binding(
     auto_start_mode: AutoStartMode,
     proof_cache: &SyncProofCache,
 ) -> Option<String> {
+    if matches!(auto_start_mode, AutoStartMode::SafePassive)
+        && let Some(pane_id) =
+            crate::focus::local_actor_projection_pane_for_document(file, session_id, tmux)
+    {
+        log_sync_latency(
+            focus,
+            "controller_actor_lookup",
+            Duration::ZERO,
+            SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
+            auto_start_mode,
+        );
+        sync_log(&format!(
+            "controller_actor_lookup_skipped file={} pane={} source=local_projection",
+            file.display(),
+            pane_id
+        ));
+        return Some(pane_id);
+    }
+
     let lookup_start = Instant::now();
     let record = load_live_authoritative_actor_record_cached(tmux, file, session_id, proof_cache);
     log_sync_latency(
@@ -6119,6 +6138,49 @@ mod tests {
             ),
             "one sync cycle should reuse already-proven actor facts instead of re-querying the controller/session store"
         );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn safe_passive_authoritative_actor_binding_prefers_local_projection() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let _cwd_guard = ScopedCurrentDir::set(root);
+
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks").join("owned.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: local-projection\nagent_doc_format: template\nagent_doc_write: crdt\n---\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-safe-passive-local-actor");
+        let pane = iso.new_session("test", root).unwrap();
+        let window = iso.pane_window(&pane).unwrap();
+        crate::session_actor::project_binding_in(
+            root,
+            &doc.to_string_lossy(),
+            "local-projection",
+            &pane,
+            &window,
+            "sync",
+            "local_actor_projection",
+        )
+        .unwrap();
+
+        let proof_cache = SyncProofCache::default();
+        let resolved = project_authoritative_actor_binding(
+            &iso,
+            &doc,
+            "local-projection",
+            Some(&doc.to_string_lossy()),
+            AutoStartMode::SafePassive,
+            &proof_cache,
+        );
+
+        assert_eq!(resolved.as_deref(), Some(pane.as_str()));
     }
 
     #[test]

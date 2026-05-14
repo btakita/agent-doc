@@ -869,7 +869,7 @@ fn run_ordered_task_step(
         write::strip_assistant_heading(&response)
     };
     let finalize_text = if mode.is_template() {
-        finalize_response
+        orchestrate_finalize_text_for_template(finalize_response)
     } else {
         write::strip_assistant_heading(&finalize_response)
     };
@@ -1016,6 +1016,52 @@ fn stream_step_response(
         full_response: response,
         finalize_response,
     })
+}
+
+fn orchestrate_finalize_text_for_template(response: String) -> String {
+    let Ok((patches, unmatched)) = crate::template::parse_patches(&response) else {
+        return response;
+    };
+    if patches.is_empty()
+        && !unmatched.trim().is_empty()
+        && orchestrate_plain_response_is_clean(unmatched.trim())
+    {
+        return format!(
+            "<!-- patch:exchange -->\n{}\n<!-- /patch:exchange -->\n",
+            unmatched.trim_end()
+        );
+    }
+    response
+}
+
+fn orchestrate_plain_response_is_clean(trimmed: &str) -> bool {
+    if trimmed.contains("<!-- agent:")
+        || trimmed.contains("<!-- /agent:")
+        || trimmed.contains("&lt;!-- agent:")
+        || trimmed.contains("&lt;!-- /agent:")
+    {
+        return false;
+    }
+    if trimmed
+        .lines()
+        .any(|line| line.trim_start().starts_with('❯'))
+    {
+        return false;
+    }
+    if trimmed.lines().any(|line| {
+        let line = line.trim();
+        line == "## User"
+            || line.starts_with("## User ")
+            || line == "## Assistant"
+            || line.starts_with("## Assistant ")
+    }) {
+        return false;
+    }
+    trimmed
+        .lines()
+        .filter(|line| line.trim_start().starts_with("### Re:"))
+        .count()
+        <= 1
 }
 
 fn should_stream_exchange_patch(response: &str) -> bool {
@@ -2543,6 +2589,25 @@ mod tests {
         let delta = finalize_suffix_from_streamed_prefix(streamed, full).unwrap();
         assert!(!delta.contains("### Re: streamed — gpt-5"));
         assert!(delta.contains("Implemented and verified."));
+    }
+
+    #[test]
+    fn orchestrate_template_finalize_wraps_plain_response_as_exchange_patch() {
+        let finalize = orchestrate_finalize_text_for_template(
+            "### Re: plain orch — gpt-5\n\nImplemented and verified.".to_string(),
+        );
+
+        assert!(finalize.starts_with("<!-- patch:exchange -->"));
+        assert!(finalize.contains("### Re: plain orch"));
+        assert!(finalize.ends_with("<!-- /patch:exchange -->\n"));
+    }
+
+    #[test]
+    fn orchestrate_template_finalize_does_not_wrap_transcript_response() {
+        let transcript = "❯ do #next\n### Re: malformed — gpt-5\nBody";
+        let finalize = orchestrate_finalize_text_for_template(transcript.to_string());
+
+        assert_eq!(finalize, transcript);
     }
 
     #[test]

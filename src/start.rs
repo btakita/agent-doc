@@ -630,13 +630,20 @@ fn route_owned_liveness_reason(
         Ok(content) => content,
         Err(err) => return Some(format!("read_failed:{err}")),
     };
-    if route_owned_file_dirty_after_commit(&content, state) {
-        return Some("document_dirty_after_commit".to_string());
+    let dirty_after_commit = route_owned_file_dirty_after_commit(&content, state);
+    if dirty_after_commit && route_owned_exchange_tail_has_unresolved_prompt(&content) {
+        return Some("post_commit_user_follow_up".to_string());
     }
 
     let components = match crate::component::parse(&content) {
         Ok(components) => components,
-        Err(err) => return Some(format!("component_parse_failed:{err}")),
+        Err(err) => {
+            return Some(if dirty_after_commit {
+                "document_dirty_after_commit".to_string()
+            } else {
+                format!("component_parse_failed:{err}")
+            });
+        }
     };
 
     for component in &components {
@@ -650,8 +657,16 @@ fn route_owned_liveness_reason(
             return Some("queue_non_empty".to_string());
         }
         if component.name == "exchange" && route_owned_exchange_tail_has_unresolved_prompt(body) {
-            return Some("exchange_tail_unresolved_prompt".to_string());
+            return Some(if dirty_after_commit {
+                "post_commit_user_follow_up".to_string()
+            } else {
+                "exchange_tail_unresolved_prompt".to_string()
+            });
         }
+    }
+
+    if dirty_after_commit {
+        return Some("document_dirty_after_commit".to_string());
     }
 
     None
@@ -4292,13 +4307,30 @@ Done.
     }
 
     #[test]
-    fn route_owned_reap_policy_auto_keeps_dirty_doc_alive() {
+    fn route_owned_reap_policy_auto_names_post_commit_user_follow_up() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let file = tmp.path().join("doc.md");
         let committed =
             "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
         let edited = format!("{committed}\nnew prompt?\n");
+        std::fs::write(&file, edited).unwrap();
+        let state = committed_state_for_doc(&file, committed);
+
+        let decision = route_owned_reap_decision(&file, &state, RouteOwnedReapPolicy::Auto);
+
+        assert!(!decision.reap);
+        assert_eq!(decision.reason, "post_commit_user_follow_up");
+    }
+
+    #[test]
+    fn route_owned_reap_policy_auto_keeps_non_prompt_dirty_doc_alive() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let file = tmp.path().join("doc.md");
+        let committed =
+            "<!-- agent:exchange -->\n### Re: done — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
+        let edited = format!("{committed}\n<!-- local note -->\n");
         std::fs::write(&file, edited).unwrap();
         let state = committed_state_for_doc(&file, committed);
 

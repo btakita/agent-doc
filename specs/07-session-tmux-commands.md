@@ -424,9 +424,12 @@ ownership-proof latency.
 Controller actor-binding responses must distinguish `bound` from `not_found`;
 an absent actor is a typed no-op for safe-passive focus, while a malformed
 controller response is a protocol error with the raw envelope in diagnostics.
-Safe-passive post-lock focus must use the local actor projection when it is
-live, avoiding a controller RPC on the editor fast path. If it must fall back to
-the controller actor-binding call, that result must be stored in the per-sync
+Safe-passive post-lock focus and safe-passive document binding must use the
+local actor projection when it is live, avoiding a controller RPC on the editor
+fast path. Document binding logs `controller_actor_lookup_skipped ...
+source=local_projection` and records an immediate `controller_actor_lookup`
+success sample when that fast path resolves. If sync must fall back to the
+controller actor-binding call, that result must be stored in the per-sync
 proof cache so later controller actor lookup, ownership proof, and synthetic
 registry construction do not pay for the same lookup again. The broad
 `window_resolution` bucket covers target session/window resolution only;

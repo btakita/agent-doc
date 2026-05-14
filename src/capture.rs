@@ -125,6 +125,7 @@ pub struct PartialCheckpointWriter {
     last_checkpoint: Option<Instant>,
     last_response_sha256: Option<String>,
     checkpoint_count: u64,
+    stopped: bool,
 }
 
 impl PartialCheckpointWriter {
@@ -145,10 +146,14 @@ impl PartialCheckpointWriter {
             last_checkpoint: None,
             last_response_sha256: None,
             checkpoint_count: 0,
+            stopped: false,
         }
     }
 
     pub fn maybe_checkpoint(&mut self, response: &str) -> Result<Option<PartialCaptureRecord>> {
+        if self.stopped || !self.active_cycle_accepts_checkpoint()? {
+            return Ok(None);
+        }
         if response.trim().is_empty() {
             return Ok(None);
         }
@@ -175,6 +180,34 @@ impl PartialCheckpointWriter {
         self.last_checkpoint = Some(Instant::now());
         self.last_response_sha256 = Some(response_sha256);
         Ok(Some(record))
+    }
+
+    fn active_cycle_accepts_checkpoint(&mut self) -> Result<bool> {
+        let Some(state) = crate::cycle_state::load(&self.file)? else {
+            return Ok(self.cycle_id.starts_with("partial-"));
+        };
+        if state.cycle_id == self.cycle_id && state.is_open() {
+            return Ok(true);
+        }
+
+        self.stopped = true;
+        let reason = if state.cycle_id != self.cycle_id {
+            "cycle_changed"
+        } else {
+            "cycle_closed"
+        };
+        crate::ops_log::log_op(
+            &self.file,
+            &format!(
+                "partial_response_checkpoint_stopped file={} writer_cycle={} current_cycle={} phase={:?} reason={}",
+                self.file.display(),
+                self.cycle_id,
+                state.cycle_id,
+                state.phase,
+                reason
+            ),
+        );
+        Ok(false)
     }
 }
 
@@ -650,6 +683,23 @@ mod tests {
             crate::cycle_state::CyclePhase::PreflightStarted
         );
         assert!(state.capture_id.is_none());
+    }
+
+    #[test]
+    fn partial_checkpoint_stops_after_cycle_commits() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body").unwrap();
+        crate::snapshot::save(&doc, "body").unwrap();
+        crate::cycle_state::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+
+        let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
+        assert!(writer.maybe_checkpoint("first").unwrap().is_some());
+        crate::cycle_state::mark_committed(&doc, "test", Some("body"), Some("body")).unwrap();
+
+        assert!(writer.maybe_checkpoint("second").unwrap().is_none());
+        let loaded = latest_partial_checkpoint(&doc).unwrap().unwrap();
+        assert_eq!(loaded.response_body, "first");
     }
 
     #[test]

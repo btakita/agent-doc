@@ -51,12 +51,12 @@
 //! - send_fork_args: verifies fork (resume --last) command
 
 use anyhow::Result;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::io::BufRead;
 use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use super::streaming::{StreamChunk, StreamingAgent};
@@ -417,6 +417,43 @@ impl ManagedCapabilityProofTimings {
             proof_timing_ms(self.writable_child),
             self.total.as_millis()
         )
+    }
+}
+
+static MANAGED_NETWORK_CHILD_PROOF_CACHE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn managed_network_child_proof_cache() -> &'static Mutex<HashSet<String>> {
+    MANAGED_NETWORK_CHILD_PROOF_CACHE.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn managed_network_child_proof_cache_key(
+    command: &str,
+    args: &[String],
+    env: &std::collections::HashMap<String, String>,
+    harness: &str,
+) -> String {
+    let mut env_pairs: Vec<_> = env.iter().collect();
+    env_pairs.sort_by(|(left, _), (right, _)| left.cmp(right));
+    let raw = serde_json::json!({
+        "harness": harness,
+        "command": command,
+        "probe_args": codex_exec_args_for_probe(args),
+        "env": env_pairs,
+    })
+    .to_string();
+    crate::ops_log::content_hash(&raw)
+}
+
+fn managed_network_child_proof_is_cached(key: &str) -> bool {
+    managed_network_child_proof_cache()
+        .lock()
+        .map(|cache| cache.contains(key))
+        .unwrap_or(false)
+}
+
+fn remember_managed_network_child_proof(key: String) {
+    if let Ok(mut cache) = managed_network_child_proof_cache().lock() {
+        cache.insert(key);
     }
 }
 
@@ -1126,16 +1163,24 @@ pub(crate) fn prove_managed_session_capabilities(
     let mut timings = ManagedCapabilityProofTimings::default();
     let network_required =
         super::resolve_codex_network_access(fm, global_config) == CodexNetworkAccess::Enabled;
+    let mut network_probe = "not_required";
     if network_required {
         let phase_start = Instant::now();
         prove_dns_resolution()?;
         timings.network_host_dns = Some(phase_start.elapsed());
 
         let phase_start = Instant::now();
-        if harness == "opencode" {
-            prove_opencode_child_network_access(command, args, env, harness)?;
+        let cache_key = managed_network_child_proof_cache_key(command, args, env, harness);
+        if managed_network_child_proof_is_cached(&cache_key) {
+            network_probe = "child_dns_https_cached";
         } else {
-            prove_codex_child_network_access(command, args, env, harness)?;
+            if harness == "opencode" {
+                prove_opencode_child_network_access(command, args, env, harness)?;
+            } else {
+                prove_codex_child_network_access(command, args, env, harness)?;
+            }
+            remember_managed_network_child_proof(cache_key);
+            network_probe = "child_dns_https";
         }
         timings.network_child = Some(phase_start.elapsed());
     }
@@ -1183,11 +1228,7 @@ pub(crate) fn prove_managed_session_capabilities(
         "{}_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={}{} {}",
         harness,
         proof_status_label(network_required, network_required),
-        if network_required {
-            "child_dns_https"
-        } else {
-            "not_required"
-        },
+        network_probe,
         fm.required_ssh_targets.len(),
         normalized_writable_root_strings(&writable_roots).len(),
         writable_root_contract
@@ -2635,6 +2676,23 @@ mod tests {
             &config,
             "opencode"
         ));
+    }
+
+    #[test]
+    fn managed_network_child_proof_cache_key_includes_environment() {
+        let mut first_env = std::collections::HashMap::new();
+        first_env.insert("HTTPS_PROXY".to_string(), "http://proxy-a".to_string());
+        let mut second_env = std::collections::HashMap::new();
+        second_env.insert("HTTPS_PROXY".to_string(), "http://proxy-b".to_string());
+
+        let args = vec!["exec".to_string(), "--json".to_string()];
+        let first = managed_network_child_proof_cache_key("codex", &args, &first_env, "codex");
+        let second = managed_network_child_proof_cache_key("codex", &args, &second_env, "codex");
+
+        assert_ne!(first, second);
+        assert!(!managed_network_child_proof_is_cached(&first));
+        remember_managed_network_child_proof(first.clone());
+        assert!(managed_network_child_proof_is_cached(&first));
     }
 
     #[test]

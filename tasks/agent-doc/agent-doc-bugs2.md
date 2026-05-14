@@ -34,16 +34,34 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): #opsreadinessrace; closeout normalization
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-sync orchestra
-preset #spec-test-build-install-commit-push
-- do [#orchmidrun]
-- do [#backlogorphan]
-- do [#interruptcleartimeout]
-- do [#opsnoisereduce]
-- do [#hookreviewroute]
-- do [#sshcapfalsecapture]
-- do [#codexverbosepb]
-<!-- agent:boundary:8c20bd90 -->
+
+❯ (preset #spec-test-build-install-commit-push)
+❯ update spec + tests. build + install for local testing. commit + push
+❯ do [#orchmidrun]
+❯ sync orchestra
+❯ preset #spec-test-build-install-commit-push
+❯ - do [#orchmidrun]
+❯ - do [#backlogorphan]
+❯ - do [#interruptcleartimeout]
+❯ - do [#opsnoisereduce]
+❯ - do [#hookreviewroute]
+❯ - do [#sshcapfalsecapture]
+❯ - do [#codexverbosepb]
+### Re: #orchmidrun — gpt-5
+
+Implemented `#orchmidrun`: sequential `agent-doc orchestrate --mode sequential --from-exchange` now freezes the originating exchange task list and checks it after each child closeout. If that list is inserted into, removed from, or reordered mid-run, the parent writes a deterministic interruption response, leaves remaining/new tasks open, passes `session-check`, and exits before launching the next step.
+
+Changed and pushed:
+- `src/agent-doc` submodule commit `44d8984` (`20260422/codex-agent-backend`)
+- parent repo submodule pointer commit `f12ace7ec` (`main`)
+
+Verification:
+- `cargo test -p agent-doc orchestrate::tests -- --nocapture`
+- `make check`
+- `make install`
+- `make tmux-ci` (227 live/ignored tmux tests passed)
+- `agent-doc --version` -> `agent-doc 0.33.16`
+<!-- agent:boundary:f7b60216 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,7 +136,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#orchmidrun] #agent-doc-bug: Sequential orchestrator can hang when the live exchange task list is edited during a running batch; freeze the batch at start, detect mid-run task-list mutation after each child closeout, stop deterministically, and leave new tasks open for the next explicit run. Plan: tasks/agent-doc/plan-orchestrate-mid-run-task-list-mutation.md
 - [ ] [#backlogorphan] #agent-doc-bug: Backlog-section prompts leave orphan text after patchback — finalize writes response to exchange but does not clean up the original prompt text from backlog, making it look like the patchback was never written. Plan: tasks/agent-doc/plan-backlog-prompt-patchback-orphan.md
 - [ ] [#interruptcleartimeout] Investigate `session_interrupt_clear_settled outcome=timed_out` after protected clear and make interrupt-clear report the blocking state and last command deterministically.
 - [ ] [#opsnoisereduce] Reduce `post_commit_local_drift` / `commit_noop` noise by separating expected user follow-up edits from anomalous drift in `agent-doc ops summary`.

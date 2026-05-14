@@ -29,54 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260514-165042.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260514-165604.md`*
 
 Compacted content:
-- Archived 6 response topic(s): #clearstartingrace; #ownedreapbusy; #opencodeinputdiag; 3 more
+- Archived 2 response topic(s): Zellij vs tmux reliability; log evaluation and next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: Zellij vs tmux reliability — gpt-5
-
-Zellij could help with some presentation and layout concerns, but I would not expect it to solve the important agent-doc reliability problems by itself.
-
-The fragile parts we keep seeing are mostly above the terminal multiplexer boundary: detecting prompt readiness, distinguishing accepted input from actually dispatched input, tracking authoritative actor state, preserving output captures without false positives, and avoiding stale historical logs influencing current guard decisions. Those would still exist with Zellij if agent-doc continues to drive an interactive PTY and infer state from terminal text.
-
-Where Zellij might help:
-
-- Structured layout/session behavior may be cleaner than our tmux-pane lifecycle in some cases.
-- Its UI could make managed panes easier to inspect manually.
-- A backend abstraction for `tmux` vs `zellij` could clarify which failures are multiplexer-specific and which are agent-doc state-machine bugs.
-
-Where it probably would not help:
-
-- Input delivery proof still needs a reliable dispatch/start signal, not just pane write success.
-- Output capture still needs scoped, current-run evidence instead of arbitrary terminal history or saved JSON text.
-- Busy/idle ownership still needs an agent-doc lifecycle model that is explicit about starting, running, prompt-ready, dispatching, blocked, killed, and restarted states.
-
-So my recommendation is: do not switch to Zellij as a primary fix. First harden the multiplexer-agnostic contract inside agent-doc: authoritative actor state, prompt-gated dispatch, scoped output evidence, and deterministic lifecycle transitions. After that, Zellij is worth a small adapter spike if we want better UX or a comparison backend, but it should be treated as an implementation option rather than the reliability foundation.
-Evaluate issues and the effectiveness of agent-doc in the logs. #next-steps
-### Re: log evaluation and next steps — gpt-5
-
-The logs say agent-doc is effective at the core document-session contract, but still noisy and brittle at the terminal lifecycle boundary.
-
-What is working:
-
-- Response persistence is strong. The latest completed cycle has a committed capture with `write_applied_at`, `committed_at`, `response_sha256`, and `state: committed`; ops also shows recent `ipc_write_consumed` and `commit_success` events for this document.
-- Dispatch proof is much better than pane-write proof. The recent ops summary shows 14 `route_dispatch_start_proven` events with `proof=consumed`, and the current route events record `proof_scope=dispatch_start`, which is the right reliability target.
-- The supervisor/controller state is useful. `agent-doc session status` reports a healthy supervisor, a ready authoritative actor, capability proof as proven, and concrete generation/pane ownership state.
-- Safety guards are doing real work. `session_clear_protected_input_guard_refused` prevented clearing a pane that appeared to contain drafted prompt input, which is preferable to losing user input.
-
-Issues still visible:
-
-- The logs are dominated by expected-but-confusing drift: ops summary reports 33 recent `post_commit_local_drift` events for this document, mostly user follow-up edits after committed cycles. That is legitimate state, but it reads like an error stream.
-- Actor startup remains a race window. Recent logs include `route_authoritative_actor_starting_not_ready` before the same generation later becomes ready and dispatch proceeds. The recovery works, but the operator experience is noisy and timing-dependent.
-- Clear/interrupt still has an unresolved edge. The logs show `session_interrupt_clear_settled ... outcome=timed_out` after a protected clear refusal. That means the guard prevented damage, but the recovery path can still leave the user without a crisp next command.
-- Hook and prompt blockers are not yet explained well enough. One route was blocked with `reason=codex hook review prompt`; that is useful as telemetry, but it should become a direct user-facing blocker with recovery instructions.
-- The preflight debounce and truncation checks are useful, but still visible as rough edges. This run itself waited for a possibly truncated line to stabilize before diffing. Correct behavior, but it is another sign that file-change detection should expose less internal machinery to the user.
-
-My read: agent-doc is now reliable enough at writeback, commit closure, and dispatch proof for serious use. The next reliability work should not be a multiplexer swap. It should be tightening the lifecycle state machine and reducing ambiguous operator feedback around `starting`, `busy`, protected input, hook prompts, and post-commit drift.
-
-I added four concrete backlog items from this log review: route readiness, interrupt-clear timeout reporting, ops summary noise reduction, and Codex hook route-blocker messaging.
-<!-- agent:boundary:64bb7ce8 -->
+<!-- agent:boundary:6edb53fc -->
 <!-- /agent:exchange -->
 ###
 <!--

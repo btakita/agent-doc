@@ -211,23 +211,42 @@ fn first_required_ssh_failure_line<'a>(
     None
 }
 
+fn line_proves_ssh_failure_context(line: &str) -> bool {
+    let lower = line.trim_start().to_ascii_lowercase();
+    lower.starts_with("ssh:")
+        || lower.starts_with("ssh.exe:")
+        || lower.starts_with("kex_exchange_identification:")
+        || lower.starts_with("connection closed by ")
+}
+
+fn format_required_ssh_command_failure(command: &str, line: &str) -> String {
+    let trimmed_command = command.trim();
+    if trimmed_command.is_empty() {
+        line.to_string()
+    } else {
+        format!("command `{trimmed_command}`: {line}")
+    }
+}
+
 fn command_execution_required_ssh_failure(
     command: &str,
     aggregated_output: &str,
     lowered_terms: &[String],
 ) -> Option<String> {
-    if let Some(line) = first_required_ssh_failure_line(aggregated_output, lowered_terms, true) {
-        return Some(line.to_string());
-    }
-
-    if !looks_like_ssh_command(command)
-        || !has_required_ssh_match_term(command, lowered_terms)
-        || looks_like_local_browser_cdp_permission_denied(aggregated_output)
-    {
+    if looks_like_local_browser_cdp_permission_denied(aggregated_output) {
         return None;
     }
 
-    first_required_ssh_failure_line(aggregated_output, lowered_terms, false).map(str::to_string)
+    let command_proves_required_ssh =
+        looks_like_ssh_command(command) && has_required_ssh_match_term(command, lowered_terms);
+    if command_proves_required_ssh {
+        return first_required_ssh_failure_line(aggregated_output, lowered_terms, false)
+            .map(|line| format_required_ssh_command_failure(command, line));
+    }
+
+    first_required_ssh_failure_line(aggregated_output, lowered_terms, true)
+        .filter(|line| line_proves_ssh_failure_context(line))
+        .map(str::to_string)
 }
 
 fn transcript_has_required_ssh_failure(text: &str, match_terms: &[String]) -> Option<String> {
@@ -3027,7 +3046,10 @@ exit 0
 
         assert_eq!(
             transcript_has_required_ssh_failure(line, &["monsterrodholders-server".to_string()]),
-            Some("socket: Operation not permitted".to_string())
+            Some(
+                "command `ssh monsterrodholders-server true`: socket: Operation not permitted"
+                    .to_string()
+            )
         );
     }
 
@@ -3038,6 +3060,32 @@ exit 0
         assert_eq!(
             transcript_has_required_ssh_failure(line, &["monsterrodholders-server".to_string()]),
             None
+        );
+    }
+
+    #[test]
+    fn required_ssh_failure_ignores_historical_capture_grep_output() {
+        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"rg 'Operation not permitted' .agent-doc/captures","aggregated_output":".agent-doc/captures/old/cycle.json:16: \"response_body\": \"required SSH capability failed for target(s) monsterrodholders-server: socket: Operation not permitted\"","exit_code":0,"status":"completed"}}"#;
+
+        assert_eq!(
+            transcript_has_required_ssh_failure(line, &["monsterrodholders-server".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn required_ssh_failure_detects_direct_ssh_diagnostic_without_command_field() {
+        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","aggregated_output":"ssh: connect to host 50.28.2.199 port 22: Operation not permitted","exit_code":255,"status":"completed"}}"#;
+
+        assert_eq!(
+            transcript_has_required_ssh_failure(
+                line,
+                &[
+                    "monsterrodholders-server".to_string(),
+                    "50.28.2.199".to_string()
+                ]
+            ),
+            Some("ssh: connect to host 50.28.2.199 port 22: Operation not permitted".to_string())
         );
     }
 

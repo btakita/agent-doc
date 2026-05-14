@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Codex required-SSH drift detection now requires live SSH evidence.** Command-execution parsing no longer treats arbitrary command output that merely mentions a required host plus an old `socket: Operation not permitted` as active SSH capability loss, so searches through `.agent-doc/captures` or logs cannot abort a resumed Codex run. Actual SSH commands still fail closed on bare EPERM output, and failure details now include the command string. This closes `#sshcapfalsecapture` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Codex hook-review route blockers now include recovery guidance.** Dispatch-only reroutes that see `route_dispatch_only_blocked reason=codex hook review prompt` now tell the operator to open `/hooks`, approve or disable the pending hook change, wait for the idle composer, and rerun the route/editor action instead of falling back to a generic idle-prompt hint. Updated route specs and regression coverage. This closes `#hookreviewroute` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Ops summaries now separate expected follow-up noise from anomalous drift.** `agent-doc ops summary` now buckets benign `post_commit_user_follow_up`, `post_commit_local_drift kind=user_follow_up`, and `commit_noop drift_kind=user_follow_up` events separately from working-tree drift/noop diagnostics. No-op closeouts now log their drift kind in `ops.log`, making routine user follow-up reruns distinguishable from real post-commit local edits. This closes `#opsnoisereduce` in `tasks/agent-doc/agent-doc-bugs2.md`.

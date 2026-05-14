@@ -79,7 +79,22 @@ So there are two separate points:
 
 1. Sequential orchestration is stepwise fresh-agent execution, not subagent spawning.
 2. This particular orchestration aborted on the first step because the generated template-mode response did not satisfy the required patchback shape.
-<!-- agent:boundary:4a49504f -->
+❯ Why is `<!-- patch:exchange -->` required? Can we remove the requirement?
+### Re: patch:exchange requirement — gpt-5
+
+`<!-- patch:exchange -->` is required for template-mode orchestration because it is the explicit write target. In a template document, the binary is not appending to a single transcript file; it is applying component patches into named regions like `exchange`, `backlog`, `status`, and `icebox`. The patch wrapper tells the write path exactly which component receives the response and lets it reject malformed output before snapshot/commit.
+
+The current code has two layers:
+
+- General template writes require a real response-body write: either at least one non-empty non-backlog patch or non-empty unmatched response text. That is `ensure_template_response_write_proof` in `write.rs`.
+- Orchestration is stricter: if `--origin orchestrate` is used, `write.rs` requires a real `patch:exchange` block and rejects raw unmatched text. That is intentional because orchestrated child output is higher-risk: it may contain progress chatter, copied transcript text, or partial streamed content, and the orchestrator must be able to prove what gets committed before moving to the next task.
+
+So I would not remove the requirement wholesale. It is doing useful fail-closed work: preventing a child response from being visible in the console but absent from the session document, preventing raw transcript dumps from being committed, and keeping each orchestration step's `finalize -> session-check` boundary deterministic.
+
+What we can remove is the brittleness. A good fix would be to make orchestration normalize a plain final answer into a `patch:exchange` block before calling `finalize`, but only when the payload is clearly a single assistant response, not a transcript or component dump. That would keep the safety invariant while avoiding the failure mode we just hit.
+
+Concretely: keep the committed-response proof, but add an orchestration-side repair/synthesis path for clean plain responses. Do not relax it to "anything printed by the child is acceptable." That would reopen the exact closeout class agent-doc has been tightening: response text exists in the harness console, but not durably in the document.
+<!-- agent:boundary:0ed10820 -->
 <!-- /agent:exchange -->
 ###
 <!--

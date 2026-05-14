@@ -36,7 +36,7 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 
 ❯ (preset #spec-test-build-install-commit-push)
-❯ update spec + tests. build + install for local testing. commit + push
+update spec + tests. build + install for local testing. commit + push
 ❯ do [#opsreadinessrace]
 ❯ sync orchestra
 ❯ preset #spec-test-build-install-commit-push
@@ -47,7 +47,7 @@ Compacted content:
 ❯ - do [#hookreviewroute]
 ❯ - do [#sshcapfalsecapture]
 ❯ - do [#codexverbosepb]
-### Re: #opsreadinessrace — gpt-5 (HEAD)
+### Re: #opsreadinessrace — gpt-5
 
 Implemented the route-readiness guard in `src/agent-doc`.
 
@@ -60,8 +60,7 @@ Committed and pushed in the `src/agent-doc` submodule:
 Parent repo submodule pointer was updated afterward. `#opsreadinessrace` is now recorded in the done archive.
 
 The original sequential orchestrator hung after that committed first step, so I stopped the stuck parent process and preserved the remaining backlog items as open for the next recovery cycle instead of pretending the full batch completed.
-
-<!-- agent:boundary:5bedeedb -->
+<!-- agent:boundary:0ba6d21a -->
 <!-- /agent:exchange -->
 ###
 <!--

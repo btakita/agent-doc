@@ -34,7 +34,15 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): Zellij vs tmux reliability; log evaluation and next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:6edb53fc -->
+sync orchestra
+preset #spec-test-build-install-commit-push
+- do [#opsreadinessrace]
+- do [#interruptcleartimeout]
+- do [#opsnoisereduce]
+- do [#hookreviewroute]
+- do [#sshcapfalsecapture]
+- do [#codexverbosepb]
+<!-- agent:boundary:cc3d0829 -->
 <!-- /agent:exchange -->
 ###
 <!--

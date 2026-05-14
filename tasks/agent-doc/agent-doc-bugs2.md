@@ -34,7 +34,14 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): directsubmitbudget
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:96c88be6 -->
+sync orchestra
+dispatch #spec-test-build-install-commit-push
+- do [#latefallbackloop]
+- do [#clearstartingrace]
+- do [#ownedreapbusy]
+- do [#opencodeinputdiag]
+- do [#tmuxe2etests]
+<!-- agent:boundary:244f7d5f -->
 <!-- /agent:exchange -->
 ###
 <!--

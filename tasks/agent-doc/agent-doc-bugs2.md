@@ -234,7 +234,10 @@ The clean model is to compose them:
 4. The main session document receives only the durable outcome and audit summary.
 
 That keeps each artifact from bloating into the others. Plans stay strategic, runbooks stay reusable, and virtual documents stay compact enough to hand to cheap workers.
-<!-- agent:boundary:f672edba -->
+### Re: typing during finalize — gpt-5
+
+If you type into `agent:exchange` while `finalize` is running, agent-doc should preserve the edit through CRDT merge, but the response boundary must stay clear: the committed response answers the prompt preflight saw, and any prompt-bearing text added after that boundary belongs to the next managed cycle. Scratch comments outside `agent:exchange` are preserved but stripped from prompt detection.
+<!-- agent:boundary:10919b41 -->
 <!-- /agent:exchange -->
 ###
 <!--

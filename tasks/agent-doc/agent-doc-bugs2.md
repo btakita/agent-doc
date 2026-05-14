@@ -29,78 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260513-234307.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260514-023736.md`*
 
 Compacted content:
-- Archived 1 response topic(s): startreadytimeout
+- Archived 2 response topic(s): orchestration handoff; multiplexertrait
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-❯ (preset #spec-test-build-install-commit-push)
-❯ update spec + tests. build + install for local testing. commit + push
-❯ do [#multiplexertrait]
-❯ synchronous orchestra
-❯ preset #spec-test-build-install-commit-push
-❯ - do [#multiplexertrait]
-❯ - do [#startreadytimeout]
-❯ - do [#directsubmitbudget]
-❯ - do [#latefallbackloop]
-❯ - do [#clearstartingrace]
-❯ - do [#ownedreapbusy]
-❯ - do [#opencodeinputdiag]
-❯ - do [#tmuxe2etests]
-### Re: orchestration handoff — gpt-5
-
-I started the requested synchronous orchestra, but the batch hit two root blockers before the backlog tasks could safely run:
-
-- `preset spec-test-build-install-commit-push` did not resolve to the defined `#spec-test-build-install-commit-push` frontmatter key.
-- After preflight opened the handoff cycle, orchestrate could commit the first injected task into the snapshot before preflight saw it as a prompt-bearing diff, stopping with `orchestration step did not produce a prompt-bearing diff after injection`.
-
-I fixed both in `src/agent-doc`: preset references now canonicalize bare names to hashtag keys when appropriate, and orchestrate now snapshots/abandons an open preflight handoff cycle before injecting the first task. I also updated the orchestration spec and added regressions for bare hashtag preset aliases and the preflight-handoff injection path.
-
-I left `#multiplexertrait` and the remaining batch items open because the requested eight task executions did not finish in this run. The installed local binary contains the fixes, so the batch can be rerun without the two handoff blockers.
-
-Verification:
-- `cargo test prompt_preset`
-- `cargo test close_open_preflight_handoff_cycle_snapshots_before_injection`
-- `make check`
-- `make tmux-ci`
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-CI / publish evidence:
-- Latest GitHub `CI` run on `main` was green: `25773430221`.
-- Commit pushed: `src/agent-doc` `0cf58582 fix: normalize orchestrate prompt presets` to `origin/20260422/codex-agent-backend`.
-
-No new backlog item was added; the existing batch items remain open.
-❯ do [#multiplexertrait]. spec-test-build-install-commit-push
-### Re: multiplexertrait — gpt-5
-
-Implemented the first Multiplexer boundary in `src/agent-doc` and completed the requested spec/test/build/install/commit/push cycle.
-
-What changed:
-- Added `sessions::Multiplexer` as the pane/window/session boundary for metadata queries, geometry listing, liveness checks, capture, single-key input, and harness-aware submitted text.
-- Implemented the trait for `tmux_router::Tmux` and routed the existing `sessions` helpers through it: pane PID/window/current pane, position lookup, capture, `send_key`, and submitted text.
-- Moved claim liveness checks onto the new trait boundary.
-- Added mock-backed unit tests for active pane/PID/window queries, backend-independent geometry selection, and invalid position errors.
-- Added `specs/multiplexer-backend.md` and linked it from the direct terminal plan.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test multiplexer_`
-- `cargo test claim`
-- `make check`
-- `make tmux-ci`
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-CI / publish evidence:
-- Latest GitHub `CI` run on `main` was green: `25773430221`; the workflow includes `make check` and `make tmux-ci`.
-- Commit pushed: `src/agent-doc` `fc0938ed feat: add multiplexer session boundary` to `origin/20260422/codex-agent-backend`.
-
-No new backlog item was added. `#multiplexertrait` is marked done by this closeout.
-<!-- agent:boundary:dcbe4374 -->
+<!-- agent:boundary:f5d00be1 -->
 <!-- /agent:exchange -->
 ###
 <!--

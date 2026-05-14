@@ -613,22 +613,66 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
     crate::ops_log::log_op(
         &ctx.canonical_file,
         &format!(
-            "session_interrupt_clear_settled file={} pane={} harness={} outcome={}",
+            "session_interrupt_clear_settled file={} pane={} harness={} outcome={} editor_recovery_attempted={} last_command={}",
             ctx.canonical_file.display(),
             pane,
             ctx.harness,
-            outcome.as_str()
+            outcome.as_str(),
+            outcome.editor_recovery_attempted(),
+            outcome.last_command().unwrap_or("unknown")
         ),
     );
     match outcome {
         InterruptClearSettleOutcome::Idle | InterruptClearSettleOutcome::Closed => clear(file),
-        InterruptClearSettleOutcome::TimedOut => anyhow::bail!(
-            "session_interrupt_clear timed out for {} because pane {} stayed busy after interrupt. Run `agent-doc session status {}` before retrying.",
-            ctx.canonical_file.display(),
-            pane,
-            ctx.canonical_file.display()
+        InterruptClearSettleOutcome::TimedOut {
+            last_command,
+            editor_recovery_attempted,
+        } => anyhow::bail!(
+            "{}",
+            interrupt_clear_timeout_message(
+                &ctx.canonical_file,
+                pane,
+                last_command.as_deref(),
+                editor_recovery_attempted
+            )
         ),
     }
+}
+
+fn interrupt_clear_timeout_message(
+    file: &Path,
+    pane: &str,
+    last_command: Option<&str>,
+    editor_recovery_attempted: bool,
+) -> String {
+    if editor_recovery_attempted {
+        return format!(
+            "session_interrupt_clear timed out for {} because pane {} stayed busy after interrupt and forced editor recovery (last_command={}). Inspect the pane, exit any editor prompt with `:qa!`, then run `agent-doc session status {}` before retrying.",
+            file.display(),
+            pane,
+            last_command.unwrap_or("unknown"),
+            file.display()
+        );
+    }
+    format!(
+        "session_interrupt_clear timed out for {} because pane {} stayed busy after interrupt (last_command={}). Run `agent-doc session status {}` before retrying.",
+        file.display(),
+        pane,
+        last_command.unwrap_or("unknown"),
+        file.display()
+    )
+}
+
+fn terminal_editor_command(command: &str) -> bool {
+    let name = Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command)
+        .trim();
+    matches!(
+        name,
+        "vi" | "view" | "vim" | "vim.basic" | "vimdiff" | "nvim" | "nvimdiff"
+    )
 }
 
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {
@@ -664,20 +708,40 @@ fn send_operator_interrupt_sequence(tmux: &Tmux, pane: &str, harness: &str) -> R
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum InterruptClearSettleOutcome {
     Idle,
     Closed,
-    TimedOut,
+    TimedOut {
+        last_command: Option<String>,
+        editor_recovery_attempted: bool,
+    },
 }
 
 impl InterruptClearSettleOutcome {
-    fn as_str(self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             Self::Idle => "idle",
             Self::Closed => "closed",
-            Self::TimedOut => "timed_out",
+            Self::TimedOut { .. } => "timed_out",
         }
+    }
+
+    fn last_command(&self) -> Option<&str> {
+        match self {
+            Self::TimedOut { last_command, .. } => last_command.as_deref(),
+            _ => None,
+        }
+    }
+
+    fn editor_recovery_attempted(&self) -> bool {
+        matches!(
+            self,
+            Self::TimedOut {
+                editor_recovery_attempted: true,
+                ..
+            }
+        )
     }
 }
 
@@ -688,17 +752,46 @@ fn wait_for_interrupt_clear_settle(
     timeout: Duration,
 ) -> InterruptClearSettleOutcome {
     let deadline = Instant::now() + timeout;
+    let mut editor_recovery_attempted = false;
+    let mut last_command = None;
     loop {
         if !tmux.pane_alive(pane) {
             return InterruptClearSettleOutcome::Closed;
         }
         let evidence = live_pane_evidence(ctx, tmux);
+        last_command.clone_from(&evidence.current_command);
         if evidence.state == LivePaneState::AliveIdle {
             let _ = reconcile_idle_projection_from_evidence(ctx, &evidence);
             return InterruptClearSettleOutcome::Idle;
         }
+        if !editor_recovery_attempted
+            && evidence
+                .current_command
+                .as_deref()
+                .is_some_and(terminal_editor_command)
+        {
+            editor_recovery_attempted = true;
+            let command = evidence.current_command.as_deref().unwrap_or("unknown");
+            crate::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "session_interrupt_clear_editor_recovery file={} pane={} command={}",
+                    ctx.canonical_file.display(),
+                    pane,
+                    command
+                ),
+            );
+            let _ = tmux.send_keys_raw(pane, "Escape");
+            std::thread::sleep(Duration::from_millis(100));
+            let _ = tmux.send_keys(pane, ":qa!");
+            std::thread::sleep(Duration::from_millis(250));
+            continue;
+        }
         if Instant::now() >= deadline {
-            return InterruptClearSettleOutcome::TimedOut;
+            return InterruptClearSettleOutcome::TimedOut {
+                last_command,
+                editor_recovery_attempted,
+            };
         }
         std::thread::sleep(Duration::from_millis(250));
     }
@@ -1742,6 +1835,48 @@ mod tests {
         assert!(message.contains("pane %7 contains protected prompt input"));
         assert!(message.contains("reason=drafted prompt input"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    #[test]
+    fn terminal_editor_command_detects_vim_family_processes() {
+        for command in [
+            "vi",
+            "view",
+            "vim",
+            "vim.basic",
+            "vimdiff",
+            "nvim",
+            "nvimdiff",
+        ] {
+            assert!(
+                terminal_editor_command(command),
+                "{command} should trigger interrupt-clear editor recovery"
+            );
+        }
+        assert!(!terminal_editor_command("codex"));
+        assert!(!terminal_editor_command("agent-doc"));
+        assert!(!terminal_editor_command("vim-addon-manager"));
+    }
+
+    #[test]
+    fn interrupt_clear_timeout_message_reports_editor_recovery() {
+        let message =
+            interrupt_clear_timeout_message(Path::new("/tmp/doc.md"), "%7", Some("vim"), true);
+
+        assert!(message.contains("forced editor recovery"));
+        assert!(message.contains("last_command=vim"));
+        assert!(message.contains(":qa!"));
+        assert!(message.contains("agent-doc session status /tmp/doc.md"));
+    }
+
+    #[test]
+    fn interrupt_clear_timeout_message_reports_last_command_without_editor_recovery() {
+        let message =
+            interrupt_clear_timeout_message(Path::new("/tmp/doc.md"), "%7", Some("codex"), false);
+
+        assert!(!message.contains("forced editor recovery"));
+        assert!(message.contains("last_command=codex"));
+        assert!(message.contains("agent-doc session status /tmp/doc.md"));
     }
 
     #[test]

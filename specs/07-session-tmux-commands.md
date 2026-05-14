@@ -325,7 +325,14 @@ single-owner actor controls:
   positives when the pane runs a different harness than the document specifies.
   That refusal must
   record the protected-input reason in the ops log and tell the operator to use
-  `agent-doc session interrupt-clear <FILE>` for an explicit discard. For Codex panes, a capture
+  `agent-doc session interrupt-clear <FILE>` for an explicit discard.
+  `interrupt-clear` owns harness-specific interrupt keys, waits for direct
+  idle/closed evidence, and then retries the normal clear path. If the interrupt
+  opens a Vim/Neovim editor prompt in the managed pane, the discard path must
+  attempt one forced editor quit before continuing the idle/closed wait; if the
+  pane still does not settle, the error must name the last observed command and
+  give an exact manual recovery action instead of leaving the operator with a
+  generic busy timeout. For Codex panes, a capture
   that shows only Codex status/footer chrome such as the model/cwd/context line,
   with no prompt input or busy cue, is direct idle evidence for operator
   clear/status; Codex idle placeholder prompts such as `› Explain this codebase`

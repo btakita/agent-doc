@@ -36,7 +36,7 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 
 ❯ (preset #spec-test-build-install-commit-push)
-update spec + tests. build + install for local testing. commit + push
+❯ update spec + tests. build + install for local testing. commit + push
 ❯ do [#opsreadinessrace]
 ❯ sync orchestra
 ❯ preset #spec-test-build-install-commit-push
@@ -60,7 +60,13 @@ Committed and pushed in the `src/agent-doc` submodule:
 Parent repo submodule pointer was updated afterward. `#opsreadinessrace` is now recorded in the done archive.
 
 The original sequential orchestrator hung after that committed first step, so I stopped the stuck parent process and preserved the remaining backlog items as open for the next recovery cycle instead of pretending the full batch completed.
-<!-- agent:boundary:0ba6d21a -->
+### Re: closeout normalization — gpt-5
+
+No additional repo work was needed for this cycle. The only prompt-bearing diff was the previously answered `#opsreadinessrace` preset line being normalized with a prompt prefix and the committed response heading being marked `(HEAD)`.
+
+I treated that as closeout cleanup for the interrupted orchestrator run, not as a new request to rerun the completed spec/test/build/install path.
+
+<!-- agent:boundary:c6c765e9 -->
 <!-- /agent:exchange -->
 ###
 <!--

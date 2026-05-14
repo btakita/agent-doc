@@ -472,6 +472,28 @@ pub struct Frontmatter {
     pub security_review: Option<String>,
 }
 
+/// Resolve a user-authored prompt preset reference to the frontmatter key.
+///
+/// Exact keys win. As a convenience for command-like preset names, a bare
+/// reference such as `preset review` also resolves to a `#review` key when
+/// only the hashtag form is defined.
+pub fn resolve_prompt_preset_key(
+    prompt_presets: &indexmap::IndexMap<String, String>,
+    requested: &str,
+) -> Option<String> {
+    let requested = requested.trim();
+    if prompt_presets.contains_key(requested) {
+        return Some(requested.to_string());
+    }
+    if !requested.starts_with('#') {
+        let hashtag_key = format!("#{requested}");
+        if prompt_presets.contains_key(hashtag_key.as_str()) {
+            return Some(hashtag_key);
+        }
+    }
+    None
+}
+
 impl Frontmatter {
     /// Resolve the canonical (format, write) pair from all three fields.
     ///
@@ -1359,6 +1381,27 @@ mod tests {
         let (parsed, body2) = parse(&written).unwrap();
         assert_eq!(body2, "Body\n");
         assert_eq!(parsed.prompt_presets, fm.prompt_presets);
+    }
+
+    #[test]
+    fn resolve_prompt_preset_key_accepts_bare_hashtag_alias() {
+        let mut prompt_presets = indexmap::IndexMap::new();
+        prompt_presets.insert("#spec-test".to_string(), "Run checks.".to_string());
+        prompt_presets.insert("release-check".to_string(), "Publish.".to_string());
+
+        assert_eq!(
+            resolve_prompt_preset_key(&prompt_presets, "spec-test").as_deref(),
+            Some("#spec-test")
+        );
+        assert_eq!(
+            resolve_prompt_preset_key(&prompt_presets, "#spec-test").as_deref(),
+            Some("#spec-test")
+        );
+        assert_eq!(
+            resolve_prompt_preset_key(&prompt_presets, "release-check").as_deref(),
+            Some("release-check")
+        );
+        assert!(resolve_prompt_preset_key(&prompt_presets, "missing").is_none());
     }
 
     // --- resolve_mode tests ---

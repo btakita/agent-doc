@@ -1448,6 +1448,18 @@ pub fn run(file: &Path) -> Result<()> {
             diff::detect_prompt_preset_requests(harness_only_diff),
         );
     }
+    prompt_presets_requested = prompt_presets_requested
+        .into_iter()
+        .map(|name| {
+            frontmatter::resolve_prompt_preset_key(&frontmatter_prompt_presets, &name)
+                .unwrap_or(name)
+        })
+        .fold(Vec::new(), |mut acc, name| {
+            if !acc.iter().any(|existing| existing == &name) {
+                acc.push(name);
+            }
+            acc
+        });
     let missing_prompt_presets = prompt_presets_requested
         .iter()
         .filter(|name| !frontmatter_prompt_presets.contains_key(name.as_str()))

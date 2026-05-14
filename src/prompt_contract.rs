@@ -382,7 +382,8 @@ fn referenced_presets_in_text(
         }
 
         for preset in crate::diff::extract_prompt_preset_requests_from_text(line) {
-            if prompt_presets.contains_key(preset.as_str())
+            if let Some(preset) =
+                crate::frontmatter::resolve_prompt_preset_key(prompt_presets, &preset)
                 && !referenced.iter().any(|existing| existing == &preset)
             {
                 referenced.push(preset);

@@ -29,7 +29,7 @@ This file covers binary-owned planning/orchestration and the queue surface that 
 
 - Natural-language orchestration requests are normalized by the skill/runbook layer into this command; the CLI itself expects explicit tasks and mode.
 - Task resolution combines repeated `--task` entries, optional task extraction from a file, and optional task extraction from the newest exchange tail.
-- Batch-level `preset` / `presets` directives request frontmatter `prompt_presets` and are validated before execution.
+- Batch-level `preset` / `presets` directives request frontmatter `prompt_presets` and are validated before execution. Exact preset keys win; a bare directive such as `preset review` also resolves to frontmatter key `#review` when only the hashtag form is defined.
 
 ### `--dry-run` and `--plan`
 

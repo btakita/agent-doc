@@ -647,6 +647,7 @@ fn run_ordered_task_step(
     lifecycle: &impl LifecycleOps,
     agent_runner: &impl FreshAgentRunner,
 ) -> Result<()> {
+    close_open_preflight_handoff_cycle(file)?;
     inject_prompt(file, task)?;
     let preflight = lifecycle.preflight(file)?;
     if preflight.no_changes {
@@ -764,6 +765,34 @@ fn run_ordered_task_step(
         mode,
     )?;
     lifecycle.session_check(file)?;
+    Ok(())
+}
+
+fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
+    let Some(state) = crate::cycle_state::load(file)? else {
+        return Ok(());
+    };
+    if state.phase != crate::cycle_state::CyclePhase::PreflightStarted {
+        return Ok(());
+    }
+    if crate::capture::load_by_id(file, &state.cycle_id)?.is_some() {
+        return Ok(());
+    }
+
+    eprintln!(
+        "[orchestrate] closing preflight handoff cycle {} before task injection",
+        state.cycle_id
+    );
+    let file_content = fs::read_to_string(file)
+        .with_context(|| format!("failed to read {} before orchestrating", file.display()))?;
+    let snapshot_content = snapshot::load(file)?;
+    snapshot::save(file, &file_content)?;
+    crate::cycle_state::mark_abandoned(
+        file,
+        "orchestrate_preflight_handoff_closed",
+        snapshot_content.as_deref(),
+        Some(&file_content),
+    )?;
     Ok(())
 }
 
@@ -1029,7 +1058,31 @@ fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<Resolve
         extend_task_batch_from_text(&mut batch, &scoped);
     }
 
+    canonicalize_prompt_preset_requests(file, &mut batch.requested_presets)?;
+
     Ok(batch)
+}
+
+fn canonicalize_prompt_preset_requests(
+    file: &Path,
+    requested_presets: &mut Vec<String>,
+) -> Result<()> {
+    if requested_presets.is_empty() {
+        return Ok(());
+    }
+    let doc =
+        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let (fm, _) = frontmatter::parse(&doc)?;
+    let mut canonical = Vec::new();
+    for preset_name in requested_presets.drain(..) {
+        let resolved = frontmatter::resolve_prompt_preset_key(&fm.prompt_presets, &preset_name)
+            .unwrap_or(preset_name);
+        if !canonical.iter().any(|existing| existing == &resolved) {
+            canonical.push(resolved);
+        }
+    }
+    *requested_presets = canonical;
+    Ok(())
 }
 
 fn extend_task_batch_from_text(batch: &mut ResolvedTaskBatch, text: &str) {
@@ -1124,14 +1177,16 @@ fn load_prompt_preset_block(file: &Path, requested_presets: &[String]) -> Result
     let mut block = String::new();
 
     for (idx, preset_name) in requested_presets.iter().enumerate() {
+        let preset_key = frontmatter::resolve_prompt_preset_key(&fm.prompt_presets, preset_name)
+            .ok_or_else(|| anyhow::anyhow!("unknown prompt preset `{}`", preset_name))?;
         let preset_body = fm
             .prompt_presets
-            .get(preset_name)
-            .ok_or_else(|| anyhow::anyhow!("unknown prompt preset `{}`", preset_name))?;
+            .get(&preset_key)
+            .expect("resolved prompt preset key must exist");
         if idx > 0 {
             block.push('\n');
         }
-        block.push_str(&format!("(preset {})\n", preset_name));
+        block.push_str(&format!("(preset {})\n", preset_key));
         block.push_str(preset_body.trim_end());
         block.push('\n');
     }
@@ -1708,6 +1763,43 @@ mod tests {
     }
 
     #[test]
+    fn resolve_task_batch_canonicalizes_bare_hashtag_prompt_preset() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(
+            &doc,
+            "---\nprompt_presets:\n  \"#spec-test\": |\n    Run checks.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset spec-test\n- do #prep\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Sequential,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: true,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(batch.requested_presets, vec!["#spec-test".to_string()]);
+        assert_eq!(
+            load_prompt_preset_block(&doc, &batch.requested_presets)
+                .unwrap()
+                .as_deref(),
+            Some("(preset #spec-test)\nRun checks.\n")
+        );
+    }
+
+    #[test]
     fn apply_prompt_preset_block_prefixes_task_prompt() {
         let rendered = apply_prompt_preset_block(
             "do #prep",
@@ -1725,6 +1817,61 @@ mod tests {
         let prompt_pos = updated.find("❯ do #gkke").unwrap();
         let boundary_pos = updated.find("<!-- agent:boundary:keep -->").unwrap();
         assert!(prompt_pos < boundary_pos);
+    }
+
+    #[test]
+    fn close_open_preflight_handoff_cycle_snapshots_before_injection() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        Command::new("git")
+            .current_dir(dir.path())
+            .arg("init")
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let snapshot = template_doc();
+        fs::write(&doc, &snapshot).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let handoff = snapshot.replace(
+            "<!-- agent:boundary:keep -->",
+            "synchronous orchestra\npreset #spec-test\n- do #first\n<!-- agent:boundary:keep -->",
+        );
+        fs::write(&doc, &handoff).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&snapshot), Some(&handoff)).unwrap();
+
+        close_open_preflight_handoff_cycle(&doc).unwrap();
+        inject_prompt(&doc, "do #first").unwrap();
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        let live = fs::read_to_string(&doc).unwrap();
+        assert!(snap.contains("synchronous orchestra"));
+        assert!(!snap.contains("❯ do #first"));
+        assert!(live.contains("❯ do #first"));
+        assert_eq!(
+            crate::cycle_state::load(&doc).unwrap().unwrap().phase,
+            crate::cycle_state::CyclePhase::Abandoned
+        );
     }
 
     #[test]

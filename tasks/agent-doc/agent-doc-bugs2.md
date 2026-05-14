@@ -83,7 +83,47 @@ The practical sequence I would use:
 The main risk is privacy, not competition. tsift's value is tied to local repo/session/log material, and that kind of tooling easily grows assumptions from your own workspace. Before making it public, I would run an explicit release audit for hardcoded paths, fixtures, archived logs, private project names, API/provider assumptions, and README claims that imply a more general product than the CLI currently supports.
 
 So my answer is: make it public if the audit is clean; do not rush package publication. A public repo plus repeatable demos will help agent-doc's smaller-model orchestration story immediately, while package publication should be treated as a separate distribution-readiness milestone.
-<!-- agent:boundary:5161576e -->
+❯ If agent-doc depends on tsift, can this assist with orchestration?
+❯ Would memgraph be a good augmentation on top of sift + sqlite? Would memgraph replace sqlite instead?
+### Re: tsift dependency and Memgraph augmentation — gpt-5
+
+Yes, agent-doc depending on tsift can help orchestration, but I would make it a capability dependency rather than a hard correctness dependency at first.
+
+The useful split is: agent-doc owns the durable workflow contract, while tsift owns context shaping. `agent-doc preflight` / `plan` can decide what work needs to happen; tsift can provide bounded packets for that work: `session-review --next-context`, `context-pack`, `search`, `source-read`, `graph`, `explain`, `diff-digest`, `test-digest`, and `log-digest`. That lets smaller models receive a tight job packet with handles and expansion commands instead of a vague prompt plus a large repo dump.
+
+For orchestration, the concrete win would be a routing loop like this:
+
+1. agent-doc classifies the prompt into task type, risk level, write scope, and required proof.
+2. tsift builds the context packet: active prompt tail, touched files, touched symbols, fresh/stale index state, recent failures, relevant source windows, graph neighbors, and digest commands.
+3. smaller workers get only that packet plus allowed commands and output schema.
+4. agent-doc reviews structured proof, escalates only when ambiguity or risk crosses a threshold, then finalizes the document.
+
+That is exactly the kind of context discipline that makes smaller models viable. The dependency risk is bootstrap and failure mode: agent-doc must still be able to answer and close a document if tsift is missing, stale, or broken. So I would design this as `agent-doc detects tsift -> uses tsift orchestration packets`, with fail-closed warnings for stale context, rather than making every document cycle require a healthy tsift index immediately.
+
+On Memgraph: I would treat it as an augmentation on top of sift + SQLite, not a SQLite replacement.
+
+SQLite is still the right local source of truth for tsift's current index: embedded, durable, zero service dependency, easy to snapshot, easy to ship, good enough for symbols, call edges, summaries, file state, and CLI reads. It keeps tsift usable in any repo without asking the user to run infrastructure.
+
+Memgraph becomes interesting when the graph stops being just "symbols and call edges in one checkout" and starts becoming an orchestration graph:
+
+- tasks, prompts, backlog items, claims, commits, files, symbols, tests, failures, agents, model tiers, and verification evidence as connected nodes
+- historical routing outcomes: which model tier succeeded for which task class, which context packet was enough, when escalation was needed
+- cross-session memory: repeated failures, recurring files, stale assumptions, ownership boundaries, and successful runbooks
+- multi-hop questions: "what files are implicated by this prompt through prior failures and recent commits?", "which pending item depends on this flaky test?", "what small-model job packet should be generated for this class of issue?"
+
+That is where Memgraph's current positioning lines up: their docs emphasize graph traversal plus vector search in one engine, GraphRAG pipelines as Cypher queries, traceable reasoning paths, and MCP/agent integrations. Those are useful for shared or long-lived orchestration state. They are overkill for tsift's local AST index.
+
+So the architecture I would aim for is:
+
+- keep SQLite as tsift's canonical local index
+- keep sift/ripgrep as the fast lexical/exact retrieval layer
+- optionally export/project selected tsift + agent-doc facts into Memgraph for graph-level orchestration
+- make Memgraph a service-backed accelerator for teams, dashboards, and advanced routing, not a required local dependency
+
+If this becomes productized, the clean boundary is `tsift graph-export` or `agent-doc orchestration-export`: emit nodes/edges from the committed document state and tsift indexes, then let Memgraph answer graph questions. Do not put Memgraph in the hot path until the graph queries prove they produce better worker packets or better routing decisions than SQLite-backed tsift alone.
+
+Sources: [Memgraph overview](https://memgraph.com/), [Memgraph Vector Search](https://memgraph.com/vector-search), [Memgraph GraphRAG](https://memgraph.com/graphrag), [Memgraph AI docs](https://www.memgraph.ai/docs).
+<!-- agent:boundary:5fc61f52 -->
 <!-- /agent:exchange -->
 ###
 <!--

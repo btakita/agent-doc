@@ -237,13 +237,43 @@ That keeps each artifact from bloating into the others. Plans stay strategic, ru
 ### Re: typing during finalize — gpt-5
 
 If you type into `agent:exchange` while `finalize` is running, agent-doc should preserve the edit through CRDT merge, but the response boundary must stay clear: the committed response answers the prompt preflight saw, and any prompt-bearing text added after that boundary belongs to the next managed cycle. Scratch comments outside `agent:exchange` are preserved but stripped from prompt detection.
-<!-- agent:boundary:10919b41 -->
+❯ Is a virtual document a good name or is there a better name? Operation doc? opdoc? something else?
+### Re: naming job-scoped context docs — gpt-5
+
+I would avoid `virtual document` as the primary name. It is accurate technically, but it sounds like an editor abstraction or synthetic file system feature. The important idea is not virtualness; it is bounded execution context.
+
+My strongest names:
+
+| Name | Best use | Why |
+| --- | --- | --- |
+| `job packet` | short-lived worker context | Plainly says it is handed to one job and should be small. |
+| `work packet` | user-facing/general | Slightly less mechanical than `job packet`. |
+| `operation doc` | longer-lived/auditable execution artifact | Good when the doc records a complete operation, not just a worker prompt. |
+| `opdoc` | internal shorthand | Useful once the concept is established, but too opaque as the first name. |
+| `context packet` | tsift/agent-facing context bundle | Emphasizes bounded context, but less tied to execution. |
+
+I would use this vocabulary:
+
+- **job packet**: generated, usually short-lived, for one worker/model/job
+- **operation doc**: retained/auditable document for a larger operation or multi-job workflow
+- **runbook**: reusable procedure
+- **plan**: intended work before execution
+
+So the implementation could have paths like:
+
+```text
+.agent-doc/jobs/<cycle>/<job-id>.md        # job packets
+.agent-doc/operations/<operation-id>.md    # operation docs, optionally committed
+```
+
+I would not lead with `opdoc`, but it is a decent CLI shorthand after the user-facing term is clear: `agent-doc opdoc create`, `agent-doc opdoc preserve`, etc. In prose and specs, call them `job packets` and `operation docs`.
+<!-- agent:boundary:028e7b77 -->
 <!-- /agent:exchange -->
 ###
 <!--
-If I'm typing into agent:exchange during finalize, the content of finalize are duplicated in the final patchback.
+If I'm typing into agent:exchange during finalize, the content of finalize are duplicated in the final patchback. Please investigate and fix. spec-test-build-install-commit-push
 ---
-
+When an agent:queue is running, each completed task should have a strikethrough `~...~`. When the entire agent:queue is complete, clear the contents.
 -->
 
 <!-- agent:queue auto -->

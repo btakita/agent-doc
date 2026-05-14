@@ -61,13 +61,12 @@ Parent repo submodule pointer was updated afterward. `#opsreadinessrace` is now 
 
 The original sequential orchestrator hung after that committed first step, so I stopped the stuck parent process and preserved the remaining backlog items as open for the next recovery cycle instead of pretending the full batch completed.
 
-### Re: closeout normalization — gpt-5 (HEAD)
+### Re: closeout normalization — gpt-5
 
 No additional repo work was needed for this cycle. The only prompt-bearing diff was the previously answered `#opsreadinessrace` preset line being normalized with a prompt prefix and the committed response heading being marked `(HEAD)`.
 
 I treated that as closeout cleanup for the interrupted orchestrator run, not as a new request to rerun the completed spec/test/build/install path.
-
-<!-- agent:boundary:81b3d8a0 -->
+<!-- agent:boundary:074460d6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -142,6 +141,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#orchmidrun] #agent-doc-bug: Sequential orchestrator can hang when the live exchange task list is edited during a running batch; freeze the batch at start, detect mid-run task-list mutation after each child closeout, stop deterministically, and leave new tasks open for the next explicit run. Plan: tasks/agent-doc/plan-orchestrate-mid-run-task-list-mutation.md
 - [ ] [#backlogorphan] #agent-doc-bug: Backlog-section prompts leave orphan text after patchback — finalize writes response to exchange but does not clean up the original prompt text from backlog, making it look like the patchback was never written. Plan: tasks/agent-doc/plan-backlog-prompt-patchback-orphan.md
 - [ ] [#interruptcleartimeout] Investigate `session_interrupt_clear_settled outcome=timed_out` after protected clear and make interrupt-clear report the blocking state and last command deterministically.
 - [ ] [#opsnoisereduce] Reduce `post_commit_local_drift` / `commit_noop` noise by separating expected user follow-up edits from anomalous drift in `agent-doc ops summary`.

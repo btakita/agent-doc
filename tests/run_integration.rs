@@ -592,7 +592,49 @@ fn orchestrate_streams_step_patchback_before_finalize() {
 }
 
 #[test]
-fn orchestrate_rejects_raw_template_response_without_exchange_patch() {
+fn orchestrate_accepts_clean_plain_template_response() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, template_doc_with_model()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+
+    let plain_response = "### Re: clean orchestrate closeout — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n";
+    let script = write_mock_agent(tmp.path(), plain_response);
+    let config_root = write_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args([
+            "orchestrate",
+            doc.to_str().unwrap(),
+            "--mode",
+            "sequential",
+            "--task",
+            "do #orplain1. update spec + tests. build + install for local testing. commit + push",
+        ])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains(
+        "❯ do #orplain1. update spec + tests. build + install for local testing. commit + push"
+    ));
+    assert!(content.contains("### Re: clean orchestrate closeout — gpt-5"));
+    assert!(content.contains("Implemented and verified."));
+    assert_eq!(
+        content
+            .matches("### Re: clean orchestrate closeout — gpt-5")
+            .count(),
+        1,
+        "plain orchestrate closeout should be synthesized once into exchange"
+    );
+    assert_eq!(read_cycle_phase(tmp.path()), "committed");
+}
+
+#[test]
+fn orchestrate_rejects_raw_template_transcript_response() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     fs::write(&doc, template_doc_with_model()).unwrap();
@@ -616,7 +658,7 @@ fn orchestrate_rejects_raw_template_response_without_exchange_patch() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("patch:exchange"));
+        .stderr(predicate::str::contains("transcript prompt lines"));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert_eq!(

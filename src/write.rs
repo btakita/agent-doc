@@ -3415,6 +3415,11 @@ fn enforce_orchestrate_template_patch_contract(
         return Ok(());
     }
 
+    if patches.is_empty() {
+        enforce_orchestrate_plain_response_contract(unmatched)?;
+        return Ok(());
+    }
+
     if !patches.iter().any(|patch| patch.name == "exchange") {
         anyhow::bail!(
             "orchestrate template-mode responses must include a <!-- patch:exchange --> block"
@@ -3425,6 +3430,56 @@ fn enforce_orchestrate_template_patch_contract(
             "orchestrate template-mode responses must not include raw unmatched content outside patch blocks"
         );
     }
+    Ok(())
+}
+
+fn enforce_orchestrate_plain_response_contract(unmatched: &str) -> Result<()> {
+    let trimmed = unmatched.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    if trimmed.contains("<!-- agent:")
+        || trimmed.contains("<!-- /agent:")
+        || trimmed.contains("&lt;!-- agent:")
+        || trimmed.contains("&lt;!-- /agent:")
+    {
+        anyhow::bail!(
+            "orchestrate template-mode plain responses must not include full document component markers"
+        );
+    }
+
+    if trimmed
+        .lines()
+        .any(|line| line.trim_start().starts_with('❯'))
+    {
+        anyhow::bail!(
+            "orchestrate template-mode plain responses must not include transcript prompt lines"
+        );
+    }
+
+    if trimmed.lines().any(|line| {
+        let line = line.trim();
+        line == "## User"
+            || line.starts_with("## User ")
+            || line == "## Assistant"
+            || line.starts_with("## Assistant ")
+    }) {
+        anyhow::bail!(
+            "orchestrate template-mode plain responses must not include transcript headings"
+        );
+    }
+
+    let response_headings = trimmed
+        .lines()
+        .filter(|line| line.trim_start().starts_with("### Re:"))
+        .count();
+    if response_headings > 1 {
+        anyhow::bail!(
+            "orchestrate template-mode plain responses must contain only one assistant response"
+        );
+    }
+
     Ok(())
 }
 
@@ -10939,7 +10994,7 @@ mod verify_sidecar_normalization_tests {
     }
 
     #[test]
-    fn orchestrate_contract_requires_exchange_patch() {
+    fn orchestrate_contract_rejects_non_exchange_patch() {
         let patches = vec![crate::template::PatchBlock::new("status", "updated")];
         let err = enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
             .unwrap_err();
@@ -10963,6 +11018,81 @@ mod verify_sidecar_normalization_tests {
         let patches = vec![crate::template::PatchBlock::new("exchange", "ok")];
         enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
             .expect("exchange-only orchestrate patch should be accepted");
+    }
+
+    #[test]
+    fn orchestrate_contract_allows_clean_plain_response() {
+        enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "### Re: orchplainresp — gpt-5\n\nImplemented and verified.",
+        )
+        .expect("clean plain orchestrate response should synthesize exchange append");
+    }
+
+    #[test]
+    fn orchestrate_contract_allows_explicit_multi_component_patch() {
+        let patches = vec![
+            crate::template::PatchBlock::new("exchange", "response"),
+            crate::template::PatchBlock::new("status", "updated"),
+        ];
+        enforce_orchestrate_template_patch_contract(Some("orchestrate"), &patches, "")
+            .expect("explicit multi-component patch should be accepted");
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_plain_transcript_prompt_lines() {
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "### Re: topic — gpt-5\n\nDone.\n❯ do #next",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("transcript prompt lines"));
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_plain_transcript_headings() {
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "## User\nrequest\n\n## Assistant\nresponse",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("transcript headings"));
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_plain_full_document_dump() {
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "<!-- agent:exchange -->\n### Re: topic — gpt-5\n<!-- /agent:exchange -->",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("component markers"));
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_sanitized_full_document_dump() {
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "&lt;!-- agent:exchange --&gt;\n### Re: topic — gpt-5\n&lt;!-- /agent:exchange --&gt;",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("component markers"));
+    }
+
+    #[test]
+    fn orchestrate_contract_rejects_multiple_plain_responses() {
+        let err = enforce_orchestrate_template_patch_contract(
+            Some("orchestrate"),
+            &[],
+            "### Re: first — gpt-5\n\nOne.\n\n### Re: second — gpt-5\n\nTwo.",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("only one assistant response"));
     }
 
     #[test]

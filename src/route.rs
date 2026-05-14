@@ -1797,12 +1797,14 @@ fn dispatch_only_send_reopen(
                 reason
             ),
         );
+        let recovery = dispatch_blocker_recovery_hint(harness, &reason, file);
         anyhow::bail!(
-            "dispatch-only {} reopen refused to inject into pane {} for {} because the pane still shows {}; restore an idle prompt and retry",
+            "dispatch-only {} reopen refused to inject into pane {} for {} because the pane still shows {}; {}",
             harness.binary,
             dispatch_pane,
             file.display(),
-            reason
+            reason,
+            recovery
         );
     }
 
@@ -2284,6 +2286,17 @@ fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &str) -> Optio
     } else {
         None
     }
+}
+
+fn dispatch_blocker_recovery_hint(harness: &HarnessConfig, reason: &str, file: &Path) -> String {
+    if harness.binary == "codex" && reason == "codex hook review prompt" {
+        return format!(
+            "open `/hooks` in that Codex pane, approve or disable the pending hook change, wait for the idle composer, then rerun `agent-doc route --dispatch-only {}` or the editor Run Agent Doc action",
+            file.display()
+        );
+    }
+
+    "restore an idle prompt and retry".to_string()
 }
 
 fn load_authoritative_actor_binding(
@@ -8455,6 +8468,36 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
                 .contains("never recorded a routed submission proof"),
             "unexpected error: {err:#}"
         );
+    }
+
+    #[test]
+    fn dispatch_blocker_recovery_hint_names_codex_hook_review_action() {
+        let doc = PathBuf::from("tasks/agent-doc/agent-doc-bugs2.md");
+        let hint = dispatch_blocker_recovery_hint(
+            &HarnessConfig::codex(),
+            "codex hook review prompt",
+            &doc,
+        );
+
+        assert!(
+            hint.contains("open `/hooks`"),
+            "hook-review blockers should tell the operator where to approve hooks: {hint}"
+        );
+        assert!(
+            hint.contains("approve or disable the pending hook change"),
+            "hook-review blockers should describe the approval gate: {hint}"
+        );
+        assert!(
+            hint.contains("agent-doc route --dispatch-only tasks/agent-doc/agent-doc-bugs2.md"),
+            "hook-review blockers should include a reroute recovery command: {hint}"
+        );
+
+        let generic = dispatch_blocker_recovery_hint(
+            &HarnessConfig::codex(),
+            "queued draft in composer",
+            &doc,
+        );
+        assert_eq!(generic, "restore an idle prompt and retry");
     }
 
     #[test]

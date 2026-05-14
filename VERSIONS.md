@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Codex hook-review route blockers now include recovery guidance.** Dispatch-only reroutes that see `route_dispatch_only_blocked reason=codex hook review prompt` now tell the operator to open `/hooks`, approve or disable the pending hook change, wait for the idle composer, and rerun the route/editor action instead of falling back to a generic idle-prompt hint. Updated route specs and regression coverage. This closes `#hookreviewroute` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Ops summaries now separate expected follow-up noise from anomalous drift.** `agent-doc ops summary` now buckets benign `post_commit_user_follow_up`, `post_commit_local_drift kind=user_follow_up`, and `commit_noop drift_kind=user_follow_up` events separately from working-tree drift/noop diagnostics. No-op closeouts now log their drift kind in `ops.log`, making routine user follow-up reruns distinguishable from real post-commit local edits. This closes `#opsnoisereduce` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Interrupt-clear timeouts now preserve final blocker evidence.** `agent-doc session interrupt-clear <FILE>` timeout logs and user-facing errors now report the final live-pane state, evidence source, prompt-ready value, current command, and recent pane tail after the protected clear discard path, instead of reducing the result to `outcome=timed_out` plus a loose last command. This closes `#interruptcleartimeout` in `tasks/agent-doc/agent-doc-bugs2.md`.

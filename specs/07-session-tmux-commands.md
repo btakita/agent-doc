@@ -62,6 +62,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - A live `agent-doc` child or healthy supervisor is not itself proof that the rerouted prompt started a new cycle.
 - For Codex reroutes, hook-backed submission proof is preferred before the later cycle-start health check.
 - For dispatch-only Codex reroutes with visible hook tracking, accepted tmux delivery without routed submission proof is a terminal accepted-but-unproven error. The command output must not also print an optimistic fallback/success line before that error.
+- If dispatch-only route refuses a Codex pane with `route_dispatch_only_blocked reason=codex hook review prompt`, the user-facing error must name the hook-review approval gate and tell the operator to open `/hooks`, approve or disable the pending hook change, wait for the idle composer, and rerun the dispatch-only route or editor Run Agent Doc action. A generic "restore an idle prompt" hint is insufficient for this blocker.
 - Claude Code and OpenCode do not currently expose the Codex-style prompt-submit hook. Dispatch-only route must therefore label their accepted pane delivery as accepted-only instead of implying consumed/submitted proof parity.
 - Frontmatter-only metadata churn must not count as prompt-bearing work that blocks or requires reroute acknowledgment.
 

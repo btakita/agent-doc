@@ -69,7 +69,16 @@ Remaining open for a later explicit run: `#backlogorphan`, `#interruptcleartimeo
 ### Re: sync orchestra premature stop — gpt-5
 
 Recorded the premature `sync orchestra` stop as a new `#agent-doc-bug` backlog item with plan `tasks/agent-doc/plan-sync-orchestra-premature-stop.md`. The bug is that the parent orchestrator completed the first child task but stopped before task 2 when its own closeout path failed to spawn `agent-doc finalize`.
-<!-- agent:boundary:697036d0 -->
+sync orchestra
+preset #spec-test-build-install-commit-push
+- do [#synchorchstop]
+- do [#backlogorphan]
+- do [#interruptcleartimeout]
+- do [#opsnoisereduce]
+- do [#hookreviewroute]
+- do [#sshcapfalsecapture]
+- do [#codexverbosepb]
+<!-- agent:boundary:60a01f15 -->
 <!-- /agent:exchange -->
 ###
 <!--

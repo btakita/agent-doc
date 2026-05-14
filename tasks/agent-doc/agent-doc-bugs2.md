@@ -160,7 +160,36 @@ Commits prepared before session closeout:
 - parent `agent-loop` `434e8326f` (`agent-doc: report interrupt-clear timeout blockers`)
 
 Per the session-document closeout ordering, I will push those commits after this finalize commit lands.
-<!-- agent:boundary:5fc4be5c -->
+
+❯ update spec + tests. build + install for local testing. commit + push. do [#opsnoisereduce]
+### Re: #opsnoisereduce — gpt-5
+
+Implemented `#opsnoisereduce`.
+
+What changed:
+- `agent-doc ops summary` now buckets expected follow-up activity separately from anomalous drift: `post_commit_user_follow_up`, `post_commit_local_drift kind=user_follow_up`, and `commit_noop drift_kind=user_follow_up` no longer collapse into the same bucket as working-tree drift.
+- Already-current no-op closeouts now emit an ops-log `commit_noop` line with `drift_kind=none`, `user_follow_up`, or `working_tree_edits` so summary output can separate routine reruns from real dirty-working-tree anomalies.
+- Updated `specs/07-core-commands.md` and `VERSIONS.md`, plus regression coverage in `ops_report.rs` and the no-op commit diagnostics tests in `git.rs`.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test ops_summary -- --nocapture`
+- `cargo test commit_repairs_committed_head_before_user_follow_up_noop -- --nocapture`
+- `cargo test commit_identifies_post_commit_local_working_tree_edits -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- GitHub `Agent Doc` run `25880559564` is red because GitHub did not start `check` or `tmux-ci`: account billing/spending-limit restriction.
+- First local `make tmux-ci` run hit two route tmux failures; both failed tests passed when rerun directly, and the subsequent full local `make tmux-ci` passed with 227 ignored live tmux tests.
+
+Commits prepared before push:
+- `src/agent-doc` `c5bbc317` (`fix: separate ops summary follow-up noise`), pushed to `20260422/codex-agent-backend`.
+- parent `agent-loop` `6bb2bdb9f` (`agent-doc: separate ops summary follow-up noise`).
+- parent corrective `2bb58f3d9` (`agent-doc: restore plan redirect`) restores `plan.md` to the `origin/main` redirect after an initial wrong-file preflight opened a temporary plan commit.
+
+Per the session-document closeout ordering, I will push the parent commits after this finalize commit lands.
+<!-- agent:boundary:86e24a47 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -235,7 +264,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#opsnoisereduce] Reduce `post_commit_local_drift` / `commit_noop` noise by separating expected user follow-up edits from anomalous drift in `agent-doc ops summary`.
 - [ ] [#hookreviewroute] Clarify `route_dispatch_only_blocked reason=codex hook review prompt` as a user-facing route blocker with recovery guidance.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md

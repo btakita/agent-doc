@@ -172,10 +172,73 @@ Short-lived job docs should probably be ignored by default, with an option to pr
 This also pairs well with tsift. agent-doc can ask tsift for bounded context, write the result into a virtual document, route that document to a smaller model, then finalize only the distilled result back into the main session. That turns context shaping into a visible filesystem protocol rather than hidden prompt assembly.
 
 So yes: virtual documents would help. I would start with short-lived per-job documents for orchestration packets, then add committed long-lived artifacts only for outputs that are useful across cycles. Do not let virtual documents become unbounded transcript dumps; their value is that they are smaller, typed, and easier to audit than the parent context.
-<!-- agent:boundary:c3405bc7 -->
+❯ What advantage would a virtual-document have over a plan file and runbook for respective use casese/
+### Re: virtual documents vs plans and runbooks — gpt-5
+
+A virtual document is not better than a plan file or runbook in general. It has a different job.
+
+A plan file is for intended work. It says what should happen, why, and in what order. It is useful when the human or parent agent needs to inspect or approve the approach before implementation.
+
+A runbook is for repeatable procedure. It says how a class of work should be handled every time: release flow, closeout rules, routing rules, verification policy, recovery steps. It should be stable and reused across many sessions.
+
+A virtual document is for one bounded execution context. It says: for this specific worker, in this specific cycle, here is the clipped packet of prompt, scope, evidence, handles, commands, expected output, and escalation rules. Its advantage is that it can be generated mechanically from the live session, tsift, repo state, and orchestration policy.
+
+So the distinction is:
+
+| Artifact | Lifetime | Audience | Contents | Authority |
+| --- | --- | --- | --- | --- |
+| Plan file | medium | human + parent agent | proposed work and milestones | advisory until executed |
+| Runbook | long | all agents/harnesses | reusable procedure | policy/procedure |
+| Virtual document | short or selected long | one worker/job | bounded task packet and evidence | derived context, usually non-authoritative |
+
+The advantage of a virtual document over a plan is operational precision. A plan might say "investigate route closeout failures." A virtual document says "worker A: read these 3 source windows, inspect this failing log digest, do not edit outside `src/agent-doc/src/route.rs`, return JSON with findings and confidence." That is much more suitable for smaller models.
+
+The advantage over a runbook is specificity. A runbook should not contain live line numbers, current failures, temporary branch state, model routing decisions, or tsift handles for a single job. A virtual document should contain exactly those things.
+
+The clean model is to compose them:
+
+1. Runbook defines the procedure.
+2. Plan file defines the intended multi-step work.
+3. Virtual documents instantiate individual executable jobs from the plan and runbook using current context.
+4. The main session document receives only the durable outcome and audit summary.
+
+That keeps each artifact from bloating into the others. Plans stay strategic, runbooks stay reusable, and virtual documents stay compact enough to hand to cheap workers.
+❯ What advantage would a virtual-document have over a plan file and runbook for respective use cases?
+### Re: virtual documents vs plans and runbooks — gpt-5
+
+A virtual document is not better than a plan file or runbook in general. It has a different job.
+
+A plan file is for intended work. It says what should happen, why, and in what order. It is useful when the human or parent agent needs to inspect or approve the approach before implementation.
+
+A runbook is for repeatable procedure. It says how a class of work should be handled every time: release flow, closeout rules, routing rules, verification policy, recovery steps. It should be stable and reused across many sessions.
+
+A virtual document is for one bounded execution context. It says: for this specific worker, in this specific cycle, here is the clipped packet of prompt, scope, evidence, handles, commands, expected output, and escalation rules. Its advantage is that it can be generated mechanically from the live session, tsift, repo state, and orchestration policy.
+
+So the distinction is:
+
+| Artifact | Lifetime | Audience | Contents | Authority |
+| --- | --- | --- | --- | --- |
+| Plan file | medium | human + parent agent | proposed work and milestones | advisory until executed |
+| Runbook | long | all agents/harnesses | reusable procedure | policy/procedure |
+| Virtual document | short or selected long | one worker/job | bounded task packet and evidence | derived context, usually non-authoritative |
+
+The advantage of a virtual document over a plan is operational precision. A plan might say "investigate route closeout failures." A virtual document says "worker A: read these 3 source windows, inspect this failing log digest, do not edit outside `src/agent-doc/src/route.rs`, return JSON with findings and confidence." That is much more suitable for smaller models.
+
+The advantage over a runbook is specificity. A runbook should not contain live line numbers, current failures, temporary branch state, model routing decisions, or tsift handles for a single job. A virtual document should contain exactly those things.
+
+The clean model is to compose them:
+
+1. Runbook defines the procedure.
+2. Plan file defines the intended multi-step work.
+3. Virtual documents instantiate individual executable jobs from the plan and runbook using current context.
+4. The main session document receives only the durable outcome and audit summary.
+
+That keeps each artifact from bloating into the others. Plans stay strategic, runbooks stay reusable, and virtual documents stay compact enough to hand to cheap workers.
+<!-- agent:boundary:f672edba -->
 <!-- /agent:exchange -->
 ###
 <!--
+If I 'm
 -->
 
 <!-- agent:queue auto -->

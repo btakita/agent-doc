@@ -311,7 +311,15 @@ Because `agent-doc plan` classified this turn as `execution_scope=plan_backlog_o
 I also added the requested `#next-steps` backlog items for taxonomy, operation docs, lower-agent orchestration, and the tsift support item in `tasks/software/tsift.md`.
 
 Verification: no code changed in this cycle, so I did not run the project test suite.
-<!-- agent:boundary:d1937f8a -->
+❯ Create a comprehensive plan document for the lower agent orchestration to save tokens. Include tsift work.
+### Re: lower-agent orchestration plan — gpt-5
+
+Created and committed the comprehensive plan document at `tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md` (`bc4598be8`).
+
+The plan covers the control-plane split between agent-doc and worker job packets, routing policy for lower versus medium/high agents, job packet schema, operation docs, token-savings metrics, safety invariants, regression coverage, and a phased implementation path. It includes the tsift workstream explicitly: context packs, source handles, diff/test/log digests, session review, index freshness, routing history, new content types, and JSON CLI contracts.
+
+I marked the existing lower-agent orchestration design backlog item complete and added the implementation follow-up against the new plan. No code changed in this cycle, so I did not run the Rust test suite.
+<!-- agent:boundary:1433344b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -323,10 +331,10 @@ Verification: no code changed in this cycle, so I did not run the project test s
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ek86] Implement the lower-agent orchestration MVP from tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md, starting with manual job packets plus tsift context packets.
 - [ ] [#ajx2] Investigate and fix live-typing duplicate insertion in agent-doc; plan: tasks/agent-doc/plan-live-typing-duplicate-insertion.md
 - [ ] [#fwjw] Define the agent-doc taxonomy for agent docs, job packets, operation docs, runbooks, and plans.
 - [ ] [#0fcx] Specify operation docs/opdocs as retained audit artifacts and how they relate to job packets.
-- [ ] [#gv32] Design lower-agent orchestration using bounded job packets and model-tier routing.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

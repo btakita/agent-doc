@@ -54,6 +54,7 @@
 use anyhow::{Context, Result};
 use clap::ValueEnum;
 use std::collections::HashSet;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -182,7 +183,7 @@ struct CliLifecycleOps;
 
 impl CliLifecycleOps {
     fn run_output_json<T: serde::de::DeserializeOwned>(&self, args: &[&str]) -> Result<T> {
-        let exe = std::env::current_exe().context("failed to resolve current agent-doc binary")?;
+        let exe = current_agent_doc_binary()?;
         let output = Command::new(&exe)
             .args(args)
             .stdin(Stdio::null())
@@ -198,7 +199,7 @@ impl CliLifecycleOps {
     }
 
     fn run_status(&self, args: &[&str]) -> Result<()> {
-        let exe = std::env::current_exe().context("failed to resolve current agent-doc binary")?;
+        let exe = current_agent_doc_binary()?;
         let status = Command::new(&exe)
             .args(args)
             .stdin(Stdio::null())
@@ -226,7 +227,7 @@ impl LifecycleOps for CliLifecycleOps {
         response: &str,
         mode: ResolvedMode,
     ) -> Result<()> {
-        let exe = std::env::current_exe().context("failed to resolve current agent-doc binary")?;
+        let exe = current_agent_doc_binary()?;
         let file_arg = file.to_string_lossy().into_owned();
 
         let mut cmd = Command::new(&exe);
@@ -248,7 +249,7 @@ impl LifecycleOps for CliLifecycleOps {
 
         let mut child = cmd
             .spawn()
-            .context("failed to spawn `agent-doc finalize`")?;
+            .with_context(|| internal_command_spawn_context("finalize", &exe))?;
         {
             use std::io::Write;
             let stdin = child
@@ -272,6 +273,91 @@ impl LifecycleOps for CliLifecycleOps {
         let file_arg = file.to_string_lossy().into_owned();
         self.run_status(&["session-check", &file_arg])
     }
+}
+
+fn current_agent_doc_binary() -> Result<PathBuf> {
+    let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
+    resolve_agent_doc_binary_from_env(
+        std::env::current_exe().ok(),
+        std::env::args_os().next(),
+        std::env::var_os("PATH"),
+        &cwd,
+    )
+}
+
+fn resolve_agent_doc_binary_from_env(
+    current_exe: Option<PathBuf>,
+    argv0: Option<OsString>,
+    path_env: Option<OsString>,
+    cwd: &Path,
+) -> Result<PathBuf> {
+    let stale_current_exe = match current_exe {
+        Some(path) if launchable_file(&path) => return Ok(path),
+        other => other,
+    };
+
+    let mut path_search_names = Vec::new();
+    if let Some(raw_argv0) = argv0.as_deref() {
+        let argv0_path = Path::new(raw_argv0);
+        if has_path_separator(argv0_path) {
+            let candidate = if argv0_path.is_absolute() {
+                argv0_path.to_path_buf()
+            } else {
+                cwd.join(argv0_path)
+            };
+            if launchable_file(&candidate) {
+                return Ok(candidate);
+            }
+        } else if !raw_argv0.is_empty() {
+            path_search_names.push(raw_argv0.to_os_string());
+        }
+    }
+    if !path_search_names
+        .iter()
+        .any(|name| name == OsStr::new("agent-doc"))
+    {
+        path_search_names.push(OsString::from("agent-doc"));
+    }
+
+    if let Some(path_env) = path_env {
+        for dir in std::env::split_paths(&path_env) {
+            for name in &path_search_names {
+                let candidate = dir.join(name);
+                if launchable_file(&candidate) {
+                    return Ok(candidate);
+                }
+            }
+        }
+    }
+
+    let stale = stale_current_exe
+        .as_ref()
+        .map(|path| format!("; skipped missing current_exe {}", path.display()))
+        .unwrap_or_default();
+    anyhow::bail!("failed to locate launchable agent-doc binary{stale}");
+}
+
+fn launchable_file(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
+}
+
+fn has_path_separator(path: &Path) -> bool {
+    path.is_absolute() || path.components().count() > 1
+}
+
+fn internal_command_spawn_context(command: &str, exe: &Path) -> String {
+    let cwd = std::env::current_dir()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|err| format!("<unavailable: {err}>"));
+    let path_present = std::env::var_os("PATH").is_some();
+    format!(
+        "failed to spawn `agent-doc {command}` (binary={}, cwd={}, PATH_present={})",
+        exe.display(),
+        cwd,
+        path_present
+    )
 }
 
 struct CliAgentRunner;
@@ -1403,7 +1489,12 @@ Stopped sequential orchestration after {completed_steps} of {total_steps} step(s
         preflight.baseline_file.as_deref(),
         &response,
         fm.resolve_mode(),
-    )?;
+    )
+    .with_context(|| {
+        format!(
+            "failed parent orchestration batch-change closeout after {completed_steps}/{total_steps} step(s)"
+        )
+    })?;
     lifecycle.session_check(file)?;
     anyhow::bail!(
         "orchestration batch changed during run after {}/{} step(s); stopped before launching the next step",
@@ -1903,6 +1994,48 @@ mod tests {
             ));
             Ok(())
         }
+    }
+
+    #[test]
+    fn agent_doc_binary_resolution_works_without_path_when_current_exe_exists() {
+        let dir = TempDir::new().unwrap();
+        let current = dir.path().join("current-agent-doc");
+        std::fs::write(&current, "current").unwrap();
+
+        let resolved =
+            resolve_agent_doc_binary_from_env(Some(current.clone()), None, None, dir.path())
+                .unwrap();
+
+        assert_eq!(resolved, current);
+    }
+
+    #[test]
+    fn agent_doc_binary_resolution_falls_back_when_current_exe_is_stale() {
+        let dir = TempDir::new().unwrap();
+        let path_bin_dir = dir.path().join("bin");
+        let path_bin = path_bin_dir.join("agent-doc");
+        std::fs::create_dir_all(&path_bin_dir).unwrap();
+        std::fs::write(&path_bin, "path").unwrap();
+
+        let resolved = resolve_agent_doc_binary_from_env(
+            Some(dir.path().join("deleted-agent-doc")),
+            Some(OsString::from("agent-doc")),
+            Some(path_bin_dir.into_os_string()),
+            dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, path_bin);
+    }
+
+    #[test]
+    fn internal_spawn_context_names_binary_cwd_and_path_presence() {
+        let context = internal_command_spawn_context("finalize", Path::new("/tmp/agent-doc"));
+
+        assert!(context.contains("agent-doc finalize"));
+        assert!(context.contains("binary=/tmp/agent-doc"));
+        assert!(context.contains("cwd="));
+        assert!(context.contains("PATH_present="));
     }
 
     impl agent::Agent for CaptureAgent {

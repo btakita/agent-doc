@@ -5702,6 +5702,33 @@ mod tests {
         predicate()
     }
 
+    fn pane_current_command(tmux: &IsolatedTmux, pane: &str) -> Option<String> {
+        let output = tmux
+            .cmd()
+            .args([
+                "display-message",
+                "-p",
+                "-t",
+                pane,
+                "#{pane_current_command}",
+            ])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    fn wait_for_shell(tmux: &IsolatedTmux, pane: &str, timeout: Duration) -> bool {
+        wait_for(timeout, || {
+            matches!(
+                pane_current_command(tmux, pane).as_deref(),
+                Some("sh" | "bash" | "zsh" | "fish")
+            )
+        })
+    }
+
     struct ScopedCurrentDir {
         prev_cwd: PathBuf,
         _env_guard: std::sync::MutexGuard<'static, ()>,
@@ -6930,6 +6957,10 @@ mod tests {
         let iso = IsolatedTmux::new("sync-dead-pane-diagnostics");
         let pane = iso.new_session("test", tmp.path()).unwrap();
         iso.enable_remain_on_exit(&pane).unwrap();
+        assert!(
+            wait_for_shell(&iso, &pane, Duration::from_secs(3)),
+            "pane shell should be ready before sending the diagnostic exit command"
+        );
         iso.send_keys(&pane, "printf 'assistant tail\\n'; exit 9")
             .unwrap();
         assert!(

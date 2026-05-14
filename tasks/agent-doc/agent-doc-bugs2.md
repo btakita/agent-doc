@@ -52,86 +52,40 @@ I reviewed the current session log (`.agent-doc/logs/b26b9957-8de6-4eae-bb98-5d7
 I did not see a fresh failure for the JB `API Error: 400 Could not process image` case or for `session_restart refused` in the latest session slice I inspected. The dispatch proof for the current reroute is healthy: it reached `proof=consumed proof_scope=dispatch_start` at `.agent-doc/logs/ops.log:115093` through `.agent-doc/logs/ops.log:115095`.
 
 No code was changed and I did not run the test suite; this was a log triage and backlog-capture pass.
-<!-- agent:boundary:c9944b7e -->
+### Re: managed cycle closeout bugs — gpt-5
+
+Implemented and verified the five queued agent-doc fixes.
+
+- `#ds58`: template-mode orchestration now wraps clean plain child responses in an explicit `patch:exchange` block before finalize, while transcript-shaped/full-document output still fails closed.
+- `#djwb`: partial-response checkpoint writers now stop once their original cycle commits, is abandoned, or is replaced, preventing stale partial ledgers from being mutated.
+- `#m2hx`: route-owned liveness now reports `post_commit_user_follow_up` when the remaining dirty document content is a new prompt, while non-prompt drift still reports `document_dirty_after_commit`.
+- `#ha62`: managed Codex network child proof now reuses an in-process cache keyed by harness, command, probe args, and environment, and logs cached proof as `child_dns_https_cached`.
+- `#aymr`: safe-passive sync now prefers the live local actor projection before controller actor lookup and logs the skipped controller path with an immediate latency sample.
+
+Updated specs and `VERSIONS.md` alongside focused regression coverage. I ran `cargo fmt`, `cargo test --lib`, targeted regressions for route-owned liveness and orchestrate transcript rejection, `make check`, `cargo build`, `cargo install --path . --force`, and local `make tmux-ci`; all passed. I also checked the latest GitHub `CI` workflow run, which was green on `main` and includes `make check` plus `make tmux-ci`.
+
+Committed and pushed:
+
+- `src/agent-doc`: `762f0adc` (`fix: tighten managed cycle closeout paths`) to `20260422/codex-agent-backend`
+- parent repo: `532cba414` (`agent-doc: tighten managed cycle closeout paths`) to `main`
+<!-- agent:boundary:e7625b3e -->
 <!-- /agent:exchange -->
 ###
 <!--
-Autosync on editor file change + `Sync Tmux Layout` lands on a 1 tmux pane and 3 tmux pane layout with 2 editor panes.
-spec-test-build-install-commit-push
----
-The managed proof check tmux prompt should be terse and more "human readable" on a single line. Explain the status without the extra information.
-spec-test-build-install-commit-push
----
-`--pending-only` should be renamed to `--backlog-only`.
-spec-test-build-install-commit-push
----
-Please ensure the JB opencode fixes are propagated to the VSCode plugin. Ensure the specs are updated for all editor plugins. Should we implement in the ffi plugin?
-#next-steps
----
-JB `Run Agent Doc` on root.md with `agent: claude` sends an incorrect command
-```
-❯ agent-doc /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md
-  ⎿  API Error: 400 Could not process image
-```
-spec-test-build-install-commit-push
----
-Should tsift fail fast in this case?
-```
-• Ran tsift search "transcript not found livekit-101"
-  └ Error: tsift search timed out after 30s (strategy: lexical). The search root looks fresh, so reindexing is unlikely
-    to help. Re-run with `--timeout 0` to disable the timeout, narrow `--path` / `--scope`, or try a different
-    strategy.
-```
-spec-test-build-install-commit-push
----
-How can we move the agent-doc concept to html files?
-Can the agent-doc supervisor run a web server, using contenteditable via tinymcp or another editor to write back to the source file?
-Would major editors such as VSCode, JetBrains, Zig, and TUI editors support this workflow?
----
-With the latest supply chain attacks on npm and pypi, should agent-doc should run in a docker container? Should all software written run in a docker container?
----
-JB `Restart Supervisor Process` error:
-```
-agent-doc command failed (exit 1): Error: session_restart refused for /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="⏵⏵ bypass permissions on (shift+tab to cycle)"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.
-```
-spec-test-build-install-commit-push
----
-Move JB `Copy Session Diagnostics` outside the numeric shortcuts.
----
-I don't have a good track on the lifecycle logic that starts panes, kills panes, edge cases, etc.
-Can we make a nested list and diagram of the lifecycle logic?
----
-Why is agent-doc starting a child Codex run?
-```
-• agent-doc started a child Codex run. Its preflight noticed the previous patchback was already committed, then
-  submitted the new follow-up prompt for execution.
-```
----
-```
-3. Workaround: delegate SSH via the host — if OpenCode can't SSH directly, have agent-doc run the SSH deploy           step outside the managed pane (in the harness supervisor process), not inside the OpenCode child.
-```
----
-Confirm that z.ai subscriptions are message based and not token based. If message based, is agent-doc inefficient on message based plans? Please review code + logs.
-#next-steps
----
-minor (v0.34.0) release + publish. merge into main
----
-/home/brian/work/btakita/agent-loop/tasks/agent-doc/plan-project-controller-session-actor-mvp.md
----
-"Press Enter to restart, or 'q' to exit."
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset spec-test-build-install-commit-push
+- do [#ds58]
+- do [#djwb]
+- do [#m2hx]
+- do [#ha62]
+- do [#aymr]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ds58] Investigate orchestrate closeout producing zero-patch writes after a skill finalize; logs show origin=orchestrate zero_patches_warning plus late_fallback_patch_rejected on already-committed cycles. #agent-doc-bug
-- [ ] [#djwb] Stop stale partial-response checkpoint writers after a cycle is committed or abandoned; logs show checkpoints for older cycle IDs continuing through later commits and triggering stale-lock repair churn. #agent-doc-bug
-- [ ] [#m2hx] Clarify route-owned reap reason for post-commit user follow-up drift; document_dirty_after_commit currently appears after successful commits even when the remaining drift is the next user prompt. #agent-doc-bug
-- [ ] [#ha62] Reduce Codex managed capability proof startup latency or move it off the readiness path; recent logs show child network proof taking roughly 13-16 seconds before ready. #agent-doc-bug
-- [ ] [#aymr] Optimize or re-budget passive sync controller_actor_lookup; safe-passive logs repeatedly exceed the 250ms budget while total sync stays barely under 1s. #agent-doc-bug
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

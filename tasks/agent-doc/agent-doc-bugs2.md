@@ -216,7 +216,35 @@ Commits:
 - parent `agent-loop` `20d8c1ae9` (`agent-doc: explain codex hook review route blocker`) prepared with the updated `src/agent-doc` pointer.
 
 Per the session-document closeout ordering, I will push the parent repo after this finalize commit lands.
-<!-- agent:boundary:3ed646dc -->
+
+❯ update spec + tests. build + install for local testing. commit + push. do [#sshcapfalsecapture]
+### Re: #sshcapfalsecapture — gpt-5
+
+Implemented `#sshcapfalsecapture`.
+
+What changed:
+- Codex required-SSH drift detection now gates command output by live SSH evidence. A `command_execution` event from `rg` or another arbitrary command that prints old `.agent-doc/captures` text mentioning a required host plus `socket: Operation not permitted` no longer aborts the active run.
+- Actual SSH command output still fails closed, including bare `socket: Operation not permitted` when the command itself targets a required SSH host.
+- Direct SSH diagnostics without a command field, such as `ssh: connect to host ...`, still trigger the resumed-session drift retry path.
+- Failure diagnostics for command-proven SSH failures now include the command string.
+- Updated `SPEC.md`, `specs/05-agent-backend.md`, tests, and `VERSIONS.md`.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test required_ssh -- --nocapture`
+- `make check`
+- `cargo build --release`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest GitHub `CI` run inspected: `25773430221`, green on `main`.
+- Local `make tmux-ci` passed with 227 live tmux tests.
+
+Commits:
+- `src/agent-doc` `7626e4f0` (`fix: scope required ssh drift to live commands`), pushed to `20260422/codex-agent-backend`.
+- parent `agent-loop` `1bad7f370` (`agent-doc: scope required ssh drift to live commands`) prepared with the updated `src/agent-doc` pointer.
+
+Per the session-document closeout ordering, I will push the parent repo after this finalize commit lands.
+<!-- agent:boundary:9789af4f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -291,10 +319,7 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
-
-Would ZelliJ help with input and output reliability over tmux?
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

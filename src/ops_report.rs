@@ -167,8 +167,19 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
     let category = match event_name {
         "ipc_write_consumed" => "write ipc consumed",
         "commit_success" => "commit success",
+        "commit_noop" if field_eq(&fields, "drift_kind", "user_follow_up") => {
+            "expected user follow-up noop"
+        }
+        "commit_noop" if field_eq(&fields, "drift_kind", "working_tree_edits") => {
+            "anomalous drift noop"
+        }
+        "commit_noop" => "commit noop",
         "route_dispatch_start_proven" => "route dispatch proven",
-        "post_commit_local_drift" => "post-commit local drift",
+        "post_commit_user_follow_up" => "expected user follow-up",
+        "post_commit_local_drift" if field_eq(&fields, "kind", "user_follow_up") => {
+            "expected user follow-up"
+        }
+        "post_commit_local_drift" => "anomalous post-commit drift",
         "session_clear_active_pane_allowed" => "active clear allowed",
         "session_clear_protected_input_guard_refused" => "protected input clear refused",
         "session_clear_live_busy_guard_bypassed" => "busy clear bypassed",
@@ -235,6 +246,9 @@ fn render_detail(event_name: &str, fields: &BTreeMap<String, String>) -> String 
     let mut parts = vec![event_name.to_string()];
     for key in [
         "kind",
+        "reason",
+        "drift_kind",
+        "basis",
         "pane",
         "source",
         "current_command",
@@ -273,20 +287,24 @@ mod tests {
 [102] route_dispatch_start_proven file=tasks/a.md pane=%1 harness=codex proof=consumed timeout_secs=10
 [103] route_dispatch_only_sent file=tasks/b.md pane=%2 harness=opencode proof=accepted proof_scope=accepted_only
 [104] post_commit_local_drift file=/repo/tasks/a.md kind=user_follow_up basis=head
-[105] session_clear_active_pane_allowed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[106] session_clear_protected_input_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor reason=drafted_prompt_input current_command=agent-doc
-[107] session_clear_live_busy_guard_bypassed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[108] session_clear_live_busy_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[109] route_authoritative_actor_starting_not_ready file=tasks/c.md pane=%3 harness=codex generation=9 actor_state=starting
-[110] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
-[111] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
+[105] post_commit_user_follow_up file=/repo/tasks/a.md basis=head
+[106] post_commit_local_drift file=/repo/tasks/a.md kind=working_tree_edits basis=head
+[107] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=user_follow_up basis=head
+[108] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=working_tree_edits basis=head
+[109] session_clear_active_pane_allowed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[110] session_clear_protected_input_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor reason=drafted_prompt_input current_command=agent-doc
+[111] session_clear_live_busy_guard_bypassed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[112] session_clear_live_busy_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[113] route_authoritative_actor_starting_not_ready file=tasks/c.md pane=%3 harness=codex generation=9 actor_state=starting
+[114] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
+[115] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
 ";
 
         let report =
             summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
 
-        assert_eq!(report.scanned_lines, 12);
-        assert_eq!(report.matched_events, 11);
+        assert_eq!(report.scanned_lines, 16);
+        assert_eq!(report.matched_events, 15);
         assert!(
             report.buckets.iter().any(|bucket| {
                 bucket.category == "write ipc consumed"
@@ -300,6 +318,42 @@ mod tests {
                 bucket.category == "accepted-only route proof"
                     && bucket.file == "tasks/b.md"
                     && bucket.samples[0].contains("proof_scope=accepted_only")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "expected user follow-up"
+                    && bucket.file == "tasks/a.md"
+                    && bucket.count == 2
+                    && bucket
+                        .samples
+                        .iter()
+                        .any(|sample| sample.contains("kind=user_follow_up"))
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "anomalous post-commit drift"
+                    && bucket.file == "tasks/a.md"
+                    && bucket.samples[0].contains("kind=working_tree_edits")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "expected user follow-up noop"
+                    && bucket.file == "tasks/a.md"
+                    && bucket.samples[0].contains("drift_kind=user_follow_up")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "anomalous drift noop"
+                    && bucket.file == "tasks/a.md"
+                    && bucket.samples[0].contains("drift_kind=working_tree_edits")
             }),
             "{report:#?}"
         );

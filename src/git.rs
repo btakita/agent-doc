@@ -1744,6 +1744,7 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             "commit_already_current",
             snapshot_after_noop.as_deref(),
             Some(&file_after_noop),
+            post_commit_local_drift,
         );
 
         // Even for no-op submodule commits, the parent pointer may be stale
@@ -2551,8 +2552,20 @@ fn finalize_already_committed_noop(
     event: &str,
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
+    drift_kind: Option<PostCommitLocalDriftKind>,
 ) {
     crate::ops_log::log_cycle(file, "commit_noop", snapshot_content, file_content);
+    let drift_kind = drift_kind
+        .map(PostCommitLocalDriftKind::as_str)
+        .unwrap_or("none");
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "commit_noop file={} reason=already_current drift_kind={} basis=head",
+            file.display(),
+            drift_kind
+        ),
+    );
     crate::ops_log::log_op(
         file,
         &format!("commit_already_current file={} basis=head", file.display()),
@@ -4799,6 +4812,10 @@ Done.
             "mixed cleanup should use the benign user-follow-up marker:\n{log}"
         );
         assert!(
+            log.contains("commit_noop file=") && log.contains("drift_kind=user_follow_up"),
+            "mixed cleanup noop should record the benign drift kind for ops summary:\n{log}"
+        );
+        assert!(
             !log.contains("prior_patchback_without_response_body file="),
             "fresh follow-up prompts must not be mislabeled as missing response-body repair:\n{log}"
         );
@@ -4971,6 +4988,10 @@ Done.
         assert!(
             log.contains("post_commit_user_follow_up file="),
             "follow-up noop closeout should record the benign follow-up diagnostic:\n{log}"
+        );
+        assert!(
+            log.contains("commit_noop file=") && log.contains("drift_kind=user_follow_up"),
+            "follow-up noop closeout should record the benign drift kind for ops summary:\n{log}"
         );
         assert!(
             !log.contains("prior_patchback_without_response_body file="),
@@ -5561,6 +5582,10 @@ Done.
             log.contains("post_commit_local_drift file=")
                 && log.contains("kind=working_tree_edits"),
             "working-tree edits should be classified as post-commit local drift:\n{log}"
+        );
+        assert!(
+            log.contains("commit_noop file=") && log.contains("drift_kind=working_tree_edits"),
+            "working-tree noop should record its anomalous drift kind for ops summary:\n{log}"
         );
         assert!(
             !log.contains("out_of_band_write file="),

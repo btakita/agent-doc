@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Ops summaries now separate expected follow-up noise from anomalous drift.** `agent-doc ops summary` now buckets benign `post_commit_user_follow_up`, `post_commit_local_drift kind=user_follow_up`, and `commit_noop drift_kind=user_follow_up` events separately from working-tree drift/noop diagnostics. No-op closeouts now log their drift kind in `ops.log`, making routine user follow-up reruns distinguishable from real post-commit local edits. This closes `#opsnoisereduce` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Interrupt-clear timeouts now preserve final blocker evidence.** `agent-doc session interrupt-clear <FILE>` timeout logs and user-facing errors now report the final live-pane state, evidence source, prompt-ready value, current command, and recent pane tail after the protected clear discard path, instead of reducing the result to `outcome=timed_out` plus a loose last command. This closes `#interruptcleartimeout` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Backlog-section prompt patchback cleanup.** Template and CRDT closeout now remove newly-added raw prompt-target lines from `agent:backlog` / legacy `agent:pending` after the response is merged into `agent:exchange`, while preserving normal tracked backlog edits and pending state changes. This closes `#backlogorphan` in `tasks/agent-doc/agent-doc-bugs2.md`.

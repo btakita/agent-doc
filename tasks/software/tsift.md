@@ -35,7 +35,35 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): stale tsift index reminders
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:127c3589 -->
+❯ Please read audit in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+
+❯ I want to make tsift public and publish to crates and add a `curl ... | sh` install script.
+### Re: public tsift release — gpt-5
+
+I read the audit in `tasks/agent-doc/agent-doc-bugs2.md` and treated it as a release-readiness checklist: public repo first, install story next, crates.io only after the package can actually pass a dry run.
+
+What is done:
+
+- Made `btakita/tsift` public: https://github.com/btakita/tsift
+- Added `README.md` with the install command: `curl -fsSL https://raw.githubusercontent.com/btakita/tsift/main/scripts/install.sh | sh`
+- Added `scripts/install.sh`, which detects Linux/macOS targets, downloads GitHub release assets, verifies SHA-256, and installs to `$HOME/.local/bin` by default.
+- Switched `tagpath` from a sibling path dependency to the published `tagpath = 0.6.2` crate, updated `Cargo.lock`, removed CI/release sibling checkouts, and copied the tagpath token-savings fixture into `tsift` so tests no longer depend on `../tagpath`.
+- Sanitized the obvious public-audit hits: removed a personal absolute path from a test fixture string and replaced the private project example in `SPEC.md`.
+- Committed and pushed the `tsift` submodule as `8378e0f` (`chore: prepare public tsift release`).
+- Updated the superproject submodule pointer in commit `d7562b443` (`chore: update tsift release pointer`).
+- Tagged and pushed `v0.1.42` in `tsift` to start the GitHub release workflow.
+
+Crates.io is not published yet. `cargo publish --dry-run --allow-dirty` still fails because `sift` is a git dependency with no version requirement, and crates.io already has an unrelated `sift = 0.1.0` package. The `tagpath` blocker is fixed; the remaining blocker is the upstream `sift` dependency strategy.
+
+Verification run locally in `src/tsift`:
+
+- `sh -n scripts/install.sh`
+- public-audit `rg` scan for obvious secrets/personal paths/private project names; remaining hits are expected token/API-key env var names in docs/tests, not secret values.
+- `make ci-full` passed, including clippy, normal tests, and ignored deterministic SimWorld coverage.
+- `cargo publish --dry-run --allow-dirty` failed only on the `sift` git dependency blocker above.
+
+Remote release status at closeout: the `v0.1.42` Release workflow verified successfully, and Linux, macOS arm64, and Windows build jobs completed successfully. The macOS x86_64 job was still queued on GitHub Actions, so the final GitHub Release object and `latest/download` installer assets will appear only after that queued leg completes.
+<!-- agent:boundary:93b22b58 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,6 +72,8 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
+- [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
@@ -55,8 +85,4 @@ Compacted content:
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/tsift.done.md -->
-- 2026-05-13 [#xcst] Fix session-cost/log guardrail wording for agent-doc logs so restart_loop warnings are only emitted when restart churn is actually present; ops.log currently reports fresh_restart=0 auto_trigger_timeout=0 ctrl_d_restart_loop=0 while still warning restart churn detected.
-- 2026-05-13 [#xlog] Teach tsift log-digest to classify agent-doc runtime/churn/failure events as signals; current tsift-v0.1.log digest reports signals:0 even though session-digest finds claude_exit, auto_trigger_timeout, fresh_restart, ctrl_d_restart_loop, and closeout churn.
-- 2026-05-13 [#srgd] Promote session-review/log guardrails into next-context unresolved failures or action items; current review/logs report restart/noop churn while next-context says unresolved_failures is empty.
-- 2026-05-13 [#qtoe] Tune agent-doc log-digest restart-churn classification to separate clean user quits/EOF from actual restart loops/timeouts, so quit_after_eof does not overstate risk.
 <!-- /agent:done -->

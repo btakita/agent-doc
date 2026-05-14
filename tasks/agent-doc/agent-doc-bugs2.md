@@ -61,7 +61,7 @@ Parent repo submodule pointer was updated afterward. `#opsreadinessrace` is now 
 
 The original sequential orchestrator hung after that committed first step, so I stopped the stuck parent process and preserved the remaining backlog items as open for the next recovery cycle instead of pretending the full batch completed.
 
-### Re: closeout normalization — gpt-5
+### Re: closeout normalization — gpt-5 (HEAD)
 
 No additional repo work was needed for this cycle. The only prompt-bearing diff was the previously answered `#opsreadinessrace` preset line being normalized with a prompt prefix and the committed response heading being marked `(HEAD)`.
 

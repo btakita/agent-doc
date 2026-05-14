@@ -21,3 +21,4 @@
 - 2026-05-14 [#backlogorphan] #agent-doc-bug: Backlog-section prompts leave orphan text after patchback — finalize writes response to exchange but does not clean up the original prompt text from backlog, making it look like the patchback was never written. Plan: tasks/agent-doc/plan-backlog-prompt-patchback-orphan.md
 - 2026-05-14 [#interruptcleartimeout] Investigate `session_interrupt_clear_settled outcome=timed_out` after protected clear and make interrupt-clear report the blocking state and last command deterministically.
 - 2026-05-14 [#opsnoisereduce] Reduce `post_commit_local_drift` / `commit_noop` noise by separating expected user follow-up edits from anomalous drift in `agent-doc ops summary`.
+- 2026-05-14 [#hookreviewroute] Clarify `route_dispatch_only_blocked reason=codex hook review prompt` as a user-facing route blocker with recovery guidance.

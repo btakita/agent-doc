@@ -63,7 +63,27 @@ A concrete agent-doc design would be:
 That matches the lesson from the post while preserving ProgramBench's caution: harness wins are real, but they should be measured per task class. Agent-doc can help by making those task classes, routing decisions, and proof requirements first-class data in the document rather than implicit model vibes.
 
 Sources: [LinkedIn post](https://www.linkedin.com/posts/andrei-trandafira-6282a813_pushed-gpt-54-mini-from-481-to-93-on-activity-7459581138357923840-M6Nd?utm_source=share&utm_medium=member_desktop&rcm=ACoAAAC0KQ4BlxIAK5Vbm7Gssr6SzIaiyNG0e68), [ProgramBench](https://programbench.com/), [ProgramBench paper](https://arxiv.org/abs/2605.03546).
-<!-- agent:boundary:fb3f9179 -->
+❯ Should I make tsift public and publish to assist with the context shaping?
+### Re: publishing tsift for context shaping — gpt-5
+
+Yes, but I would separate "public" from "published package" and do it in stages.
+
+Making `tsift` public is useful for context shaping because it gives agent-doc a concrete, inspectable companion tool: bounded source reads, search handles, context packs, session review, cost/session digests, and stale-index reminders are exactly the surfaces that let smaller models work from clipped evidence instead of whole-repo dumps. Public source also makes the thesis easier to explain: agent-doc is the document/control plane; tsift is the context-shaping and evidence-compaction layer.
+
+I would publish the repository first, then package only after the install story is clean. A public repo with a good README, examples, recorded token-savings fixtures, and an `agent-doc + tsift` workflow demo is enough to support the idea. Publishing to crates.io or a binary channel should wait until the CLI contract is stable enough that early users will not be broken by command renames or output schema churn.
+
+The practical sequence I would use:
+
+1. Make the GitHub repo public once secrets, local paths, private session fragments, and accidental personal/work data are audited.
+2. Add a top-level README that frames tsift as "context shaping for coding agents", not as generic search.
+3. Include two demos: one `context-pack` flow for an agent-doc session, and one `source-read/search/explain` flow showing how a small model gets bounded handles.
+4. Mark JSON/envelope outputs as either stable or experimental so integrations know what they can rely on.
+5. Publish binaries or crates.io only after `tsift init`, `status --fix`, and the common `search -> source-read -> context-pack` workflow feel boring on a clean machine.
+
+The main risk is privacy, not competition. tsift's value is tied to local repo/session/log material, and that kind of tooling easily grows assumptions from your own workspace. Before making it public, I would run an explicit release audit for hardcoded paths, fixtures, archived logs, private project names, API/provider assumptions, and README claims that imply a more general product than the CLI currently supports.
+
+So my answer is: make it public if the audit is clean; do not rush package publication. A public repo plus repeatable demos will help agent-doc's smaller-model orchestration story immediately, while package publication should be treated as a separate distribution-readiness milestone.
+<!-- agent:boundary:5161576e -->
 <!-- /agent:exchange -->
 ###
 <!--

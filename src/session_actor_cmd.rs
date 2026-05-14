@@ -444,7 +444,7 @@ fn guard_starting_actor_operator_command(
         ),
     );
     anyhow::bail!(
-        "{} refused for {} because the authoritative actor is still starting and {}. Wait for a dispatch-ready prompt and retry, or run `agent-doc session status {}` to inspect the pane.",
+        "{} refused for {} because the authoritative actor is still starting and {}. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status {}` to inspect the pane.",
         action.as_str(),
         ctx.canonical_file.display(),
         reason,
@@ -468,7 +468,7 @@ fn starting_operator_guard_reason(
     if dispatch_ready {
         return "the ready prompt could not be reconciled".to_string();
     }
-    "the pane has not reached a dispatch-ready prompt".to_string()
+    "the pane has not reached a dispatch-ready prompt (`prompt_ready=true`)".to_string()
 }
 
 fn operator_command_has_starting_actor(ctx: &SessionContext) -> bool {
@@ -1931,7 +1931,7 @@ mod tests {
         );
         assert_eq!(
             starting_operator_guard_reason(OperatorAction::Restart, false, false, true),
-            "the pane has not reached a dispatch-ready prompt"
+            "the pane has not reached a dispatch-ready prompt (`prompt_ready=true`)"
         );
     }
 

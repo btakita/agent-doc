@@ -4581,7 +4581,7 @@ fn authoritative_actor_dispatch_recovery_hint(
 ) -> String {
     match state {
         crate::session_actor::ActorState::Starting => format!(
-            "Wait for the pane to reach an idle prompt, then rerun `agent-doc {}`. If the pane stays stuck, restart the owner with `agent-doc start {}`.",
+            "Wait for the pane to show a dispatch-ready prompt (`prompt_ready=true`), then rerun `agent-doc {}`. If the pane stays stuck, restart the owner with `agent-doc start {}`.",
             file.display(),
             file.display()
         ),
@@ -7037,6 +7037,10 @@ mod tests {
         assert!(
             hint.contains("rerun `agent-doc /tmp/session.md`"),
             "starting actor hint should tell the user how to retry: {hint}"
+        );
+        assert!(
+            hint.contains("prompt_ready=true"),
+            "starting actor hint should name the dispatch-ready wait state: {hint}"
         );
         assert!(
             hint.contains("agent-doc start /tmp/session.md"),

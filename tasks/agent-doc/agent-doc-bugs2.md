@@ -34,7 +34,7 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): orchestration handoff; multiplexertrait
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f5d00be1 -->
+<!-- agent:boundary:838e446d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -109,7 +109,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#directsubmitbudget] #agent-doc-bug: Direct pane submit telemetry reports 5.18s timeouts / over-budget sends even when dispatch_start_proof later proves the prompt was consumed. Split input-acceptance latency from dispatch-start proof, avoid false timeout language after consumed proof, and tune the owned/hybrid pty submit budget around actual tmux/control-mode behavior.
 - [ ] [#latefallbackloop] #agent-doc-bug: Late fallback patch writes keep firing after a cycle is already committed; logs show repeated late_fallback_patch_rejected reason=already_committed, ipc_write_consumed, commit_already_current, and one resume_commit_blocked_drift with an unresolved prompt-only tail. Stop fallback writers at terminal commit state or rebind them to the next cycle before accepting IPC patches.
 - [ ] [#clearstartingrace] #agent-doc-bug: Clear/restart commands can race starting owned panes; logs show session_clear_sent while generation 170 was still starting, followed by protected-input refusals, commits, and repeated starting_not_ready. Gate clear/restart on dispatch-ready or clean-exit prompt state and document-dirty state before sending literal Enter into the pane.
 - [ ] [#ownedreapbusy] #agent-doc-bug: Owned pane reap decisions are noisy and often keep panes alive from spinner tails like Working/escape-title fragments instead of a stable idle/busy signal. Normalize screen-tail sampling or prefer supervisor prompt state so route_owned_reap_decision does not preserve panes based on transient renderer text.

@@ -120,6 +120,12 @@ The supervisor is a single process that:
   Tab/BackTab selector keys before forwarding them to the child. Outside that
   active permission prompt, OpenCode receives the original arrow bytes so normal
   composer navigation is unchanged.
+- Supervisor input diagnostics emit structured `tmux_input_event` lines at the
+  input boundaries: operator stdin forwarding, IPC/auto-trigger injection, tmux
+  pane submits, Kitty keyboard-mode preserve/drop decisions, and active
+  permission-prompt key translations. Each line includes source, destination,
+  transform, key, byte count, and harness when known; prompt text is logged only
+  as length plus SHA-256.
 
 ### Actor lifecycle reporting
 

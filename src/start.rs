@@ -1023,6 +1023,23 @@ fn auto_trigger_inject_command(
     );
     let submitted_text = crate::supervisor::ipc::normalize_submit_text(trigger_cmd);
     if let Some(pane_id) = shared.inject_pane.as_deref() {
+        crate::input_diag::log_text_submit(
+            None,
+            "supervisor.auto_trigger",
+            &format!("pane:{pane_id}"),
+            &submitted_text,
+            Some(&shared.harness_binary),
+            if shared.harness_binary == "opencode" {
+                "auto_trigger_kitty_return"
+            } else {
+                "auto_trigger_enter"
+            },
+            if shared.harness_binary == "opencode" {
+                "KittyReturn"
+            } else {
+                "Enter"
+            },
+        );
         return match dispatch_submit_text_to_pane(pane_id, &submitted_text, &shared.harness_binary)
         {
             Ok(()) => AutoTriggerOutcome::Sent,
@@ -1038,6 +1055,15 @@ fn auto_trigger_inject_command(
     }
 
     let payload = crate::supervisor::ipc::submit_bytes(&submitted_text).into_bytes();
+    crate::input_diag::log_text_submit(
+        None,
+        "supervisor.auto_trigger",
+        "child_pty",
+        &submitted_text,
+        Some(&shared.harness_binary),
+        "pty_submit_cr",
+        "Enter",
+    );
 
     let Some(mut writer) = lock_writer_interruptibly(&writer_arc, stop) else {
         return AutoTriggerOutcome::Cancelled;
@@ -1915,6 +1941,23 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
                 return IpcResponse::err(reason);
             }
             let injected = if let Some(pane_id) = shared.inject_pane.as_deref() {
+                crate::input_diag::log_text_submit(
+                    None,
+                    "supervisor.ipc_inject",
+                    &format!("pane:{pane_id}"),
+                    &bytes,
+                    Some(&shared.harness_binary),
+                    if shared.harness_binary == "opencode" {
+                        "ipc_inject_kitty_return"
+                    } else {
+                        "ipc_inject_enter"
+                    },
+                    if shared.harness_binary == "opencode" {
+                        "KittyReturn"
+                    } else {
+                        "Enter"
+                    },
+                );
                 dispatch_submit_text_to_pane(pane_id, &bytes, &shared.harness_binary)
                     .map_err(|e| e.to_string())
             } else {
@@ -1923,6 +1966,15 @@ fn handle_ipc(method: IpcMethod, shared: &SupervisorShared) -> IpcResponse {
                     Some(writer_arc) => {
                         let mut w = writer_arc.lock().unwrap();
                         let normalized = normalize_supervisor_inject_bytes(&bytes);
+                        crate::input_diag::log_transform_event(
+                            None,
+                            "supervisor.ipc_inject",
+                            "child_pty",
+                            "normalize_lf_to_cr",
+                            bytes.as_bytes(),
+                            &normalized,
+                            Some(&shared.harness_binary),
+                        );
                         w.write_all_blocking(&normalized)
                             .map_err(|e| format!("write error: {e}"))
                     }
@@ -2114,6 +2166,17 @@ fn spawn_writer_thread(
                             .load(Ordering::Relaxed),
                         shared.prompt_visible_once.load(Ordering::Relaxed),
                     );
+                    if let Some(filtered) = maybe_filtered.as_deref() {
+                        crate::input_diag::log_transform_event(
+                            None,
+                            "supervisor.stdin",
+                            "child_pty",
+                            "drop_stale_ctrl_d_before_prompt",
+                            data,
+                            filtered,
+                            Some(&harness.binary),
+                        );
+                    }
                     let data = maybe_filtered.as_deref().unwrap_or(data);
                     if data.is_empty() {
                         if debug {
@@ -2125,7 +2188,36 @@ fn spawn_writer_thread(
                     }
                     let maybe_translated =
                         normalize_stdin_for_harness_permission_prompt(&shared, &harness, data);
+                    if let Some(translated) = maybe_translated.as_deref() {
+                        crate::input_diag::log_prompt_detection(
+                            None,
+                            "supervisor.stdin",
+                            "child_pty",
+                            &harness.binary,
+                            "active permission prompt",
+                            "active",
+                        );
+                        crate::input_diag::log_transform_event(
+                            None,
+                            "supervisor.stdin",
+                            "child_pty",
+                            "opencode_permission_arrow_translation",
+                            data,
+                            translated,
+                            Some(&harness.binary),
+                        );
+                    }
                     let data = maybe_translated.as_deref().unwrap_or(data);
+                    if crate::input_diag::verbose_enabled() {
+                        crate::input_diag::log_byte_events(
+                            None,
+                            "supervisor.stdin",
+                            "child_pty",
+                            "raw_forward",
+                            data,
+                            Some(&harness.binary),
+                        );
+                    }
                     // Detect Ctrl+D (\x04) — in raw mode this is a byte, not EOF.
                     // The pty slave's line discipline interprets it as EOF for the child.
                     if let Some(ref flag) = ctrl_d_flag
@@ -2206,6 +2298,16 @@ fn spawn_writer_thread(
                             if buf[..n].contains(&0x03) {
                                 flag.store(true, Ordering::Relaxed);
                             }
+                        }
+                        if crate::input_diag::verbose_enabled() {
+                            crate::input_diag::log_byte_events(
+                                None,
+                                "supervisor.stdin",
+                                "child_pty",
+                                "raw_forward",
+                                &buf[..n],
+                                None,
+                            );
                         }
                         let Some(mut w) = lock_writer_interruptibly(&writer, stop.as_ref()) else {
                             break;

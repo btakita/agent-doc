@@ -4359,6 +4359,23 @@ fn send_command_once_unchecked(
         eprintln!("[route] warning: display-message failed: {}", e);
     }
 
+    crate::input_diag::log_text_submit(
+        Some(Path::new(file_path)),
+        "route.direct_pane_submit",
+        &format!("pane:{pane}"),
+        &payload,
+        Some(&harness.binary),
+        if harness.binary == "opencode" {
+            "routed_trigger_kitty_return"
+        } else {
+            "routed_trigger_enter"
+        },
+        if harness.binary == "opencode" {
+            "KittyReturn"
+        } else {
+            "Enter"
+        },
+    );
     crate::sessions::send_submitted_text_for_harness(tmux, pane, &payload, &harness.binary)?;
     if let Err(e) = tmux.select_pane(pane) {
         eprintln!("[route] warning: failed to focus pane {}: {}", pane, e);
@@ -4403,6 +4420,15 @@ fn dispatch_via_supervisor_ipc_with_mode(
     let method = IpcMethod::Inject {
         bytes: routed_trigger_submit_payload(&payload),
     };
+    crate::input_diag::log_text_submit(
+        Some(file),
+        "route.supervisor_ipc",
+        &format!("socket:{}:pane:{pane}", sock.display()),
+        &payload,
+        Some(&harness.binary),
+        "supervisor_ipc_inject",
+        "Inject",
+    );
     let submit_start = Instant::now();
     let response = crate::supervisor::ipc::send_command(&sock, &method).with_context(|| {
         format!(
@@ -6498,6 +6524,15 @@ fn auto_start_in_session(
 
     // Start agent-doc start in the new pane
     let start_cmd = format!("{} start --route-owned {}", agent_doc_bin, start_path);
+    crate::input_diag::log_text_submit(
+        Some(file),
+        "route.auto_start",
+        &format!("pane:{new_pane}"),
+        &start_cmd,
+        Some(&harness.binary),
+        "route_owned_start_enter",
+        "Enter",
+    );
     crate::sessions::send_submitted_text(tmux, &new_pane, &start_cmd)?;
 
     eprintln!(
@@ -6761,6 +6796,16 @@ fn wait_for_agent_ready_outcome(
                 } else {
                     blocker_streak = 1;
                     last_blocker = Some(reason.clone());
+                    if reason == "active permission prompt" {
+                        crate::input_diag::log_prompt_detection(
+                            None,
+                            "route.wait_for_agent_ready",
+                            &format!("pane:{pane_id}"),
+                            &harness.binary,
+                            &reason,
+                            "entered",
+                        );
+                    }
                 }
                 if blocker_streak >= 2 {
                     eprintln!(

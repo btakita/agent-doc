@@ -1297,6 +1297,16 @@ fn protected_registered_pane_state_from_capture(
 ) -> Option<ProtectedRegisteredPaneState> {
     let harness = resolve_harness_for_sync(file);
     let reason = harness.protected_prompt_input_reason(capture)?;
+    if reason == "active permission prompt" {
+        crate::input_diag::log_prompt_detection(
+            Some(file),
+            "sync.protected_registered_pane",
+            "registered_pane",
+            &harness.binary,
+            &reason,
+            "active",
+        );
+    }
     Some(ProtectedRegisteredPaneState {
         reason,
         last_visible_excerpt: last_visible_excerpt(capture),

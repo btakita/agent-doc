@@ -257,6 +257,16 @@ impl PtySession {
                     match lock.read(&mut buf) {
                         Ok(0) => break, // parent stdin closed
                         Ok(n) => {
+                            if crate::input_diag::verbose_enabled() {
+                                crate::input_diag::log_byte_events(
+                                    None,
+                                    "supervisor.forward_stdio",
+                                    "child_pty",
+                                    "raw_forward",
+                                    &buf[..n],
+                                    None,
+                                );
+                            }
                             if let Err(e) = writer.write_all(&buf[..n]) {
                                 eprintln!("[supervisor::pty] pty write error: {e}");
                                 break;
@@ -487,6 +497,54 @@ impl PtyFilter {
                             b'u' if has_lt => !self.preserve_kitty_keyboard,
                             _ => false,
                         };
+                        if has_gt && matches!(final_byte, b'u' | b'm') {
+                            let key = if final_byte == b'u' {
+                                "kitty_keyboard_push"
+                            } else {
+                                "kitty_progressive_enhancement"
+                            };
+                            crate::input_diag::log_key_event(
+                                None,
+                                "supervisor.pty_filter",
+                                "stdout",
+                                if should_filter {
+                                    "kitty_keyboard_drop"
+                                } else {
+                                    "kitty_keyboard_preserve"
+                                },
+                                key,
+                                i - start,
+                                crate::input_diag::KeyEventMeta {
+                                    harness: None,
+                                    detail: Some(if self.preserve_kitty_keyboard {
+                                        "preserve_kitty_keyboard=true"
+                                    } else {
+                                        "preserve_kitty_keyboard=false"
+                                    }),
+                                },
+                            );
+                        } else if has_lt && final_byte == b'u' {
+                            crate::input_diag::log_key_event(
+                                None,
+                                "supervisor.pty_filter",
+                                "stdout",
+                                if should_filter {
+                                    "kitty_keyboard_drop"
+                                } else {
+                                    "kitty_keyboard_preserve"
+                                },
+                                "kitty_keyboard_pop",
+                                i - start,
+                                crate::input_diag::KeyEventMeta {
+                                    harness: None,
+                                    detail: Some(if self.preserve_kitty_keyboard {
+                                        "preserve_kitty_keyboard=true"
+                                    } else {
+                                        "preserve_kitty_keyboard=false"
+                                    }),
+                                },
+                            );
+                        }
                         if should_filter {
                             continue; // drop this sequence
                         }

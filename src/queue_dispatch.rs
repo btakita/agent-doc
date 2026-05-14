@@ -227,6 +227,15 @@ fn try_supervisor_dispatch(
     // Use `inject` method to send the command text to the harness stdin.
     // The harness interprets `/command` lines natively.
     let bytes = supervisor_ipc::normalize_submit_text(&item.raw);
+    crate::input_diag::log_text_submit(
+        Some(&ctx.file),
+        "queue_dispatch.supervisor_ipc",
+        &format!("socket:{}", sock.display()),
+        &bytes,
+        None,
+        "supervisor_ipc_inject",
+        "Inject",
+    );
     let method = supervisor_ipc::IpcMethod::Inject { bytes };
     let resp =
         supervisor_ipc::send_command(&sock, &method).context("supervisor IPC dispatch failed")?;
@@ -254,6 +263,15 @@ fn try_tmux_dispatch(item: &QueueItem, ctx: &DispatchContext) -> Result<Option<D
     let tmux = sessions::Tmux::default();
 
     // Send the command text + Enter to the pane
+    crate::input_diag::log_text_submit(
+        Some(&ctx.file),
+        "queue_dispatch.tmux_send_keys",
+        &format!("pane:{pane_id}"),
+        &item.raw,
+        None,
+        "tmux_text_enter",
+        "Enter",
+    );
     sessions::send_submitted_text(&tmux, &pane_id, &item.raw)?;
 
     // Poll for completion: wait until the command text disappears from the

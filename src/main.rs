@@ -72,6 +72,7 @@ mod history;
 mod hook_cmd;
 mod hooks;
 mod init;
+mod input_diag;
 mod install;
 mod layout;
 mod lib_gc;

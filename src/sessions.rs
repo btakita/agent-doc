@@ -186,10 +186,28 @@ impl Multiplexer for Tmux {
     }
 
     fn send_key(&self, pane_id: &str, key: &str) -> Result<()> {
+        crate::input_diag::log_key_event(
+            None,
+            "sessions.send_key",
+            &format!("pane:{pane_id}"),
+            "tmux_send_key",
+            key,
+            key.len(),
+            crate::input_diag::KeyEventMeta::default(),
+        );
         Tmux::send_key(self, pane_id, key)
     }
 
     fn send_submitted_text(&self, pane_id: &str, text: &str) -> Result<()> {
+        crate::input_diag::log_text_submit(
+            None,
+            "sessions.send_submitted_text",
+            &format!("pane:{pane_id}"),
+            text,
+            None,
+            "tmux_text_enter",
+            "Enter",
+        );
         Tmux::send_keys(self, pane_id, text)
             .with_context(|| format!("failed to submit input to pane {}", pane_id))
     }
@@ -200,6 +218,25 @@ impl Multiplexer for Tmux {
         text: &str,
         harness: &str,
     ) -> Result<()> {
+        let submit_key = if harness == "opencode" {
+            "KittyReturn"
+        } else {
+            "Enter"
+        };
+        let transform = if harness == "opencode" {
+            "tmux_text_kitty_return"
+        } else {
+            "tmux_text_enter"
+        };
+        crate::input_diag::log_text_submit(
+            None,
+            "sessions.send_submitted_text_for_harness",
+            &format!("pane:{pane_id}"),
+            text,
+            Some(harness),
+            transform,
+            submit_key,
+        );
         tmux_router::submit_text_for_harness(self, pane_id, text, harness)
             .with_context(|| format!("failed to submit input to {harness} pane {pane_id}"))
     }

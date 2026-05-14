@@ -351,6 +351,12 @@ single-owner actor controls:
   protocol Return sequence after the literal text instead of tmux's named
   `Enter` key. OpenCode distinguishes `return` from `ctrl+j` in its TUI keymap,
   and a bare carriage-return submit can be interpreted as newline input.
+- Every tmux-bound input path must produce structured `tmux_input_event`
+  diagnostics naming the source, destination, transform, key, byte count, and
+  harness when known. Text payloads must be hashed rather than logged raw, so
+  route, queue-dispatch, supervisor IPC, auto-trigger, and stdin-forwarding
+  regressions can assert the actual delivery path without depending on manual
+  pane inspection.
 - `agent-doc session doctor <FILE> [--repair]` reports actor/registry/supervisor
   drift plus controller projection and recent command-stage failures in one
   read-only summary, with `--repair` explicitly escalating into the destructive

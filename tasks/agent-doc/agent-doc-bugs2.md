@@ -34,14 +34,35 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): directsubmitbudget
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-sync orchestra
-dispatch #spec-test-build-install-commit-push
-- do [#latefallbackloop]
-- do [#clearstartingrace]
-- do [#ownedreapbusy]
-- do [#opencodeinputdiag]
-- do [#tmuxe2etests]
-<!-- agent:boundary:244f7d5f -->
+
+❯ do [#latefallbackloop]
+❯ sync orchestra
+❯ dispatch #spec-test-build-install-commit-push
+❯ - do [#latefallbackloop]
+❯ - do [#clearstartingrace]
+❯ - do [#ownedreapbusy]
+❯ - do [#opencodeinputdiag]
+❯ - do [#tmuxe2etests]
+### Re: latefallbackloop — gpt-5
+
+Implemented `#latefallbackloop`.
+
+The late IPC fallback path now treats an already committed cycle as a terminal skip instead of a successful IPC consume. `try_ipc` returns an explicit `skipped_committed_cycle` result, callers stop before logging `ipc_write_consumed`, stale queued patch JSON is cleaned up with a claimed-patch sentinel, and the socket-to-file fallback rechecks committed state before writing another fallback patch.
+
+Updated the session-routing spec and `VERSIONS.md`, and added a regression proving a committed-cycle late IPC attempt is not reported as consumed and cannot leave a stale patch for a watcher to replay.
+
+Verification:
+- `cargo test late_fallback_patch_guard_tests`
+- `make check`
+- `gh run list --workflow "Agent Doc" --limit 5`: latest remote `Agent Doc` runs are red immediately
+- `gh run view 25838897606 --log-failed`: `log not found`, so the remote tmux failure was not inspectable
+- `make tmux-ci`: 227 live tmux tests passed, 0 failed
+- `make install`: installed `agent-doc v0.33.16` and `libagent_doc-0.33.16.so`
+
+Commits:
+- `src/agent-doc` `b5a3a2b4` (`fix: stop late ipc fallback loops`) pushed to `origin/20260422/codex-agent-backend`
+- parent repo `7f0d3dc66` (`agent-doc: stop late ipc fallback loops`) is committed locally and will be pushed after this document closeout commit is created
+<!-- agent:boundary:5c23d659 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -116,7 +137,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#latefallbackloop] #agent-doc-bug: Late fallback patch writes keep firing after a cycle is already committed; logs show repeated late_fallback_patch_rejected reason=already_committed, ipc_write_consumed, commit_already_current, and one resume_commit_blocked_drift with an unresolved prompt-only tail. Stop fallback writers at terminal commit state or rebind them to the next cycle before accepting IPC patches.
 - [ ] [#clearstartingrace] #agent-doc-bug: Clear/restart commands can race starting owned panes; logs show session_clear_sent while generation 170 was still starting, followed by protected-input refusals, commits, and repeated starting_not_ready. Gate clear/restart on dispatch-ready or clean-exit prompt state and document-dirty state before sending literal Enter into the pane.
 - [ ] [#ownedreapbusy] #agent-doc-bug: Owned pane reap decisions are noisy and often keep panes alive from spinner tails like Working/escape-title fragments instead of a stable idle/busy signal. Normalize screen-tail sampling or prefer supervisor prompt state so route_owned_reap_decision does not preserve panes based on transient renderer text.
 - [ ] [#opencodeinputdiag] #agent-doc-bug: Add structured diagnostic logging for all tmux input paths — supervisor stdin forwarding, send-keys dispatch, Kitty keyboard protocol state, permission prompt detection transitions. Emit a log line per key event with source/destination/transform so regressions can be caught with log assertions, not manual testing.

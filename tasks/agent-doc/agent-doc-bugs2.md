@@ -29,44 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260514-165604.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260514-172628.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Zellij vs tmux reliability; log evaluation and next steps
+- Archived 2 response topic(s): #opsreadinessrace; closeout normalization
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-
-❯ (preset #spec-test-build-install-commit-push)
-❯ update spec + tests. build + install for local testing. commit + push
-❯ do [#opsreadinessrace]
-❯ sync orchestra
-❯ preset #spec-test-build-install-commit-push
-❯ - do [#opsreadinessrace]
-❯ - do [#backlogorphan]
-❯ - do [#interruptcleartimeout]
-❯ - do [#opsnoisereduce]
-❯ - do [#hookreviewroute]
-❯ - do [#sshcapfalsecapture]
-❯ - do [#codexverbosepb]
-### Re: #opsreadinessrace — gpt-5
-
-Implemented the route-readiness guard in `src/agent-doc`.
-
-The child run updated `src/agent-doc/src/route.rs`, `src/agent-doc/src/session_actor_cmd.rs`, and `src/agent-doc/specs/07-session-tmux-commands.md` so clear/dispatch paths fail closed while the authoritative actor is still `starting` and report a single wait/retry state until `prompt_ready=true`.
-
-Committed and pushed in the `src/agent-doc` submodule:
-
-- `cc3f20ef` (`fix: clarify starting actor readiness guard`)
-
-Parent repo submodule pointer was updated afterward. `#opsreadinessrace` is now recorded in the done archive.
-
-The original sequential orchestrator hung after that committed first step, so I stopped the stuck parent process and preserved the remaining backlog items as open for the next recovery cycle instead of pretending the full batch completed.
-
-### Re: closeout normalization — gpt-5 (HEAD)
-
-No additional repo work was needed for this cycle. The only prompt-bearing diff was the previously answered `#opsreadinessrace` preset line being normalized with a prompt prefix and the committed response heading being marked `(HEAD)`.
-
-I treated that as closeout cleanup for the interrupted orchestrator run, not as a new request to rerun the completed spec/test/build/install path.
-<!-- agent:boundary:074460d6 -->
+<!-- agent:boundary:c02693b0 -->
 <!-- /agent:exchange -->
 ###
 <!--

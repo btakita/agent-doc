@@ -94,7 +94,32 @@ So I would not remove the requirement wholesale. It is doing useful fail-closed 
 What we can remove is the brittleness. A good fix would be to make orchestration normalize a plain final answer into a `patch:exchange` block before calling `finalize`, but only when the payload is clearly a single assistant response, not a transcript or component dump. That would keep the safety invariant while avoiding the failure mode we just hit.
 
 Concretely: keep the committed-response proof, but add an orchestration-side repair/synthesis path for clean plain responses. Do not relax it to "anything printed by the child is acceptable." That would reopen the exact closeout class agent-doc has been tightening: response text exists in the harness console, but not durably in the document.
-<!-- agent:boundary:0ed10820 -->
+❯ Why not target the `<!-- agent:boundary -->` tag?
+### Re: boundary targeting — gpt-5
+
+Targeting the `<!-- agent:boundary:... -->` marker is useful internally, but it should not replace the `patch:exchange` response contract.
+
+The boundary marker is an insertion anchor. It answers "where inside the exchange should append-mode content land right now?" The binary and editor IPC already use it that way: pre-patch logic normalizes stale boundaries, extracts the current boundary id, applies the response before that marker, then repositions a fresh marker at the end. It is intentionally transient working-tree/editor state, and preflight/commit are allowed to collapse or ignore boundary-only churn.
+
+`patch:exchange` answers a different question: "what component is this response intentionally writing to?" That matters before any insertion happens. It lets the binary prove that a child response is a response-body write, reject raw transcript spill, avoid accidentally writing to `status`/`backlog`/frontmatter, and keep the commit boundary deterministic.
+
+So the right design is probably both:
+
+- Use `patch:exchange` as the semantic write target and closeout proof.
+- Use `agent:boundary` as the placement anchor inside the exchange component.
+
+If orchestration receives a clean plain assistant answer, it can synthesize:
+
+```markdown
+<!-- patch:exchange -->
+<plain assistant answer>
+<!-- /patch:exchange -->
+```
+
+Then the normal write path can still insert that patch at the current boundary. That removes the brittleness without making the boundary marker carry too much meaning.
+
+I would avoid making children target the boundary marker directly because it turns a volatile cursor-like marker into an API. Boundary ids can be stale, rewritten, missing, duplicated during repair, or stripped from snapshots/archives. A child response should not depend on that lifecycle. It should name the component; the binary should choose the current anchor.
+<!-- agent:boundary:73208ed3 -->
 <!-- /agent:exchange -->
 ###
 <!--

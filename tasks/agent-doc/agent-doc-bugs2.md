@@ -62,7 +62,24 @@ Verification:
 Commits:
 - `src/agent-doc` `b5a3a2b4` (`fix: stop late ipc fallback loops`) pushed to `origin/20260422/codex-agent-backend`
 - parent repo `7f0d3dc66` (`agent-doc: stop late ipc fallback loops`) is committed locally and will be pushed after this document closeout commit is created
-<!-- agent:boundary:5c23d659 -->
+❯ Why did symphony orchestra not create a chain of subagents?
+### Re: orchestration subagents — gpt-5
+
+Because `agent-doc orchestrate --mode sequential` is not implemented as a Codex subagent chain.
+
+The code path in `src/agent-doc/src/orchestrate.rs` says sequential orchestration injects one task into the document exchange, runs preflight, sends one fresh backend request with no session reuse, then persists through `finalize` and `session-check` before moving to the next task. Its contract explicitly says sequential orchestration never resumes prior agent sessions between tasks: each step is `session_id=None` and `fork=false`. So the intended shape is fresh step runs owned by the `agent-doc` binary, not nested Codex `spawn_agent` workers or a chain of subagents.
+
+In the live run, it also did not get past step 1. The orchestrator injected `❯ do [#latefallbackloop]`, then failed its own closeout with:
+
+`orchestrate template-mode responses must include a <!-- patch:exchange --> block`
+
+After that, preflight saw only the injected first task as the active prompt. I completed that task manually in the normal document lifecycle, which is why the remaining requested tasks were not fanned out or chained.
+
+So there are two separate points:
+
+1. Sequential orchestration is stepwise fresh-agent execution, not subagent spawning.
+2. This particular orchestration aborted on the first step because the generated template-mode response did not satisfy the required patchback shape.
+<!-- agent:boundary:4a49504f -->
 <!-- /agent:exchange -->
 ###
 <!--

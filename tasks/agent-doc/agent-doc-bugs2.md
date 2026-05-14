@@ -159,7 +159,30 @@ The practical next step is not to remove every guard. It is to make the guard mu
 4. The plugin should not leave the operator guessing after a destructive-confirmation path.
 
 I added a backlog item for the vim/drop-into-editor failure so it can be fixed directly instead of continuing to spend cycles around the same guardrail behavior.
-<!-- agent:boundary:430ae155 -->
+❯ do [#clearinterruptvim]. spec-test-build-install-commit-push
+### Re: #clearinterruptvim — gpt-5
+
+Implemented `#clearinterruptvim`.
+
+`agent-doc session interrupt-clear <FILE>` now watches the managed pane after sending the harness interrupt sequence. If the pane drops into Vim/Neovim during the explicit discard path, the binary logs `session_interrupt_clear_editor_recovery`, sends one forced `:qa!` recovery, then continues waiting for idle/closed evidence before retrying normal clear. If it still times out, the error now includes `last_command` and tells the operator exactly how to recover instead of giving a generic busy timeout.
+
+Updated the session tmux command spec, shared editor specs, JetBrains spec, and `VERSIONS.md` to keep interrupt/clear recovery binary-owned after the IDE confirmation.
+
+Verification passed:
+- `cargo fmt --check`
+- `cargo test interrupt_clear_timeout_message`
+- `cargo test terminal_editor_command_detects_vim_family_processes`
+- `make check`
+- `make build`
+- `make install && agent-doc --version` -> `agent-doc 0.33.16`
+- `make tmux-ci` -> 227 live/ignored tmux tests passed
+
+CI review: latest hosted `CI` run on `main` is green (`25773430221`, May 13, 2026). There is no hosted workflow named `tmux-ci`, so the tmux evidence is the local `make tmux-ci` run above.
+
+Commits pushed:
+- `src/agent-doc` `6bae5bb` (`fix: recover editor prompts during interrupt clear`)
+- parent repo `930552c7b` (`agent-doc: recover editor prompts during interrupt clear`)
+<!-- agent:boundary:d912f5f8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -234,7 +257,6 @@ minor (v0.34.0) release + publish. merge into main
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#clearinterruptvim] #agent-doc-bug: Clear Session Context interrupt-clear UX can still land the operator in vim or a confusing terminal state after the explicit discard confirmation; tighten the interrupt-clear path so it exits/avoids editor prompts, waits for a real harness-ready prompt or clean closed state, and reports a precise recovery action instead of leaving the pane in an editor.
 - [ ] [#sshcapfalsecapture] #agent-doc-bug: Required-SSH guard falsely failed a Monster Rod Holders `agent-doc` run by matching historical `.agent-doc/captures/...json` text containing `socket: Operation not permitted`; `command_execution_required_ssh_failure()` scans arbitrary command output before proving the command was an SSH probe. Plan: tasks/agent-doc/plan-required-ssh-false-positive-historical-capture.md
 - [ ] [#codexverbosepb] #agent-doc-bug: Codex child-run response patchback is too verbose because `src/agent-doc/src/agent/codex.rs` concatenates every `item.completed` `agent_message`, so progress/status chatter from a Monster Rod Holders run was committed into `tasks/monsterrodholders.md` along with the final closeout. Plan: tasks/agent-doc/plan-codex-response-patchback-verbose-progress.md
 <!-- /agent:backlog -->

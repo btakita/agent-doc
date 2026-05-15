@@ -55,7 +55,7 @@ Commits prepared before this session closeout:
 - superproject gitlink: `cee464d03` (`chore: update agent-doc submodule`)
 
 No follow-up backlog items.
-<!-- agent:boundary:1345e32b -->
+<!-- agent:boundary:419d92cd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,6 +69,35 @@ No follow-up backlog items.
 <!-- agent:backlog -->
 - [ ] [#vkk8] [recommended] Investigate the Agent Doc GitHub Actions workflow jobs that fail before step logs are available; run 25923724699 completed in about three seconds with empty job steps and gh reporting log not found.
 - [ ] [#kw0r] [recommended] Audit and harden process-global cwd/env test isolation so unbounded cargo test does not intermittently poison session_check tests; make check already uses TEST_THREADS=2 as the supported full-suite entrypoint.
+- [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
+- [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
+- [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
+- [ ] [#rafe] [recommended] Phase 4 for lower-agent orchestration: implement agent-doc jobs create/list/status/collect plus optional operation-doc generation and closeout links. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
+- [ ] [#ek86] Implement the lower-agent orchestration MVP from tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md, starting with manual job packets plus tsift context packets.
+- [ ] [#fwjw] Define the agent-doc taxonomy for agent docs, job packets, operation docs, runbooks, and plans.
+- [ ] [#0fcx] Specify operation docs/opdocs as retained audit artifacts and how they relate to job packets.
+<!-- /agent:backlog -->
+
+<!-- agent:icebox -->
+<!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done archive=tasks/agent-doc-bugs2.done.md -->
+
+<!-- completed work archived in tasks/agent-doc-bugs2.done.md -->
+<!-- /agent:done -->
+
+-->
+
+<!-- agent:queue -->
+<!-- /agent:queue -->
+
+## Pending / Not Built
+
+<!-- agent:backlog -->
+- [ ] [#kw0r] [recommended] Audit and harden process-global cwd/env test isolation so unbounded cargo test does not intermittently poison session_check tests; make check already uses TEST_THREADS=2 as the supported full-suite entrypoint.
+- [ ] [#6v38] [recommended] Implement the answered-marker closeout hardening from tasks/agent-doc/plan-finish-closeout-after-answered-marker-drift.md, including an end-to-end closeout/session-check regression for live IDE marker drift.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

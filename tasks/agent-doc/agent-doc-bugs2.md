@@ -72,7 +72,34 @@ Verification:
 - `agent-doc --version` -> `agent-doc 0.33.16`
 
 No follow-up backlog items from this pass.
-<!-- agent:boundary:8e26c6e2 -->
+
+❯ (preset #spec-test-build-install-commit-push)
+❯ update spec + tests. build + install for local testing. commit + push
+❯ do [#writeempty]
+### Re: #writeempty spec/test/build/install — gpt-5
+
+Completed the requested `#writeempty` follow-up pass. The `#writeempty` backlog item was already archived before this cycle, so there was no live pending item to mark done again.
+
+Changed in `src/agent-doc`:
+- Added an integration regression for `agent-doc write --commit <FILE> --done <id>` with empty stdin. It now proves the command reaps and archives the completed item, commits the document, leaves the exchange untouched, and passes `session-check`.
+- Updated `specs/07-closeout-commands.md` so the empty-stdin pending-only repair contract explicitly covers both `--pending-add` and `--done` shapes.
+- Added an unreleased `VERSIONS.md` note for this `#writeempty` coverage.
+
+Commits pushed:
+- `src/agent-doc`: `fd0fe8a2` `test: cover empty write done closeouts`
+- parent repo: `6ba872e1e` `agent-doc: cover empty write done closeouts`
+
+Verification:
+- `cargo test write_commit_empty_stdin_with_done_commits_pending_only_reap --test finalize_integration`
+- `cargo fmt --check`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest inspected GitHub `CI` run `25773430221` was green; it did not expose a current branch tmux leg, so I ran local `make tmux-ci`, which passed with 228 live tmux tests.
+
+No follow-up backlog items from this pass.
+<!-- agent:boundary:8c8ff751 -->
 <!-- /agent:exchange -->
 ###
 <!--

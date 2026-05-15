@@ -29,33 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-151542.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-152800.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #34qd; #34qd final closeout
+- Archived 1 response topic(s): #6v38 answered-marker closeout hardening
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#6v38]. spec-test-build-install-commit-push
-### Re: #6v38 answered-marker closeout hardening — gpt-5
-
-Implemented and closed `#6v38`.
-
-What changed:
-- Added an end-to-end `session-check` regression for active Codex sessions where the live IDE normalizes answered prompt markers, adds `(HEAD)`, rotates the boundary id, and changes backlog metadata wording after the response is already committed.
-- Updated the closeout command spec to document that promptless answered-marker / `(HEAD)` / boundary churn paired with backlog metadata wording drift is allowed, while fresh prompt targets, response patchbacks, and typed-component drift outside that envelope still fail closed.
-
-Verification:
-- `cargo test session_check_ignores_active_session_answered_marker_and_backlog_metadata_drift`
-- `cargo fmt --check`
-- `make check`
-- `make install`
-- Latest visible GitHub CI run for `btakita/agent-doc` was green; that run did not expose a separate `make tmux-ci` step to inspect.
-
-Commits prepared before this session closeout:
-- `src/agent-doc`: `ede90d11` (`fix: allow answered marker closeout drift`)
-- superproject gitlink: `cee464d03` (`chore: update agent-doc submodule`)
-
-No follow-up backlog items.
-<!-- agent:boundary:419d92cd -->
+<!-- agent:boundary:f5228d47 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -64,7 +64,7 @@ Verification:
 
 <!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
-- do [#has9]
+- ~do [#has9]~
 - do [#5pr6]
 - do [#s1mv]
 <!-- /agent:queue -->

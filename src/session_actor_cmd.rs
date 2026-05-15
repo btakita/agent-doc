@@ -397,6 +397,10 @@ fn guard_starting_actor_operator_command(
     tmux: &Tmux,
     action: OperatorAction,
 ) -> Result<()> {
+    if action == OperatorAction::Clear {
+        return Ok(());
+    }
+
     if !operator_command_has_starting_actor(ctx) {
         return Ok(());
     }
@@ -406,39 +410,12 @@ fn guard_starting_actor_operator_command(
     let clean_exit_prompt = pane_shows_clean_exit_prompt(ctx, tmux, &evidence);
     let dispatch_ready =
         evidence.state == LivePaneState::AliveIdle && evidence.prompt_ready == Some(true);
-    let protected_clear_input = if action == OperatorAction::Clear {
-        protected_clear_input_reason(ctx, tmux, &evidence).is_some()
-    } else {
-        false
-    };
-
     if dispatch_ready && !dirty {
         reconcile_idle_projection_from_evidence(ctx, &evidence)?;
         return Ok(());
     }
 
     if action.allows_clean_exit_prompt() && clean_exit_prompt && !dirty {
-        return Ok(());
-    }
-
-    if starting_clear_can_use_direct_pane(
-        action,
-        &evidence,
-        protected_clear_input,
-        clean_exit_prompt,
-    ) {
-        crate::ops_log::log_op(
-            &ctx.canonical_file,
-            &format!(
-                "session_operator_starting_clear_allowed file={} pane={} source={} dirty_after_commit={} prompt_ready={} tail={:?}",
-                ctx.canonical_file.display(),
-                evidence.pane_id.as_deref().unwrap_or("unknown"),
-                evidence.source,
-                dirty,
-                evidence.prompt_ready.unwrap_or(false),
-                evidence.tail.as_deref().unwrap_or("unknown")
-            ),
-        );
         return Ok(());
     }
 
@@ -476,19 +453,6 @@ fn guard_starting_actor_operator_command(
         reason,
         ctx.canonical_file.display()
     )
-}
-
-fn starting_clear_can_use_direct_pane(
-    action: OperatorAction,
-    evidence: &LivePaneEvidence,
-    protected_clear_input: bool,
-    clean_exit_prompt: bool,
-) -> bool {
-    action == OperatorAction::Clear
-        && evidence.pane_id.is_some()
-        && evidence.state == LivePaneState::AliveBusy
-        && !protected_clear_input
-        && !clean_exit_prompt
 }
 
 fn starting_operator_guard_reason(
@@ -2058,52 +2022,25 @@ mod tests {
     }
 
     #[test]
-    fn starting_operator_guard_reason_blocks_clear_at_clean_exit_prompt() {
-        assert_eq!(
-            starting_operator_guard_reason(OperatorAction::Clear, false, false, true),
-            "the pane is at a clean-exit restart prompt, not a dispatch-ready composer"
+    fn starting_operator_guard_does_not_gate_clear() {
+        let record = test_actor_record(ActorState::Starting);
+        let ctx = test_session_context(
+            record,
+            test_supervisor_runtime(Some(ActorState::Starting)),
+            Some("starting"),
         );
+        let tmux = Tmux::default_server();
+
+        guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Clear)
+            .expect("session clear must not be gated by stale starting actor projections");
+    }
+
+    #[test]
+    fn starting_operator_guard_reason_blocks_restart_at_clean_exit_prompt() {
         assert_eq!(
             starting_operator_guard_reason(OperatorAction::Restart, false, false, true),
             "the pane has not reached a dispatch-ready prompt (`prompt_ready=true`)"
         );
-    }
-
-    #[test]
-    fn starting_clear_guard_allows_unprotected_busy_direct_pane() {
-        let evidence = LivePaneEvidence {
-            pane_id: Some("%7".to_string()),
-            source: "authoritative_actor",
-            state: LivePaneState::AliveBusy,
-            current_command: Some("agent-doc".to_string()),
-            prompt_ready: Some(false),
-            tail: Some("gpt-5.5 high · ~/work/btakita/agent-loop · Context 0% used".to_string()),
-        };
-
-        assert!(starting_clear_can_use_direct_pane(
-            OperatorAction::Clear,
-            &evidence,
-            false,
-            false
-        ));
-        assert!(!starting_clear_can_use_direct_pane(
-            OperatorAction::Restart,
-            &evidence,
-            false,
-            false
-        ));
-        assert!(!starting_clear_can_use_direct_pane(
-            OperatorAction::Clear,
-            &evidence,
-            true,
-            false
-        ));
-        assert!(!starting_clear_can_use_direct_pane(
-            OperatorAction::Clear,
-            &evidence,
-            false,
-            true
-        ));
     }
 
     #[test]

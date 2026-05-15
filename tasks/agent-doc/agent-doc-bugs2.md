@@ -29,32 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-101455.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-104550.md`*
 
 Compacted content:
-- Archived 2 response topic(s): session log review and next steps; JetBrains action logs and live prompt duplication
+- Archived 1 response topic(s): startup route gating
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#r313]. spec-test-build-install-commit-push
-### Re: startup route gating — gpt-5
-Implemented `#r313`.
-
-Summary:
-- Replaced the fixed starting-actor sleep/probe budget with a current-generation dispatch-ready prompt barrier in `src/agent-doc/src/route.rs`.
-- Added typed startup wait diagnostics with elapsed time, pane id, generation, actor state, supervisor health/runtime state, prompt-ready status, and last lifecycle transition.
-- Updated the routing README/spec surfaces and tightened the live tmux fixtures so the startup tests prove a Codex-shaped dispatch-ready prompt before route injection.
-
-Verification:
-- `make check`
-- `make tmux-ci`
-- `make build-release`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- Latest GitHub CI run on `main` was green; the downloaded job log did not show a separate `make tmux-ci` section despite the current workflow listing it, so local `make tmux-ci` is the tmux proof for this turn.
-
-Committed and pushed:
-- `src/agent-doc` `d577a77f` (`fix: gate starting actor dispatch on ready prompts`) to `origin/20260422/codex-agent-backend`.
-- root `8aacd23df` (`chore: update agent-doc submodule`) to `origin/main`.
-<!-- agent:boundary:b7ad9eff -->
+<!-- agent:boundary:fd144430 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

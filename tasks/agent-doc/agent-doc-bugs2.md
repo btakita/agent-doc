@@ -29,29 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-183546.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-191700.md`*
 
 Compacted content:
-- Archived 2 response topic(s): JetBrains Run Agent Doc duplicate prompt corruption; JetBrains Clear Session Context dim placeholder blocker
+- Archived 1 response topic(s): #kw0r process-global test isolation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#kw0r]. spec-test-build-install-commit-push
-### Re: #kw0r process-global test isolation — gpt-5
-
-Implemented #kw0r and marked it done.
-
-The fix unifies test process-global state behind the shared harness/session-check lock, adds a reentrant test guard plus RAII current-directory helper, routes session-check test inspection through that guard, and converts the remaining env/cwd mutation tests that were leaking or restoring manually. I also documented the invariant in `specs/12-deterministic-simulation.md` and added a meta regression in `tests/test_cli.rs`.
-
-Verification:
-- `cargo test --all-targets` passed with default unbounded parallelism: 2108 passed, 0 failed, 228 ignored.
-- `make check` passed, including clippy, full supported test suite, and the medium deterministic simulator.
-- `make tmux-ci` passed: 228 ignored/live tmux tests, 0 failed.
-- `make install` replaced `/home/brian/.cargo/bin/agent-doc` and installed `libagent_doc-0.33.16.so`.
-- Latest visible remote CI for this repo is green, but it is from 2026-05-13; the current tmux evidence is local.
-
-Commits created locally before this closeout:
-- `src/agent-doc` submodule: `5cd12d9` (`test: serialize process-global test state`)
-- parent gitlink: `37d3f57f0` (`agent-doc: serialize process-global test state`)
-<!-- agent:boundary:2b891b33 -->
+<!-- agent:boundary:daf6da3a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -34,7 +34,27 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): session log review and next steps; JetBrains action logs and live prompt duplication
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:dbd12037 -->
+❯ do [#r313]. spec-test-build-install-commit-push
+### Re: startup route gating — gpt-5
+Implemented `#r313`.
+
+Summary:
+- Replaced the fixed starting-actor sleep/probe budget with a current-generation dispatch-ready prompt barrier in `src/agent-doc/src/route.rs`.
+- Added typed startup wait diagnostics with elapsed time, pane id, generation, actor state, supervisor health/runtime state, prompt-ready status, and last lifecycle transition.
+- Updated the routing README/spec surfaces and tightened the live tmux fixtures so the startup tests prove a Codex-shaped dispatch-ready prompt before route injection.
+
+Verification:
+- `make check`
+- `make tmux-ci`
+- `make build-release`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest GitHub CI run on `main` was green; the downloaded job log did not show a separate `make tmux-ci` section despite the current workflow listing it, so local `make tmux-ci` is the tmux proof for this turn.
+
+Committed and pushed:
+- `src/agent-doc` `d577a77f` (`fix: gate starting actor dispatch on ready prompts`) to `origin/20260422/codex-agent-backend`.
+- root `8aacd23df` (`chore: update agent-doc submodule`) to `origin/main`.
+<!-- agent:boundary:b7ad9eff -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -43,7 +63,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#r313] [recommended] Implement the startup route gating next step from tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md: replace fixed starting-actor sleep budgets with a current-generation ready-prompt barrier and typed timeout diagnostics.
 - [ ] [#rrfe] [recommended] Implement the diagnostics phase of tasks/agent-doc/plan-live-typing-duplicate-insertion.md for this repro: every background write touching a live-edited exchange must log writer process/source, patch id, cycle id, write mode, before/after content hashes, and whether prompt text was duplicated or normalized.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

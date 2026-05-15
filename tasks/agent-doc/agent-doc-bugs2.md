@@ -34,7 +34,19 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): queue completion bookkeeping
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b77e34a5 -->
+❯ Review logs for agent-doc bugs and effectiveness. #next-steps
+### Re: log review and next steps — gpt-5
+
+Reviewed `.agent-doc/logs/ops.log`, `.agent-doc/logs/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.log`, `.agent-doc/logs/cycles.jsonl`, the capture for `cycle-1778806827456`, recent `agent-doc-bugs2.md` commits, and the existing replay/Stop-hook plans.
+
+The healthy signal is strong: recent `agent-doc-bugs2.md` routes show `route_dispatch_start_proven` with `proof=consumed`, direct-pane submit succeeds, Codex capability proof is present, safe-passive sync stays inside budget, and response persistence crosses `ipc_write_consumed` plus `commit_success`. The current preflight also correctly classified this prompt as a post-commit user follow-up instead of trying to absorb it into the prior response.
+
+The main bug-shaped signal is terminal-cycle bookkeeping around `cycle-1778806827456`. The queue-drain Stop-hook response did commit, and the prior full queue response was later compacted, so I do not see a missing-response failure there. But the same committed cycle kept receiving later committed/replay updates, including `late_fallback_patch_rejected reason=already_committed` followed by repeated `capture_committed_after_replay` records. That overlaps the existing plans `tasks/agent-doc/plan-stop-hook-write-applied-rewind.md` and `tasks/agent-doc/plan-late-fallback-patch-redirties-committed-doc.md`; the next fix should make terminal cycle state idempotent so stale repair/Stop-hook/fallback paths cannot keep mutating the lifecycle record after commit success.
+
+Two lower-priority effectiveness issues are visible. `session_clear_protected_input_guard_refused reason=drafted_prompt_input` is correctly fail-closed, but repeated clear attempts should be summarized as protected-input UX instead of reading like clear failures. The log also shows high `commit_noop` / `post_commit_local_drift` churn from follow-up edits and no-op reopen cycles; that is mostly expected, but it should be separated in summaries from actionable bugs.
+
+I captured two recommended backlog items for those follow-ups. No code was changed in this cycle; this was a log review and session-document closeout.
+<!-- agent:boundary:0be3479a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -43,6 +55,8 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#sp3q] [recommended] Implement terminal-cycle replay/idempotency fix from tasks/agent-doc/plan-stop-hook-write-applied-rewind.md and tasks/agent-doc/plan-late-fallback-patch-redirties-committed-doc.md; cover cycle-1778806827456 where committed captures continue receiving replay/commit updates after terminal closeout.
+- [ ] [#s8cs] [recommended] Add log-summary/UX handling for repeated session_clear_protected_input_guard_refused and commit_noop drift so expected fail-closed clear/no-op behavior is summarized separately from actionable bugs.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

@@ -29,24 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-002915.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-003211.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #ajx2 live typing duplicate insertion
+- Archived 1 response topic(s): log review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Look through the logs to identify issues with agent-doc. #next-steps
-### Re: log review — gpt-5
-
-I found three issues worth turning into fixes.
-
-1. Opencode routing is often only proving pane-input acceptance, not dispatch start. Evidence includes `.agent-doc/logs/ops.log:103073`, `.agent-doc/logs/ops.log:105032`, and `.agent-doc/logs/ops.log:116379`, all with `proof=accepted proof_scope=accepted_only`. Those are followed by stale locks and unresolved prompt keep-alives for the same opencode/corky flow, for example `.agent-doc/logs/ops.log:105035`, `.agent-doc/logs/ops.log:105044`, and `.agent-doc/logs/ops.log:116382`. That matches the user-facing “button did not actually dispatch” class: text reached the pane, but agent-doc never proved the harness consumed it.
-
-2. The opencode capability proof path appears to be invoking opencode incorrectly. `.agent-doc/logs/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.log:4396`, `:4415`, `:4477`, `:4739`, and `:4762` all record `opencode_capability_proof status=failed`, but the captured child output is opencode’s command/help screen. That looks like a CLI usage/argument construction failure being reported as a child network probe failure. There is also a separate pty write failure in `.agent-doc/logs/be20dd6e-31ce-4f16-93ed-42c9c2a21b98.log:134`.
-
-3. The session lifecycle is repeatedly recovering stale prompt cycles and snapshot drift instead of leaving one clean owner state. Recent evidence includes `.agent-doc/logs/ops.log:105686` for “Left/Right buttons still don't work with agent-doc opencode”, `.agent-doc/logs/ops.log:112752`, `.agent-doc/logs/ops.log:114284`, plus drift warnings like `.agent-doc/logs/ops.log:113760`, `:114287`, and `:116385`. Earlier `snapshot_committed_guard_failed` entries for this same document show the same class at `.agent-doc/logs/ops.log:53655`, `:54300`, `:54857`, `:75002`, and `:89749`.
-
-I added recommended backlog items for those three fixes. I did not change code or run the test suite; this cycle was a log review.
-<!-- agent:boundary:d65d6852 -->
+<!-- agent:boundary:349ce82b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

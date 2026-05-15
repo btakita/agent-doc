@@ -285,6 +285,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     LOG.info("[socket] dedup: patch_id ${patch.patchId} already applied — skipping")
                     return true
                 }
+                awaitIdleBeforeDocumentMutation(patch.file, "socket patch")
                 var applied = false
                 ApplicationManager.getApplication().invokeAndWait {
                     // Re-check under EDT to avoid TOCTOU race with file watcher
@@ -415,6 +416,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 return
             }
 
+            awaitIdleBeforeDocumentMutation(patch.file, "file patch")
             ApplicationManager.getApplication().invokeLater {
                 if (isClaimedByForceDisk(patch.patchId, patch.file) || isPatchAlreadyApplied(patch, patchFile)) {
                     LOG.info("[patch-watcher] dedup (inner): skipping apply for ${patchFile.name}")
@@ -463,6 +465,14 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
         if (!lib.agent_doc_write_ack_content(root, patchId, content)) {
             LOG.warn("[ack-content] FFI write_ack_content returned false for patch_id $patchId")
+        }
+    }
+
+    private fun awaitIdleBeforeDocumentMutation(filePath: String, operation: String) {
+        val lib = AgentDocLib.get() ?: return
+        val idle = lib.agent_doc_await_idle(filePath, TypingTracker.DEBOUNCE_MS, 5_000)
+        if (!idle) {
+            LOG.warn("[patch-watcher] typing debounce timed out before $operation for $filePath")
         }
     }
 

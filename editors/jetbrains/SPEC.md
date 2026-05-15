@@ -55,13 +55,17 @@ Two strategies for detecting the file's position in the editor split:
 
 ### Run Feedback
 
-- `Run Agent Doc` saves and dispatches immediately with `agent-doc route --dispatch-only --plain-trigger`, without editor-side typing debounce or local "already running" inference. Even after `Clear Session Context`, this action still sends the plain `agent-doc <FILE>` reopen into the live session instead of restarting Codex.
+- `Run Agent Doc` waits for the active markdown document's typing indicator to go idle before saving and dispatching with `agent-doc route --dispatch-only --plain-trigger`. Even after `Clear Session Context`, this action still sends the plain `agent-doc <FILE>` reopen into the live session instead of restarting Codex.
 - Repeating `Run Agent Doc` while an older plugin-spawned route process is still alive cancels the stale process and immediately starts a fresh dispatch for the same document.
 - If route fails only because the authoritative actor is still in its startup window, `Run Agent Doc` retries the same dispatch up to three times with bounded backoff before surfacing the final route failure. Any later `Run Agent Doc` click still cancels the older retry loop and starts a fresh dispatch immediately.
 - When Codex hook tracking is installed, `Run Agent Doc` must not report success from a live reroute that only proved tmux acceptance. If the bare reopen was accepted but Codex never records routed submission proof, the binary must fail once with that exact stage-specific reason and must not precede it with an optimistic success/progress line.
 - The action is silent on route progress/success. Failures are logged to the IDE Event Log / notification tool window instead of showing bottom-right balloon popups.
 - A failed route persists the exact `agent-doc route` output under `.agent-doc/state/editor-route-errors/` and the notification exposes copy/open actions so startup-miss and pending-drift diagnostics remain inspectable after the toast moment. A later successful `Run Agent Doc`, binary route, or focused sync for that document deletes the saved route-error file so the editor cannot keep showing an obsolete startup/proof failure after route recovery.
 - Route session targeting follows the same root-aware chooser as sync: a nested document reroute uses that file's nearest `.agent-doc` root, while a mixed-root visible layout stays pinned to the shared workspace root instead of the focused child repo.
+
+### Patch Application Safety
+
+- JetBrains defers socket and file-watch patch application until the target markdown document has been idle long enough for the typing debounce. If the bounded wait times out, the plugin logs the timeout and applies the latest patch rather than blocking indefinitely.
 
 ### Session Operator Actions
 

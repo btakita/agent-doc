@@ -792,6 +792,81 @@ pub fn repair_duplicate_exchange_close_tail(doc: &str) -> Result<Option<String>>
     Ok(Some(repaired))
 }
 
+/// Repair the malformed-template case where a duplicate template scaffold is
+/// inserted between two `<!-- /agent:exchange -->` close markers.
+///
+/// Unlike `repair_duplicate_exchange_close_tail`, the text between the two
+/// close markers is not conversation content to move back into exchange. It is
+/// a duplicated outer document scaffold (`###`, queue/backlog/done components,
+/// etc.) that should be dropped while preserving the first close marker and
+/// the real scaffold after the second close marker.
+pub fn repair_duplicate_exchange_close_scaffold(doc: &str) -> Result<Option<String>> {
+    let open_tag = "<!-- agent:exchange";
+    let close_tag = "<!-- /agent:exchange -->";
+
+    let Some(open_start) = doc.find(open_tag) else {
+        return Ok(None);
+    };
+    let Some(open_end) = doc[open_start..]
+        .find("-->")
+        .map(|idx| open_start + idx + 3)
+    else {
+        return Ok(None);
+    };
+    let Some(first_close_start) = doc[open_end..].find(close_tag).map(|idx| open_end + idx) else {
+        return Ok(None);
+    };
+    let first_close_end = first_close_start + close_tag.len();
+    let Some(second_close_start) = doc[first_close_end..]
+        .find(close_tag)
+        .map(|idx| first_close_end + idx)
+    else {
+        return Ok(None);
+    };
+    let second_close_end = second_close_start + close_tag.len();
+
+    let duplicate_scaffold = &doc[first_close_end..second_close_start];
+    if !is_safe_duplicate_template_scaffold(duplicate_scaffold) {
+        return Ok(None);
+    }
+
+    let mut repaired = String::with_capacity(doc.len() - (second_close_end - first_close_end));
+    repaired.push_str(&doc[..first_close_end]);
+    repaired.push_str(&doc[second_close_end..]);
+    Ok(Some(repaired))
+}
+
+fn is_safe_duplicate_template_scaffold(segment: &str) -> bool {
+    let trimmed = segment.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.contains("### Re:")
+        || trimmed.contains("## User")
+        || trimmed.contains("## Assistant")
+        || trimmed.contains("❯ ")
+    {
+        return false;
+    }
+
+    let has_scaffold_component = trimmed.contains("<!-- agent:queue -->")
+        || trimmed.contains("<!-- agent:backlog")
+        || trimmed.contains("<!-- agent:pending")
+        || trimmed.contains("<!-- agent:done");
+    if !has_scaffold_component {
+        return false;
+    }
+
+    let wrapped = format!("<!-- agent:scaffold -->\n{trimmed}\n<!-- /agent:scaffold -->\n");
+    let Ok(components) = component::parse(&wrapped) else {
+        return false;
+    };
+    let allowed = ["scaffold", "queue", "backlog", "pending", "icebox", "done"];
+    components
+        .iter()
+        .all(|component| allowed.contains(&component.name.as_str()))
+}
+
 /// Merge duplicate `<!-- agent:exchange -->` openers into a single exchange block.
 ///
 /// When a template/CRDT document gains two complete exchange components (each with
@@ -4083,6 +4158,58 @@ Existing answer.
             1,
             "repair should leave exactly one exchange close marker"
         );
+    }
+
+    #[test]
+    fn repair_duplicate_exchange_close_scaffold_drops_inserted_template_shell() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "JB `Run Agent Doc` failed on this document.\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = repair_duplicate_exchange_close_scaffold(doc)
+            .unwrap()
+            .expect("duplicate scaffold repair should apply");
+
+        assert_eq!(
+            repaired.matches("<!-- /agent:exchange -->").count(),
+            1,
+            "repair should leave one exchange close:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("<!-- agent:queue -->").count(),
+            1,
+            "repair should drop the duplicated queue scaffold:\n{repaired}"
+        );
+        assert!(repaired.contains("JB `Run Agent Doc` failed on this document."));
+        assert!(component::parse(&repaired).is_ok());
     }
 
     #[test]

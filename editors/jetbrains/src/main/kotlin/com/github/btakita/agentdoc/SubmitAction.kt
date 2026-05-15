@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 
 /**
@@ -11,9 +12,9 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
  * Triggered by Ctrl+Shift+Alt+A (configurable in Keymap settings).
  * Only enabled when the active editor has a .md file open.
  *
- * Saves the document and routes immediately. Manual Run stays intentionally
- * stateless so the editor does not try to infer whether the tmux session is
- * "already running" or otherwise mid-recovery.
+ * Waits for active typing to settle, then saves the document and routes.
+ * Manual Run stays intentionally stateless so the editor does not try to infer
+ * whether the tmux session is "already running" or otherwise mid-recovery.
  */
 class SubmitAction : AnAction() {
 
@@ -27,10 +28,18 @@ class SubmitAction : AnAction() {
 
         LOG.warn("[run] actionPerformed: ${file.name}")
 
-        FileDocumentManager.getInstance().saveAllDocuments()
-        LOG.warn("[run] invoking sendToTerminal immediately: ${file.name}")
-        TerminalUtil.sendToTerminal(project, file)
-        PromptPoller.getInstance(project).addFile(file)
+        Thread {
+            val idle = TypingTracker.awaitIdle(file.path)
+            if (!idle) {
+                LOG.warn("[run] typing debounce timed out; routing latest saved content for ${file.name}")
+            }
+            ApplicationManager.getApplication().invokeLater {
+                FileDocumentManager.getInstance().saveAllDocuments()
+                LOG.warn("[run] invoking sendToTerminal after typing idle: ${file.name}")
+                TerminalUtil.sendToTerminal(project, file)
+                PromptPoller.getInstance(project).addFile(file)
+            }
+        }.start()
     }
 
     override fun update(e: AnActionEvent) {

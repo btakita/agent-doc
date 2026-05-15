@@ -712,10 +712,14 @@ fn repair_template_doc_if_needed(
         dup_opener_input = merged;
         duplicate_opener_changed = true;
     }
-    let duplicate_close_repaired =
-        crate::template::repair_duplicate_exchange_close_tail(&dup_opener_input)?
+    let duplicate_scaffold_repaired =
+        crate::template::repair_duplicate_exchange_close_scaffold(&dup_opener_input)?
             .unwrap_or_else(|| dup_opener_input.clone());
-    let duplicate_close_changed = duplicate_close_repaired != dup_opener_input;
+    let duplicate_scaffold_changed = duplicate_scaffold_repaired != dup_opener_input;
+    let duplicate_close_repaired =
+        crate::template::repair_duplicate_exchange_close_tail(&duplicate_scaffold_repaired)?
+            .unwrap_or_else(|| duplicate_scaffold_repaired.clone());
+    let duplicate_close_changed = duplicate_close_repaired != duplicate_scaffold_repaired;
     let tail_repaired =
         crate::template::repair_conversation_tail_outside_exchange(&duplicate_close_repaired)?
             .unwrap_or_else(|| duplicate_close_repaired.clone());
@@ -743,6 +747,7 @@ fn repair_template_doc_if_needed(
 
     if duplicate_opener_changed
         || duplicate_close_changed
+        || duplicate_scaffold_changed
         || tail_changed
         || boundary_changed
         || prompt_changed
@@ -774,6 +779,16 @@ fn repair_template_doc_if_needed(
             );
             eprintln!(
                 "[repair] removed duplicate exchange close and restored escaped content in {}",
+                file.display()
+            );
+        }
+        if duplicate_scaffold_changed {
+            crate::ops_log::log_op(
+                file,
+                &format!("repair_duplicate_exchange_scaffold file={}", file.display()),
+            );
+            eprintln!(
+                "[repair] removed duplicate template scaffold after exchange close in {}",
                 file.display()
             );
         }
@@ -809,6 +824,34 @@ fn repair_template_doc_if_needed(
         }
     }
 
+    Ok(repaired)
+}
+
+fn repair_duplicate_exchange_scaffold_if_needed(file: &Path, doc_content: &str) -> Result<String> {
+    let repaired = crate::template::repair_duplicate_exchange_close_scaffold(doc_content)?
+        .unwrap_or_else(|| doc_content.to_string());
+    if repaired == doc_content {
+        return Ok(repaired);
+    }
+
+    let save_repaired_snapshot = match snapshot::load(file)? {
+        Some(snapshot_content) => {
+            !repair_leaves_unanswered_prompt_diff(&snapshot_content, &repaired, None)
+        }
+        None => true,
+    };
+    write::atomic_write_pub(file, &repaired)?;
+    if save_repaired_snapshot {
+        snapshot::save(file, &repaired)?;
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!("repair_duplicate_exchange_scaffold file={}", file.display()),
+    );
+    eprintln!(
+        "[repair] removed duplicate template scaffold after exchange close in {}",
+        file.display()
+    );
     Ok(repaired)
 }
 
@@ -1177,6 +1220,11 @@ pub fn run(file: &Path) -> Result<RepairOutcome> {
         }
         if recover_missing_commit_boundary(file, "repair_commit_boundary_recovered")?.is_some() {
             return Ok(RepairOutcome::CommitBoundaryRecovered);
+        }
+        let scaffold_repaired_doc =
+            repair_duplicate_exchange_scaffold_if_needed(file, &doc_content)?;
+        if scaffold_repaired_doc != doc_content {
+            return Ok(RepairOutcome::TemplateNormalized);
         }
         let has_live_prompt =
             crate::session_check::first_unstarted_prompt_bearing_change(file)?.is_some();

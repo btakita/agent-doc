@@ -93,7 +93,7 @@ The `agent:queue` component batches prompts inside the document.
 
 - Single-line prompts use flush-left `- ` list items.
 - Completed single-line prompts render as `- ~prompt text~` and are skipped by dispatch.
-- Batch-level preset directives may use `preset <name>` lines in the queue body.
+- Batch-level preset directives may use `preset <name>` lines in the queue body. The queue parser also accepts `dispatch <name>` as a preserved batch directive so older queued batches can close out without parse failure.
 - Multi-line prompts use `~~~prompt ... ~~~` or bare `--- ... ---` fences.
 - Control fences:
   - `--- start` / `~~~start`

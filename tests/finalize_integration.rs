@@ -1007,6 +1007,10 @@ fn queue_doc_content() -> String {
     "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do #fix1\n- do #fix2\n- run tests\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
 }
 
+fn queue_doc_content_with_dispatch() -> String {
+    "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\ndispatch #spec-test-build-install-commit-push\n- do [#has9]\n- do [#5pr6]\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+}
+
 #[test]
 fn finalize_consumes_first_queue_prompt_after_commit() {
     let tmp = TempDir::new().unwrap();
@@ -1052,6 +1056,51 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
 }
 
 #[test]
+fn finalize_consumes_queue_prompt_after_dispatch_directive() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = queue_doc_content_with_dispatch();
+    fs::write(&doc, &content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let baseline = write_baseline(tmp.path(), &content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nImplemented the fix.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] consumed"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("dispatch #spec-test-build-install-commit-push"),
+        "batch dispatch directive should remain while later prompts are still queued"
+    );
+    assert!(
+        content.contains("- ~do [#has9]~"),
+        "completed queue item should be struck through"
+    );
+    assert!(
+        content.contains("- do [#5pr6]"),
+        "next queue item should remain open"
+    );
+    assert!(
+        content.contains("queue_active: true"),
+        "queue_active should stay true when a later prompt remains"
+    );
+}
+
+#[test]
 fn finalize_drains_queue_and_clears_active_on_last_prompt() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
@@ -1093,6 +1142,51 @@ fn finalize_drains_queue_and_clears_active_on_last_prompt() {
     assert!(
         !content.contains("auto"),
         "auto attribute should be stripped on drain"
+    );
+}
+
+#[test]
+fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\ndispatch #spec-test-build-install-commit-push\n- do [#has9]\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let baseline = write_baseline(tmp.path(), content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nImplemented the fix.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] drained"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("dispatch #spec-test-build-install-commit-push"),
+        "drained queue should not retain the batch dispatch directive"
+    );
+    assert!(
+        !content.contains("- do [#has9]"),
+        "drained queue should remove the completed item"
+    );
+    assert!(
+        !content.contains("- ~do [#has9]~"),
+        "drained queue should not retain a struck-through last item"
+    );
+    assert!(
+        content.contains("queue_active: false"),
+        "queue_active should be false when drained"
     );
 }
 

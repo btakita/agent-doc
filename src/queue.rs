@@ -28,6 +28,7 @@ pub enum QueueEntry {
     Prompt(QueuePrompt),
     Completed(QueuePrompt),
     Preset(String),
+    Dispatch(String),
     StartFence(Option<String>),
     StopFence,
 }
@@ -182,6 +183,14 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             }
         }
 
+        if let Some(rest) = trimmed.strip_prefix("dispatch ") {
+            let preset = rest.trim();
+            if !preset.is_empty() {
+                entries.push(QueueEntry::Dispatch(preset.to_string()));
+                continue;
+            }
+        }
+
         if is_start_fence(trimmed) {
             let datetime = parse_start_datetime(trimmed);
             entries.push(QueueEntry::StartFence(datetime));
@@ -286,6 +295,11 @@ pub fn render(entries: &[QueueEntry]) -> String {
             }
             QueueEntry::Preset(preset) => {
                 out.push_str("preset ");
+                out.push_str(preset);
+                out.push('\n');
+            }
+            QueueEntry::Dispatch(preset) => {
+                out.push_str("dispatch ");
                 out.push_str(preset);
                 out.push('\n');
             }
@@ -538,6 +552,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_dispatch_directive() {
+        let body = "dispatch #spec-test-build-install-commit-push\n- do #fix1\n";
+        let entries = parse(body).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0],
+            QueueEntry::Dispatch("#spec-test-build-install-commit-push".to_string())
+        );
+        assert_eq!(prompts(&entries).len(), 1);
+        assert_eq!(render(&entries), body);
+    }
+
+    #[test]
     fn parse_empty_queue() {
         let body = "";
         let entries = parse(body).unwrap();
@@ -716,6 +743,27 @@ mod tests {
         ];
         let result = mark_first_prompt_completed(&entries);
         assert_eq!(render(&result), "preset spec\n- ~do #fix1~\n- do #fix2\n");
+        assert_eq!(prompts(&result).len(), 1);
+    }
+
+    #[test]
+    fn mark_first_prompt_completed_preserves_dispatch_directive() {
+        let entries = vec![
+            QueueEntry::Dispatch("#spec".to_string()),
+            QueueEntry::Prompt(QueuePrompt {
+                text: "do #fix1".to_string(),
+                multiline: false,
+            }),
+            QueueEntry::Prompt(QueuePrompt {
+                text: "do #fix2".to_string(),
+                multiline: false,
+            }),
+        ];
+        let result = mark_first_prompt_completed(&entries);
+        assert_eq!(
+            render(&result),
+            "dispatch #spec\n- ~do #fix1~\n- do #fix2\n"
+        );
         assert_eq!(prompts(&result).len(), 1);
     }
 

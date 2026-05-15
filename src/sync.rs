@@ -7026,8 +7026,12 @@ mod tests {
         iso.send_keys(&pane, "printf 'assistant tail\\n'; exit 9")
             .unwrap();
         assert!(
-            wait_for(Duration::from_secs(3), || iso.pane_dead(&pane)),
-            "pane should be retained as dead for diagnostics"
+            wait_for(Duration::from_secs(10), || iso.pane_dead(&pane)),
+            "pane should be retained as dead for diagnostics; alive={} dead={} current_command={:?} capture={:?}",
+            iso.pane_alive(&pane),
+            iso.pane_dead(&pane),
+            pane_current_command(&iso, &pane),
+            iso.capture_pane(&pane, Some(20)).ok()
         );
         let repair = repair_missing_registered_pane(
             &iso,

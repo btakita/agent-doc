@@ -34,7 +34,7 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): JetBrains Run Agent Doc duplicate prompt corruption; JetBrains Clear Session Context dim placeholder blocker
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:4d276839 -->
+<!-- agent:boundary:7a9ed08a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +46,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [x] [#17pe] [recommended] After restarting IntelliJ, run one live JetBrains Clear Session Context click against tasks/agent-doc/agent-doc-bugs2.md to confirm the IDE resolves the newly installed CLI.
 - [ ] [#kw0r] [recommended] Audit and harden process-global cwd/env test isolation so unbounded cargo test does not intermittently poison session_check tests; make check already uses TEST_THREADS=2 as the supported full-suite entrypoint.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

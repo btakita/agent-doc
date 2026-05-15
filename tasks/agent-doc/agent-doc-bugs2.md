@@ -29,27 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-144106.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-151542.md`*
 
 Compacted content:
-- Archived 3 response topic(s): live typing duplicate and clear refusal; empty closeout drift and duplicate prompt repair; remove session clear starting guard
+- Archived 2 response topic(s): #34qd; #34qd final closeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#34qd]. You can reinstate the session clear startup guard if [#34qd] proves to be reliable.
-❯ spec-test-build-install-commit-push
-### Re: #34qd — gpt-5
-
-❯ Done.
-
-❯ - Outcome: Added a named SimWorld regression for the JetBrains Clear Session Context sequence. It proves stale starting actors remain prompt-gated after `/clear`, prompt-only drift cannot dispatch early, and IPC snapshot duplicate-prompt repair happens before commit.
-❯ - Verified: `cargo test jetbrains_clear_session_sim_keeps_starting_route_guard_and_repairs_prompt_duplicate`; `cargo test route_sim_`; `make check`; `cargo build`; `make install`
-❯ - Committed: `391b2c037942` (`test: cover clear session reroute guard`)
-❯ - Pushed: yes, `origin/20260422/codex-agent-backend`
-### Re: #34qd final closeout — gpt-5
-
-Closed. The earlier prefixed verification tail is answered by this normalized closeout block.
-
-Final evidence: `make check` passed, `make tmux-ci` passed with 228 ignored live-tmux tests, `make install` completed, agent-doc submodule commit `391b2c037942` is pushed, and parent pointer commit `285e037d1` is pushed to `origin/main`.
-<!-- agent:boundary:49b04845 -->
+<!-- agent:boundary:4b5a370b -->
 <!-- /agent:exchange -->
 ###
 <!--

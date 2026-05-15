@@ -3898,6 +3898,151 @@ fn extract_exchange_content_len(doc: &str) -> usize {
     }
 }
 
+fn exchange_content(doc: &str) -> Option<&str> {
+    component::parse(doc)
+        .ok()?
+        .into_iter()
+        .find(|component| component.name == "exchange")
+        .map(|component| component.content(doc))
+}
+
+fn normalized_prompt_text(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("<!--")
+        || trimmed.starts_with("### Re:")
+        || trimmed.starts_with("## Assistant")
+        || trimmed.starts_with("## User")
+    {
+        return None;
+    }
+    Some(
+        trimmed
+            .strip_prefix('❯')
+            .unwrap_or(trimmed)
+            .trim()
+            .to_string(),
+    )
+}
+
+fn normalized_prompt_counts(exchange: &str) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for line in exchange.lines() {
+        if let Some(text) = normalized_prompt_text(line) {
+            *counts.entry(text).or_default() += 1;
+        }
+    }
+    counts
+}
+
+fn exchange_has_live_user_edit(baseline: Option<&str>, before: &str) -> bool {
+    let Some(base) = baseline else {
+        return false;
+    };
+    let Some(base_exchange) = exchange_content(base) else {
+        return false;
+    };
+    let Some(before_exchange) = exchange_content(before) else {
+        return false;
+    };
+    strip_boundary_for_dedup(base_exchange) != strip_boundary_for_dedup(before_exchange)
+}
+
+fn exchange_prompt_prefix_count(exchange: &str) -> usize {
+    exchange
+        .lines()
+        .filter(|line| line.trim_start().starts_with("❯ "))
+        .count()
+}
+
+fn exchange_prompt_text_duplicated(before: &str, after: &str) -> bool {
+    let Some(before_exchange) = exchange_content(before) else {
+        return false;
+    };
+    let Some(after_exchange) = exchange_content(after) else {
+        return false;
+    };
+    let before_counts = normalized_prompt_counts(before_exchange);
+    let after_counts = normalized_prompt_counts(after_exchange);
+    after_counts.iter().any(|(line, after_count)| {
+        let before_count = before_counts.get(line).copied().unwrap_or(0);
+        before_count > 0 && *after_count > before_count
+    })
+}
+
+fn patch_touches_exchange(patches: &[template::PatchBlock], unmatched: &str) -> bool {
+    patches.iter().any(|patch| patch.name == "exchange") || !unmatched.trim().is_empty()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn log_exchange_write_diagnostic(
+    file: &Path,
+    source: &str,
+    write_mode: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    before: &str,
+    after: &str,
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) {
+    let before_exchange = exchange_content(before);
+    let after_exchange = exchange_content(after);
+    let touches_exchange =
+        before_exchange != after_exchange || patch_touches_exchange(patches, unmatched);
+    if !touches_exchange {
+        return;
+    }
+
+    let before_hash = crate::ops_log::content_hash(before);
+    let after_hash = crate::ops_log::content_hash(after);
+    let live_exchange_edited = exchange_has_live_user_edit(baseline, before);
+    let prompt_text_duplicated = exchange_prompt_text_duplicated(before, after);
+    let before_prefix_count = before_exchange
+        .map(exchange_prompt_prefix_count)
+        .unwrap_or(0);
+    let after_prefix_count = after_exchange
+        .map(exchange_prompt_prefix_count)
+        .unwrap_or(0);
+    let normalized_prefix_delta = after_prefix_count.saturating_sub(before_prefix_count);
+    let prompt_text_normalized = normalized_prefix_delta > 0;
+    let cycle_id = crate::cycle_state::load(file)
+        .ok()
+        .flatten()
+        .map(|state| state.cycle_id)
+        .unwrap_or_else(|| "-".to_string());
+    let writer_pid = std::process::id();
+    let writer_exe = std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| "-".to_string());
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "exchange_write_diagnostic file={} writer_pid={} writer_exe={} source={} write_mode={} patch_id={} cycle_id={} before_hash={} after_hash={} live_exchange_edited={} prompt_text_duplicated={} prompt_text_normalized={} normalized_prefix_delta={} patches={} unmatched_len={}",
+            file.display(),
+            writer_pid,
+            writer_exe,
+            source,
+            write_mode,
+            patch_id.unwrap_or("-"),
+            cycle_id,
+            before_hash,
+            after_hash,
+            live_exchange_edited,
+            prompt_text_duplicated,
+            prompt_text_normalized,
+            normalized_prefix_delta,
+            patches.len(),
+            unmatched.trim().len()
+        ),
+    );
+}
+
 /// Log a write dedup event to both stderr and a persistent file for diagnosis.
 fn log_dedup(file: &Path, context: &str) {
     let msg = format!("[write] dedup: {} — {}", file.display(), context);
@@ -4052,6 +4197,17 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
     // file-change listeners, git hooks) trigger on the document rename and may
     // compute diffs immediately. Writing the snapshot first guarantees they
     // always read a current baseline instead of racing against a stale one.
+    log_exchange_write_diagnostic(
+        file,
+        "write_inline",
+        "inline_disk",
+        None,
+        baseline,
+        &content_current,
+        &final_content,
+        &[],
+        "",
+    );
     snapshot::save(file, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
@@ -4240,6 +4396,17 @@ pub fn run_template(
     // file-change listeners, git hooks) trigger on the document rename and may
     // compute diffs immediately. Writing the snapshot first guarantees they
     // always read a current baseline instead of racing against a stale one.
+    log_exchange_write_diagnostic(
+        file,
+        "run_template",
+        "template_disk",
+        None,
+        baseline,
+        &content_current,
+        &final_content,
+        &patches,
+        &unmatched,
+    );
     snapshot::save(file, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
@@ -4719,6 +4886,17 @@ pub fn run_stream(
                 }
             };
             if local_write_applied {
+                log_exchange_write_diagnostic(
+                    file,
+                    "run_stream_ipc_timeout",
+                    "stream_ipc_timeout_disk",
+                    Some(&ipc_result.patch_id),
+                    baseline,
+                    &content_current,
+                    &final_content,
+                    &patches,
+                    &unmatched,
+                );
                 write_claimed_patch_sentinel(&project_root, &ipc_result.patch_id);
             }
             if crate::git::is_in_git_repo(file) {
@@ -4895,6 +5073,17 @@ pub fn run_stream(
     // file-change listeners, git hooks) trigger on the document rename and may
     // compute diffs immediately. Writing the snapshot first guarantees they
     // always read a current baseline instead of racing against a stale one.
+    log_exchange_write_diagnostic(
+        file,
+        "run_stream",
+        "stream_disk",
+        None,
+        baseline,
+        &content_current,
+        &final_content,
+        &patches,
+        &unmatched,
+    );
     snapshot::save(file, snapshot_content)?;
     snapshot::save_crdt(file, &snapshot_crdt_state)?;
 
@@ -5020,6 +5209,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let patches_dir = project_root.join(".agent-doc/patches");
     std::fs::create_dir_all(&patches_dir)?;
     let patch_file = patches_dir.join(format!("{}.json", hash));
+    let patch_id = uuid::Uuid::new_v4().to_string();
 
     // Use shared helper for boundary-aware synthesis (matches try_ipc socket + file paths)
     let ipc_patches = build_ipc_patches_json(file, &patches, &unmatched, None)?;
@@ -5043,6 +5233,10 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         "unmatched": effective_unmatched,
         "baseline": baseline.unwrap_or(""),
     });
+    ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
+    if let Ok(Some(ref cs)) = crate::cycle_state::load(file) {
+        ipc_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
+    }
 
     if let Some(ref yaml) = frontmatter_yaml {
         ipc_payload["frontmatter"] = serde_json::Value::String(yaml.clone());
@@ -5075,6 +5269,17 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                     file.display(),
                     content.len()
                 ),
+            );
+            log_exchange_write_diagnostic(
+                file,
+                "run_ipc",
+                "ipc_file",
+                Some(&patch_id),
+                baseline,
+                &content_at_start,
+                &content,
+                &patches,
+                &unmatched,
             );
             let crdt_doc = crate::crdt::CrdtDoc::from_text(&content);
             snapshot::save_crdt(file, &crdt_doc.encode_state())?;
@@ -5163,6 +5368,17 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     };
     let final_content =
         normalize_final_template_content(file, base, snapshot_doc.as_deref(), &final_content)?;
+    log_exchange_write_diagnostic(
+        file,
+        "run_ipc_timeout_fallback",
+        "ipc_timeout_disk",
+        None,
+        baseline,
+        &content_current,
+        &final_content,
+        &patches,
+        &unmatched,
+    );
     atomic_write(file, &final_content)?;
     snapshot::save(file, &final_content)?;
     snapshot::save_crdt(file, &crdt_state)?;
@@ -5627,6 +5843,7 @@ pub fn try_ipc(
     let patch_id = reuse_patch_id
         .map(|s| s.to_string())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let ipc_before_content = std::fs::read_to_string(file).ok();
 
     // Guard: if the cycle is already committed, reject the patch to prevent
     // a late fallback from re-dirtying the document.
@@ -5808,6 +6025,19 @@ pub fn try_ipc(
                             effective_snap.len()
                         ),
                     );
+                    if let Some(before) = ipc_before_content.as_deref() {
+                        log_exchange_write_diagnostic(
+                            file,
+                            "try_ipc_socket",
+                            "socket_ipc",
+                            Some(&patch_id),
+                            baseline,
+                            before,
+                            &effective_snap,
+                            patches,
+                            unmatched,
+                        );
+                    }
                     if let Err(e) = snapshot::save(file, &effective_snap) {
                         eprintln!(
                             "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
@@ -6028,6 +6258,7 @@ pub fn try_ipc(
 pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
     let canonical = file.canonicalize()?;
     let project_root = resolve_ipc_project_root(&canonical);
+    let before_content = std::fs::read_to_string(file).ok();
 
     // Try socket IPC first
     if crate::ipc_socket::is_listener_active(&project_root) {
@@ -6041,6 +6272,19 @@ pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
         match crate::ipc_socket::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC full content delivered");
+                if let Some(before) = before_content.as_deref() {
+                    log_exchange_write_diagnostic(
+                        file,
+                        "try_ipc_full_content_socket",
+                        "socket_full_content",
+                        None,
+                        None,
+                        before,
+                        content,
+                        &[],
+                        "",
+                    );
+                }
                 snapshot::save(file, content)?;
                 let crdt_doc = crate::crdt::CrdtDoc::from_text(content);
                 snapshot::save_crdt(file, &crdt_doc.encode_state())?;
@@ -6183,6 +6427,7 @@ fn write_ipc_and_poll(
     normalize_prefix_lines: Option<&[String]>,
     project_root: &Path,
 ) -> Result<bool> {
+    let before_content = std::fs::read_to_string(doc_file).ok();
     // Atomic write of patch file
     atomic_write(patch_file, &serde_json::to_string_pretty(payload)?)?;
 
@@ -6326,6 +6571,46 @@ fn write_ipc_and_poll(
                     snap_content.len()
                 ),
             );
+            if let Some(before) = before_content.as_deref() {
+                let patch_id = payload.get("patch_id").and_then(|value| value.as_str());
+                let baseline = payload
+                    .get("baseline")
+                    .and_then(|value| value.as_str())
+                    .filter(|value| !value.is_empty());
+                let payload_patches: Vec<template::PatchBlock> = payload
+                    .get("patches")
+                    .and_then(|value| value.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| {
+                                let name = item
+                                    .get("component")
+                                    .or_else(|| item.get("name"))
+                                    .and_then(|value| value.as_str())?;
+                                let content =
+                                    item.get("content").and_then(|value| value.as_str())?;
+                                Some(template::PatchBlock::new(name, content))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let unmatched = payload
+                    .get("unmatched")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                log_exchange_write_diagnostic(
+                    doc_file,
+                    "write_ipc_and_poll",
+                    "file_ipc",
+                    patch_id,
+                    baseline,
+                    before,
+                    &snap_content,
+                    &payload_patches,
+                    unmatched,
+                );
+            }
             if let Err(e) = snapshot::save(doc_file, &snap_content) {
                 eprintln!(
                     "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
@@ -8069,6 +8354,47 @@ mod tests {
             "agent heading should not get prefix: {}",
             result
         );
+    }
+
+    #[test]
+    fn exchange_write_diagnostic_logs_live_edit_provenance() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let baseline =
+            "<!-- agent:exchange patch=append -->\nOld content.\n<!-- /agent:exchange -->\n";
+        let before = "<!-- agent:exchange patch=append -->\nOld content.\nlive prompt\n<!-- /agent:exchange -->\n";
+        let after = "<!-- agent:exchange patch=append -->\nOld content.\n❯ live prompt\nlive prompt\n### Re: response\nDone.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, before).unwrap();
+        let patches = vec![template::PatchBlock::new(
+            "exchange",
+            "### Re: response\nDone.\n",
+        )];
+
+        log_exchange_write_diagnostic(
+            &doc,
+            "test_source",
+            "test_mode",
+            Some("patch-123"),
+            Some(baseline),
+            before,
+            after,
+            &patches,
+            "",
+        );
+
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("exchange_write_diagnostic"));
+        assert!(log.contains("source=test_source"));
+        assert!(log.contains("write_mode=test_mode"));
+        assert!(log.contains("patch_id=patch-123"));
+        assert!(log.contains("live_exchange_edited=true"));
+        assert!(log.contains("prompt_text_duplicated=true"));
+        assert!(log.contains("prompt_text_normalized=true"));
+        assert!(log.contains("normalized_prefix_delta=1"));
+        assert!(log.contains("before_hash="));
+        assert!(log.contains("after_hash="));
+        assert!(log.contains("writer_pid="));
     }
 
     #[test]

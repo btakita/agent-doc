@@ -30,3 +30,4 @@
 - 2026-05-14 [#ha62] Reduce Codex managed capability proof startup latency or move it off the readiness path; recent logs show child network proof taking roughly 13-16 seconds before ready. #agent-doc-bug
 - 2026-05-14 [#aymr] Optimize or re-budget passive sync controller_actor_lookup; safe-passive logs repeatedly exceed the 250ms budget while total sync stays barely under 1s. #agent-doc-bug
 - 2026-05-14 [#gv32] Design lower-agent orchestration using bounded job packets and model-tier routing.
+- 2026-05-14 [#ajx2] Investigate and fix live-typing duplicate insertion in agent-doc; plan: tasks/agent-doc/plan-live-typing-duplicate-insertion.md

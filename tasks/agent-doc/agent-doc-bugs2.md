@@ -29,41 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-152800.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-154511.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #6v38 answered-marker closeout hardening
+- Archived 1 response topic(s): CI start blocker
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#vkk8]. spec-test-build-install-commit-push
-### Re: CI start blocker — gpt-5
-
-Completed `#vkk8`.
-
-Root cause: the Agent Doc GitHub Actions jobs were failing before runner allocation. The current pushed run `25926910854` shows both `check` and `tmux-ci` completed in about three seconds with empty step arrays because GitHub reported: recent account payments failed or the spending limit needs to be increased. That explains both the missing job steps and `gh run view --log-failed` returning `log not found`.
-
-Implemented the closeout as instruction/spec hardening instead of a workflow YAML change:
-
-- Updated `src/agent-doc/SKILL.md`, `CLAUDE.md`, `README.md`, and `SPEC.md` to classify empty-step/no-log Actions jobs that never start a runner as external CI-start blockers, not code or tmux regressions.
-- Added `tests/test_cli.rs` assertions so installed harness SKILL content must carry the external CI-start blocker and billing/spending-limit wording.
-- Refreshed generated Claude, Codex, Cursor, OpenCode, and root `AGENTS.md` instruction surfaces from the rebuilt binary.
-
-Verification completed:
-
-- `cargo test test_skill_md_contains_required_steps -- --test-threads=1`
-- `make check`
-- `make tmux-ci` — 228 live/ignored tmux tests passed locally
-- `make install`, then `agent-doc --version` -> `agent-doc 0.33.16`
-- `agent-doc skill install --all`
-- `cargo run --quiet -- audit-docs`
-- Post-push CI inspection: run `25926910854` is still blocked by the same GitHub billing/spending-limit annotation before runner startup.
-
-Pushed commits:
-
-- `btakita/agent-doc` `ad644cd1` on `20260422/codex-agent-backend`
-- `btakita/agent-loop` `6fc9ba85c` on `main`
-
-No follow-up work remains for this item.
-<!-- agent:boundary:743009cc -->
+<!-- agent:boundary:fe203e29 -->
 <!-- /agent:exchange -->
 ###
 <!--

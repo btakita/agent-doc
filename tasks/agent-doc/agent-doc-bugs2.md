@@ -29,84 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-154511.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-183546.md`*
 
 Compacted content:
-- Archived 1 response topic(s): CI start blocker
+- Archived 2 response topic(s): JetBrains Run Agent Doc duplicate prompt corruption; JetBrains Clear Session Context dim placeholder blocker
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB `Run Agent Doc` failed on this document. No activity or response.
-
-❯ Still getting duplicate prompts and document corruption while I'm typing in this prompt.
-
-❯ spec-test-build-install-commit-push
-### Re: JetBrains Run Agent Doc duplicate prompt corruption — gpt-5.5
-
-I repaired this document's malformed exchange first so preflight could run. The concrete corruption was a duplicate template scaffold inserted between two `&lt;!-- /agent:exchange --&gt;` close markers; preflight was failing before any normal response cycle could start.
-
-I fixed the underlying paths in `src/agent-doc`:
-
-- Rust repair now recognizes and removes the duplicate scaffold-after-exchange-close shape without swallowing live prompt edits into the snapshot.
-- JetBrains `Run Agent Doc` now waits for markdown typing idle before saving and routing the file to the terminal.
-- JetBrains patch application now waits for typing idle before mutating the editor document, covering both socket and file-watch patch paths.
-- JetBrains plugin version is bumped to `0.2.120`, and a regression test asserts `Run Agent Doc` waits for idle before save/route.
-
-Verification completed:
-
-- `cargo test repair_duplicate_exchange_close_scaffold_drops_inserted_template_shell --lib`
-- `cargo test recover_does_not_treat_orchestration_handoff_marker_as_missing_response -- --test-threads=2`
-- `cargo test repair_completed_backlog_reap_preserves_live_prompt_outside_snapshot -- --test-threads=2`
-- `cargo test --all-targets -- --test-threads=2`
-- `make check`
-- `cargo build --release`
-- `cargo install --path .`
-- `agent-doc lib-install`
-- `./gradlew test buildPlugin`
-- `make tmux-ci` (`228 passed` ignored live tmux tests)
-
-The latest GitHub `CI` workflow run on `main` is green, but that workflow currently has only the `check` job and no separate tmux-test job, so the tmux evidence here is the local `make tmux-ci` run.
-
-Installed locally:
-
-- CLI replaced at `/home/brian/.cargo/bin/agent-doc`
-- FFI library installed via `agent-doc lib-install`
-- JetBrains plugin installed from `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.120.zip` into `/home/brian/.config/JetBrains/IntelliJIdea2026.1`; restart IDEA to activate it.
-
-Commits so far:
-
-- `src/agent-doc`: `b588090de` (`fix: debounce jetbrains agent-doc runs`), pushed to `origin/20260422/codex-agent-backend`
-- parent repo: `c33324989` (`agent-doc: debounce jetbrains runs`) records the submodule pointer locally; I will push parent `main` after this session-document finalize commit so the pointer and closeout commit travel together.
-❯ JB `Clear Session Context` issue with this document:
-```
-Clear Session Context is blocked for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 contains protected prompt input (drafted prompt input). Use Interrupt and clear to discard the prompt input, or Show status to inspect the session. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 21% used
-```
-
-❯ spec-test-build-install-commit-push
-### Re: JetBrains Clear Session Context dim placeholder blocker — gpt-5.5
-
-Fixed the Clear Session Context refusal path.
-
-Root cause: `agent-doc session clear <FILE>` was checking protected prompt input from plain `tmux capture-pane` output. Codex renders idle placeholder text as dim ANSI text, but the plain capture erased that distinction. When the only current UI was a Codex placeholder/status footer, the clear guard could classify the placeholder as `drafted prompt input` and JetBrains surfaced the protected-input warning.
-
-What changed:
-
-- `session clear` now uses ANSI pane capture for the protected-input check, falling back to plain capture only if ANSI capture fails.
-- Codex protected-input detection now ignores prompt candidate text whose body is rendered with SGR dim/faint styling.
-- Real non-dim typed prompt input still blocks clear, including RGB-colored prompt text; queued drafts and shell search remain protected.
-- Updated the shared CLI/editor specs and `VERSIONS.md` to document that Codex dim placeholder text is idle chrome, not drafted user input.
-
-
-- `cargo test protected_prompt_input_reason`
-- `cargo install --path . --force`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- `make tmux-ci` -> `228 passed`
-
-CI evidence: latest GitHub `CI` run on `main` is green (`25773430221`, May 13, 2026). Recent workflow list does not show a separate tmux-test workflow run, so the live tmux evidence for this turn is the local `make tmux-ci` sweep.
-
-Commits pushed:
-
-- `src/agent-doc`: `dd9f5302` (`fix: ignore codex dim placeholders on clear`) to `origin/20260422/codex-agent-backend`
-- parent repo: `8567719b0` (`agent-doc: ignore codex dim placeholders on clear`) to `origin/main`
-<!-- agent:boundary:c9cf8d95 -->
+<!-- agent:boundary:4d276839 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -118,7 +46,7 @@ Commits pushed:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#17pe] [recommended] After restarting IntelliJ, run one live JetBrains Clear Session Context click against tasks/agent-doc/agent-doc-bugs2.md to confirm the IDE resolves the newly installed CLI.
+- [x] [#17pe] [recommended] After restarting IntelliJ, run one live JetBrains Clear Session Context click against tasks/agent-doc/agent-doc-bugs2.md to confirm the IDE resolves the newly installed CLI.
 - [ ] [#kw0r] [recommended] Audit and harden process-global cwd/env test isolation so unbounded cargo test does not intermittently poison session_check tests; make check already uses TEST_THREADS=2 as the supported full-suite entrypoint.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

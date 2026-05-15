@@ -34,10 +34,28 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): JetBrains Run Agent Doc duplicate prompt corruption; JetBrains Clear Session Context dim placeholder blocker
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7a9ed08a -->
+❯ do [#kw0r]. spec-test-build-install-commit-push
+### Re: #kw0r process-global test isolation — gpt-5
+
+Implemented #kw0r and marked it done.
+
+The fix unifies test process-global state behind the shared harness/session-check lock, adds a reentrant test guard plus RAII current-directory helper, routes session-check test inspection through that guard, and converts the remaining env/cwd mutation tests that were leaking or restoring manually. I also documented the invariant in `specs/12-deterministic-simulation.md` and added a meta regression in `tests/test_cli.rs`.
+
+Verification:
+- `cargo test --all-targets` passed with default unbounded parallelism: 2108 passed, 0 failed, 228 ignored.
+- `make check` passed, including clippy, full supported test suite, and the medium deterministic simulator.
+- `make tmux-ci` passed: 228 ignored/live tmux tests, 0 failed.
+- `make install` replaced `/home/brian/.cargo/bin/agent-doc` and installed `libagent_doc-0.33.16.so`.
+- Latest visible remote CI for this repo is green, but it is from 2026-05-13; the current tmux evidence is local.
+
+Commits created locally before this closeout:
+- `src/agent-doc` submodule: `5cd12d9` (`test: serialize process-global test state`)
+- parent gitlink: `37d3f57f0` (`agent-doc: serialize process-global test state`)
+<!-- agent:boundary:2b891b33 -->
 <!-- /agent:exchange -->
 ###
 <!--
+Use TEST_THREADS=8. spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->
@@ -46,7 +64,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#kw0r] [recommended] Audit and harden process-global cwd/env test isolation so unbounded cargo test does not intermittently poison session_check tests; make check already uses TEST_THREADS=2 as the supported full-suite entrypoint.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

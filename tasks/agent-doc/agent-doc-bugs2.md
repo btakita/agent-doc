@@ -34,8 +34,36 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): startup route gating
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:fd144430 -->
+❯ do [#rrfe]. spec-test-build-install-commit-push
+### Re: #rrfe — gpt-5
+
+Implemented the diagnostics phase for the live-typing duplicate-insertion repro.
+
+What changed:
+- Added `exchange_write_diagnostic` ops-log coverage for exchange-touching writes in `src/agent-doc/src/write.rs` across inline/template/stream disk writes, stream IPC timeout fallback, explicit IPC, socket IPC, file IPC, and full-content IPC repair.
+- Each diagnostic records writer pid/executable, source, write mode, patch id when available, cycle id, before/after content hashes, live exchange drift, prompt duplication, prompt normalization, normalized prefix delta, patch count, and unmatched length.
+- Added regression coverage for the diagnostic log shape and live-edit duplication/normalization flags.
+- Updated `SPEC.md` and `specs/07-closeout-commands.md` with the new write-path diagnostic contract.
+
+Verification:
+- `cargo fmt`
+- `cargo test exchange_write_diagnostic_logs_live_edit_provenance`
+- `cargo check`
+- `make check`
+- Reviewed latest GitHub Actions `tmux-ci` leg; it was red on run `25913874762`, so I reproduced locally with `make tmux-ci`, which passed.
+- `cargo build`
+- `make install` installed `agent-doc v0.33.16` and `libagent_doc-0.33.16.so` locally.
+
+Commit evidence:
+- Submodule commit: `936e29c agent-doc: log exchange write diagnostics`
+- Root submodule pointer commit: `fea8bfbbe chore: update agent-doc submodule`
+
+Push is intentionally after this binary-owned session closeout; I will push the submodule branch and root branch next.
+<!-- agent:boundary:ce3c3599 -->
 <!-- /agent:exchange -->
+###
+<!--
+-->
 
 <!-- agent:queue -->
 <!-- /agent:queue -->
@@ -43,7 +71,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rrfe] [recommended] Implement the diagnostics phase of tasks/agent-doc/plan-live-typing-duplicate-insertion.md for this repro: every background write touching a live-edited exchange must log writer process/source, patch id, cycle id, write mode, before/after content hashes, and whether prompt text was duplicated or normalized.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

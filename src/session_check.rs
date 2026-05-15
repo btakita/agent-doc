@@ -1227,6 +1227,11 @@ fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>
     }
 
     let prompt_marker = detect_unstarted_prompt_bearing_diff(file)?;
+    if prompt_marker.is_none()
+        && active_session_drift_is_only_exchange_or_backlog_metadata(&snapshot, &current)
+    {
+        return Ok(None);
+    }
     if prompt_marker.is_none() && exchange_only_promptless_content_drift(&snapshot, &current) {
         return Ok(None);
     }
@@ -1342,18 +1347,36 @@ fn exchange_only_promptless_content_drift(snapshot: &str, current: &str) -> bool
         == crate::git::normalize_transient_agent_doc_markers(&current_masked)
 }
 
+fn active_session_drift_is_only_exchange_or_backlog_metadata(
+    snapshot: &str,
+    current: &str,
+) -> bool {
+    let Some(snapshot_masked) = mask_components_by_name(snapshot, &["exchange", "backlog"]) else {
+        return false;
+    };
+    let Some(current_masked) = mask_components_by_name(current, &["exchange", "backlog"]) else {
+        return false;
+    };
+    crate::git::normalize_transient_agent_doc_markers(&snapshot_masked)
+        == crate::git::normalize_transient_agent_doc_markers(&current_masked)
+}
+
 fn mask_exchange_component_content(doc: &str) -> Option<String> {
+    mask_components_by_name(doc, &["exchange"])
+}
+
+fn mask_components_by_name(doc: &str, names: &[&str]) -> Option<String> {
     let components = crate::component::parse(doc).ok()?;
     let mut masked = doc.to_string();
-    let mut saw_exchange = false;
+    let mut saw_target = false;
     for component in components.iter().rev() {
-        if component.name != "exchange" {
+        if !names.contains(&component.name.as_str()) {
             continue;
         }
-        saw_exchange = true;
+        saw_target = true;
         masked.replace_range(component.open_end..component.close_start, "\n");
     }
-    saw_exchange.then_some(masked)
+    saw_target.then_some(masked)
 }
 
 fn open_cycle_message(state: &crate::cycle_state::CycleState) -> String {
@@ -2824,6 +2847,50 @@ Body\n\
         assert!(prompt_target_is_immediately_before_existing_response(
             current,
             "❯ JB `/clear` on this document error:"
+        ));
+    }
+
+    #[test]
+    fn active_session_drift_allows_answered_exchange_and_backlog_metadata() {
+        let snapshot = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "JB `/clear` on this document error:\n",
+            "```\n",
+            "clear refused while actor was starting\n",
+            "```\n\n",
+            "This prompt was duplicated.\n",
+            "### Re: live typing duplicate and clear refusal — gpt-5\n\n",
+            "Fixed.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#34qd] old wording\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ JB `/clear` on this document error:\n",
+            "```\n",
+            "clear refused while actor was starting\n",
+            "```\n\n",
+            "❯ This prompt was duplicated.\n",
+            "### Re: live typing duplicate and clear refusal — gpt-5 (HEAD)\n\n",
+            "Fixed.\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#34qd] updated wording\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        assert!(active_session_drift_is_only_exchange_or_backlog_metadata(
+            snapshot, current
         ));
     }
 

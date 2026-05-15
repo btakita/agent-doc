@@ -34,7 +34,17 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 3 response topic(s): live typing duplicate and clear refusal; empty closeout drift and duplicate prompt repair; remove session clear starting guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ed985a9e -->
+❯ do [#34qd]. You can reinstate the session clear startup guard if [#34qd] proves to be reliable.
+❯ spec-test-build-install-commit-push
+### Re: #34qd — gpt-5
+
+❯ Done.
+
+❯ - Outcome: Added a named SimWorld regression for the JetBrains Clear Session Context sequence. It proves stale starting actors remain prompt-gated after `/clear`, prompt-only drift cannot dispatch early, and IPC snapshot duplicate-prompt repair happens before commit.
+❯ - Verified: `cargo test jetbrains_clear_session_sim_keeps_starting_route_guard_and_repairs_prompt_duplicate`; `cargo test route_sim_`; `make check`; `cargo build`; `make install`
+❯ - Committed: `391b2c037942` (`test: cover clear session reroute guard`)
+❯ - Pushed: yes, `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:a4033a43 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,7 +88,6 @@ Compacted content:
 <!-- agent:backlog -->
 - [ ] [#kw0r] [recommended] Audit and harden process-global cwd/env test isolation so unbounded cargo test does not intermittently poison session_check tests; make check already uses TEST_THREADS=2 as the supported full-suite entrypoint.
 - [ ] [#6v38] [recommended] Implement the answered-marker closeout hardening from tasks/agent-doc/plan-finish-closeout-after-answered-marker-drift.md, including an end-to-end closeout/session-check regression for live IDE marker drift.
-- [ ] [#34qd] [recommended] Add an end-to-end JetBrains Clear Session Context regression covering stale starting actor clear, live prompt-only document drift, and duplicate prompt repair.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

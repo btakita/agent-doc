@@ -1418,6 +1418,7 @@ mod tests {
     use super::*;
     use std::path::Path;
     use std::process::Command as ProcessCommand;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     fn setup_project() -> TempDir {
@@ -2228,6 +2229,64 @@ mod tests {
         assert!(
             log.contains("repair_preflight_stale_prompt_cycle_abandoned file="),
             "abandon event should be logged for diagnostics:\n{log}"
+        );
+    }
+
+    #[test]
+    fn stale_preflight_abandonment_stops_original_partial_checkpoint_writer() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: earlier — gpt-5\n",
+            "done\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        snapshot::save(&doc, base).unwrap();
+        init_git_repo(root, &doc);
+        let state = crate::cycle_state::start_preflight(&doc, Some(base), Some(base)).unwrap();
+
+        let mut writer =
+            crate::capture::PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
+        assert!(writer.maybe_checkpoint("first partial").unwrap().is_some());
+
+        let live = base.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            "do [#staleckpt]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
+        );
+        std::fs::write(&doc, &live).unwrap();
+        age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::StalePreflightCycleAbandoned);
+
+        let after = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(after.phase, crate::cycle_state::CyclePhase::Abandoned);
+        assert_eq!(after.cycle_id, state.cycle_id);
+        assert!(writer.maybe_checkpoint("second partial").unwrap().is_none());
+
+        let loaded = crate::capture::latest_partial_checkpoint(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.response_body, "first partial");
+        assert_eq!(loaded.checkpoint_count, 1);
+
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("repair_preflight_stale_prompt_cycle_abandoned file="),
+            "repair abandonment should be logged:\n{log}"
+        );
+        assert!(
+            log.contains("partial_response_checkpoint_stopped"),
+            "stale checkpoint writer should stop after repair abandonment:\n{log}"
+        );
+        assert!(
+            log.contains("reason=cycle_closed"),
+            "abandoned same-cycle checkpoint stop should be classified as a closed cycle:\n{log}"
         );
     }
 

@@ -51,6 +51,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - Session-document `write --commit` shares `finalize`'s strict closeout contract.
 - Strict `write --commit` with empty stdin may recover instead of failing when the document already contains an agent-doc-owned visible response from an interrupted `response_captured` / `write_applied` cycle. That recovery adopts the visible response into the snapshot and continues through the normal commit/session-check boundary.
 - Empty stdin with only valid pending mutations, such as `agent-doc write --commit <FILE> --pending-add "..."` or `agent-doc write --commit <FILE> --done <id>`, is a valid pending-only repair closeout. The command must commit those pending mutations and must not fail after mutating the document solely because no assistant response body was supplied.
+- Empty stdin with no recoverable visible response and no pending mutations must fail before any commit/session-check closeout attempt. It must leave live prompt drift in the working tree for the next response cycle instead of committing that prompt as a repaired assistant closeout.
 - Bare session-document `write` is not a terminal success path: if it preserves a response and leaves the cycle open at `response_captured` / `write_applied`, the command must fail closed with recovery intact instead of returning success and waiting for a later `agent-doc commit`.
 
 ### Write-path invariants

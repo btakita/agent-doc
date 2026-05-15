@@ -196,6 +196,38 @@ fn write_commit_writes_and_commits_session_response() {
 }
 
 #[test]
+fn write_commit_empty_stdin_does_not_commit_live_prompt_drift() {
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+    let committed = head_blob(tmp.path());
+    let drifted = committed.replace(
+        "<!-- /agent:exchange -->",
+        "follow-up typed while repair is attempted\n<!-- /agent:exchange -->",
+    );
+    fs::write(&doc, drifted).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin("")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("empty response"));
+
+    let head = head_blob(tmp.path());
+    assert_eq!(
+        committed, head,
+        "empty write --commit must fail before committing live prompt drift"
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("follow-up typed while repair is attempted"),
+        "failed empty repair should leave live user drift in the working tree for the next cycle"
+    );
+}
+
+#[test]
 fn stream_ipc_timeout_commit_removes_fallback_patch_file() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();

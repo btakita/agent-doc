@@ -1031,7 +1031,15 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
     }
 
-    let commit_result = finalize_commit(file, commit_mode);
+    let commit_result = if write_result
+        .as_ref()
+        .map(|_| true)
+        .unwrap_or_else(|err| !err.to_string().contains("empty response"))
+    {
+        finalize_commit(file, commit_mode)
+    } else {
+        Ok(())
+    };
     let bare_session_write_result =
         if write_result.is_ok() && commit_mode == CommitMode::None && is_session_document(file)? {
             crate::session_check::enforce_clean_closeout(file).context(

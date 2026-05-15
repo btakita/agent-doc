@@ -34,17 +34,17 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 5 response topic(s): queued spec/test/build/install; #writeempty spec/test/build/install; #startroute spec/test/build/install; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB `/clear` on this document error:
+JB `/clear` on this document error:
 ```
 agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the authoritative actor is still starting and the document changed after the last committed cycle. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to inspect the pane.
 ```
 
-❯ As I was typing this prompt, agent-doc CRDT appendent duplicate content from this document causing the document to be corrupted.
+As I was typing this prompt, agent-doc CRDT appendent duplicate content from this document causing the document to be corrupted.
 
-❯ This prompt was also duplicated from a background agent-doc procedure.
+This prompt was also duplicated from a background agent-doc procedure.
 
-❯ I already prompted to fix these issues 2 times but they remain unfixed.
-### Re: live typing duplicate and clear refusal — gpt-5 (HEAD)
+I already prompted to fix these issues 2 times but they remain unfixed.
+### Re: live typing duplicate and clear refusal — gpt-5
 
 Fixed both failure modes and installed the patched build.
 
@@ -65,7 +65,7 @@ Verification completed:
 - `make tmux-ci` locally, including the ignored live tmux sweep (`228 passed`)
 
 CI review: latest GitHub Actions run `25773430221` from 2026-05-13 was green for the regular `check` job. That run did not expose a separate tmux job, so I used the local `make tmux-ci` sweep as the tmux evidence for this turn.
-<!-- agent:boundary:cbdfda54 -->
+<!-- agent:boundary:a727bf60 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,8 +77,7 @@ CI review: latest GitHub Actions run `25773430221` from 2026-05-13 was green for
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#6v38] [recommended] Implement the answered-marker closeout hardening from tasks/agent-doc/plan-finish-closeout-after-answered-marker-drift.md, including an end-to-end closeout/session-check regression for live IDE marker drift.
-- [ ] [#34qd] [recommended] Add an end-to-end JetBrains Clear Session Context regression covering stale starting actor clear, live prompt-only document drift, and duplicate prompt repair.
+- [ ] [#34qd] [recommended] Add an end-to-end JetBrains Clear Session Context regression for a stale starting actor with live prompt-only document drift and duplicate prompt repair.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

@@ -44,3 +44,4 @@
 - 2026-05-15 [#normfallback] Investigate sidecar_normalization_fallback_repaired_working_tree for agent-doc-bugs2.md and add deterministic coverage for why sidecar normalization had to repair the working tree instead of taking the primary IPC/snapshot path.
 - 2026-05-15 [#34qd] [recommended] Add an end-to-end JetBrains Clear Session Context regression covering stale starting actor clear, live prompt-only document drift, and duplicate prompt repair.
 - 2026-05-15 [#6v38] [recommended] Implement the answered-marker closeout hardening from tasks/agent-doc/plan-finish-closeout-after-answered-marker-drift.md, including an end-to-end closeout/session-check regression for live IDE marker drift.
+- 2026-05-15 [#vkk8] [recommended] Investigate the Agent Doc GitHub Actions workflow jobs that fail before step logs are available; run 25923724699 completed in about three seconds with empty job steps and gh reporting log not found.

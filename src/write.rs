@@ -256,6 +256,7 @@ pub struct WriteFlags {
     pub allow_replace_pending: bool,
     pub has_pending_add: bool,
     pub has_pending_done: bool,
+    pub has_pending_mutation: bool,
     pub pending_done_ids: Vec<String>,
     pub strict_closeout: bool,
     pub rerun_command_base: Option<String>,
@@ -958,6 +959,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             || !options.pending_add_to.is_empty()
             || !options.pending_add_gated.is_empty(),
         has_pending_done: !options.pending_done.is_empty(),
+        has_pending_mutation: has_pending_ops,
         pending_done_ids: options.pending_done.clone(),
         strict_closeout: commit_mode == CommitMode::Required,
         rerun_command_base: build_rerun_command_base(&options, commit_mode),
@@ -1194,14 +1196,19 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
 }
 
 fn recover_empty_response_for_strict_closeout(file: &Path, flags: &WriteFlags) -> Result<bool> {
-    if !flags.strict_closeout {
-        return Ok(false);
+    if flags.strict_closeout {
+        let outcome = repair::run(file)?;
+        if outcome.repaired() {
+            eprintln!(
+                "[write] empty response stdin; recovered existing agent-doc response state with {:?}",
+                outcome
+            );
+            return Ok(true);
+        }
     }
-    let outcome = repair::run(file)?;
-    if outcome.repaired() {
+    if flags.has_pending_mutation {
         eprintln!(
-            "[write] empty response stdin; recovered existing agent-doc response state with {:?}",
-            outcome
+            "[write] empty response stdin; committing pending mutations without a response body"
         );
         return Ok(true);
     }

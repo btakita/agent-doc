@@ -719,6 +719,33 @@ mod tests {
     }
 
     #[test]
+    fn partial_checkpoint_stops_after_cycle_is_abandoned() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body").unwrap();
+        crate::snapshot::save(&doc, "body").unwrap();
+        crate::cycle_state::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+
+        let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
+        assert!(writer.maybe_checkpoint("first").unwrap().is_some());
+        crate::cycle_state::mark_abandoned(&doc, "test", Some("body"), Some("body")).unwrap();
+
+        assert!(writer.maybe_checkpoint("second").unwrap().is_none());
+        let loaded = latest_partial_checkpoint(&doc).unwrap().unwrap();
+        assert_eq!(loaded.response_body, "first");
+
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("partial_response_checkpoint_stopped"),
+            "abandoned-cycle checkpoint stop should be logged:\n{log}"
+        );
+        assert!(
+            log.contains("reason=cycle_closed"),
+            "same-cycle abandoned state should be reported as a closed cycle:\n{log}"
+        );
+    }
+
+    #[test]
     fn partial_checkpoint_skips_unchanged_response() {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");

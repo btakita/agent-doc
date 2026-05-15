@@ -347,6 +347,52 @@ fn write_commit_empty_stdin_adopts_visible_agent_owned_partial_patchback() {
 }
 
 #[test]
+fn write_commit_empty_stdin_with_pending_add_commits_pending_only_change() {
+    let (tmp, doc) = setup_session_stream_doc();
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n### Re: already handled — gpt-5\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n",
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--pending-add",
+            "pending-only repair item",
+        ])
+        .write_stdin("")
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("pending-only repair item"),
+        "pending-only write should update the live document:\n{content}"
+    );
+    assert!(
+        content.matches("### Re:").count() == 1,
+        "empty pending-only write should not synthesize an assistant response:\n{content}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("pending-only repair item"),
+        "pending-only write --commit should commit the pending mutation:\n{head}"
+    );
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
 fn write_commit_remains_best_effort_for_non_session_document() {
     let (_tmp, doc) = setup_template_doc();
 

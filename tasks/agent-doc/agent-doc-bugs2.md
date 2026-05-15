@@ -29,52 +29,15 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-025226.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-100645.md`*
 
 Compacted content:
-- Archived 1 response topic(s): queue completion bookkeeping
+- Archived 2 response topic(s): log review and next steps; terminal closeout idempotency and ops summaries
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Review logs for agent-doc bugs and effectiveness. #next-steps
-### Re: log review and next steps — gpt-5
-
-Reviewed `.agent-doc/logs/ops.log`, `.agent-doc/logs/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.log`, `.agent-doc/logs/cycles.jsonl`, the capture for `cycle-1778806827456`, recent `agent-doc-bugs2.md` commits, and the existing replay/Stop-hook plans.
-
-The healthy signal is strong: recent `agent-doc-bugs2.md` routes show `route_dispatch_start_proven` with `proof=consumed`, direct-pane submit succeeds, Codex capability proof is present, safe-passive sync stays inside budget, and response persistence crosses `ipc_write_consumed` plus `commit_success`. The current preflight also correctly classified this prompt as a post-commit user follow-up instead of trying to absorb it into the prior response.
-
-The main bug-shaped signal is terminal-cycle bookkeeping around `cycle-1778806827456`. The queue-drain Stop-hook response did commit, and the prior full queue response was later compacted, so I do not see a missing-response failure there. But the same committed cycle kept receiving later committed/replay updates, including `late_fallback_patch_rejected reason=already_committed` followed by repeated `capture_committed_after_replay` records. That overlaps the existing plans `tasks/agent-doc/plan-stop-hook-write-applied-rewind.md` and `tasks/agent-doc/plan-late-fallback-patch-redirties-committed-doc.md`; the next fix should make terminal cycle state idempotent so stale repair/Stop-hook/fallback paths cannot keep mutating the lifecycle record after commit success.
-
-Two lower-priority effectiveness issues are visible. `session_clear_protected_input_guard_refused reason=drafted_prompt_input` is correctly fail-closed, but repeated clear attempts should be summarized as protected-input UX instead of reading like clear failures. The log also shows high `commit_noop` / `post_commit_local_drift` churn from follow-up edits and no-op reopen cycles; that is mostly expected, but it should be separated in summaries from actionable bugs.
-
-I captured two recommended backlog items for those follow-ups. No code was changed in this cycle; this was a log review and session-document closeout.
-### Re: terminal closeout idempotency and ops summaries — gpt-5
-
-Implemented `#sp3q` and `#s8cs` in `src/agent-doc`.
-
-What changed:
-- Terminal capture updates are now idempotent: repeated `mark_committed` calls after replay no longer refresh committed capture timestamps or re-emit `capture_committed_after_replay`.
-- Terminal cycle-state bookkeeping now refuses stale duplicate committed/abandoned/timeout mutations while still allowing an intermediate recovered-commit marker to finish as `commit_already_current`.
-- Late fallback patch rejection logs now include `patch_id` with file and cycle id.
-- `agent-doc ops summary` now buckets `commit_noop drift_kind=none` as expected already-current noops and protected-input clear refusals as expected guardrail behavior, separate from actionable drift or busy failures.
-- Updated `SPEC.md`, `specs/07-closeout-commands.md`, `specs/07-core-commands.md`, and `VERSIONS.md`.
-
-Verification:
-- `cargo test --bin agent-doc preflight::tests::preflight_closes_response_captured_cycle_when_snapshot_already_matches_head`
-- `cargo test --bin agent-doc repeated_mark_committed_does_not_relog_replay_provenance`
-- `make check`
-- `make install`
-- `agent-doc --version` reports `agent-doc 0.33.16`
-- Latest GitHub Actions `CI` run `25773430221` was green; I did not find a red tmux leg to reproduce locally.
-
-Commit / push:
-- `src/agent-doc`: `5b47fcb` pushed to `origin/20260422/codex-agent-backend`.
-- root gitlink: `00e73b9` committed on `main`; root push runs after this binary-owned session closeout so the session document commit is included in the pushed branch.
-<!-- agent:boundary:afcbd894 -->
+<!-- agent:boundary:e41a192d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
-present #spec-test-build-install-commit-push
-- do [#sp3q]
-- do [#s8cs]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

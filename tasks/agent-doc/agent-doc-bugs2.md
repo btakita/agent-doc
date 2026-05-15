@@ -46,17 +46,40 @@ The main bug-shaped signal is terminal-cycle bookkeeping around `cycle-177880682
 Two lower-priority effectiveness issues are visible. `session_clear_protected_input_guard_refused reason=drafted_prompt_input` is correctly fail-closed, but repeated clear attempts should be summarized as protected-input UX instead of reading like clear failures. The log also shows high `commit_noop` / `post_commit_local_drift` churn from follow-up edits and no-op reopen cycles; that is mostly expected, but it should be separated in summaries from actionable bugs.
 
 I captured two recommended backlog items for those follow-ups. No code was changed in this cycle; this was a log review and session-document closeout.
-<!-- agent:boundary:0be3479a -->
+### Re: terminal closeout idempotency and ops summaries — gpt-5
+
+Implemented `#sp3q` and `#s8cs` in `src/agent-doc`.
+
+What changed:
+- Terminal capture updates are now idempotent: repeated `mark_committed` calls after replay no longer refresh committed capture timestamps or re-emit `capture_committed_after_replay`.
+- Terminal cycle-state bookkeeping now refuses stale duplicate committed/abandoned/timeout mutations while still allowing an intermediate recovered-commit marker to finish as `commit_already_current`.
+- Late fallback patch rejection logs now include `patch_id` with file and cycle id.
+- `agent-doc ops summary` now buckets `commit_noop drift_kind=none` as expected already-current noops and protected-input clear refusals as expected guardrail behavior, separate from actionable drift or busy failures.
+- Updated `SPEC.md`, `specs/07-closeout-commands.md`, `specs/07-core-commands.md`, and `VERSIONS.md`.
+
+Verification:
+- `cargo test --bin agent-doc preflight::tests::preflight_closes_response_captured_cycle_when_snapshot_already_matches_head`
+- `cargo test --bin agent-doc repeated_mark_committed_does_not_relog_replay_provenance`
+- `make check`
+- `make install`
+- `agent-doc --version` reports `agent-doc 0.33.16`
+- Latest GitHub Actions `CI` run `25773430221` was green; I did not find a red tmux leg to reproduce locally.
+
+Commit / push:
+- `src/agent-doc`: `5b47fcb` pushed to `origin/20260422/codex-agent-backend`.
+- root gitlink: `00e73b9` committed on `main`; root push runs after this binary-owned session closeout so the session document commit is included in the pushed branch.
+<!-- agent:boundary:afcbd894 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
+present #spec-test-build-install-commit-push
+- do [#sp3q]
+- do [#s8cs]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#sp3q] [recommended] Implement terminal-cycle replay/idempotency fix from tasks/agent-doc/plan-stop-hook-write-applied-rewind.md and tasks/agent-doc/plan-late-fallback-patch-redirties-committed-doc.md; cover cycle-1778806827456 where committed captures continue receiving replay/commit updates after terminal closeout.
-- [ ] [#s8cs] [recommended] Add log-summary/UX handling for repeated session_clear_protected_input_guard_refused and commit_noop drift so expected fail-closed clear/no-op behavior is summarized separately from actionable bugs.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

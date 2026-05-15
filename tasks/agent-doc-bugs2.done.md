@@ -31,3 +31,6 @@
 - 2026-05-14 [#aymr] Optimize or re-budget passive sync controller_actor_lookup; safe-passive logs repeatedly exceed the 250ms budget while total sync stays barely under 1s. #agent-doc-bug
 - 2026-05-14 [#gv32] Design lower-agent orchestration using bounded job packets and model-tier routing.
 - 2026-05-14 [#ajx2] Investigate and fix live-typing duplicate insertion in agent-doc; plan: tasks/agent-doc/plan-live-typing-duplicate-insertion.md
+- 2026-05-14 [#has9] [recommended] Fix opencode dispatch-only routing so proof=accepted/proof_scope=accepted_only is treated as not dispatched, and require dispatch-start proof before reporting routed delivery as consumed.
+- 2026-05-14 [#5pr6] [recommended] Fix opencode capability proof command construction and classify CLI usage/help output separately from real child network probe failures.
+- 2026-05-14 [#s1mv] [recommended] Add deterministic coverage for session lifecycle drift: dispatch, user follow-up edit, finalize or compact, then preflight with no stale prompt cycle and no snapshot/head guard mismatch.

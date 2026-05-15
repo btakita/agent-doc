@@ -155,7 +155,37 @@ Verification:
 - Latest visible GitHub `CI` run `25773430221` is green and contains `check`; no current `Agent Doc` workflow/tmux job is visible from `gh run list`, so I ran local `make tmux-ci`, which passed with 228 live tmux tests.
 
 No follow-up backlog items from this pass.
-<!-- agent:boundary:5a00c611 -->
+
+❯ (preset #spec-test-build-install-commit-push)
+❯ update spec + tests. build + install for local testing. commit + push
+❯ do [#normfallback]
+### Re: #normfallback spec/test/build/install — gpt-5
+
+Completed the scoped `#normfallback` pass. The original backlog item was already archived before this cycle, so there was no live backlog row to mark done again.
+
+Changed in `src/agent-doc`:
+- Added direct regression coverage for the observed `sidecar_normalization_fallback_repaired_working_tree` shape: the plugin ack-content sidecar strips the required prompt prefix, the binary rejects that primary snapshot with `reason=prefix_divergence`, repairs the snapshot and working tree from the normalized fallback, and records the working-tree repair in `ops.log`.
+- Updated `specs/07-closeout-commands.md` to make that fallback diagnostic/repair contract explicit for `#normfallback`.
+- Added an unreleased `VERSIONS.md` note for the direct coverage.
+
+Pushed:
+- `src/agent-doc`: `b5a50b58` `test: cover sidecar fallback repair diagnostics`
+
+Parent repo:
+- Committed the `src/agent-doc` gitlink update as `8e6537c5a` `agent-doc: cover sidecar fallback repair diagnostics`.
+- Parent push is blocked by pre-existing unrelated local `main` history ahead of `origin/main`, including several `src/session-share` gitlink commits. Pushing parent `main` would publish those unrelated commits too, so I did not push the parent branch.
+
+Verification:
+- `cargo test normfallback_records_repaired_working_tree_when_sidecar_strips_prompt_prefix`
+- `cargo fmt --check`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest visible GitHub `CI` run `25773430221` is green and contains `check`; no current `Agent Doc` tmux workflow was visible from `gh run list`, so I ran local `make tmux-ci`, which passed with 228 live tmux tests.
+
+No follow-up backlog items from this pass.
+<!-- agent:boundary:df8ad97d -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -29,37 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-001335.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-002915.md`*
 
 Compacted content:
-- Archived 12 response topic(s): smaller-model orchestration; publishing tsift for context shaping; tsift dependency and Memgraph augmentation; 9 more
+- Archived 1 response topic(s): #ajx2 live typing duplicate insertion
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#ajx2]. spec-test-build-install-commit-push
-### Re: #ajx2 live typing duplicate insertion — gpt-5
-
-Implemented and pushed the live-typing duplicate insertion fix.
-
-The fix makes response patch replay idempotent across the binary and editor paths: IPC timeout/fallback closeout now adopts an already-visible response instead of CRDT-merging it a second time, stale fallback patch files are claimed/removed after local closeout, and append-mode component patchers in the binary, JetBrains plugin, and VS Code plugin skip replay when the normalized response body is already present. Queue closeout semantics from the same working patch are also now specified and tested: completed queue items render as `- ~...~` while later prompts remain, and the queue body clears when the last prompt drains.
-
-Commits pushed:
-
-- `src/agent-doc`: `29903b3c` (`fix: guard live typing patch replays`) to `origin/20260422/codex-agent-backend`
-- parent repo: `fc32689f3` (`agent-doc: update live typing replay fix`) to `origin/main`
-
-Verification:
-
-- `cargo fmt`
-- `cargo test response_already_in_current`
-- `cargo test adopt_current_response_without_duplication`
-- `cargo test late_fallback_patch_guard_tests`
-- `cargo test queue::tests`
-- `npm test` in `src/agent-doc/editors/vscode`
-- `./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest` in `src/agent-doc/editors/jetbrains`
-- `./gradlew test buildPlugin` in `src/agent-doc/editors/jetbrains`
-- `make check`
-- `make install` (`agent-doc 0.33.16`)
-- GitHub CI inspected: latest `CI` run `25773430221` has successful `check`; no separate tmux job was exposed in that workflow output, so there was no red tmux leg to reproduce locally.
-<!-- agent:boundary:27257b91 -->
+<!-- agent:boundary:a4d3db47 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

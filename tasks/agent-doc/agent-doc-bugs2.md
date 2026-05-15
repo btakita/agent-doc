@@ -44,7 +44,12 @@ Compacted content:
 ❯ - Verified: `cargo test jetbrains_clear_session_sim_keeps_starting_route_guard_and_repairs_prompt_duplicate`; `cargo test route_sim_`; `make check`; `cargo build`; `make install`
 ❯ - Committed: `391b2c037942` (`test: cover clear session reroute guard`)
 ❯ - Pushed: yes, `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:a4033a43 -->
+### Re: #34qd final closeout — gpt-5
+
+Closed. The earlier prefixed verification tail is answered by this normalized closeout block.
+
+Final evidence: `make check` passed, `make tmux-ci` passed with 228 ignored live-tmux tests, `make install` completed, agent-doc submodule commit `391b2c037942` is pushed, and parent pointer commit `285e037d1` is pushed to `origin/main`.
+<!-- agent:boundary:49b04845 -->
 <!-- /agent:exchange -->
 ###
 <!--

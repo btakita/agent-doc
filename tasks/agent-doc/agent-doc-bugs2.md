@@ -34,7 +34,48 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): CI start blocker
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:fe203e29 -->
+❯ JB `Run Agent Doc` failed on this document. No activity or response.
+
+❯ Still getting duplicate prompts and document corruption while I'm typing in this prompt.
+
+❯ spec-test-build-install-commit-push
+### Re: JetBrains Run Agent Doc duplicate prompt corruption — gpt-5.5
+
+I repaired this document's malformed exchange first so preflight could run. The concrete corruption was a duplicate template scaffold inserted between two `&lt;!-- /agent:exchange --&gt;` close markers; preflight was failing before any normal response cycle could start.
+
+I fixed the underlying paths in `src/agent-doc`:
+
+- Rust repair now recognizes and removes the duplicate scaffold-after-exchange-close shape without swallowing live prompt edits into the snapshot.
+- JetBrains `Run Agent Doc` now waits for markdown typing idle before saving and routing the file to the terminal.
+- JetBrains patch application now waits for typing idle before mutating the editor document, covering both socket and file-watch patch paths.
+- JetBrains plugin version is bumped to `0.2.120`, and a regression test asserts `Run Agent Doc` waits for idle before save/route.
+
+Verification completed:
+
+- `cargo test repair_duplicate_exchange_close_scaffold_drops_inserted_template_shell --lib`
+- `cargo test recover_does_not_treat_orchestration_handoff_marker_as_missing_response -- --test-threads=2`
+- `cargo test repair_completed_backlog_reap_preserves_live_prompt_outside_snapshot -- --test-threads=2`
+- `cargo test --all-targets -- --test-threads=2`
+- `make check`
+- `cargo build --release`
+- `cargo install --path .`
+- `agent-doc lib-install`
+- `./gradlew test buildPlugin`
+- `make tmux-ci` (`228 passed` ignored live tmux tests)
+
+The latest GitHub `CI` workflow run on `main` is green, but that workflow currently has only the `check` job and no separate tmux-test job, so the tmux evidence here is the local `make tmux-ci` run.
+
+Installed locally:
+
+- CLI replaced at `/home/brian/.cargo/bin/agent-doc`
+- FFI library installed via `agent-doc lib-install`
+- JetBrains plugin installed from `editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.120.zip` into `/home/brian/.config/JetBrains/IntelliJIdea2026.1`; restart IDEA to activate it.
+
+Commits so far:
+
+- `src/agent-doc`: `b588090de` (`fix: debounce jetbrains agent-doc runs`), pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `c33324989` (`agent-doc: debounce jetbrains runs`) records the submodule pointer locally; I will push parent `main` after this session-document finalize commit so the pointer and closeout commit travel together.
+<!-- agent:boundary:28ff0afe -->
 <!-- /agent:exchange -->
 ###
 <!--

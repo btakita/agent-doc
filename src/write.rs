@@ -3977,6 +3977,108 @@ fn exchange_prompt_text_duplicated(before: &str, after: &str) -> bool {
     })
 }
 
+#[derive(Clone, Debug)]
+struct PromptLineInfo {
+    segment: String,
+    normalized: Option<String>,
+    prefixed: bool,
+    remove: bool,
+}
+
+fn dedupe_prompt_lines_against_before(before: &str, after: &str, file: &Path) -> (String, bool) {
+    let Some(before_exchange) = exchange_content(before) else {
+        return (after.to_string(), false);
+    };
+    let Ok(components) = component::parse(after) else {
+        return (after.to_string(), false);
+    };
+    let Some(after_exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return (after.to_string(), false);
+    };
+
+    let before_counts = normalized_prompt_counts(before_exchange);
+    let mut lines: Vec<PromptLineInfo> = after_exchange
+        .content(after)
+        .split_inclusive('\n')
+        .map(|segment| {
+            let trimmed = segment.trim();
+            PromptLineInfo {
+                segment: segment.to_string(),
+                normalized: normalized_prompt_text(segment),
+                prefixed: trimmed.starts_with("❯ "),
+                remove: false,
+            }
+        })
+        .collect();
+
+    let mut by_text: HashMap<String, Vec<usize>> = HashMap::new();
+    for (idx, line) in lines.iter().enumerate() {
+        if let Some(text) = line.normalized.as_ref() {
+            by_text.entry(text.clone()).or_default().push(idx);
+        }
+    }
+
+    let mut changed = false;
+    for (text, indexes) in by_text {
+        let allowed = before_counts.get(&text).copied().unwrap_or(0);
+        if allowed == 0 || indexes.len() <= allowed {
+            continue;
+        }
+
+        let mut excess = indexes.len() - allowed;
+        if indexes.iter().any(|idx| lines[*idx].prefixed) {
+            let unprefixed_indexes: Vec<usize> = indexes
+                .iter()
+                .copied()
+                .filter(|idx| !lines[*idx].prefixed)
+                .collect();
+            for idx in unprefixed_indexes {
+                if excess == 0 {
+                    break;
+                }
+                lines[idx].remove = true;
+                excess -= 1;
+                changed = true;
+            }
+        }
+        if excess > 0 {
+            for idx in indexes.iter().rev().copied() {
+                if excess == 0 {
+                    break;
+                }
+                if lines[idx].remove {
+                    continue;
+                }
+                lines[idx].remove = true;
+                excess -= 1;
+                changed = true;
+            }
+        }
+    }
+
+    if !changed {
+        return (after.to_string(), false);
+    }
+
+    let repaired_exchange = lines
+        .into_iter()
+        .filter(|line| !line.remove)
+        .map(|line| line.segment)
+        .collect::<String>();
+    let repaired = after_exchange.replace_content(after, &repaired_exchange);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_prompt_duplicate_repaired file={} before_commit=true",
+            file.display()
+        ),
+    );
+    (repaired, true)
+}
+
 fn patch_touches_exchange(patches: &[template::PatchBlock], unmatched: &str) -> bool {
     patches.iter().any(|patch| patch.name == "exchange") || !unmatched.trim().is_empty()
 }
@@ -5726,8 +5828,20 @@ fn redeliver_ipc_dedupe_to_editor(file: &Path, content: &str) {
     }
 }
 
-fn dedupe_ipc_snapshot_content(file: &Path, content: &str, source: &str) -> (String, bool) {
-    let deduped = dedupe_consecutive_response_blocks(content, file);
+fn dedupe_ipc_snapshot_content(
+    file: &Path,
+    before: Option<&str>,
+    content: &str,
+    source: &str,
+) -> (String, bool) {
+    let mut deduped = dedupe_consecutive_response_blocks(content, file);
+    if let Some(before) = before {
+        let (prompt_deduped, prompt_changed) =
+            dedupe_prompt_lines_against_before(before, &deduped, file);
+        if prompt_changed {
+            deduped = prompt_deduped;
+        }
+    }
     let changed = deduped != content;
     if changed {
         crate::ops_log::log_op(
@@ -6002,8 +6116,12 @@ pub fn try_ipc(
                         (snap_content, "ack_content_sidecar", false)
                     };
 
-                    let (effective_snap, dedupe_repair) =
-                        dedupe_ipc_snapshot_content(file, &effective_snap, snap_source);
+                    let (effective_snap, dedupe_repair) = dedupe_ipc_snapshot_content(
+                        file,
+                        ipc_before_content.as_deref(),
+                        &effective_snap,
+                        snap_source,
+                    );
                     let repair_disk = repair_disk || dedupe_repair;
 
                     eprintln!(
@@ -6564,8 +6682,12 @@ fn write_ipc_and_poll(
             // Plugin applied the patch — update snapshot as actual post-write disk state.
             // `current_on_disk` is from ack-content sidecar when available, or 200ms file read.
             // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
-            let (snap_content, dedupe_repair) =
-                dedupe_ipc_snapshot_content(doc_file, &current_on_disk, "ipc_file");
+            let (snap_content, dedupe_repair) = dedupe_ipc_snapshot_content(
+                doc_file,
+                before_content.as_deref(),
+                &current_on_disk,
+                "ipc_file",
+            );
             if dedupe_repair {
                 repair_disk_from_ipc_dedupe(doc_file, &snap_content)?;
                 redeliver_ipc_dedupe_to_editor(doc_file, &snap_content);
@@ -8402,6 +8524,35 @@ mod tests {
         assert!(log.contains("before_hash="));
         assert!(log.contains("after_hash="));
         assert!(log.contains("writer_pid="));
+    }
+
+    #[test]
+    fn ipc_snapshot_dedupes_extra_prompt_copy_against_before_content() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let before = "<!-- agent:exchange patch=append -->\nOld content.\nlive prompt\n<!-- /agent:exchange -->\n";
+        let after = "<!-- agent:exchange patch=append -->\nOld content.\n❯ live prompt\nlive prompt\n### Re: response\nDone.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, before).unwrap();
+
+        let (repaired, changed) =
+            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc");
+
+        assert!(changed);
+        assert!(repaired.contains("❯ live prompt\n### Re: response"));
+        assert!(
+            !repaired.contains("❯ live prompt\nlive prompt"),
+            "duplicate unprefixed prompt should be removed: {repaired}"
+        );
+        assert_eq!(
+            normalized_prompt_counts(exchange_content(&repaired).unwrap())
+                .get("live prompt")
+                .copied(),
+            Some(1)
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("ipc_prompt_duplicate_repaired"));
+        assert!(log.contains("ipc_snapshot_deduped"));
     }
 
     #[test]

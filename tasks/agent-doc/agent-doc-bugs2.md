@@ -59,14 +59,11 @@ Verification:
 - `make tmux-ci`
 - `make install`
 - `agent-doc --version` -> `agent-doc 0.33.16`
-<!-- agent:boundary:692cc32c -->
+Queue drain repair completed through the Codex Stop hook path.
+<!-- agent:boundary:76e9648a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
-dispatch #spec-test-build-install-commit-push
-- do [#has9]
-- do [#5pr6]
-- do [#s1mv]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

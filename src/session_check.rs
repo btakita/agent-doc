@@ -1627,10 +1627,16 @@ fn prompt_target_is_immediately_before_existing_response(
     current_doc: &str,
     change_text: &str,
 ) -> bool {
-    let target = change_text
+    let target_line = change_text
         .lines()
         .find(|line| !line.trim().is_empty())
-        .map(|line| line.trim().trim_start_matches('❯').trim().to_string());
+        .map(|line| line.trim().to_string());
+    let answered_prompt_marker = target_line
+        .as_deref()
+        .is_some_and(|line| line.starts_with('❯'));
+    let target = target_line
+        .as_deref()
+        .map(|line| line.trim_start_matches('❯').trim().to_string());
     let Some(target) = target else {
         return false;
     };
@@ -1660,7 +1666,13 @@ fn prompt_target_is_immediately_before_existing_response(
             if trimmed.is_empty() || trimmed.starts_with("<!--") {
                 continue;
             }
-            return is_exchange_response_heading(trimmed);
+            if is_exchange_response_heading(trimmed) {
+                return true;
+            }
+            if answered_prompt_marker {
+                continue;
+            }
+            return false;
         }
     }
     false
@@ -2792,6 +2804,27 @@ Body\n\
             }
             other => panic!("expected ok status, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn session_check_ignores_answered_prompt_marker_before_existing_response() {
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ JB `/clear` on this document error:\n",
+            "```\n",
+            "clear refused while actor was starting\n",
+            "```\n\n",
+            "❯ This prompt was duplicated.\n",
+            "### Re: live typing duplicate and clear refusal — gpt-5 (HEAD)\n\n",
+            "Fixed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert!(prompt_target_is_immediately_before_existing_response(
+            current,
+            "❯ JB `/clear` on this document error:"
+        ));
     }
 
     #[test]

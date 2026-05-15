@@ -29,29 +29,23 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-111142.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-111526.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #rrfe
+- Archived 1 response topic(s): log review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-Look in the Claude/Codex session + agent-doc logs to find issues. #next-steps
-### Re: log review — gpt-5.5
-
-I reviewed the recent Codex, Claude, and agent-doc logs around this document and found four concrete issues worth tracking.
-
-1. Claude hit a pending-only write path that committed a backlog mutation, then returned `Exit code 1` with `Error: empty response — nothing to write`. That means `agent-doc write --commit --pending-add ...` can perform the requested mutation and still report failure, which is a bad closeout contract.
-2. The route layer logged four consecutive `route_authoritative_actor_starting_not_ready` failures for the same Codex actor generation before the actor became `ready`. That creates a repeated miss window during clean restarts instead of queueing or retrying exactly once after prompt readiness.
-3. On May 14, two cycles show a stale-preflight repair while the same cycle continued receiving `partial_response_checkpoint` writes. That points to a race where repair can classify a cycle stale while the harness is still producing durable response checkpoints.
-4. `sidecar_normalization_fallback_repaired_working_tree` fired for this document, which means a fallback silently repaired the working tree. That may be correct recovery, but it deserves a deterministic regression so the primary IPC/snapshot path and fallback boundary are explicit.
-
-I added those as new backlog items: `#writeempty`, `#startroute`, `#staleckpt`, and `#normfallback`.
-<!-- agent:boundary:b7037157 -->
+<!-- agent:boundary:5429d963 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#writeempty]
+- do [#startroute]
+- do [#staleckpt]
+- do [#normfallback]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

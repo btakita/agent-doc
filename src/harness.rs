@@ -350,6 +350,9 @@ impl HarnessConfig {
         if self.is_dispatch_ready_prompt_line(trimmed) {
             return None;
         }
+        if codex_prompt_candidate_is_dim_placeholder(output, trimmed) {
+            return None;
+        }
 
         Some("drafted prompt input".to_string())
     }
@@ -664,6 +667,79 @@ fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
     }
 
     None
+}
+
+fn codex_prompt_candidate_is_dim_placeholder(output: &str, candidate: &str) -> bool {
+    let Some(raw_line) = output.lines().rev().find(|line| {
+        let stripped = crate::prompt::strip_ansi(line);
+        stripped.trim() == candidate
+    }) else {
+        return false;
+    };
+    codex_prompt_line_body_starts_dim(raw_line)
+}
+
+fn codex_prompt_line_body_starts_dim(raw_line: &str) -> bool {
+    let mut faint = false;
+    let mut after_prompt = false;
+    let mut chars = raw_line.char_indices().peekable();
+    while let Some((_, ch)) = chars.next() {
+        if ch == '\x1b' && chars.peek().is_some_and(|(_, next)| *next == '[') {
+            let _ = chars.next();
+            let mut sequence = String::new();
+            for (_, seq_ch) in chars.by_ref() {
+                if seq_ch.is_ascii_alphabetic() {
+                    if seq_ch == 'm' {
+                        apply_sgr_sequence(&sequence, &mut faint);
+                    }
+                    break;
+                }
+                sequence.push(seq_ch);
+            }
+            continue;
+        }
+
+        if !after_prompt {
+            if matches!(ch, '>' | '›' | '❯') {
+                after_prompt = true;
+            }
+            continue;
+        }
+
+        if ch.is_whitespace() {
+            continue;
+        }
+        return faint;
+    }
+    false
+}
+
+fn apply_sgr_sequence(sequence: &str, faint: &mut bool) {
+    if sequence.is_empty() {
+        *faint = false;
+        return;
+    }
+    let codes = sequence
+        .split(';')
+        .filter_map(|code| code.parse::<u16>().ok())
+        .collect::<Vec<_>>();
+    let mut index = 0;
+    while index < codes.len() {
+        match codes[index] {
+            0 => *faint = false,
+            2 => *faint = true,
+            22 => *faint = false,
+            38 | 48 => {
+                if codes.get(index + 1) == Some(&2) {
+                    index += 4;
+                } else if codes.get(index + 1) == Some(&5) {
+                    index += 2;
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
 }
 
 #[cfg(test)]
@@ -1200,6 +1276,42 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
             h.protected_prompt_input_reason(output).as_deref(),
             Some("drafted prompt input")
         );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_detects_non_dim_codex_text_with_ansi() {
+        let h = HarnessConfig::codex();
+        let output = "\
+\x1b[1m›\x1b[0m investigate this issue
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("drafted prompt input")
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_does_not_treat_rgb_color_as_dim() {
+        let h = HarnessConfig::codex();
+        let output = "\
+\x1b[1m›\x1b[0m \x1b[38;2;128;128;128minvestigate this issue\x1b[0m
+gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
+";
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("drafted prompt input")
+        );
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_dim_codex_placeholder_text() {
+        let h = HarnessConfig::codex();
+        let output = "\
+\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 21% used
+";
+        assert_eq!(h.protected_prompt_input_reason(output), None);
     }
 
     #[test]

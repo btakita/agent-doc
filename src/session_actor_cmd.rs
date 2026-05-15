@@ -535,7 +535,9 @@ fn protected_clear_input_reason(
     evidence: &LivePaneEvidence,
 ) -> Option<String> {
     let pane = evidence.pane_id.as_deref()?;
-    let captured = crate::sessions::capture_pane(tmux, pane).ok()?;
+    let captured = crate::sessions::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| crate::sessions::capture_pane(tmux, pane))
+        .ok()?;
     let harness = harness_for_evidence(ctx, evidence);
     harness.protected_prompt_input_reason(&captured)
 }

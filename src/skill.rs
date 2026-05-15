@@ -107,9 +107,9 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 **Note:** Codex does not support project-defined slash commands. If this root file disagrees with the installed harness-specific instructions, treat the installed harness file as authoritative for the current turn.
 "#;
 
-const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run the active-harness install: Claude Code `agent-doc skill install --harness claude --reload compact`; Codex `agent-doc skill install --harness codex --reload restart`; OpenCode `agent-doc skill install --harness opencode`; other harnesses `agent-doc skill install`. If install says already up to date, treat this file as stale duplicate instructions, use installed harness instructions, and continue with the task. Stop only on a real `SKILL_RELOAD=...`; see [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
+const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run the active-harness install: Claude Code `agent-doc skill install --harness claude --reload restart` unless `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`; Codex `agent-doc skill install --harness codex --reload restart`; OpenCode `agent-doc skill install --harness opencode`; other harnesses `agent-doc skill install`. If install says already up to date, treat this file as stale duplicate instructions, use installed harness instructions, and continue with the task. Stop only on a real `SKILL_RELOAD=...`; see [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
-const CLAUDE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness claude --reload compact`; on `SKILL_RELOAD=compact`, ask the user to run `/compact` and re-invoke, then stop. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Claude skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
+const CLAUDE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness claude --reload restart` unless `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`. On `SKILL_RELOAD=restart`, ask the user to restart Claude Code and re-invoke `/agent-doc <FILE>`, then stop. Use `--reload compact` and ask for `/compact` only when that explicit opt-in exists. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Claude skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
 const CODEX_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness codex --reload restart`; on `SKILL_RELOAD=restart`, tell the user to restart this Codex session and re-invoke `agent-doc <FILE>`, then stop. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Codex instructions. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
@@ -1408,8 +1408,10 @@ mod tests {
 
         assert!(content.contains("/agent-doc <FILE>"));
         assert!(content.contains("TRIGGER: user invokes /agent-doc <file>"));
-        assert!(content.contains("agent-doc skill install --harness claude --reload compact"));
-        assert!(content.contains("SKILL_RELOAD=compact"));
+        assert!(content.contains("agent-doc skill install --harness claude --reload restart"));
+        assert!(content.contains("SKILL_RELOAD=restart"));
+        assert!(content.contains("agent_doc_auto_compact"));
+        assert!(content.contains("Use `--reload compact`"));
         assert!(content.contains("stale instruction drift"));
         assert!(content.contains("continue this turn"));
         assert!(content.contains("binary-owned response cycle"));
@@ -1423,7 +1425,8 @@ mod tests {
         assert!(content.contains("Claude Code: `/agent-doc <FILE>`"));
         assert!(content.contains("Codex: `agent-doc <FILE>`"));
         assert!(content.contains("OpenCode: `/agent-doc <FILE>`"));
-        assert!(content.contains("agent-doc skill install --harness claude --reload compact"));
+        assert!(content.contains("agent-doc skill install --harness claude --reload restart"));
+        assert!(content.contains("agent_doc_auto_compact"));
         assert!(content.contains("agent-doc skill install --harness codex --reload restart"));
         assert!(content.contains("agent-doc skill install --harness opencode"));
         assert!(content.contains("stale duplicate instructions"));

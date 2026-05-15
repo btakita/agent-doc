@@ -104,6 +104,10 @@ pub struct ProjectConfig {
     /// Target tmux session name for this project.
     #[serde(default)]
     pub tmux_session: Option<String>,
+    /// Explicit opt-in for automatic compaction/reload policies.
+    /// Session-accretion heuristics never compact by themselves; omit to disable.
+    #[serde(default, alias = "auto_compact")]
+    pub agent_doc_auto_compact: Option<usize>,
     /// Guard behavior overrides (for example pending-capture enforcement).
     #[serde(default)]
     pub guards: GuardConfig,
@@ -311,12 +315,24 @@ mod tests {
         let config_path = setup_project(dir.path());
         std::fs::write(
             &config_path,
-            "tmux_session = \"test\"\n\n[components.exchange]\npatch = \"append\"\n",
+            "tmux_session = \"test\"\nagent_doc_auto_compact = 240\n\n[components.exchange]\npatch = \"append\"\n",
         )
         .unwrap();
         let cfg = load_project_from(&config_path);
         assert_eq!(cfg.tmux_session.as_deref(), Some("test"));
+        assert_eq!(cfg.agent_doc_auto_compact, Some(240));
         assert_eq!(cfg.components["exchange"].patch, "append");
+    }
+
+    #[test]
+    fn load_legacy_auto_compact_alias() {
+        let dir = TempDir::new().unwrap();
+        let config_path = setup_project(dir.path());
+        std::fs::write(&config_path, "auto_compact = 180\n").unwrap();
+
+        let cfg = load_project_from(&config_path);
+
+        assert_eq!(cfg.agent_doc_auto_compact, Some(180));
     }
 
     #[test]

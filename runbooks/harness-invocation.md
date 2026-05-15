@@ -52,7 +52,7 @@ Identify your harness from your environment:
 
 - **Invocation:** User types `/agent-doc <file>` which triggers the `Skill` tool.
 - **Slash commands:** Execute via the `Skill` tool. Strip the leading `/`; pass remaining args.
-- **Auto-update prompt:** Use `AskUserQuestion` to prompt the user to run `/compact`.
+- **Auto-update prompt:** Default to `--reload restart`; only use `--reload compact` and ask the user to run `/compact` when `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`.
 - **Write-back:** Pipe the normal response cycle via `Bash` using `agent-doc finalize ...`; use `agent-doc write --commit ...` only for manual repair when the prompt already exists.
 - **Manual repair / missed patchback:** Use the shared default above. In Claude Code that still means piping the response through `Bash`, but the command should be `agent-doc write --commit <FILE>` once the prompt already exists in the document.
 - **Built-in commands** (e.g., `/compact`, `/clear`): Cannot invoke via Skill. Write a document note instructing the user to run it at the terminal.

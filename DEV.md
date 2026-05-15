@@ -22,8 +22,10 @@ serves the local workspace but tmux panes resolve via `$PATH` which hits `~/.car
 
 ## Skill update after release
 
-After publishing a new version, run `agent-doc skill install --reload compact` inside
+After publishing a new version, run `agent-doc skill install --reload restart` inside
 the agent-loop workspace to update the Claude Code skill (`.claude/skills/agent-doc/SKILL.md`).
+Use `--reload compact` only for sessions that explicitly opt into
+`agent_doc_auto_compact` in frontmatter or project `.agent-doc/config.toml`.
 
 ## Library target (v0.17.28+)
 

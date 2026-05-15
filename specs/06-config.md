@@ -61,6 +61,7 @@ Location: `.agent-doc/config.toml` (relative to project root).
 
 Fields:
 - `tmux_session` — the tmux session name bound to this project.
+- `agent_doc_auto_compact = <line-threshold>` — explicit opt-in for automatic compaction/reload policies. Session-accretion warnings, repeated no-op closeouts, and Claude skill auto-update must not compact by default when this setting is absent.
 - `ssh.profiles.<name>.targets = ["alias-or-host", ...]` — named SSH target groups for ops docs.
 - `ssh.docs."<relative/path.md>"` — per-document SSH defaults for known ops docs. Each entry may set `profile = "<name>"`, direct `targets = [...]`, or both. If an entry exists but resolves no targets, preflight/startup must fail closed.
 

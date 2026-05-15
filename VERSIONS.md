@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Starting actor route waits now have deterministic prompt-barrier coverage.** The route wait decision is factored into a pure poll classifier and covered for the `starting -> busy -> ready` schedule: dispatch remains blocked through restart-bootstrap `busy` and through `ready` without prompt proof, then releases only when ready state, dispatch-ready prompt proof, and dispatch eligibility agree. The route spec now names that conjunctive gate for `#startroute` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Pending-only empty write closeouts cover completed items.** `write --commit` with empty stdin now has regression coverage for `--done` as well as `--pending-add`: it reaps and archives the completed item, commits the document, leaves the exchange untouched, and passes `session-check`. The closeout spec now names both add-only and done-only pending mutation shapes for the `#writeempty` contract in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Terminal closeout lifecycle updates are idempotent.** Repeated repair/replay/no-op bookkeeping after a cycle is already `Committed` no longer rewrites cycle-state, refreshes committed capture timestamps, or re-emits `capture_committed_after_replay`; late fallback rejection diagnostics now include the patch id. `agent-doc ops summary` also separates `commit_noop drift_kind=none` and protected-input clear refusals into expected-behavior buckets so routine no-op closeouts and fail-closed clear guards do not read as actionable bugs. This closes `#sp3q` and `#s8cs` in `tasks/agent-doc/agent-doc-bugs2.md`.

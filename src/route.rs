@@ -2635,6 +2635,27 @@ fn route_starting_actor_not_ready_log_line(
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthoritativeActorReadyPollDecision {
+    Ready,
+    Terminal,
+    Continue,
+}
+
+fn classify_authoritative_actor_ready_poll(
+    actor_state: crate::session_actor::ActorState,
+    prompt_ready: bool,
+    dispatch_eligible: bool,
+) -> AuthoritativeActorReadyPollDecision {
+    if actor_state == crate::session_actor::ActorState::Ready && prompt_ready && dispatch_eligible {
+        return AuthoritativeActorReadyPollDecision::Ready;
+    }
+    if authoritative_actor_start_wait_terminal_state(actor_state) {
+        return AuthoritativeActorReadyPollDecision::Terminal;
+    }
+    AuthoritativeActorReadyPollDecision::Continue
+}
+
 fn wait_for_authoritative_actor_ready(
     tmux: &Tmux,
     file: &Path,
@@ -2659,36 +2680,40 @@ fn wait_for_authoritative_actor_ready(
             let refreshed_state = refreshed.actor_state();
             let prompt_ready = current_generation_ready_prompt_proven(tmux, &refreshed, harness);
             last_facts = AuthoritativeActorReadyFacts::from_target(&refreshed, prompt_ready);
-            if refreshed_state == crate::session_actor::ActorState::Ready
-                && prompt_ready
-                && authoritative_actor_dispatch_target_eligible(&refreshed)
-            {
-                let elapsed_ms = start.elapsed().as_millis();
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "route_starting_actor_ready file={} harness={} elapsed_ms={} {}",
-                        file.display(),
-                        harness.binary,
-                        elapsed_ms,
-                        last_facts.log_fields()
-                    ),
-                );
-                return Ok(Some(refreshed));
-            }
-            if authoritative_actor_start_wait_terminal_state(refreshed_state) {
-                let elapsed_ms = start.elapsed().as_millis();
-                crate::ops_log::log_op(
-                    file,
-                    &format!(
-                        "route_authoritative_actor_starting_terminal file={} harness={} elapsed_ms={} {}",
-                        file.display(),
-                        harness.binary,
-                        elapsed_ms,
-                        last_facts.log_fields()
-                    ),
-                );
-                return Ok(Some(refreshed));
+            match classify_authoritative_actor_ready_poll(
+                refreshed_state,
+                prompt_ready,
+                authoritative_actor_dispatch_target_eligible(&refreshed),
+            ) {
+                AuthoritativeActorReadyPollDecision::Ready => {
+                    let elapsed_ms = start.elapsed().as_millis();
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_starting_actor_ready file={} harness={} elapsed_ms={} {}",
+                            file.display(),
+                            harness.binary,
+                            elapsed_ms,
+                            last_facts.log_fields()
+                        ),
+                    );
+                    return Ok(Some(refreshed));
+                }
+                AuthoritativeActorReadyPollDecision::Terminal => {
+                    let elapsed_ms = start.elapsed().as_millis();
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "route_authoritative_actor_starting_terminal file={} harness={} elapsed_ms={} {}",
+                            file.display(),
+                            harness.binary,
+                            elapsed_ms,
+                            last_facts.log_fields()
+                        ),
+                    );
+                    return Ok(Some(refreshed));
+                }
+                AuthoritativeActorReadyPollDecision::Continue => {}
             }
         }
         std::thread::sleep(poll);
@@ -7153,6 +7178,49 @@ mod tests {
         assert!(!authoritative_actor_start_wait_terminal_state(
             crate::session_actor::ActorState::Ready
         ));
+    }
+
+    #[test]
+    fn authoritative_actor_ready_poll_requires_ready_state_and_prompt_proof() {
+        use crate::session_actor::ActorState;
+
+        let schedule = [
+            (ActorState::Starting, false, true),
+            (ActorState::Busy, false, true),
+            (ActorState::Ready, false, true),
+        ];
+        for (state, prompt_ready, dispatch_eligible) in schedule {
+            assert_eq!(
+                classify_authoritative_actor_ready_poll(state, prompt_ready, dispatch_eligible),
+                AuthoritativeActorReadyPollDecision::Continue,
+                "route must keep waiting while the current generation is {state:?} prompt_ready={prompt_ready} eligible={dispatch_eligible}"
+            );
+        }
+
+        assert_eq!(
+            classify_authoritative_actor_ready_poll(ActorState::Ready, true, false),
+            AuthoritativeActorReadyPollDecision::Continue,
+            "a ready actor still cannot dispatch until the target passes dispatch eligibility"
+        );
+        assert_eq!(
+            classify_authoritative_actor_ready_poll(ActorState::Ready, true, true),
+            AuthoritativeActorReadyPollDecision::Ready,
+            "route may dispatch only after ready state, prompt proof, and eligibility agree"
+        );
+    }
+
+    #[test]
+    fn authoritative_actor_ready_poll_surfaces_terminal_states() {
+        use crate::session_actor::ActorState;
+
+        assert_eq!(
+            classify_authoritative_actor_ready_poll(ActorState::Closed, false, true),
+            AuthoritativeActorReadyPollDecision::Terminal
+        );
+        assert_eq!(
+            classify_authoritative_actor_ready_poll(ActorState::Blocked, false, true),
+            AuthoritativeActorReadyPollDecision::Terminal
+        );
     }
 
     fn test_registry_entry(

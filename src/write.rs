@@ -5836,7 +5836,7 @@ fn redeliver_ipc_dedupe_to_editor(file: &Path, content: &str) {
     }
 }
 
-fn dedupe_ipc_snapshot_content(
+pub(crate) fn dedupe_ipc_snapshot_content(
     file: &Path,
     before: Option<&str>,
     content: &str,

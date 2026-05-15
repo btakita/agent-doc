@@ -34,8 +34,10 @@ RepairBoundary
 DuplicateVisibleResponse
 CrashAt(FaultPoint)
 Recover
+SessionClear
 BindRouteOwner
 SupervisorReady
+SupervisorBusy
 SupervisorWaitingInput
 SupervisorBlocked
 SupervisorClosed
@@ -114,6 +116,8 @@ Closeout invariants currently exercised by the simulator:
   crosses the commit boundary.
 - Duplicate visible response patchbacks are rejected before commit.
 - Boundary cleanup leaves at most one live exchange boundary marker.
+- IPC snapshot duplicate-prompt repair removes an extra live-typed prompt copy
+  before the repaired response crosses the commit boundary.
 - Each named closeout fault point has an explicit fail-closed, recovery, or
   no-op outcome.
 
@@ -128,6 +132,9 @@ actor model:
 - Supervisor lifecycle facts can move through starting, ready, waiting-input,
   blocked, and closed states. Route dispatch is accepted only for the current
   ready generation.
+- A JetBrains Clear Session Context simulation keeps `/clear` as an explicit
+  session operator action while proving the following `Run Agent Doc` reroute
+  still fails closed until the starting actor reaches a dispatch-ready prompt.
 - Dispatch proof must match the same durable generation, session, and pane that
   accepted the dispatch.
 - Stale actor generation updates, stale pane observations, and missing pane

@@ -67,6 +67,7 @@ enum SimCommand {
     DuplicateVisibleResponse,
     CrashAt(FaultPoint),
     Recover,
+    SessionClear,
     BindRouteOwner,
     SupervisorReady,
     SupervisorBusy,
@@ -264,6 +265,9 @@ struct Coverage {
     supervisor_lifecycle_updates: usize,
     route_dispatch_acceptances: usize,
     route_dispatch_proofs: usize,
+    session_clears: usize,
+    starting_dispatch_blocks: usize,
+    prompt_duplicate_repairs: usize,
     starting_prompt_promotions: usize,
     busy_dispatch_blocks: usize,
     closed_dispatch_blocks: usize,
@@ -314,6 +318,9 @@ impl Coverage {
         if message.contains("supervisor lifecycle Busy cannot accept route dispatch") {
             self.busy_dispatch_blocks += 1;
         }
+        if message.contains("supervisor lifecycle Starting cannot accept route dispatch") {
+            self.starting_dispatch_blocks += 1;
+        }
         if message.contains("supervisor lifecycle Closed cannot accept route dispatch") {
             self.closed_dispatch_blocks += 1;
         }
@@ -333,6 +340,9 @@ impl Coverage {
         self.supervisor_lifecycle_updates += other.supervisor_lifecycle_updates;
         self.route_dispatch_acceptances += other.route_dispatch_acceptances;
         self.route_dispatch_proofs += other.route_dispatch_proofs;
+        self.session_clears += other.session_clears;
+        self.starting_dispatch_blocks += other.starting_dispatch_blocks;
+        self.prompt_duplicate_repairs += other.prompt_duplicate_repairs;
         self.starting_prompt_promotions += other.starting_prompt_promotions;
         self.busy_dispatch_blocks += other.busy_dispatch_blocks;
         self.closed_dispatch_blocks += other.closed_dispatch_blocks;
@@ -387,7 +397,7 @@ impl SimWorld {
         let mut rng = DeterministicRng::new(seed);
         let mut world = Self::new(seed);
         for _ in 0..steps {
-            let command = match rng.next_usize(41) {
+            let command = match rng.next_usize(42) {
                 0 => SimCommand::EditPrompt,
                 1 => SimCommand::EditLaterPrompt,
                 2 => SimCommand::AddMalformedBacklogItem,
@@ -403,26 +413,27 @@ impl SimWorld {
                     SimCommand::CrashAt(FaultPoint::ALL[index])
                 }
                 19 => SimCommand::Recover,
-                20 => SimCommand::BindRouteOwner,
-                21 => SimCommand::SupervisorReady,
-                22 => SimCommand::SupervisorBusy,
-                23 => SimCommand::SupervisorWaitingInput,
-                24 => SimCommand::SupervisorBlocked,
-                25 => SimCommand::SupervisorClosed,
-                26 => SimCommand::DispatchRoutePrompt,
-                27 => SimCommand::ProveDispatchAccepted,
-                28 => SimCommand::StaleSupervisorUpdate,
-                29 => SimCommand::ObserveStalePane,
-                30 => SimCommand::ObserveMissingPane,
-                31 => SimCommand::DriftProjection,
-                32 => SimCommand::RepairProjection,
-                33 => SimCommand::PromoteStartingPromptReady,
-                34 => SimCommand::BusyInterruptRecoveryReady,
-                35 => SimCommand::SyncProtectedGrowthManual,
-                36 => SimCommand::SyncProtectedGrowthPassive,
-                37 => SimCommand::SyncProtectedGrowthFocusVisible,
-                38 => SimCommand::SyncDetachableReplaceManual,
-                39 => SimCommand::SyncDetachableReplacePassive,
+                20 => SimCommand::SessionClear,
+                21 => SimCommand::BindRouteOwner,
+                22 => SimCommand::SupervisorReady,
+                23 => SimCommand::SupervisorBusy,
+                24 => SimCommand::SupervisorWaitingInput,
+                25 => SimCommand::SupervisorBlocked,
+                26 => SimCommand::SupervisorClosed,
+                27 => SimCommand::DispatchRoutePrompt,
+                28 => SimCommand::ProveDispatchAccepted,
+                29 => SimCommand::StaleSupervisorUpdate,
+                30 => SimCommand::ObserveStalePane,
+                31 => SimCommand::ObserveMissingPane,
+                32 => SimCommand::DriftProjection,
+                33 => SimCommand::RepairProjection,
+                34 => SimCommand::PromoteStartingPromptReady,
+                35 => SimCommand::BusyInterruptRecoveryReady,
+                36 => SimCommand::SyncProtectedGrowthManual,
+                37 => SimCommand::SyncProtectedGrowthPassive,
+                38 => SimCommand::SyncProtectedGrowthFocusVisible,
+                39 => SimCommand::SyncDetachableReplaceManual,
+                40 => SimCommand::SyncDetachableReplacePassive,
                 _ => SimCommand::SyncVisibleFocusPreserve,
             };
             world.apply(command)?;
@@ -521,6 +532,11 @@ impl SimWorld {
             }
             SimCommand::Recover => {
                 if let Err(err) = self.recover_after_fault() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
+            SimCommand::SessionClear => {
+                if let Err(err) = self.clear_session_context() {
                     self.coverage.record_block(&err.to_string());
                 }
             }
@@ -695,6 +711,23 @@ impl SimWorld {
         self.route.projection = self.route.durable.clone();
         self.route.pending_dispatch = None;
         self.coverage.route_generation_rebinds += 1;
+    }
+
+    fn clear_session_context(&mut self) -> Result<()> {
+        self.current_dispatch_pane()?;
+        self.route.pending_dispatch = None;
+        self.coverage.session_clears += 1;
+        Ok(())
+    }
+
+    fn repair_ipc_snapshot_duplicate_prompts(&mut self, before: &str, file: &Path) -> Result<()> {
+        let (repaired, changed) =
+            crate::write::dedupe_ipc_snapshot_content(file, Some(before), &self.doc, "sim_ipc");
+        if changed {
+            self.doc = repaired;
+            self.coverage.prompt_duplicate_repairs += 1;
+        }
+        Ok(())
     }
 
     fn transition_supervisor(
@@ -1521,6 +1554,52 @@ fn route_sim_blocks_starting_actor_that_closes_before_ready_prompt() {
     assert_eq!(world.coverage.starting_prompt_promotions, 0);
     assert_eq!(world.coverage.route_dispatch_acceptances, 0);
     assert_eq!(world.coverage.route_dispatch_proofs, 0);
+}
+
+#[test]
+fn jetbrains_clear_session_sim_keeps_starting_route_guard_and_repairs_prompt_duplicate() {
+    let temp = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(temp.path().join(".agent-doc/logs")).unwrap();
+    let doc_path = temp.path().join("jetbrains-clear-session.md");
+
+    let mut world = SimWorld::new(2_008);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::EditPrompt).unwrap();
+    let before_ipc = world.doc.clone();
+
+    world.apply(SimCommand::SessionClear).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+
+    assert_eq!(world.coverage.session_clears, 1);
+    assert_eq!(
+        world.coverage.starting_dispatch_blocks, 1,
+        "Run Agent Doc after clear must stay prompt-gated while the actor is still starting"
+    );
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+
+    world
+        .append_to_exchange("do #sim1. spec-test-build-install-commit-push\n")
+        .unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+    world
+        .repair_ipc_snapshot_duplicate_prompts(&before_ipc, &doc_path)
+        .unwrap();
+
+    assert_eq!(world.coverage.prompt_duplicate_repairs, 1);
+    assert_eq!(
+        world
+            .component_content("exchange")
+            .unwrap()
+            .matches("do #sim1. spec-test-build-install-commit-push")
+            .count(),
+        1,
+        "IPC snapshot repair should keep the normalized live prompt once"
+    );
+
+    world.apply(SimCommand::Commit).unwrap();
+    assert_eq!(world.phase, CyclePhase::Committed);
+    assert_eq!(world.snapshot, world.doc);
 }
 
 #[test]

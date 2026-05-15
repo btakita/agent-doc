@@ -224,6 +224,50 @@ impl AuthoritativeActorDispatchTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthoritativeActorReadyFacts {
+    pane_id: String,
+    generation: u64,
+    actor_state: crate::session_actor::ActorState,
+    supervisor_health: String,
+    runtime_state: String,
+    prompt_ready: bool,
+    last_transition_reason: String,
+    last_transition_caller: String,
+}
+
+impl AuthoritativeActorReadyFacts {
+    fn from_target(
+        target: &AuthoritativeActorDispatchTarget,
+        prompt_ready: bool,
+    ) -> AuthoritativeActorReadyFacts {
+        AuthoritativeActorReadyFacts {
+            pane_id: target.record.pane_id.clone(),
+            generation: target.record.generation,
+            actor_state: target.actor_state(),
+            supervisor_health: supervisor_health_label(target.runtime.health),
+            runtime_state: runtime_actor_state_label(&target.runtime).to_string(),
+            prompt_ready,
+            last_transition_reason: target.record.last_transition.reason.clone(),
+            last_transition_caller: target.record.last_transition.caller.clone(),
+        }
+    }
+
+    fn log_fields(&self) -> String {
+        format!(
+            "pane={} generation={} actor_state={} supervisor_health={} runtime_state={} prompt_ready={} last_transition_reason={} last_transition_caller={}",
+            self.pane_id,
+            self.generation,
+            self.actor_state.as_str(),
+            self.supervisor_health,
+            self.runtime_state,
+            self.prompt_ready,
+            self.last_transition_reason,
+            self.last_transition_caller
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingPromptBearingRouteContext {
     marker: String,
 }
@@ -2445,19 +2489,11 @@ fn promote_starting_authoritative_actor_if_dispatch_ready(
     }
 
     let _ = tmux.select_pane(&record.pane_id);
-    std::thread::sleep(std::time::Duration::from_millis(100));
     let pane_ready = tmux
         .capture_pane(&record.pane_id, Some(80))
         .ok()
         .map(|content| ready_prompt_candidate(&content, harness).is_some())
-        .unwrap_or(false)
-        || wait_for_agent_ready_outcome(
-            tmux,
-            &record.pane_id,
-            std::time::Duration::from_millis(1_200),
-            harness,
-        )
-        .is_ready();
+        .unwrap_or(false);
     if !pane_ready {
         return (record, runtime);
     }
@@ -2499,6 +2535,28 @@ fn promote_starting_authoritative_actor_if_dispatch_ready(
             (record, runtime)
         }
     }
+}
+
+fn current_generation_ready_prompt_proven(
+    tmux: &Tmux,
+    target: &AuthoritativeActorDispatchTarget,
+    harness: &HarnessConfig,
+) -> bool {
+    if tmux
+        .capture_pane(&target.record.pane_id, Some(80))
+        .ok()
+        .map(|content| ready_prompt_candidate(&content, harness).is_some())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    target.record.last_transition.new_generation == target.record.generation
+        && matches!(
+            target.record.last_transition.reason.as_str(),
+            "prompt_ready" | "dispatch_ready_prompt"
+        )
+        && target.actor_state() == crate::session_actor::ActorState::Ready
 }
 
 fn authorize_controller_dispatch(
@@ -2560,6 +2618,23 @@ fn authoritative_actor_start_wait_terminal_state(state: crate::session_actor::Ac
     )
 }
 
+fn route_starting_actor_not_ready_log_line(
+    file: &Path,
+    harness: &HarnessConfig,
+    timeout: Duration,
+    elapsed: Duration,
+    facts: &AuthoritativeActorReadyFacts,
+) -> String {
+    format!(
+        "route_authoritative_actor_starting_not_ready file={} harness={} timeout_ms={} elapsed_ms={} {}",
+        file.display(),
+        harness.binary,
+        timeout.as_millis(),
+        elapsed.as_millis(),
+        facts.log_fields()
+    )
+}
+
 fn wait_for_authoritative_actor_ready(
     tmux: &Tmux,
     file: &Path,
@@ -2571,9 +2646,10 @@ fn wait_for_authoritative_actor_ready(
     let timeout = dispatch_only_starting_pane_recovery_timeout(Some(harness));
     let deadline = Instant::now() + timeout;
     let poll = Duration::from_millis(100);
-    let mut last_state = initial.actor_state();
-    let mut last_generation = initial.record.generation;
-    let mut last_pane = initial.record.pane_id.clone();
+    let mut last_facts = AuthoritativeActorReadyFacts::from_target(
+        initial,
+        current_generation_ready_prompt_proven(tmux, initial, harness),
+    );
     let start = Instant::now();
 
     while Instant::now() < deadline {
@@ -2581,22 +2657,21 @@ fn wait_for_authoritative_actor_ready(
             tmux, file, session_id, file_path, harness, false, false,
         )? {
             let refreshed_state = refreshed.actor_state();
-            last_state = refreshed_state;
-            last_generation = refreshed.record.generation;
-            last_pane = refreshed.record.pane_id.clone();
+            let prompt_ready = current_generation_ready_prompt_proven(tmux, &refreshed, harness);
+            last_facts = AuthoritativeActorReadyFacts::from_target(&refreshed, prompt_ready);
             if refreshed_state == crate::session_actor::ActorState::Ready
+                && prompt_ready
                 && authoritative_actor_dispatch_target_eligible(&refreshed)
             {
                 let elapsed_ms = start.elapsed().as_millis();
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "route_starting_actor_ready file={} pane={} harness={} generation={} elapsed_ms={}",
+                        "route_starting_actor_ready file={} harness={} elapsed_ms={} {}",
                         file.display(),
-                        last_pane,
                         harness.binary,
-                        last_generation,
-                        elapsed_ms
+                        elapsed_ms,
+                        last_facts.log_fields()
                     ),
                 );
                 return Ok(Some(refreshed));
@@ -2606,13 +2681,11 @@ fn wait_for_authoritative_actor_ready(
                 crate::ops_log::log_op(
                     file,
                     &format!(
-                        "route_authoritative_actor_starting_terminal file={} pane={} harness={} generation={} actor_state={} elapsed_ms={}",
+                        "route_authoritative_actor_starting_terminal file={} harness={} elapsed_ms={} {}",
                         file.display(),
-                        last_pane,
                         harness.binary,
-                        last_generation,
-                        refreshed_state.as_str(),
-                        elapsed_ms
+                        elapsed_ms,
+                        last_facts.log_fields()
                     ),
                 );
                 return Ok(Some(refreshed));
@@ -2621,19 +2694,10 @@ fn wait_for_authoritative_actor_ready(
         std::thread::sleep(poll);
     }
 
-    let elapsed_ms = start.elapsed().as_millis();
+    let elapsed = start.elapsed();
     crate::ops_log::log_op(
         file,
-        &format!(
-            "route_authoritative_actor_starting_not_ready file={} pane={} harness={} generation={} actor_state={} timeout_ms={} elapsed_ms={}",
-            file.display(),
-            last_pane,
-            harness.binary,
-            last_generation,
-            last_state.as_str(),
-            timeout.as_millis(),
-            elapsed_ms
-        ),
+        &route_starting_actor_not_ready_log_line(file, harness, timeout, elapsed, &last_facts),
     );
     Ok(None)
 }
@@ -12766,6 +12830,27 @@ Body\n\
         let stale_pane = iso.auto_start(session, &cwd).unwrap();
         let _ = wait_for_pane_contains(&iso, &stale_pane, "> ", std::time::Duration::from_secs(3));
         let actor_pane = iso.auto_start(session, &cwd).unwrap();
+        assert!(
+            wait_for_shell(&iso, &actor_pane, Duration::from_secs(3)),
+            "actor pane shell should be ready before installing Codex prompt fixture"
+        );
+        let prompt_script = dir.path().join("codex-ready.sh");
+        std::fs::write(
+            &prompt_script,
+            "#!/bin/sh\nprintf '\\033[2J\\033[H› \\ngpt-5.4 high · ~/work/btakita/agent-loop · Context 0%% used\\n'\ncat\n",
+        )
+        .unwrap();
+        send_keys_with_retry(
+            &iso,
+            &actor_pane,
+            &format!("exec /bin/sh {}", prompt_script.display()),
+        );
+        let ready_output =
+            wait_for_pane_contains(&iso, &actor_pane, "Context", Duration::from_secs(3));
+        assert!(
+            ready_prompt_candidate(&ready_output, &HarnessConfig::codex()).is_some(),
+            "actor pane should show a Codex dispatch-ready prompt before the ready wait: {ready_output}"
+        );
 
         let doc = dir.path().join("session.md");
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
@@ -13219,10 +13304,16 @@ Body\n\
             "-y",
             "40",
         ]);
+        let prompt_script = dir.path().join("codex-ready-loop.sh");
+        std::fs::write(
+            &prompt_script,
+            "#!/bin/sh\nprintf '\\033[2J\\033[HREADYMARK\\ngpt-5.4 high · ~/work/btakita/agent-loop · Context 0%% used\\n› \\n'\nwhile IFS= read -r CMD; do printf '[run] Nothing changed\\n'; done\n",
+        )
+        .unwrap();
         send_keys_with_retry(
             &iso,
             &actor_pane,
-            r#"exec sh -c 'printf "\033[2J\033[HREADYMARK\n>\n"; while IFS= read -r CMD; do printf "[run] Nothing changed\n"; done'"#,
+            &format!("exec /bin/sh {}", prompt_script.display()),
         );
         let ready_output = wait_for_pane_contains(
             &iso,
@@ -13233,6 +13324,10 @@ Body\n\
         assert!(
             ready_output.contains("READYMARK"),
             "fixture command should execute before split setup: {ready_output}"
+        );
+        assert!(
+            ready_prompt_candidate(&ready_output, &HarnessConfig::codex()).is_some(),
+            "fixture should show a Codex dispatch-ready prompt before split setup: {ready_output}"
         );
         let sibling_one = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
         let sibling_two = iso.split_window(&actor_pane, dir.path(), "-dh").unwrap();
@@ -16416,5 +16511,42 @@ Body\n\
         let h = crate::harness::HarnessConfig::codex();
         let timeout = dispatch_only_starting_pane_recovery_timeout(Some(&h));
         assert_eq!(timeout, Duration::from_millis(400));
+    }
+
+    #[test]
+    fn route_starting_actor_not_ready_log_line_includes_typed_lifecycle_facts() {
+        let h = crate::harness::HarnessConfig::codex();
+        let facts = AuthoritativeActorReadyFacts {
+            pane_id: "%7".to_string(),
+            generation: 42,
+            actor_state: crate::session_actor::ActorState::Busy,
+            supervisor_health: "healthy".to_string(),
+            runtime_state: "busy".to_string(),
+            prompt_ready: false,
+            last_transition_reason: "restart_bootstrap".to_string(),
+            last_transition_caller: "start".to_string(),
+        };
+
+        let line = route_starting_actor_not_ready_log_line(
+            Path::new("/tmp/doc.md"),
+            &h,
+            Duration::from_secs(8),
+            Duration::from_millis(8_125),
+            &facts,
+        );
+
+        assert!(line.contains("route_authoritative_actor_starting_not_ready"));
+        assert!(line.contains("file=/tmp/doc.md"));
+        assert!(line.contains("harness=codex"));
+        assert!(line.contains("timeout_ms=8000"));
+        assert!(line.contains("elapsed_ms=8125"));
+        assert!(line.contains("pane=%7"));
+        assert!(line.contains("generation=42"));
+        assert!(line.contains("actor_state=busy"));
+        assert!(line.contains("supervisor_health=healthy"));
+        assert!(line.contains("runtime_state=busy"));
+        assert!(line.contains("prompt_ready=false"));
+        assert!(line.contains("last_transition_reason=restart_bootstrap"));
+        assert!(line.contains("last_transition_caller=start"));
     }
 }

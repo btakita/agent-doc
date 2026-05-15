@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -59,12 +59,12 @@ Verification:
 - `make tmux-ci`
 - `make install`
 - `agent-doc --version` -> `agent-doc 0.33.16`
-<!-- agent:boundary:79b9cf82 -->
+<!-- agent:boundary:692cc32c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
-- ~do [#has9]~
+- do [#has9]
 - do [#5pr6]
 - do [#s1mv]
 <!-- /agent:queue -->

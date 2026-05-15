@@ -34,7 +34,32 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): dispatch proof fixes
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:05bb7542 -->
+❯ As agent:queue completes a job, the completed job should have a strikethrough added `- ~do [#has9]~`
+
+❯ When all jobs in a queue are compete, the content in `agent:queue` should be removed.
+
+❯ spec-test-build-install-commit-push
+### Re: queue completion bookkeeping — gpt-5
+
+Implemented the queue closeout fix.
+
+- `agent:queue` now accepts `dispatch <name>` as a preserved batch directive, so the existing `dispatch #spec-test-build-install-commit-push` line no longer makes queue parsing fail before closeout maintenance can run.
+- Successful queue closeout still marks completed items as strikethrough while later prompts remain queued, and drains the whole queue body when the final prompt completes.
+- Added finalize regressions for `dispatch` queues and updated the orchestration spec.
+- While reviewing the required tmux CI leg, I reproduced the red `tmux-ci` failure and hardened the retained-dead-pane diagnostic test timeout/message. That behavior is live-tmux timing, so there is no useful SimWorld model to add beyond the existing deterministic suite.
+
+Commits:
+- `src/agent-doc`: `4a5c48f0` (`fix: parse queue dispatch directives`), pushed to `origin/20260422/codex-agent-backend`
+- parent repo: `5cd43379a` (`agent-doc: update queue dispatch handling`)
+
+Verification:
+- `cargo test dispatch_directive`
+- `cargo test --bin agent-doc sync::tests::repair_missing_registered_pane_captures_retained_dead_pane_diagnostics -- --ignored --test-threads=1 --nocapture`
+- `make check`
+- `make tmux-ci`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+<!-- agent:boundary:79b9cf82 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

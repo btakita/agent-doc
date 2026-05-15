@@ -75,7 +75,38 @@ Commits so far:
 
 - `src/agent-doc`: `b588090de` (`fix: debounce jetbrains agent-doc runs`), pushed to `origin/20260422/codex-agent-backend`
 - parent repo: `c33324989` (`agent-doc: debounce jetbrains runs`) records the submodule pointer locally; I will push parent `main` after this session-document finalize commit so the pointer and closeout commit travel together.
-<!-- agent:boundary:28ff0afe -->
+❯ JB `Clear Session Context` issue with this document:
+```
+Clear Session Context is blocked for tasks/agent-doc/agent-doc-bugs2.md. Pane %1 contains protected prompt input (drafted prompt input). Use Interrupt and clear to discard the prompt input, or Show status to inspect the session. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 21% used
+```
+
+❯ spec-test-build-install-commit-push
+### Re: JetBrains Clear Session Context dim placeholder blocker — gpt-5.5
+
+Fixed the Clear Session Context refusal path.
+
+Root cause: `agent-doc session clear <FILE>` was checking protected prompt input from plain `tmux capture-pane` output. Codex renders idle placeholder text as dim ANSI text, but the plain capture erased that distinction. When the only current UI was a Codex placeholder/status footer, the clear guard could classify the placeholder as `drafted prompt input` and JetBrains surfaced the protected-input warning.
+
+What changed:
+
+- `session clear` now uses ANSI pane capture for the protected-input check, falling back to plain capture only if ANSI capture fails.
+- Codex protected-input detection now ignores prompt candidate text whose body is rendered with SGR dim/faint styling.
+- Real non-dim typed prompt input still blocks clear, including RGB-colored prompt text; queued drafts and shell search remain protected.
+- Updated the shared CLI/editor specs and `VERSIONS.md` to document that Codex dim placeholder text is idle chrome, not drafted user input.
+
+
+- `cargo test protected_prompt_input_reason`
+- `cargo install --path . --force`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `make tmux-ci` -> `228 passed`
+
+CI evidence: latest GitHub `CI` run on `main` is green (`25773430221`, May 13, 2026). Recent workflow list does not show a separate tmux-test workflow run, so the live tmux evidence for this turn is the local `make tmux-ci` sweep.
+
+Commits pushed:
+
+- `src/agent-doc`: `dd9f5302` (`fix: ignore codex dim placeholders on clear`) to `origin/20260422/codex-agent-backend`
+- parent repo: `8567719b0` (`agent-doc: ignore codex dim placeholders on clear`) to `origin/main`
+<!-- agent:boundary:c9cf8d95 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -87,6 +118,7 @@ Commits so far:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#17pe] [recommended] After restarting IntelliJ, run one live JetBrains Clear Session Context click against tasks/agent-doc/agent-doc-bugs2.md to confirm the IDE resolves the newly installed CLI.
 - [ ] [#kw0r] [recommended] Audit and harden process-global cwd/env test isolation so unbounded cargo test does not intermittently poison session_check tests; make check already uses TEST_THREADS=2 as the supported full-suite entrypoint.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

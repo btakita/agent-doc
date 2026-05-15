@@ -18,8 +18,8 @@
 //!   creates a synthetic cycle if a write lands without a prior preflight).
 //! - `mark_committed()` advances the cycle to `committed` (or creates a
 //!   synthetic committed cycle if commit happens without a prior state file).
-//! - Lower-rank bookkeeping must never rewind an already-committed cycle back
-//!   to `response_captured` or `write_applied`.
+//! - Lower-rank bookkeeping and duplicate terminal bookkeeping must never
+//!   mutate an already-committed or abandoned cycle.
 //! - `load()` returns the current persisted state when present.
 //!
 //! ## Agentic Contracts
@@ -341,6 +341,9 @@ pub fn mark_recoverable_preflight_timeout(file: &Path, event: &str) -> Result<Op
     let Some(mut state) = load(file)? else {
         return Ok(None);
     };
+    if !state.is_open() {
+        return Ok(Some(state));
+    }
     state.phase = CyclePhase::PreflightStarted;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
@@ -370,6 +373,11 @@ pub fn mark_committed(
     file_content: Option<&str>,
 ) -> Result<CycleState> {
     let mut state = load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::WriteApplied));
+    if matches!(state.phase, CyclePhase::Committed)
+        && (state.last_event == event || is_stable_commit_event(&state.last_event))
+    {
+        return Ok(state);
+    }
     state.phase = CyclePhase::Committed;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
@@ -394,6 +402,9 @@ pub fn mark_abandoned(
 ) -> Result<CycleState> {
     let mut state =
         load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
+    if !state.is_open() {
+        return Ok(state);
+    }
     state.phase = CyclePhase::Abandoned;
     state.last_event = event.to_string();
     state.updated_at = now_secs();
@@ -518,6 +529,13 @@ fn cycle_phase_rank(phase: CyclePhase) -> u8 {
         CyclePhase::Committed => 3,
         CyclePhase::Abandoned => 4,
     }
+}
+
+fn is_stable_commit_event(event: &str) -> bool {
+    matches!(
+        event,
+        "commit" | "commit_success" | "commit_already_current"
+    )
 }
 
 fn is_zero(value: &usize) -> bool {
@@ -752,6 +770,38 @@ mod tests {
         let state = mark_committed(&doc, "commit", Some("new"), Some("new")).unwrap();
         assert_eq!(state.phase, CyclePhase::Committed);
         assert!(!state.is_open());
+    }
+
+    #[test]
+    fn mark_committed_is_idempotent_for_terminal_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let committed = mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
+        let replay = mark_committed(&doc, "repair_applied", Some("new"), Some("new")).unwrap();
+
+        assert_eq!(replay, committed);
+        assert_eq!(load(&doc).unwrap().unwrap(), committed);
+    }
+
+    #[test]
+    fn abandoned_and_timeout_bookkeeping_do_not_reopen_committed_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let committed = mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
+        let abandoned = mark_abandoned(&doc, "stale_empty", Some("new"), Some("new")).unwrap();
+        let timeout = mark_recoverable_preflight_timeout(&doc, "recoverable_timeout")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(abandoned, committed);
+        assert_eq!(timeout, committed);
+        assert_eq!(load(&doc).unwrap().unwrap(), committed);
     }
 
     #[test]

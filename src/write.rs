@@ -5624,6 +5624,9 @@ pub fn try_ipc(
     let canonical = file.canonicalize()?;
     let hash = snapshot::doc_hash(file)?;
     let project_root = resolve_ipc_project_root(&canonical);
+    let patch_id = reuse_patch_id
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     // Guard: if the cycle is already committed, reject the patch to prevent
     // a late fallback from re-dirtying the document.
@@ -5636,27 +5639,19 @@ pub fn try_ipc(
         crate::ops_log::log_op(
             file,
             &format!(
-                "late_fallback_patch_rejected file={} cycle_id={} reason=already_committed",
+                "late_fallback_patch_rejected file={} cycle_id={} patch_id={} reason=already_committed",
                 file.display(),
-                cycle_id
+                cycle_id,
+                patch_id
             ),
         );
         cleanup_fallback_patch_files(file);
         return Ok(IpcResult {
             success: false,
-            patch_id: reuse_patch_id
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            patch_id,
             skipped_committed_cycle: true,
         });
     }
-
-    // Single patch_id for all IPC paths (socket, file, caller's fallback).
-    // Reusing the same ID allows the plugin to deduplicate when both socket
-    // and file delivery fire for the same logical write.
-    let patch_id = reuse_patch_id
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     // Clean up any legacy degraded marker from older versions
     cleanup_legacy_ipc_degraded(&project_root);
@@ -12459,12 +12454,23 @@ mod late_fallback_patch_guard_tests {
         .unwrap();
 
         let patch = crate::template::PatchBlock::new("exchange", "late response");
-        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            None,
+            None,
+            None,
+            Some("current-patch-456"),
+        )
+        .unwrap();
 
         assert!(
             !result.success,
             "committed-cycle IPC skip must not look like a consumed write"
         );
+        assert_eq!(result.patch_id, "current-patch-456");
         assert!(
             result.skipped_committed_cycle,
             "caller must be able to stop terminal fallback handling"
@@ -12482,6 +12488,7 @@ mod late_fallback_patch_guard_tests {
 
         let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("late_fallback_patch_rejected"));
+        assert!(ops_log.contains("patch_id=current-patch-456"));
         assert!(
             !ops_log.contains("ipc_write_consumed"),
             "terminal skip must not be logged as an IPC consume"

@@ -15,7 +15,8 @@
 //! - `validate_replay(file, capture)` fail-closes replay when the current file
 //!   or snapshot hashes no longer match the captured baseline.
 //! - `mark_write_applied`, `mark_replayed`, `mark_committed`, and
-//!   `mark_discarded` advance the capture lifecycle in-place.
+//!   `mark_discarded` advance the capture lifecycle in-place. Duplicate
+//!   terminal updates are idempotent and do not re-log replay provenance.
 //!
 //! ## Agentic Contracts
 //! - The capture ledger is document-scoped; one active capture is associated
@@ -480,33 +481,48 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
     if capture_state_rank(state.clone()) < capture_state_rank(record.state.clone()) {
         return Ok(());
     }
+    let prior_state = record.state.clone();
     let now = now_secs();
+    let mut changed = false;
     match state {
         CaptureState::Captured => {}
         CaptureState::WriteApplied => {
             if record.write_applied_at.is_none() {
                 record.write_applied_at = Some(now);
+                changed = true;
             }
         }
         CaptureState::Replayed => {
             if record.replayed_at.is_none() {
                 record.replayed_at = Some(now);
+                changed = true;
             }
         }
         CaptureState::Committed => {
             if record.committed_at.is_none() {
                 record.committed_at = Some(now);
+                changed = true;
             }
         }
         CaptureState::Discarded => {
             if record.discarded_at.is_none() {
                 record.discarded_at = Some(now);
+                changed = true;
             }
         }
     }
-    record.state = state;
+    if record.state != state {
+        record.state = state;
+        changed = true;
+    }
+    if !changed {
+        return Ok(());
+    }
     record.updated_at = now;
-    if matches!(record.state, CaptureState::Committed) && record.replayed_at.is_some() {
+    if matches!(record.state, CaptureState::Committed)
+        && record.replayed_at.is_some()
+        && !matches!(prior_state, CaptureState::Committed)
+    {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -776,5 +792,28 @@ mod tests {
         assert_eq!(active.state, CaptureState::Committed);
         assert!(active.replayed_at.is_some());
         assert!(active.committed_at.is_some());
+    }
+
+    #[test]
+    fn repeated_mark_committed_does_not_relog_replay_provenance() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body").unwrap();
+        crate::snapshot::save(&doc, "body").unwrap();
+        capture_response(&doc, "response body").unwrap();
+
+        mark_replayed(&doc).unwrap();
+        mark_committed(&doc).unwrap();
+        let first = load_active(&doc).unwrap().unwrap();
+        mark_committed(&doc).unwrap();
+        let second = load_active(&doc).unwrap().unwrap();
+
+        assert_eq!(second, first);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert_eq!(
+            log.matches("capture_committed_after_replay").count(),
+            1,
+            "terminal replay provenance should be logged once:\n{log}"
+        );
     }
 }

@@ -9877,6 +9877,128 @@ agent response
     }
 
     #[test]
+    fn normfallback_records_repaired_working_tree_when_sidecar_strips_prompt_prefix() {
+        // Regression for #normfallback: the observed ops-log signal should be
+        // backed by deterministic coverage. A plugin sidecar that drops a
+        // required prompt prefix must be rejected, and the binary fallback must
+        // repair the live file before any commit can capture the stripped form.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+
+        let doc = dir.path().join("agent-doc-bugs2.md");
+        let original = "\
+---
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+do [#normfallback]
+<!-- agent:boundary:test-bnd-001 -->
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: #normfallback — gpt-5\n\nCovered.",
+        );
+        let content_ours = "\
+---
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+❯ do [#normfallback]
+### Re: #normfallback — gpt-5
+
+Covered.
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        let normalize_prefix_lines = vec!["do [#normfallback]".to_string()];
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = std::fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = std::fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            let bad_sidecar = "\
+---
+agent_doc_format: template
+---
+
+<!-- agent:exchange patch=append -->
+do [#normfallback]
+### Re: #normfallback — gpt-5
+
+Covered.
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+                            let _ = std::fs::write(&doc_for_watcher, bad_sidecar);
+                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                        }
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(original),
+            Some(content_ours),
+            Some(normalize_prefix_lines.as_slice()),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.success,
+            "IPC should succeed when plugin consumes patch"
+        );
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("❯ do [#normfallback]"),
+            "snapshot must use the normalized fallback rather than the stripped sidecar: {snap}"
+        );
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk.contains("❯ do [#normfallback]"),
+            "working tree must be repaired to match the normalized fallback: {disk}"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback")
+                && ops_log.contains("reason=prefix_divergence"),
+            "ops log should record why the primary sidecar snapshot was rejected:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback_repaired_working_tree"),
+            "ops log should record the explicit working-tree repair:\n{ops_log}"
+        );
+    }
+
+    #[test]
     fn normalization_fallback_redelivers_full_content_to_editor() {
         // A disk-only fallback can leave an editor buffer stale. When the ack
         // sidecar proves the plugin normalized differently from the binary, the

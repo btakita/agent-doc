@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Sidecar normalization fallback now has direct repair diagnostics coverage.** A regression recreates the `#normfallback` shape from `tasks/agent-doc/agent-doc-bugs2.md`: the plugin ack-content sidecar strips a required prompt prefix, the binary rejects that primary snapshot with `reason=prefix_divergence`, repairs the snapshot and working tree from the normalized fallback, and records the `sidecar_normalization_fallback_repaired_working_tree` ops-log marker required by the closeout spec.
+
 - **Stale preflight repair now has direct stale-checkpoint race coverage.** A regression now binds a partial-response checkpoint writer to an open `preflight_started` cycle, lets repair abandon that stale prompt-bearing cycle, and proves the original writer stops with `partial_response_checkpoint_stopped` instead of writing another checkpoint for the abandoned cycle. The backend spec names stale-preflight abandonment as part of the checkpoint stop contract for `#staleckpt` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Starting actor route waits now have deterministic prompt-barrier coverage.** The route wait decision is factored into a pure poll classifier and covered for the `starting -> busy -> ready` schedule: dispatch remains blocked through restart-bootstrap `busy` and through `ready` without prompt proof, then releases only when ready state, dispatch-ready prompt proof, and dispatch eligibility agree. The route spec now names that conjunctive gate for `#startroute` in `tasks/agent-doc/agent-doc-bugs2.md`.

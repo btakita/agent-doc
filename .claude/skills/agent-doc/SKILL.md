@@ -25,6 +25,7 @@ This shared hot path serves Claude Code, Codex, OpenCode, Cursor, and direct har
 Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 
 **Note:** Slash commands (`/agent-doc`) are Claude Code-specific. Other harnesses receive the document path directly.
+
 ## Hot Path Digest
 
 - **Document is the UI** — user edits ARE the prompt; respond in the document and console.
@@ -36,8 +37,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 - **Manual repo commits keep the session document on the finalize path** — stage and commit only the intended non-session repo files first, stop on any stage failure, verify the staged diff still matches the intended path set, then let `finalize` / `write --commit` own the session document.
 - **Dispatch proof language must preserve scope** — when reading route diagnostics, `proof=accepted proof_scope=accepted_only` means pane-input acceptance only. Do not describe Claude Code/OpenCode dispatch-only routes as consumed/submitted unless logs show dispatch-start proof.
 - **Starting actor reroutes are prompt-gated** — if route diagnostics mention a `starting` authoritative actor, treat dispatch as valid only after the live pane shows a harness-specific dispatch-ready prompt; otherwise the route path must fail closed before input.
-- **Managed capability proof is tmux status, not pane content** — treat `[start] managed ... capability proof` as a tmux `display-message` / session-log diagnostic. It should not be expected inside the child pane transcript or used as agent input.
-- **Rare routing / tmux / startup-miss invariants live in runbooks** — consult [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/commit.md](runbooks/commit.md), and [runbooks/code-enforced-directives.md](runbooks/code-enforced-directives.md) for route/start/sync/session-check or sibling `src/tmux-router` work, including doctor-backed `Sync Tmux Layout` repair.
+- **Rare routing / tmux / startup-miss invariants live in runbooks** — consult [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/commit.md](runbooks/commit.md), and [runbooks/code-enforced-directives.md](runbooks/code-enforced-directives.md) for route/start/sync/session-check or sibling `src/tmux-router` work.
 - Preserve user edits; let `agent-doc write --stream` merge. Stream useful console status.
 
 ## Workflow
@@ -50,7 +50,7 @@ Detect subcommands before the normal workflow:
 - `compact <FILE>` → run `agent-doc compact <FILE> --commit` and stop.
 - `compact exchange <FILE>` → follow [runbooks/compact-exchange.md](runbooks/compact-exchange.md) and stop.
 
-**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness claude --reload compact`; on `SKILL_RELOAD=compact`, ask the user to run `/compact` and re-invoke, then stop. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Claude skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).
+**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run the active-harness install: Claude Code `agent-doc skill install --harness claude --reload compact`; Codex `agent-doc skill install --harness codex --reload restart`; OpenCode `agent-doc skill install --harness opencode`; other harnesses `agent-doc skill install`. If install says already up to date, treat this file as stale duplicate instructions, use installed harness instructions, and continue with the task. Stop only on a real `SKILL_RELOAD=...`; see [runbooks/harness-invocation.md](runbooks/harness-invocation.md).
 
 Run `agent-doc preflight <FILE>`. Preflight owns recovery before diffing and prints the cycle contract: `baseline_file`, `no_changes`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
 
@@ -106,7 +106,7 @@ Complete requested implementation, verification, build/install, and local inspec
 
 **Agent harnesses own full-suite verification:** if you changed code, tests, build logic, or instruction surfaces, run the full project verification suite explicitly after edits and before `finalize` / `write --commit`. Do not rely on a pre-commit hook. Do not waive red suites as "unrelated" or "flaky".
 
-**Tmux CI review for test-bearing turns:** when the cycle runs tests or changes test, build, or instruction surfaces, inspect the latest CI tmux-test result for this repo. If the tmux leg is red, run `make tmux-ci` locally, fix the failure, and add or update deterministic SimWorld coverage for the regression class when the behavior can be modeled without live tmux. Record CI and local tmux evidence in closeout.
+**Tmux CI review for test-bearing turns:** when the cycle runs tests or changes test, build, or instruction surfaces, inspect the latest CI tmux-test result for this repo. If the tmux leg is red after runner startup, run `make tmux-ci` locally, fix the failure, and add or update deterministic SimWorld coverage for the regression class when the behavior can be modeled without live tmux. If GitHub reports an empty-step job with no logs because the job was not started (for example billing/spending-limit exhaustion or other runner-allocation failure), classify it as an external CI-start blocker instead of a code/tmux regression; record the annotation and continue with local verification evidence. Record CI and local tmux evidence in closeout.
 
 **Session document staging rule:** for ordinary repo `commit + push`, keep the session document out of that manual git commit. Resolve the exact intended non-session path set first, stage only that set, stop on any stage failure, verify `git diff --cached --name-only` still matches the intended set, commit only that validated set, then let `finalize` / `write --commit` close the session document before push.
 

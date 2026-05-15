@@ -1205,6 +1205,14 @@ fn test_skill_md_contains_required_steps() {
         "SKILL.md should point agents to the planning/dispatch runbook"
     );
     assert!(
+        content.contains("external CI-start blocker"),
+        "SKILL.md should classify empty-step no-log GitHub jobs as external CI-start blockers"
+    );
+    assert!(
+        content.contains("billing/spending-limit exhaustion"),
+        "SKILL.md should name billing/spending-limit failures as CI-start blockers"
+    );
+    assert!(
         content.contains("create the plan file first"),
         "SKILL.md should require creating plan files before adding plan-backed pending items"
     );

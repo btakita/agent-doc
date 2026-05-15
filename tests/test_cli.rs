@@ -52,6 +52,24 @@ fn seed_snapshot(root: &Path, doc: &Path, content: &str) {
     fs::write(snapshot, content).unwrap();
 }
 
+fn extract_preflight_baseline(output: &str) -> String {
+    output
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("[preflight] baseline saved: ")
+                .map(str::trim)
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            output
+                .split("\"baseline_file\": \"")
+                .nth(1)
+                .and_then(|tail| tail.split('"').next())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| panic!("missing preflight baseline in output:\n{output}"))
+}
+
 fn template_doc(title: &str, exchange: &str, backlog: &str, icebox: &str) -> String {
     format!(
         "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n# {title}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n{backlog}<!-- /agent:backlog -->\n\n## Icebox\n\n<!-- agent:icebox -->\n{icebox}<!-- /agent:icebox -->\n"
@@ -235,7 +253,8 @@ fn test_cli_ops_summary_groups_ops_log_events() {
 [100] ipc_write_consumed file={} patches=1
 [101] commit_success file={}
 [102] route_dispatch_only_sent file=tasks/b.md pane=%2 harness=opencode proof=accepted proof_scope=accepted_only
-[103] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
+[103] route_dispatch_only_submit_unproven file=tasks/b.md pane=%2 harness=opencode delivery=direct_pane_submit submit_mode=tmux_literal_enter_delayed proof=accepted proof_scope=accepted_only timeout_secs=10
+[104] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
 ",
             root.join("tasks/a.md").display(),
             root.join("tasks/a.md").display()
@@ -257,6 +276,7 @@ fn test_cli_ops_summary_groups_ops_log_events() {
         .stdout(predicate::str::contains("write ipc consumed"))
         .stdout(predicate::str::contains("tasks/a.md"))
         .stdout(predicate::str::contains("accepted-only route proof"))
+        .stdout(predicate::str::contains("dispatch-only not proven"))
         .stdout(predicate::str::contains("sync over budget"));
 }
 
@@ -382,6 +402,92 @@ fn test_commit_explains_head_current_follow_up_without_repair_body_noise() {
             "This is not a full closeout for the follow-up prompt",
         ))
         .stderr(predicate::str::contains("agent-doc write --commit"));
+}
+
+#[test]
+fn test_preflight_finalize_preflight_follow_up_lifecycle_has_no_stale_cycle() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let committed = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+        ## Exchange\n\n\
+        <!-- agent:exchange patch=append -->\n\
+        ### Re: prior response — gpt-5\n\
+        Already committed.\n\
+        <!-- agent:boundary:head-boundary -->\n\
+        <!-- /agent:exchange -->\n";
+    fs::write(&doc, committed).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, committed);
+
+    let working = committed.replace(
+        "<!-- agent:boundary:head-boundary -->",
+        "❯ follow-up after dispatch\n<!-- agent:boundary:head-boundary -->",
+    );
+    fs::write(&doc, working).unwrap();
+
+    let mut preflight = agent_doc_cmd();
+    preflight.current_dir(root);
+    preflight.args(["preflight", doc.to_str().unwrap()]);
+    let output = preflight.output().unwrap();
+    assert!(
+        output.status.success(),
+        "preflight failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let baseline = extract_preflight_baseline(&combined);
+    assert!(
+        !combined.contains("prior_patchback_without_response_body"),
+        "preflight should not reopen missed-response repair for a follow-up prompt:\n{combined}"
+    );
+
+    let mut finalize = agent_doc_cmd();
+    finalize.current_dir(root);
+    finalize.args([
+        "finalize",
+        doc.to_str().unwrap(),
+        "--baseline-file",
+        &baseline,
+        "--origin",
+        "skill",
+    ]);
+    finalize
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: follow-up — gpt-5\n\nHandled.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let mut second_preflight = agent_doc_cmd();
+    second_preflight.current_dir(root);
+    second_preflight.args(["preflight", doc.to_str().unwrap()]);
+    let second = second_preflight.output().unwrap();
+    assert!(
+        second.status.success(),
+        "second preflight failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&second.stdout),
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&second.stdout),
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert!(
+        second_combined.contains("\"no_changes\": true"),
+        "preflight after finalize should be clean:\n{second_combined}"
+    );
+    assert!(
+        !second_combined.contains("snapshot/head guard mismatch")
+            && !second_combined.contains("prior_patchback_without_response_body"),
+        "clean follow-up lifecycle should not report stale cycle guards:\n{second_combined}"
+    );
 }
 
 #[test]

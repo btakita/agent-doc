@@ -1833,7 +1833,7 @@ fn dispatch_only_send_reopen(
             should_print_dispatch_only_unproven_progress(file, harness),
         )?,
     };
-    require_dispatch_only_codex_submit_proof(
+    require_dispatch_only_dispatch_start_proof(
         file,
         &dispatch_pane,
         harness,
@@ -1867,16 +1867,23 @@ fn should_print_dispatch_only_unproven_progress(file: &Path, harness: &HarnessCo
     harness.binary != "codex" || !codex_dispatch_start_tracking_enabled(file)
 }
 
-fn require_dispatch_only_codex_submit_proof(
+fn dispatch_only_dispatch_start_proof_required(file: &Path, harness: &HarnessConfig) -> bool {
+    match harness.binary.as_str() {
+        "codex" => codex_dispatch_start_tracking_enabled(file),
+        "opencode" => true,
+        _ => false,
+    }
+}
+
+fn require_dispatch_only_dispatch_start_proof(
     file: &Path,
     pane: &str,
     harness: &HarnessConfig,
     delivery: DispatchOnlyReopenDelivery,
     dispatch_start: RoutedDispatchStartProof,
 ) -> Result<()> {
-    if harness.binary != "codex"
-        || dispatch_start != RoutedDispatchStartProof::CommandAcceptedOnly
-        || !codex_dispatch_start_tracking_enabled(file)
+    if dispatch_start != RoutedDispatchStartProof::CommandAcceptedOnly
+        || !dispatch_only_dispatch_start_proof_required(file, harness)
     {
         return Ok(());
     }
@@ -1887,7 +1894,7 @@ fn require_dispatch_only_codex_submit_proof(
     crate::ops_log::log_op(
         file,
         &format!(
-            "route_dispatch_only_submit_unproven file={} pane={} harness={} delivery={} submit_mode={} timeout_secs={}",
+            "route_dispatch_only_submit_unproven file={} pane={} harness={} delivery={} submit_mode={} proof=accepted proof_scope=accepted_only timeout_secs={}",
             file.display(),
             pane,
             harness.binary,
@@ -1897,13 +1904,14 @@ fn require_dispatch_only_codex_submit_proof(
         ),
     );
     anyhow::bail!(
-        "dispatch-only {} reopen for {} was accepted in pane {} via {} ({}), but Codex never recorded a routed submission proof after waiting {}s; the pane is live but not dispatch-ready enough to confirm the reopen. Restore an idle Codex prompt or restart the session and reroute again",
+        "dispatch-only {} reopen for {} was accepted in pane {} via {} ({}), but only pane-input acceptance proof was available after waiting {}s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle {} prompt or restart the session and reroute again",
         harness.binary,
         file.display(),
         pane,
         delivery_label,
         submit_mode,
-        timeout
+        timeout,
+        harness.binary
     );
 }
 
@@ -8454,7 +8462,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        let err = require_dispatch_only_codex_submit_proof(
+        let err = require_dispatch_only_dispatch_start_proof(
             &doc,
             "%4",
             &HarnessConfig::codex(),
@@ -8465,7 +8473,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
 
         assert!(
             err.to_string()
-                .contains("never recorded a routed submission proof"),
+                .contains("only pane-input acceptance proof was available"),
             "unexpected error: {err:#}"
         );
     }
@@ -8511,7 +8519,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        require_dispatch_only_codex_submit_proof(
+        require_dispatch_only_dispatch_start_proof(
             &doc,
             "%4",
             &HarnessConfig::claude(),
@@ -8520,7 +8528,7 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         )
         .expect("Claude currently has accepted-only semantics");
 
-        require_dispatch_only_codex_submit_proof(
+        require_dispatch_only_dispatch_start_proof(
             &doc,
             "%4",
             &HarnessConfig::codex(),
@@ -9014,6 +9022,40 @@ gpt-5.4 high · ~/work/btakita/agent-loop/src/session-share · Context 31% used
         assert!(message.contains("harness=opencode"), "{message}");
         assert!(message.contains("proof=accepted"), "{message}");
         assert!(message.contains("proof_scope=accepted_only"), "{message}");
+    }
+
+    #[test]
+    fn dispatch_only_opencode_accepted_only_proof_is_not_successful_delivery() {
+        let err = require_dispatch_only_dispatch_start_proof(
+            Path::new("/tmp/monsterrodholders.md"),
+            "%13",
+            &HarnessConfig::opencode(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        )
+        .unwrap_err();
+
+        let message = err.to_string();
+        assert!(
+            message.contains("only pane-input acceptance proof was available"),
+            "{message}"
+        );
+        assert!(
+            message.contains("treating this as not dispatched"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn dispatch_only_claude_accepted_only_proof_remains_accepted_delivery() {
+        require_dispatch_only_dispatch_start_proof(
+            Path::new("/tmp/robert-ross.md"),
+            "%7",
+            &HarnessConfig::claude(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -12308,7 +12350,7 @@ Body\n\
         .expect_err("dispatch-only reroute must fail closed when hooks are visible but Codex never proves consumption");
         assert!(
             err.to_string()
-                .contains("never recorded a routed submission proof"),
+                .contains("only pane-input acceptance proof was available"),
             "unexpected error: {err:#}"
         );
         assert!(

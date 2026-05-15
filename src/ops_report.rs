@@ -189,6 +189,7 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
         "route_dispatch_only_sent" if field_eq(&fields, "proof_scope", "accepted_only") => {
             "accepted-only route proof"
         }
+        "route_dispatch_only_submit_unproven" => "dispatch-only not proven",
         "sync_latency" if field_eq(&fields, "status", "over_budget") => "sync over budget",
         _ => return None,
     };
@@ -286,25 +287,26 @@ mod tests {
 [101] commit_success file=/repo/tasks/a.md
 [102] route_dispatch_start_proven file=tasks/a.md pane=%1 harness=codex proof=consumed timeout_secs=10
 [103] route_dispatch_only_sent file=tasks/b.md pane=%2 harness=opencode proof=accepted proof_scope=accepted_only
-[104] post_commit_local_drift file=/repo/tasks/a.md kind=user_follow_up basis=head
-[105] post_commit_user_follow_up file=/repo/tasks/a.md basis=head
-[106] post_commit_local_drift file=/repo/tasks/a.md kind=working_tree_edits basis=head
-[107] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=user_follow_up basis=head
-[108] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=working_tree_edits basis=head
-[109] session_clear_active_pane_allowed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[110] session_clear_protected_input_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor reason=drafted_prompt_input current_command=agent-doc
-[111] session_clear_live_busy_guard_bypassed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[112] session_clear_live_busy_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
-[113] route_authoritative_actor_starting_not_ready file=tasks/c.md pane=%3 harness=codex generation=9 actor_state=starting
-[114] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
-[115] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
+[104] route_dispatch_only_submit_unproven file=tasks/b.md pane=%2 harness=opencode delivery=direct_pane_submit submit_mode=tmux_literal_enter_delayed proof=accepted proof_scope=accepted_only timeout_secs=10
+[105] post_commit_local_drift file=/repo/tasks/a.md kind=user_follow_up basis=head
+[106] post_commit_user_follow_up file=/repo/tasks/a.md basis=head
+[107] post_commit_local_drift file=/repo/tasks/a.md kind=working_tree_edits basis=head
+[108] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=user_follow_up basis=head
+[109] commit_noop file=/repo/tasks/a.md reason=already_current drift_kind=working_tree_edits basis=head
+[110] session_clear_active_pane_allowed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[111] session_clear_protected_input_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor reason=drafted_prompt_input current_command=agent-doc
+[112] session_clear_live_busy_guard_bypassed file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[113] session_clear_live_busy_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
+[114] route_authoritative_actor_starting_not_ready file=tasks/c.md pane=%3 harness=codex generation=9 actor_state=starting
+[115] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
+[116] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
 ";
 
         let report =
             summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
 
-        assert_eq!(report.scanned_lines, 16);
-        assert_eq!(report.matched_events, 15);
+        assert_eq!(report.scanned_lines, 17);
+        assert_eq!(report.matched_events, 16);
         assert!(
             report.buckets.iter().any(|bucket| {
                 bucket.category == "write ipc consumed"
@@ -318,6 +320,14 @@ mod tests {
                 bucket.category == "accepted-only route proof"
                     && bucket.file == "tasks/b.md"
                     && bucket.samples[0].contains("proof_scope=accepted_only")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "dispatch-only not proven"
+                    && bucket.file == "tasks/b.md"
+                    && bucket.samples[0].contains("route_dispatch_only_submit_unproven")
             }),
             "{report:#?}"
         );

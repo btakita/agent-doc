@@ -497,7 +497,8 @@ fn opencode_run_args_for_probe(launch_args: &[String], prompt: String) -> Vec<St
     let mut iter = launch_args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--model" | "-m" | "--agent" | "--log-level" | "--variant" | "--prompt" => {
+            "--model" | "-m" | "--agent" | "--log-level" | "--variant" | "--command" | "--file"
+            | "-f" | "--title" | "--attach" | "--password" | "-p" | "--username" | "-u" => {
                 args.push(arg.clone());
                 if let Some(value) = iter.next() {
                     args.push(value.clone());
@@ -515,7 +516,15 @@ fn opencode_run_args_for_probe(launch_args: &[String], prompt: String) -> Vec<St
                 || arg.starts_with("--agent=")
                 || arg.starts_with("--log-level=")
                 || arg.starts_with("--variant=")
-                || arg.starts_with("--prompt=") =>
+                || arg.starts_with("--command=")
+                || arg.starts_with("--file=")
+                || arg.starts_with("-f=")
+                || arg.starts_with("--title=")
+                || arg.starts_with("--attach=")
+                || arg.starts_with("--password=")
+                || arg.starts_with("-p=")
+                || arg.starts_with("--username=")
+                || arg.starts_with("-u=") =>
             {
                 args.push(arg.clone());
             }
@@ -550,7 +559,9 @@ fn opencode_child_network_probe_prompt() -> String {
 
 fn classify_child_network_probe_failure(detail: &str, harness: &str) -> String {
     let lower = detail.to_ascii_lowercase();
-    if lower.contains("could not resolve")
+    if looks_like_opencode_usage_output(detail) {
+        format!("{harness} child probe printed CLI usage/help instead of running")
+    } else if lower.contains("could not resolve")
         || lower.contains("temporary failure in name resolution")
         || lower.contains("name or service not known")
         || lower.contains("nodename nor servname provided")
@@ -572,6 +583,14 @@ fn classify_child_network_probe_failure(detail: &str, harness: &str) -> String {
     } else {
         format!("{harness} child network probe failed")
     }
+}
+
+fn looks_like_opencode_usage_output(output: &str) -> bool {
+    let lower = crate::prompt::strip_ansi(output).to_ascii_lowercase();
+    (lower.contains("opencode run [message..]")
+        && (lower.contains("positionals:") || lower.contains("options:")))
+        || lower.contains("unknown argument")
+        || lower.contains("unknown option")
 }
 
 fn wait_with_timeout(
@@ -692,6 +711,12 @@ fn validate_opencode_child_probe_marker_output(
     let combined = format!("{stdout}\n{stderr}");
     if combined.contains(marker) {
         return Ok(());
+    }
+    if looks_like_opencode_usage_output(&combined) {
+        anyhow::bail!(
+            "{harness} child probe printed CLI usage/help instead of running the {probe_name} probe: {}",
+            combined.trim()
+        );
     }
 
     let mut extracted = Vec::new();
@@ -819,7 +844,9 @@ fn opencode_child_required_ssh_probe_prompt(targets: &[String]) -> String {
 
 fn classify_child_required_ssh_probe_failure(detail: &str, harness: &str) -> String {
     let lower = detail.to_ascii_lowercase();
-    if lower.contains("operation not permitted")
+    if looks_like_opencode_usage_output(detail) {
+        format!("{harness} child SSH probe printed CLI usage/help instead of running")
+    } else if lower.contains("operation not permitted")
         || lower.contains("socket:")
         || lower.contains("eperm")
         || lower.contains("permission denied")
@@ -2720,6 +2747,57 @@ mod tests {
                 "--dangerously-skip-permissions",
                 "probe"
             ]
+        );
+    }
+
+    #[test]
+    fn opencode_probe_args_drop_tui_only_prompt_flag_and_preserve_run_command_flag() {
+        let args = opencode_run_args_for_probe(
+            &[
+                "--prompt".to_string(),
+                "tui-only".to_string(),
+                "--command".to_string(),
+                "session".to_string(),
+                "--file".to_string(),
+                "SPEC.md".to_string(),
+            ],
+            "probe".to_string(),
+        );
+
+        assert_eq!(
+            args,
+            vec![
+                "run",
+                "--format",
+                "json",
+                "--command",
+                "session",
+                "--file",
+                "SPEC.md",
+                "probe"
+            ]
+        );
+    }
+
+    #[test]
+    fn opencode_child_probe_classifies_cli_usage_separately_from_network_failure() {
+        let err = validate_opencode_child_probe_marker_output(
+            "opencode run [message..]\n\nPositionals:\n  message\n\nOptions:\n  --format\n",
+            "",
+            CODEX_CHILD_NETWORK_PROBE_MARKER,
+            "network",
+            "OpenCode",
+        )
+        .unwrap_err();
+
+        let message = err.to_string();
+        assert!(
+            message.contains("printed CLI usage/help instead of running the network probe"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("sandbox/network capability denied outbound access"),
+            "{message}"
         );
     }
 

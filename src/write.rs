@@ -1955,13 +1955,17 @@ fn plan_queue_prompt_consumption(
             )
         })?;
 
-    let new_entries = crate::queue::remove_first_prompt(&entries);
+    let has_auto = crate::queue::has_auto_attr(&comp.attrs);
+    let completed_entries = crate::queue::mark_first_prompt_completed(&entries);
+    let remaining = crate::queue::prompts(&completed_entries).len();
+    let drained = remaining == 0;
+    let new_entries = if drained {
+        Vec::new()
+    } else {
+        completed_entries
+    };
     let new_body = crate::queue::render(&new_entries);
     let mut current = comp.replace_content(content, &new_body);
-
-    let has_auto = crate::queue::has_auto_attr(&comp.attrs);
-    let remaining = crate::queue::prompts(&new_entries).len();
-    let drained = remaining == 0;
 
     if drained {
         if has_auto {
@@ -2013,10 +2017,16 @@ fn plan_queue_prompt_consumption(
             consumed_text
         );
     }
-    let snap_new_entries = crate::queue::remove_first_prompt(&snap_entries);
+    let snap_completed_entries = crate::queue::mark_first_prompt_completed(&snap_entries);
+    let snap_remaining = crate::queue::prompts(&snap_completed_entries).len();
+    let snap_new_entries = if snap_remaining == 0 {
+        Vec::new()
+    } else {
+        snap_completed_entries
+    };
     if snap_new_entries != new_entries {
         anyhow::bail!(
-            "queue consume: snapshot queue state diverged from document queue after removing head prompt"
+            "queue consume: snapshot queue state diverged from document queue after completing head prompt"
         );
     }
 
@@ -5118,9 +5128,23 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let doc_lock = acquire_doc_lock(file)?;
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
+    let snapshot_doc = snapshot::load(file).ok().flatten();
     let (final_content, crdt_state) = if content_current == base {
         let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
         (content_ours.clone(), doc.encode_state())
+    } else if let Some(repaired_current) = adopt_current_response_without_duplication(
+        file,
+        base,
+        &content_ours,
+        &content_current,
+        snapshot_doc.as_deref(),
+        &response,
+    )? {
+        eprintln!(
+            "[write] IPC fallback: response already in current file; adopting normalized current content"
+        );
+        let doc = crate::crdt::CrdtDoc::from_text(&repaired_current);
+        (repaired_current, doc.encode_state())
     } else {
         eprintln!("[write] File was modified during response generation. CRDT merging...");
         let crdt_state = snapshot::load_crdt(file)?;
@@ -5137,7 +5161,8 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             }
         }
     };
-    let final_content = normalize_template_structure_or_fail(&final_content, file)?;
+    let final_content =
+        normalize_final_template_content(file, base, snapshot_doc.as_deref(), &final_content)?;
     atomic_write(file, &final_content)?;
     snapshot::save(file, &final_content)?;
     snapshot::save_crdt(file, &crdt_state)?;

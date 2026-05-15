@@ -92,6 +92,8 @@ The `agent:queue` component batches prompts inside the document.
 ### Syntax
 
 - Single-line prompts use flush-left `- ` list items.
+- Completed single-line prompts render as `- ~prompt text~` and are skipped by dispatch.
+- Batch-level preset directives may use `preset <name>` lines in the queue body.
 - Multi-line prompts use `~~~prompt ... ~~~` or bare `--- ... ---` fences.
 - Control fences:
   - `--- start` / `~~~start`
@@ -100,7 +102,7 @@ The `agent:queue` component batches prompts inside the document.
 
 ### Data model
 
-- Queue entries are parsed as `Prompt`, `StartFence`, or `StopFence`.
+- Queue entries are parsed as `Prompt`, `Completed`, `Preset`, `StartFence`, or `StopFence`.
 - Activation resolution considers `auto`, inline start fences, exchange-triggered `do queue` / `run queue`, and persisted `queue_active`.
 
 ### Preflight queue behavior
@@ -125,6 +127,7 @@ Before emitting queue state, preflight may:
 
 ### Post-commit queue consumption
 
-- After a successful response closeout, required closeouts consume the first prompt from the queue in the same locked read/parse/write cycle.
-- The first prompt must be removable from both the live document and the snapshot in a provably identical way; otherwise strict closeouts fail before commit.
-- If the queue drains, `auto` is removed and `queue_active` is cleared.
+- After a successful response closeout, required closeouts mark the first prompt complete in the queue in the same locked read/parse/write cycle.
+- Completed prompts remain visible as `- ~prompt text~` while later prompts remain queued.
+- The first prompt must be completable or drainable from both the live document and the snapshot in a provably identical way; otherwise strict closeouts fail before commit.
+- If the queue drains, the queue body is cleared, `auto` is removed, and `queue_active` is cleared.

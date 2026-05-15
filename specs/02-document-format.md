@@ -85,10 +85,10 @@ On activation, preflight emits `queue_active: true`, `queue_prompts: [...]` (ord
 
 When the queue drains to empty: `auto` is stripped from the opening tag, `queue_active` is cleared in frontmatter.
 
-**Consumption (Phase 3):** After a successful response write (via `finalize` or `write --commit`), strict closeouts first clear the remaining pending-maintenance / pending-guard gates. Only then is the consumed prompt removed from the `agent:queue` block before the commit boundary so the same git commit can capture both the response and the queue advance. The file and snapshot transforms are both proven first, then written in sync so change detection works on the next cycle.
+**Consumption (Phase 3):** After a successful response write (via `finalize` or `write --commit`), strict closeouts first clear the remaining pending-maintenance / pending-guard gates. Only then is the consumed prompt marked complete in the `agent:queue` block as `- ~prompt text~` before the commit boundary so the same git commit can capture both the response and the queue advance. The file and snapshot transforms are both proven first, then written in sync so change detection works on the next cycle.
 
-- **Drain:** When the last prompt is consumed, `auto` is stripped and `queue_active` is cleared.
-- **Fail-closed proof for required closeouts:** When `queue_active: true`, required closeouts must be able to prove the same head prompt was removed from both the live file and the snapshot before mutating either side. Missing/malformed queue state, missing snapshot state, or file/snapshot head mismatch aborts the closeout before commit.
+- **Drain:** When the last prompt is consumed, the queue body is cleared, `auto` is stripped, and `queue_active` is cleared.
+- **Fail-closed proof for required closeouts:** When `queue_active: true`, required closeouts must be able to prove the same head prompt was completed or drained from both the live file and the snapshot before mutating either side. Missing/malformed queue state, missing snapshot state, or file/snapshot head mismatch aborts the closeout before commit.
 - **Stop fence at head:** If the next entry is `--- stop`, preflight halts the queue (strips `auto`, clears `queue_active`), consumes the fence, and emits `queue_halted: "stop_fence"`. No prompt is dispatched.
 - **Time gate at head:** If the next entry is `--- start at <time>` and the time hasn't arrived, preflight emits `queue_deferred: true` and skips the cycle. When the time arrives, the fence is consumed and the next prompt dispatches.
 - **Item modified:** If the head prompt's text differs between snapshot and file (user edited it between cycles), preflight halts with `queue_halted: "item_modified"`. The user must restart the queue explicitly.

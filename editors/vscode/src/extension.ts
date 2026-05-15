@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import { execFile } from 'child_process';
 import * as native from './native';
 import { consumeClaimedPatch, isPatchAlreadyApplied } from './patchGuard';
-import { isPureRepositionSignal } from './patchPlan';
+import { appendPatchAlreadyPresent, isPureRepositionSignal } from './patchPlan';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
     buildBusySessionClearBlockedMessage,
@@ -1766,6 +1766,9 @@ class PatchWatcher implements vscode.Disposable {
         const trimmedContent = content.trimEnd();
 
         if (mode === 'append') {
+            if (appendPatchAlreadyPresent(doc, component, content)) {
+                return doc;
+            }
             // Append before closing marker, preserving existing content
             const existing = doc.substring(contentStart, closeIdx);
             return before + existing.trimEnd() + '\n' + trimmedContent + '\n' + after;

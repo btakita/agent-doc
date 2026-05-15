@@ -94,6 +94,46 @@ Some text.
     }
 
     @Test
+    fun `append patch dedupe detects replayed exchange response despite head marker`() {
+        val doc = """
+<!-- agent:exchange patch=append -->
+### Re: Duplicate — gpt-5 (HEAD)
+
+Already applied.
+<!-- agent:boundary:abc12345 -->
+<!-- /agent:exchange -->
+""".trimStart()
+
+        assertTrue(
+            appendPatchAlreadyPresentUtil(
+                doc,
+                "exchange",
+                "### Re: Duplicate — gpt-5\n\nAlready applied.\n"
+            )
+        )
+    }
+
+    @Test
+    fun `append patch dedupe ignores boundary markers`() {
+        val doc = """
+<!-- agent:exchange patch=append -->
+### Re: Duplicate — gpt-5
+
+Already applied.
+<!-- agent:boundary:abc12345 -->
+<!-- /agent:exchange -->
+""".trimStart()
+
+        assertTrue(
+            appendPatchAlreadyPresentUtil(
+                doc,
+                "exchange",
+                "### Re: Duplicate — gpt-5\n\nAlready applied.\n<!-- agent:boundary:other -->\n"
+            )
+        )
+    }
+
+    @Test
     fun `handles line at very start of user region`() {
         // First line of the user region (no leading newline before it)
         val doc = "<!-- agent:exchange patch=append -->\nFirst line.\nSecond line.\n<!-- /agent:exchange -->\n"

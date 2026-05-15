@@ -693,6 +693,10 @@ class PatchWatcher(private val project: Project) : Disposable {
      */
     private fun applyComponentPatchNative(doc: String, component: String, content: String, caretOffset: Int? = null, boundaryId: String? = null): String {
         val mode = extractComponentMode(doc, component)
+        if (mode == "append" && appendPatchAlreadyPresentUtil(doc, component, content)) {
+            LOG.info("Patch dedup: append content already present in $component")
+            return doc
+        }
 
         // Boundary marker takes precedence for append mode
         if (mode == "append" && !boundaryId.isNullOrBlank()) {
@@ -1182,6 +1186,25 @@ internal fun annotateExchangeHeadingsAgainstBaselineUtil(doc: String, component:
         return doc
     }
     return doc.substring(0, currentRange.first) + annotated + doc.substring(currentRange.second)
+}
+
+internal fun appendPatchAlreadyPresentUtil(doc: String, component: String, content: String): Boolean {
+    val range = findComponentRangeUtil(doc, component) ?: return false
+    val patch = normalizeAppendPatchContentForCompare(content)
+    if (patch.isEmpty()) return false
+    val existing = normalizeAppendPatchContentForCompare(doc.substring(range.first, range.second))
+    return existing.contains(patch)
+}
+
+private fun normalizeAppendPatchContentForCompare(content: String): String {
+    return stripTransientHeadMarkers(content)
+        .split("\n")
+        .filterNot {
+            val trimmed = it.trim()
+            trimmed.startsWith("<!-- agent:boundary:") && trimmed.endsWith(" -->")
+        }
+        .joinToString("\n")
+        .trim()
 }
 
 private fun findComponentRangeUtil(doc: String, component: String): Pair<Int, Int>? {

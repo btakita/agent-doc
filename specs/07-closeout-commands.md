@@ -52,7 +52,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 
 ### Write-path invariants
 
-- Template/CRDT retries must adopt the already-visible response instead of appending a duplicate block.
+- Template/CRDT retries and IPC timeout fallbacks must adopt an already-visible response instead of appending or CRDT-merging a duplicate block, including when the user is concurrently typing new prompt text inside `agent:exchange`.
 - IPC sidecar success paths must run adjacent response-block dedupe on the exact content they will save as the snapshot. If dedupe changes that content, the working tree and editor repair payload must use the same deduped document before commit.
 - The commit transaction must re-run adjacent response-block dedupe on the staged snapshot content while holding the commit lock. A successful closeout must never rely on a later `agent-doc dedupe` or cleanup commit to remove a duplicate response block that was visible before staging.
 - Prompt-prefix normalization for append-mode exchange comes from the shared prompt-bearing classifier, not ad hoc line-shape guesses.

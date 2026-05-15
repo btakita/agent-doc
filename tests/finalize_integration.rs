@@ -1034,8 +1034,8 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        !content.contains("- do #fix1"),
-        "first prompt should be consumed"
+        content.contains("- ~do #fix1~"),
+        "first prompt should be marked complete"
     );
     assert!(
         content.contains("- do #fix2"),
@@ -1080,7 +1080,11 @@ fn finalize_drains_queue_and_clears_active_on_last_prompt() {
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
         !content.contains("- describe the project"),
-        "prompt should be consumed"
+        "queue body should be cleared when the last prompt is consumed"
+    );
+    assert!(
+        !content.contains("- ~describe the project~"),
+        "drained queue should not retain completed items"
     );
     assert!(
         content.contains("queue_active: false"),
@@ -1157,8 +1161,8 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
 
     let file_content = fs::read_to_string(&doc).unwrap();
     assert!(
-        !file_content.contains("- do #fix1"),
-        "first prompt consumed from file"
+        file_content.contains("- ~do #fix1~"),
+        "first prompt marked complete in file"
     );
 
     // Verify snapshot was also updated — read all .md files in snapshots dir
@@ -1169,8 +1173,8 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
             let snap = fs::read_to_string(entry.path()).unwrap();
             if snap.contains("queue") {
                 assert!(
-                    !snap.contains("- do #fix1"),
-                    "first prompt must also be consumed from snapshot: {}",
+                    snap.contains("- ~do #fix1~"),
+                    "first prompt must also be marked complete in snapshot: {}",
                     snap
                 );
                 snapshot_updated = true;

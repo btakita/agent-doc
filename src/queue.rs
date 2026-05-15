@@ -26,6 +26,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueueEntry {
     Prompt(QueuePrompt),
+    Completed(QueuePrompt),
+    Preset(String),
     StartFence(Option<String>),
     StopFence,
 }
@@ -158,11 +160,26 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
         }
 
         if let Some(rest) = line.strip_prefix("- ") {
+            if let Some(completed) = parse_completed_inline(rest) {
+                entries.push(QueueEntry::Completed(QueuePrompt {
+                    text: completed.to_string(),
+                    multiline: false,
+                }));
+                continue;
+            }
             entries.push(QueueEntry::Prompt(QueuePrompt {
                 text: rest.to_string(),
                 multiline: false,
             }));
             continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("preset ") {
+            let preset = rest.trim();
+            if !preset.is_empty() {
+                entries.push(QueueEntry::Preset(preset.to_string()));
+                continue;
+            }
         }
 
         if is_start_fence(trimmed) {
@@ -176,7 +193,8 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             continue;
         }
 
-        if is_prompt_fence_open(trimmed) {
+        if is_completed_fence_open(trimmed) || is_prompt_fence_open(trimmed) {
+            let completed = is_completed_fence_open(trimmed);
             let closer = fence_closer(trimmed);
             let mut prompt_lines = Vec::new();
             let mut found_close = false;
@@ -192,10 +210,15 @@ pub fn parse(body: &str) -> Result<Vec<QueueEntry>> {
             }
             let text = prompt_lines.join("\n");
             if !text.trim().is_empty() {
-                entries.push(QueueEntry::Prompt(QueuePrompt {
+                let prompt = QueuePrompt {
                     text,
                     multiline: true,
-                }));
+                };
+                if completed {
+                    entries.push(QueueEntry::Completed(prompt));
+                } else {
+                    entries.push(QueueEntry::Prompt(prompt));
+                }
             }
             continue;
         }
@@ -247,6 +270,25 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     out.push('\n');
                 }
             }
+            QueueEntry::Completed(p) => {
+                if p.multiline {
+                    out.push_str("~~~done\n");
+                    out.push_str(&p.text);
+                    if !p.text.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out.push_str("~~~\n");
+                } else {
+                    out.push_str("- ~");
+                    out.push_str(&p.text);
+                    out.push_str("~\n");
+                }
+            }
+            QueueEntry::Preset(preset) => {
+                out.push_str("preset ");
+                out.push_str(preset);
+                out.push('\n');
+            }
             QueueEntry::StartFence(dt) => {
                 if let Some(datetime) = dt {
                     out.push_str(&format!("--- start at {}\n", datetime));
@@ -260,6 +302,16 @@ pub fn render(entries: &[QueueEntry]) -> String {
         }
     }
     out
+}
+
+fn parse_completed_inline(text: &str) -> Option<&str> {
+    let trimmed = text.trim();
+    trimmed
+        .strip_prefix("~~")
+        .and_then(|s| s.strip_suffix("~~"))
+        .or_else(|| trimmed.strip_prefix('~').and_then(|s| s.strip_suffix('~')))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
 }
 
 fn is_start_fence(line: &str) -> bool {
@@ -286,6 +338,10 @@ fn is_stop_fence(line: &str) -> bool {
 
 fn is_prompt_fence_open(line: &str) -> bool {
     line == "~~~prompt"
+}
+
+fn is_completed_fence_open(line: &str) -> bool {
+    line == "~~~done"
 }
 
 fn fence_closer(_open: &str) -> &'static str {
@@ -317,12 +373,27 @@ pub fn first_prompt(entries: &[QueueEntry]) -> Option<&QueuePrompt> {
     })
 }
 
+#[allow(dead_code)]
 pub fn remove_first_prompt(entries: &[QueueEntry]) -> Vec<QueueEntry> {
     let mut result = Vec::with_capacity(entries.len());
     let mut removed = false;
     for entry in entries {
         if !removed && matches!(entry, QueueEntry::Prompt(_)) {
             removed = true;
+            continue;
+        }
+        result.push(entry.clone());
+    }
+    result
+}
+
+pub fn mark_first_prompt_completed(entries: &[QueueEntry]) -> Vec<QueueEntry> {
+    let mut result = Vec::with_capacity(entries.len());
+    let mut marked = false;
+    for entry in entries {
+        if !marked && let QueueEntry::Prompt(prompt) = entry {
+            result.push(QueueEntry::Completed(prompt.clone()));
+            marked = true;
             continue;
         }
         result.push(entry.clone());
@@ -440,6 +511,30 @@ mod tests {
         assert!(matches!(&entries[0], QueueEntry::Prompt(p) if !p.multiline));
         assert!(matches!(&entries[1], QueueEntry::Prompt(p) if p.multiline));
         assert!(matches!(&entries[2], QueueEntry::Prompt(p) if !p.multiline));
+    }
+
+    #[test]
+    fn parse_completed_single_line_item() {
+        let body = "- ~do #fix1~\n- do #fix2\n";
+        let entries = parse(body).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(matches!(&entries[0], QueueEntry::Completed(p) if p.text == "do #fix1"));
+        assert!(matches!(&entries[1], QueueEntry::Prompt(p) if p.text == "do #fix2"));
+        assert_eq!(prompts(&entries).len(), 1);
+        assert_eq!(render(&entries), body);
+    }
+
+    #[test]
+    fn parse_preset_directive() {
+        let body = "preset spec-test-build-install-commit-push\n- do #fix1\n";
+        let entries = parse(body).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0],
+            QueueEntry::Preset("spec-test-build-install-commit-push".to_string())
+        );
+        assert_eq!(prompts(&entries).len(), 1);
+        assert_eq!(render(&entries), body);
     }
 
     #[test]
@@ -604,6 +699,24 @@ mod tests {
             }),
         ];
         assert_eq!(render(&entries), "- do #fix1\n--- stop\n- do #fix2\n");
+    }
+
+    #[test]
+    fn mark_first_prompt_completed_preserves_later_prompts() {
+        let entries = vec![
+            QueueEntry::Preset("spec".to_string()),
+            QueueEntry::Prompt(QueuePrompt {
+                text: "do #fix1".to_string(),
+                multiline: false,
+            }),
+            QueueEntry::Prompt(QueuePrompt {
+                text: "do #fix2".to_string(),
+                multiline: false,
+            }),
+        ];
+        let result = mark_first_prompt_completed(&entries);
+        assert_eq!(render(&result), "preset spec\n- ~do #fix1~\n- do #fix2\n");
+        assert_eq!(prompts(&result).len(), 1);
     }
 
     #[test]

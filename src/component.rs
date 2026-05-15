@@ -226,6 +226,9 @@ impl Component {
         caret_offset: Option<usize>,
     ) -> String {
         let existing = &doc[self.open_end..self.close_start];
+        if append_patch_already_present(existing, content) {
+            return doc.to_string();
+        }
 
         if let Some(caret) = caret_offset {
             // Check if caret is inside this component
@@ -267,6 +270,9 @@ impl Component {
     pub fn append_with_boundary(&self, doc: &str, content: &str, boundary_id: &str) -> String {
         let boundary_marker = format!("<!-- agent:boundary:{} -->", boundary_id);
         let content_region = &doc[self.open_end..self.close_start];
+        if append_patch_already_present(content_region, content) {
+            return doc.to_string();
+        }
         let code_ranges = find_code_ranges(doc);
 
         // Search for boundary marker, skipping matches inside code blocks
@@ -338,6 +344,41 @@ fn is_valid_name(name: &str) -> bool {
         return false;
     }
     name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+fn append_patch_already_present(existing: &str, content: &str) -> bool {
+    let patch = normalize_append_patch_content(content);
+    if patch.is_empty() {
+        return false;
+    }
+    normalize_append_patch_content(existing).contains(&patch)
+}
+
+fn normalize_append_patch_content(content: &str) -> String {
+    content
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with(" -->") {
+                None
+            } else if markdown_heading_has_head_marker(line) {
+                Some(line.trim_end_matches(" (HEAD)").to_string())
+            } else {
+                Some(line.to_string())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+fn markdown_heading_has_head_marker(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let hashes = trimmed.bytes().take_while(|b| *b == b'#').count();
+    (1..=6).contains(&hashes)
+        && trimmed.as_bytes().get(hashes) == Some(&b' ')
+        && line.ends_with(" (HEAD)")
 }
 
 /// True if the text inside `<!-- ... -->` is an agent component marker.
@@ -1292,6 +1333,45 @@ actual content
         // Original marker should be consumed, but a NEW boundary re-inserted
         assert!(!result.contains(&format!("agent:boundary:{boundary_id}")));
         assert!(result.contains("agent:boundary:"));
+    }
+
+    #[test]
+    fn append_with_boundary_skips_already_present_content() {
+        let boundary_id = "simple-uuid";
+        let doc = format!(
+            "<!-- agent:exchange patch=append -->\n\
+             ### Re: Duplicate — gpt-5 (HEAD)\n\
+             \n\
+             Already applied.\n\
+             <!-- agent:boundary:old-id -->\n\
+             <!-- agent:boundary:{boundary_id} -->\n\
+             <!-- /agent:exchange -->\n"
+        );
+        let components = parse(&doc).unwrap();
+        let comp = &components[0];
+        let result = comp.append_with_boundary(
+            &doc,
+            "### Re: Duplicate — gpt-5\n\nAlready applied.\n",
+            boundary_id,
+        );
+
+        assert_eq!(result, doc);
+    }
+
+    #[test]
+    fn append_with_caret_skips_already_present_content() {
+        let doc = "<!-- agent:exchange patch=append -->\n\
+                   User prompt.\n\
+                   ### Re: Duplicate — gpt-5\n\
+                   \n\
+                   Already applied.\n\
+                   <!-- /agent:exchange -->\n";
+        let components = parse(doc).unwrap();
+        let comp = &components[0];
+        let result =
+            comp.append_with_caret(doc, "### Re: Duplicate — gpt-5\n\nAlready applied.\n", None);
+
+        assert_eq!(result, doc);
     }
 
     // --- strip_comments tests (moved from diff.rs) ---

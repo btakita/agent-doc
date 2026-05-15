@@ -2830,6 +2830,79 @@ Body\n\
     }
 
     #[test]
+    fn session_check_ignores_active_session_answered_marker_and_backlog_metadata_drift() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        let doc = root.join("doc.md");
+        let committed = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "JB `/clear` on this document error:\n",
+            "```\n",
+            "clear refused while actor was starting\n",
+            "```\n\n",
+            "This prompt was duplicated.\n",
+            "### Re: live typing duplicate and clear refusal — gpt-5\n\n",
+            "Fixed.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#34qd] old wording\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ JB `/clear` on this document error:\n",
+            "```\n",
+            "clear refused while actor was starting\n",
+            "```\n\n",
+            "❯ This prompt was duplicated.\n",
+            "### Re: live typing duplicate and clear refusal — gpt-5 (HEAD)\n\n",
+            "Fixed.\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#34qd] updated wording\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        fs::write(&doc, current).unwrap();
+        track_active_codex_session(
+            root,
+            &doc,
+            &format!(
+                "agent-doc {}\nDo #closeout-bypass. spec-test-build-install-commit-push",
+                doc.display()
+            ),
+        );
+        let _thread = EnvGuard::set("CODEX_THREAD_ID", "codex-session");
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"));
+            }
+            other => panic!("expected ok status, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn session_check_ignores_answered_prompt_marker_before_existing_response() {
         let current = concat!(
             "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",

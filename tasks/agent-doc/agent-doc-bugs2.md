@@ -125,7 +125,37 @@ Verification:
 - `make install`
 - `agent-doc --version` -> `agent-doc 0.33.16`
 - Latest inspected GitHub `Agent Doc` run `25916196867` was red in both `check` and `tmux-ci`; local `make tmux-ci` passed with 228 live tmux tests.
-<!-- agent:boundary:b61fc299 -->
+
+❯ (preset #spec-test-build-install-commit-push)
+❯ update spec + tests. build + install for local testing. commit + push
+❯ do [#staleckpt]
+### Re: #staleckpt spec/test/build/install — gpt-5
+
+Completed the scoped `#staleckpt` follow-up. The live backlog item was already archived before this cycle, so there was no active backlog row to mark done again.
+
+Changed in `src/agent-doc`:
+- Added a repair regression that binds a partial-response checkpoint writer to an open `preflight_started` cycle, lets stale-preflight repair abandon that prompt-bearing cycle, and proves the original writer stops with `partial_response_checkpoint_stopped` instead of writing another checkpoint for the abandoned cycle.
+- Updated `specs/05-agent-backend.md` so stale `preflight_started` abandonment is explicitly part of the partial-checkpoint stop contract.
+- Added an unreleased `VERSIONS.md` note for the direct `#staleckpt` race coverage.
+
+Pushed:
+- `src/agent-doc`: `a419adca` `test: cover stale preflight checkpoint repair`
+
+Parent repo:
+- Committed the `src/agent-doc` gitlink update as `d6cc5d5b8` `agent-doc: cover stale preflight checkpoint repair`.
+- Parent push is still blocked by pre-existing unrelated parent history ahead of `origin/main` that advances `src/session-share` to local/unpushed submodule commits. I did not push that unrelated history or stage unrelated dirty paths.
+
+Verification:
+- `cargo test stale_preflight_abandonment_stops_original_partial_checkpoint_writer`
+- `cargo fmt --check`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest visible GitHub `CI` run `25773430221` is green and contains `check`; no current `Agent Doc` workflow/tmux job is visible from `gh run list`, so I ran local `make tmux-ci`, which passed with 228 live tmux tests.
+
+No follow-up backlog items from this pass.
+<!-- agent:boundary:5a00c611 -->
 <!-- /agent:exchange -->
 ###
 <!--

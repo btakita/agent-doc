@@ -29,27 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-003211.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-005855.md`*
 
 Compacted content:
-- Archived 1 response topic(s): log review
+- Archived 1 response topic(s): dispatch proof fixes
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: dispatch proof fixes — gpt-5
-
-Implemented, tested, installed, committed, and pushed the requested agent-doc fixes.
-
-- `#has9`: dispatch-only OpenCode now fails closed when the only proof is pane-input acceptance (`proof=accepted proof_scope=accepted_only`). The route logs `route_dispatch_only_submit_unproven` and treats that state as not dispatched instead of reporting successful routed delivery. Hook-backed Codex keeps the same fail-closed proof requirement; Claude accepted-only semantics remain allowed.
-- `#5pr6`: OpenCode managed capability probes now build from the supported `opencode run` argument surface, drop TUI-only `--prompt`, preserve supported run flags such as `--command` and `--file`, and classify OpenCode usage/help or unknown-option output separately from real network/SSH probe failures.
-- `#s1mv`: added deterministic CLI coverage for the follow-up lifecycle: prompt-bearing user edit after dispatch, `finalize` response, then a clean `preflight` with `no_changes=true` and no stale patchback/guard diagnostics.
-
-Specs updated in `specs/05-agent-backend.md`, `specs/07-session-tmux-commands.md`, and `specs/09-git-integration.md`.
-
-Verification completed: `cargo fmt --check`, focused tests, full `cargo test`, `make check`, `cargo build`, `cargo install --path .`, and full local `make tmux-ci` after updating the one live tmux assertion exposed by the new wording. Latest GitHub CI run inspected: `CI` run `25773430221` was green; its recorded job did not include the current workflow's explicit `make tmux-ci` step, so local tmux evidence is the authoritative tmux check for this cycle.
-
-Commits pushed:
-- `src/agent-doc`: `aca970f` (`fix: tighten dispatch proof handling`) to `origin/20260422/codex-agent-backend`
-- parent repo: `02533833` (`agent-doc: update dispatch proof fixes`) to `origin/main`
-<!-- agent:boundary:5d0b0f29 -->
+<!-- agent:boundary:05bb7542 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->

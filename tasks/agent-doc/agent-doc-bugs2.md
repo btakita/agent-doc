@@ -34,27 +34,56 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): log review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:30347c0f -->
+
+❯ (preset #spec-test-build-install-commit-push)
+❯ update spec + tests. build + install for local testing. commit + push
+❯ The `agent:queue auto` tasks did not start on the last run.
+❯ synchronous orchestra
+❯ preset #spec-test-build-install-commit-push
+❯ - The `agent:queue auto` tasks did not start on the last run.
+❯ - do [#writeempty]
+❯ - do [#startroute]
+❯ - do [#staleckpt]
+❯ - do [#normfallback]
+### Re: queued spec/test/build/install — gpt-5
+
+Implemented the queued batch and normalized the `agent:queue auto` note into this response cycle.
+
+Completed:
+- `#writeempty`: `write --commit` with empty stdin and valid pending mutations now completes as a pending-only closeout instead of mutating the document and then failing because no assistant body was supplied.
+- `#startroute`: verified the existing starting-authoritative-actor route behavior/spec/tests; local tmux coverage proves it waits for ready prompt proof or fails once without dispatching into a still-starting actor.
+- `#staleckpt`: added deterministic coverage that partial checkpoint writers stop after the owning cycle is abandoned, covering the stale-preflight repair/checkpoint race class.
+- `#normfallback`: verified the existing sidecar normalization fallback repair path and retained its deterministic coverage for disk/editor repair, pending splice, and concurrent edit preservation.
+
+Changed and pushed in `src/agent-doc`:
+- `170f33d9` `fix: allow pending-only empty write closeouts`
+
+Parent repo commit made before closeout:
+- `c267e4df2` `agent-doc: allow pending-only empty write closeouts`
+
+Verification:
+- `cargo fmt`
+- `cargo test write_commit_empty_stdin_with_pending_add_commits_pending_only_change --test finalize_integration`
+- `cargo test partial_checkpoint_stops_after_cycle_is_abandoned`
+- `make check`
+- Latest GitHub Actions `Agent Doc` run `25914561587` had red `tmux-ci`; local `make tmux-ci` passed with 228 live tmux tests.
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+No follow-up backlog items from this pass.
+<!-- agent:boundary:8e26c6e2 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- do [#writeempty]
-- do [#startroute]
-- do [#staleckpt]
-- do [#normfallback]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#writeempty] Fix pending-only write/commit ordering: validate empty stdin before committing, or treat valid --pending-add-only writes as successful. Add a regression for Claude's agent-doc write --commit --pending-add empty-response path not exiting 1 after committing.
-- [ ] [#startroute] Fix repeated route failures while the authoritative actor is starting: queue or retry the dispatch once the actor reaches prompt-ready, or surface one durable recoverable route error instead of repeated route_authoritative_actor_starting_not_ready failures.
-- [ ] [#staleckpt] Audit the stale-preflight repair versus partial checkpoint race. May 14 cycles cycle-1778789175029 and cycle-1778790227635 show repair_preflight_stale_lock while partial_response_checkpoint writes keep arriving for the same cycle; prevent stale repair while a harness is still streaming checkpoints or bind repair to the newer cycle.
-- [ ] [#normfallback] Investigate sidecar_normalization_fallback_repaired_working_tree for agent-doc-bugs2.md and add deterministic coverage for why sidecar normalization had to repair the working tree instead of taking the primary IPC/snapshot path.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

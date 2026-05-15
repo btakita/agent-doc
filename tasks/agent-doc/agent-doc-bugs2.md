@@ -29,37 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-104550.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-111142.md`*
 
 Compacted content:
-- Archived 1 response topic(s): startup route gating
+- Archived 1 response topic(s): #rrfe
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#rrfe]. spec-test-build-install-commit-push
-### Re: #rrfe — gpt-5
-
-Implemented the diagnostics phase for the live-typing duplicate-insertion repro.
-
-What changed:
-- Added `exchange_write_diagnostic` ops-log coverage for exchange-touching writes in `src/agent-doc/src/write.rs` across inline/template/stream disk writes, stream IPC timeout fallback, explicit IPC, socket IPC, file IPC, and full-content IPC repair.
-- Each diagnostic records writer pid/executable, source, write mode, patch id when available, cycle id, before/after content hashes, live exchange drift, prompt duplication, prompt normalization, normalized prefix delta, patch count, and unmatched length.
-- Added regression coverage for the diagnostic log shape and live-edit duplication/normalization flags.
-- Updated `SPEC.md` and `specs/07-closeout-commands.md` with the new write-path diagnostic contract.
-
-Verification:
-- `cargo fmt`
-- `cargo test exchange_write_diagnostic_logs_live_edit_provenance`
-- `cargo check`
-- `make check`
-- Reviewed latest GitHub Actions `tmux-ci` leg; it was red on run `25913874762`, so I reproduced locally with `make tmux-ci`, which passed.
-- `cargo build`
-- `make install` installed `agent-doc v0.33.16` and `libagent_doc-0.33.16.so` locally.
-
-Commit evidence:
-- Submodule commit: `936e29c agent-doc: log exchange write diagnostics`
-- Root submodule pointer commit: `fea8bfbbe chore: update agent-doc submodule`
-
-Push is intentionally after this binary-owned session closeout; I will push the submodule branch and root branch next.
-<!-- agent:boundary:ce3c3599 -->
+<!-- agent:boundary:22f45f59 -->
 <!-- /agent:exchange -->
 ###
 <!--

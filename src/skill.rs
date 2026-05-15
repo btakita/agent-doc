@@ -754,6 +754,7 @@ mod tests {
 
     #[test]
     fn detect_install_env_treats_codex_thread_id_as_codex() {
+        let _env_lock = crate::test_support::env_lock();
         let _claude = EnvVarGuard::unset("CLAUDE_CODE");
         let _claude_ep = EnvVarGuard::unset("CLAUDE_CODE_ENTRYPOINT");
         let _opencode = EnvVarGuard::unset("OPENCODE");

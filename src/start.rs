@@ -3486,7 +3486,7 @@ mod tests {
 
     struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
-        _env_guard: std::sync::MutexGuard<'static, ()>,
+        _env_guard: crate::test_support::ProcessGlobalLockGuard,
     }
 
     impl ScopedCurrentDir {
@@ -3510,13 +3510,19 @@ mod tests {
     struct ScopedEnvVar {
         key: &'static str,
         previous: Option<String>,
+        _env_guard: crate::test_support::ProcessGlobalLockGuard,
     }
 
     impl ScopedEnvVar {
         fn set(key: &'static str, value: String) -> Self {
+            let env_guard = crate::test_support::env_lock();
             let previous = std::env::var(key).ok();
             unsafe { std::env::set_var(key, &value) };
-            Self { key, previous }
+            Self {
+                key,
+                previous,
+                _env_guard: env_guard,
+            }
         }
     }
 
@@ -4915,7 +4921,6 @@ Done.
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn supervisor_ipc_tmux_pipeline_delivers_submit_arrows_and_enter() {
-        let _env_guard = crate::test_support::env_lock();
         let tmp = TempDir::new().unwrap();
         let iso = IsolatedTmux::new("start-ipc-live-supervisor-input-e2e");
         let pane = iso.new_session("test", tmp.path()).unwrap();

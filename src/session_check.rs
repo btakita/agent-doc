@@ -1774,15 +1774,25 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
 
+    fn inspect(file: &std::path::Path) -> Result<SessionCheckStatus> {
+        let _process_global_lock = crate::test_support::env_lock();
+        super::inspect(file)
+    }
+
+    fn inspect_with_warnings(file: &std::path::Path) -> Result<SessionCheckReport> {
+        let _process_global_lock = crate::test_support::env_lock();
+        super::inspect_with_warnings(file)
+    }
+
     struct EnvGuard {
         key: &'static str,
         prev: Option<String>,
-        _lock: std::sync::MutexGuard<'static, ()>,
+        _lock: crate::test_support::ProcessGlobalLockGuard,
     }
 
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
-            let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+            let lock = crate::test_support::env_lock();
             let prev = std::env::var(key).ok();
             unsafe { std::env::set_var(key, value) };
             Self {

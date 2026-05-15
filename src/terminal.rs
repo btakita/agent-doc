@@ -271,6 +271,36 @@ fn shell_escape(s: &str) -> String {
 mod tests {
     use super::*;
 
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+        _lock: crate::test_support::ProcessGlobalLockGuard,
+    }
+
+    impl EnvGuard {
+        fn unset(key: &'static str) -> Self {
+            let lock = crate::test_support::env_lock();
+            let prior = std::env::var(key).ok();
+            unsafe { std::env::remove_var(key) };
+            Self {
+                key,
+                prior,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn shell_escape_simple() {
         assert_eq!(shell_escape("my-session"), "my-session");
@@ -297,10 +327,7 @@ mod tests {
     #[test]
     fn resolve_terminal_no_config_no_env() {
         let cfg = config::Config::default();
-        // Clear TERMINAL env var for this test
-        unsafe {
-            std::env::remove_var("TERMINAL");
-        }
+        let _terminal = EnvGuard::unset("TERMINAL");
         let result = resolve_terminal_command(&cfg, "tmux new-session -A -s 0");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

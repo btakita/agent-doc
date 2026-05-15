@@ -655,6 +655,38 @@ mod tests {
         env
     }
 
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+        _lock: crate::test_support::ProcessGlobalLockGuard,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::test_support::env_lock();
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self {
+                key,
+                prior,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn spawns_and_waits_for_clean_exit() {
         let dir = TempDir::new().unwrap();
@@ -710,10 +742,7 @@ mod tests {
         // Seed the parent env with a var the caller did NOT include in cfg.
         // The child must not see it — this locks the "deterministic env"
         // invariant from the spec.
-        // SAFETY: test-only, single-threaded within this test's scope.
-        unsafe {
-            std::env::set_var("AGENT_DOC_PTY_PARENT_LEAK", "leaked");
-        }
+        let _env_guard = EnvGuard::set("AGENT_DOC_PTY_PARENT_LEAK", "leaked");
 
         let dir = TempDir::new().unwrap();
         let script = write_fake_claude(

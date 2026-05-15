@@ -7092,10 +7092,10 @@ mod tests {
     // hold TMUX_START_MUTEX for broader prompt-readiness coverage.
     static TMUX_INJECT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
     // Serialize mutations of the route-specific binary override without
-    // contending with current-dir guards that already hold ENV_MUTEX.
+    // contending with current-dir guards that already hold the shared test lock.
     static ROUTE_BIN_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    fn env_lock() -> crate::test_support::ProcessGlobalLockGuard {
         crate::test_support::env_lock()
     }
 
@@ -7242,7 +7242,7 @@ mod tests {
 
     struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
-        _env_guard: std::sync::MutexGuard<'static, ()>,
+        _env_guard: crate::test_support::ProcessGlobalLockGuard,
     }
 
     impl ScopedCurrentDir {

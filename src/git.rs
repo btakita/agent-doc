@@ -6875,16 +6875,11 @@ Done.
         let doc = tasks.join("plan.md");
         std::fs::write(&doc, "# Plan\n").unwrap();
 
-        // Temporarily set CWD to root
-        let _env_guard = crate::test_support::env_lock();
-        let prev_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&root).unwrap();
+        let _cwd = crate::test_support::ScopedCurrentDir::set(&root);
 
         let resolved = resolve_absolute_file_path(Path::new("tasks/plan.md"));
         assert!(resolved.is_absolute(), "resolved path must be absolute");
         assert_eq!(resolved, doc, "must resolve to the CWD-relative file");
-
-        std::env::set_current_dir(prev_cwd).unwrap();
     }
 
     #[test]

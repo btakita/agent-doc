@@ -792,35 +792,30 @@ mod tests {
     #[test]
     fn registry_entry_matches_claimed_document_for_relative_entry_file() {
         let tmp = tempdir().unwrap();
-        let _env_guard = crate::test_support::env_lock();
-        let old_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd = crate::test_support::ScopedCurrentDir::set(tmp.path());
 
-        let result = {
-            let file = tmp.path().join("tasks/monsterrodholders.md");
-            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-            std::fs::write(&file, "# test\n").unwrap();
-            let file = file.canonicalize().unwrap();
-            let entry = SessionEntry {
-                pane: "%75".to_string(),
-                pid: 1,
-                cwd: tmp.path().to_string_lossy().to_string(),
-                started: "2026-05-02T23:44:31Z".to_string(),
-                session_id: "a9421282-fd96-4943-9af5-3561ed5cb799".to_string(),
-                file: "tasks/monsterrodholders.md".to_string(),
-                window: "@73".to_string(),
-                supervisor_instance_id: String::new(),
-            };
-
-            registry_entry_matches_claimed_document(
-                &file,
-                "legacy-registry-key",
-                &entry,
-                "different-session-id",
-            )
+        let file = tmp.path().join("tasks/monsterrodholders.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "# test\n").unwrap();
+        let file = file.canonicalize().unwrap();
+        let entry = SessionEntry {
+            pane: "%75".to_string(),
+            pid: 1,
+            cwd: tmp.path().to_string_lossy().to_string(),
+            started: "2026-05-02T23:44:31Z".to_string(),
+            session_id: "a9421282-fd96-4943-9af5-3561ed5cb799".to_string(),
+            file: "tasks/monsterrodholders.md".to_string(),
+            window: "@73".to_string(),
+            supervisor_instance_id: String::new(),
         };
 
-        std::env::set_current_dir(old_cwd).unwrap();
+        let result = registry_entry_matches_claimed_document(
+            &file,
+            "legacy-registry-key",
+            &entry,
+            "different-session-id",
+        );
+
         assert!(result);
     }
 

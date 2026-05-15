@@ -67,6 +67,14 @@ window reconciliation, shell readiness, or process-tree sampling costs. The
 explicit `make tmux-ci` target owns the ignored live-tmux sweep and GitHub
 Actions must run that target on Linux with `tmux` installed.
 
+Tests that mutate or inspect process-global state (`std::env` or the process
+current directory) must hold the reentrant shared test env lock from
+`test_support::env_lock()` or a helper backed by that same lock, and mutations
+must restore prior values through RAII. This keeps focused `cargo test <name>`
+and unbounded `cargo test` runs from poisoning `session-check` regressions
+while `make check` remains the supported full-suite entrypoint with
+`TEST_THREADS=2`.
+
 Current deterministic budgets:
 
 - Fast corpus: seeds `0..512`, `24` commands per seed, budget `3s`, always run

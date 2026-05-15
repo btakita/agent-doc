@@ -2498,7 +2498,7 @@ mod tests {
 
     struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
-        _env_guard: std::sync::MutexGuard<'static, ()>,
+        _env_guard: crate::test_support::ProcessGlobalLockGuard,
     }
 
     impl ScopedCurrentDir {

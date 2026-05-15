@@ -720,6 +720,47 @@ fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Resu
 mod tests {
     use super::*;
 
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+        _lock: crate::test_support::ProcessGlobalLockGuard,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::test_support::env_lock();
+            let prior = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                prior,
+                _lock: lock,
+            }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let lock = crate::test_support::env_lock();
+            let prior = std::env::var(key).ok();
+            unsafe { std::env::remove_var(key) };
+            Self {
+                key,
+                prior,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn split_last_entry_single_block() {
         let content = "### Re: Question\n\nAnswer here.\n";
@@ -777,7 +818,7 @@ mod tests {
     /// When TMUX_PANE is not set, ownership check always passes.
     #[test]
     fn check_target_ownership_passes_outside_tmux() {
-        unsafe { std::env::remove_var("TMUX_PANE") };
+        let _tmux_pane = EnvGuard::unset("TMUX_PANE");
         let target = Path::new("/tmp/nonexistent-target.md");
         assert!(check_target_ownership(target).is_ok());
     }
@@ -785,11 +826,10 @@ mod tests {
     /// When TMUX_PANE is set but no project root exists, check passes.
     #[test]
     fn check_target_ownership_passes_no_project_root() {
-        unsafe { std::env::set_var("TMUX_PANE", "%99") };
+        let _tmux_pane = EnvGuard::set("TMUX_PANE", "%99");
         let target = Path::new("/tmp/no-project-root-file.md");
         let result = check_target_ownership(target);
         assert!(result.is_ok());
-        unsafe { std::env::remove_var("TMUX_PANE") };
     }
 
     /// Selective pending item matching by ID pattern.

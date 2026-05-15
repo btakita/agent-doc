@@ -219,7 +219,7 @@ mod tests {
     use crate::sessions::{IsolatedTmux, SessionEntry, SessionRegistry};
     use tempfile::TempDir;
 
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    fn env_lock() -> crate::test_support::ProcessGlobalLockGuard {
         crate::test_support::env_lock()
     }
 

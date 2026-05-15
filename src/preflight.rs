@@ -4638,6 +4638,7 @@ mod tests {
     fn check_layout_returns_empty_outside_tmux() {
         // When TMUX env var is not set (typical in CI / test), check_layout
         // should return an empty vec silently.
+        let _env_guard = crate::test_support::env_lock();
         let saved = std::env::var("TMUX").ok();
         // SAFETY: test is single-threaded; we restore the value immediately after.
         unsafe { std::env::remove_var("TMUX") };
@@ -4689,6 +4690,7 @@ mod tests {
         let issues =
             vec!["window index 0 missing in session '0' (base-index compliance)".to_string()];
 
+        let _env_guard = crate::test_support::env_lock();
         let saved_tmux = std::env::var("TMUX").ok();
         // SAFETY: this test restores the process env before returning.
         unsafe { std::env::remove_var("TMUX") };

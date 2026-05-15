@@ -122,6 +122,37 @@ fn live_tmux_tests_are_not_in_default_development_suite() {
 }
 
 #[test]
+fn process_global_test_mutations_share_session_check_lock() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let test_support = fs::read_to_string(manifest_dir.join("src/test_support.rs")).unwrap();
+    assert!(
+        test_support.contains("crate::harness_prompt::TEST_ENV_LOCK")
+            && test_support.contains("struct ProcessGlobalLockGuard")
+            && test_support.contains("PROCESS_GLOBAL_LOCK_DEPTH")
+            && test_support.contains("struct ScopedCurrentDir")
+            && test_support.contains("std::env::set_current_dir(path)")
+            && test_support.contains("std::env::set_current_dir(&self.prev_cwd)"),
+        "test_support must route env and cwd test guards through a reentrant shared process-global lock"
+    );
+
+    let session_check = fs::read_to_string(manifest_dir.join("src/session_check.rs")).unwrap();
+    assert!(
+        session_check.contains("fn inspect(file: &std::path::Path)")
+            && session_check.contains("fn inspect_with_warnings(file: &std::path::Path)")
+            && session_check.contains("let _process_global_lock = crate::test_support::env_lock()"),
+        "session_check test inspection helpers must use the crate-wide process-global lock"
+    );
+
+    let pty = fs::read_to_string(manifest_dir.join("src/supervisor/pty.rs")).unwrap();
+    assert!(
+        pty.contains("struct EnvGuard")
+            && pty.contains("AGENT_DOC_PTY_PARENT_LEAK")
+            && pty.contains("std::env::remove_var(self.key)"),
+        "parent env leak test must restore process env through a guard"
+    );
+}
+
+#[test]
 fn test_cli_help() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("--help");

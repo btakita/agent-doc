@@ -34,7 +34,33 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): #kw0r process-global test isolation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:daf6da3a -->
+❯ agent-doc autocompacted root.md when running on claude. agent-doc should not autocompact unless there is an explicit setting in the frontmatter or config.toml
+
+❯ spec-test-build-install-commit-push
+### Re: Claude auto-compaction guard — gpt-5
+
+Implemented the Claude auto-update compaction guard.
+
+Changed `src/agent-doc` so rendered Claude/shared instruction surfaces now default to `agent-doc skill install --harness claude --reload restart`; `--reload compact` plus `/compact` prompting is reserved for sessions that explicitly opt into `agent_doc_auto_compact` in document frontmatter or project `.agent-doc/config.toml`. I also added project config parsing for `agent_doc_auto_compact` with the legacy `auto_compact` alias, updated the frontmatter comment, refreshed specs/runbooks/README/DEV/VERSIONS, and reinstalled the local Codex instruction mirrors.
+
+Verification passed:
+- `cargo test skill::tests::`
+- `cargo test project_config::tests::`
+- `make check`
+- `make tmux-ci` (228 live/ignored tmux tests passed)
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `agent-doc skill install --harness codex`
+
+CI review: latest parent `Agent Doc` run `25936973260` had `check` and `tmux-ci` jobs fail before any steps were created; `gh run view --log-failed` returned `log not found`, so I’m treating that as an external CI-start blocker rather than a code/tmux regression. Local `make check` and `make tmux-ci` are green.
+
+Commits prepared before this document closeout:
+- `src/agent-doc`: `4e99330` (`fix: gate claude auto-update compaction`)
+- parent repo: `a2bf1795d` (`agent-doc: gate claude auto-update compaction`)
+
+Per the session-document closeout order, I will push those commits after this finalize step completes.
+<!-- agent:boundary:f6d17a9b -->
 <!-- /agent:exchange -->
 ###
 <!--

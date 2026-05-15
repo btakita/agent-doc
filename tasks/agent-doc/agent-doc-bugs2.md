@@ -99,7 +99,33 @@ Verification:
 - Latest inspected GitHub `CI` run `25773430221` was green; it did not expose a current branch tmux leg, so I ran local `make tmux-ci`, which passed with 228 live tmux tests.
 
 No follow-up backlog items from this pass.
-<!-- agent:boundary:8c8ff751 -->
+
+❯ (preset #spec-test-build-install-commit-push)
+❯ update spec + tests. build + install for local testing. commit + push
+❯ do [#startroute]
+### Re: #startroute spec/test/build/install — gpt-5
+
+Completed the scoped `#startroute` pass in `src/agent-doc` and pushed the submodule commit. The live backlog item was already archived, so there was no active backlog row to reap again.
+
+Changed in `src/agent-doc`:
+- Factored the starting-authoritative-actor wait decision into a pure route poll classifier.
+- Added deterministic coverage for the `starting -> busy -> ready` schedule: route continues through restart-bootstrap `busy` and through `ready` without prompt proof, then releases only when ready state, dispatch-ready prompt proof, and dispatch eligibility all agree.
+- Updated `specs/08-session-routing.md` and `VERSIONS.md` to name the conjunctive prompt barrier for `#startroute`.
+
+Pushed:
+- `src/agent-doc`: `0bb990a5` `test: cover starting actor route prompt barrier`
+
+Parent repo push is blocked by pre-existing unrelated parent state: local `main` is ahead of `origin/main` with commits touching `plan.md` and `src/session-share`, and `src/session-share` points at local/unrelated submodule history. I did not push that unrelated parent history or stage those paths. The only new uncommitted parent change from this pass is the `src/agent-doc` gitlink update to `0bb990a5`.
+
+Verification:
+- `cargo test authoritative_actor_ready_poll`
+- `cargo fmt --check`
+- `make check`
+- `make build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest inspected GitHub `Agent Doc` run `25916196867` was red in both `check` and `tmux-ci`; local `make tmux-ci` passed with 228 live tmux tests.
+<!-- agent:boundary:b61fc299 -->
 <!-- /agent:exchange -->
 ###
 <!--

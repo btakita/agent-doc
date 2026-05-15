@@ -34,7 +34,19 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 2 response topic(s): log review and next steps; terminal closeout idempotency and ops summaries
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e41a192d -->
+❯ Review the session logs for agent-doc bugs. #next-steps
+### Re: session log review and next steps — gpt-5.5
+
+Reviewed the current `agent-doc-bugs2.md` session evidence in `.agent-doc/logs/ops.log`, `.agent-doc/logs/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.log`, `.agent-doc/logs/cycles.jsonl`, the latest archived exchange, and the existing route/startup plans.
+
+The previous closeout-idempotency bug looks handled in the current tail: the ops summary now buckets protected-input clear refusals as expected guardrail behavior, user follow-up drift as expected, and recent successful responses still cross `ipc_write_consumed` plus `commit_success`. I do not see a new missing-response or uncommitted-response failure in this log window.
+
+The active bug signal is startup route gating after a clean Codex restart. Generation 172 exited cleanly, generation 173 started on pane `%1`, and Codex capability proof completed, but the controller never recorded a matching `prompt_ready` / `state=ready` transition before four routed attempts failed as `route_authoritative_actor_starting_not_ready` at roughly 8 seconds each. That is the same class described by `tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md` Phase 2 and `tasks/agent-doc/plan-route-starting-actor-race-after-restart.md`: route is still treating a fixed wait budget as the boundary instead of waiting on a current-generation ready-prompt proof or failing with one typed startup timeout.
+
+Next step: prioritize the ready-prompt barrier work before more sync polish. Specifically, make route wait on controller lifecycle `ready` plus dispatch-ready prompt proof for generation 173-style starts, classify bootstrap `busy` as still booting, and persist one typed timeout with pane, generation, last lifecycle reason, and elapsed wait. I added that recommended item to the backlog so it stays visible from this document.
+
+No code was changed in this cycle.
+<!-- agent:boundary:778a6c0e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue -->
@@ -43,6 +55,7 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#r313] [recommended] Implement the startup route gating next step from tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md: replace fixed starting-actor sleep budgets with a current-generation ready-prompt barrier and typed timeout diagnostics.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

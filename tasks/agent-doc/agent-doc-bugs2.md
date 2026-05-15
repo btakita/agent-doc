@@ -34,7 +34,34 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): Claude auto-compaction guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:613974fd -->
+agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + received
+### Re: OpenCode arrow-key logging — gpt-5
+
+Yes. There is already a useful diagnostic path for this.
+
+Start the OpenCode owner with stdin diagnostics enabled, then reproduce the arrow-key failure:
+
+```bash
+AGENT_DOC_TMUX_INPUT_DIAG=1 AGENT_DOC_DEBUG_STDIN=1 agent-doc start /path/to/corky.md 2> >(tee -a /tmp/agent-doc-opencode-keys.log >&2)
+```
+
+Then inspect:
+
+```bash
+rg 'tmux_input_event|opencode_permission_arrow_translation|kitty_keyboard' /tmp/agent-doc-opencode-keys.log .agent-doc/logs/ops.log
+```
+
+The important part is setting the env vars on the long-lived `agent-doc start` owner, not only on a later `agent-doc corky.md` route command. Your symptom starts once a turn is active, so the bytes have to be captured inside the supervisor stdin-to-PTY path.
+
+What to look for:
+
+- `source=supervisor.stdin destination=child_pty transform=raw_forward` shows bytes received by the supervisor and forwarded to OpenCode.
+- `transform=opencode_permission_arrow_translation` means agent-doc detected an active OpenCode permission prompt and rewrote arrows: right/down become Tab, left/up become Shift-Tab. If that appears when no permission prompt is actually active, the prompt detector is the likely bug.
+- `kitty_keyboard_preserve` / `kitty_keyboard_drop` shows whether Kitty keyboard protocol sequences emitted by OpenCode are being preserved or filtered before reaching the terminal.
+- Routed text submissions already log through `input_diag::log_text_submit`; for prompt text this records byte length and SHA-256 rather than raw content.
+
+Relevant code paths are `src/agent-doc/src/input_diag.rs`, `src/agent-doc/src/start.rs` around `normalize_stdin_for_harness_permission_prompt`, and `src/agent-doc/src/supervisor/pty.rs` for the raw stdin/PTY forwarding path.
+<!-- agent:boundary:2470da22 -->
 <!-- /agent:exchange -->
 ###
 <!--

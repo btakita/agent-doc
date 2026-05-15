@@ -34,7 +34,7 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 3 response topic(s): live typing duplicate and clear refusal; empty closeout drift and duplicate prompt repair; remove session clear starting guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:97e36302 -->
+<!-- agent:boundary:ed985a9e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -49,7 +49,6 @@ Compacted content:
 - [ ] [#vkk8] [recommended] Investigate the Agent Doc GitHub Actions workflow jobs that fail before step logs are available; run 25923724699 completed in about three seconds with empty job steps and gh reporting log not found.
 - [ ] [#kw0r] [recommended] Audit and harden process-global cwd/env test isolation so unbounded cargo test does not intermittently poison session_check tests; make check already uses TEST_THREADS=2 as the supported full-suite entrypoint.
 - [ ] [#6v38] [recommended] Implement the answered-marker closeout hardening from tasks/agent-doc/plan-finish-closeout-after-answered-marker-drift.md, including an end-to-end closeout/session-check regression for live IDE marker drift.
-- [ ] [#34qd] [recommended] Add an end-to-end JetBrains Clear Session Context regression covering stale starting actor clear, live prompt-only document drift, and duplicate prompt repair.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

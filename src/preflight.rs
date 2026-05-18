@@ -120,8 +120,26 @@ pub struct RelatedDocChange {
     pub exists: bool,
 }
 
+/// A non-blocking preflight warning intended for skill/user visibility.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PreflightWarning {
+    /// Stable machine-readable warning code.
+    pub code: String,
+    /// Human-readable warning message.
+    pub message: String,
+    /// Optional document-declared agent/harness value from frontmatter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_agent: Option<String>,
+    /// Optional active harness detected from the current process environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_harness: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightOutput {
+    /// Non-blocking warnings the skill should surface before responding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<PreflightWarning>,
     /// Tmux layout issues found (empty = healthy).
     pub layout_issues: Vec<String>,
     /// Whether an orphaned pending response was recovered and applied.
@@ -428,6 +446,43 @@ fn short_model_name(model_id: &str) -> &str {
 /// like `gpt-5` pass through unchanged.
 fn resolve_agent_model(frontmatter_model: Option<&str>) -> Option<String> {
     frontmatter_model.map(|m| short_model_name(m).to_string())
+}
+
+fn canonical_harness_name(value: &str) -> Option<String> {
+    let normalized = value.trim().to_ascii_lowercase().replace(['_', ' '], "-");
+    match normalized.as_str() {
+        "" | "default" | "generic" => None,
+        "claude" | "claude-code" | "claudecode" | "claude-code-cli" => {
+            Some("claude-code".to_string())
+        }
+        "codex" | "codex-cli" | "openai-codex" => Some("codex".to_string()),
+        "opencode" | "open-code" | "opencode-ai" => Some("opencode".to_string()),
+        other => Some(other.to_string()),
+    }
+}
+
+fn harness_mismatch_warning(
+    document_agent: Option<&str>,
+    active_harness: &str,
+) -> Option<PreflightWarning> {
+    let declared_raw = document_agent?.trim();
+    if declared_raw.is_empty() {
+        return None;
+    }
+    let declared = canonical_harness_name(declared_raw)?;
+    let active = canonical_harness_name(active_harness)?;
+    if declared == active {
+        return None;
+    }
+    Some(PreflightWarning {
+        code: "harness_mismatch".to_string(),
+        message: format!(
+            "Document declares agent: {} but active harness is {}; responses will use the active harness attribution and closeout path.",
+            declared_raw, active
+        ),
+        document_agent: Some(declared_raw.to_string()),
+        active_harness: Some(active),
+    })
 }
 
 /// Trigger an automatic `resync --fix` when session-drift has been detected
@@ -912,7 +967,15 @@ pub fn run(file: &Path) -> Result<()> {
 
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let _ = frontmatter::parse_for_file(&content, file)?;
+    let (initial_frontmatter, _) = frontmatter::parse_for_file(&content, file)?;
+    let active_harness = agent_doc::model_tier::detect_harness();
+    let mut warnings = Vec::new();
+    if let Some(warning) =
+        harness_mismatch_warning(initial_frontmatter.agent.as_deref(), &active_harness)
+    {
+        eprintln!("[preflight] warning: {}", warning.message);
+        warnings.push(warning);
+    }
 
     // Step 0a: Auto-GC (at most once per day).
     // Checks .agent-doc/gc.stamp — if missing or >24 hours old, runs lightweight GC.
@@ -1574,6 +1637,7 @@ pub fn run(file: &Path) -> Result<()> {
         .ok()
         .filter(|report| !report.is_healthy());
     let output = PreflightOutput {
+        warnings,
         layout_issues,
         recovered,
         committed,
@@ -4607,6 +4671,56 @@ mod tests {
         assert!(
             parsed.get("prompt_presets_requested").is_none(),
             "prompt_presets_requested should be omitted when empty"
+        );
+    }
+
+    #[test]
+    fn harness_mismatch_warning_normalizes_aliases() {
+        assert!(
+            harness_mismatch_warning(Some("claude"), "claude-code").is_none(),
+            "claude and claude-code are the same canonical harness"
+        );
+        let warning = harness_mismatch_warning(Some("codex"), "claude-code").unwrap();
+        assert_eq!(warning.code, "harness_mismatch");
+        assert_eq!(warning.document_agent.as_deref(), Some("codex"));
+        assert_eq!(warning.active_harness.as_deref(), Some("claude-code"));
+        assert!(warning.message.contains("Document declares agent: codex"));
+    }
+
+    #[test]
+    fn harness_mismatch_warning_skips_unknown_active_harness() {
+        assert!(harness_mismatch_warning(Some("codex"), "default").is_none());
+        assert!(harness_mismatch_warning(None, "claude-code").is_none());
+    }
+
+    #[test]
+    fn preflight_output_includes_warnings() {
+        let output = PreflightOutput {
+            warnings: vec![PreflightWarning {
+                code: "harness_mismatch".to_string(),
+                message: "Document declares agent: codex but active harness is claude-code."
+                    .to_string(),
+                document_agent: Some("codex".to_string()),
+                active_harness: Some("claude-code".to_string()),
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["warnings"][0]["code"], "harness_mismatch");
+        assert_eq!(parsed["warnings"][0]["document_agent"], "codex");
+        assert_eq!(parsed["warnings"][0]["active_harness"], "claude-code");
+    }
+
+    #[test]
+    fn preflight_output_omits_warnings_when_empty() {
+        let output = PreflightOutput::default();
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            parsed.get("warnings").is_none(),
+            "warnings should be omitted when empty"
         );
     }
 

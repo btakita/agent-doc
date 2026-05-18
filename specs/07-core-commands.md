@@ -86,6 +86,10 @@ Two modes:
 - Stale `starting` actor records older than one hour are closed unless a live supervisor PID still has a fresh supervisor heartbeat proving the actor is booting; this updates the controller SQLite store and re-emits `session-actors.json` as a projection. A live PID with a stale heartbeat is treated as stuck startup state.
 - `preflight` runs the full orphan-file GC automatically at most once per day via `.agent-doc/gc.stamp`; `preflight`, `start`, and `sync` still run the lightweight stale-`starting` actor cleanup every cycle.
 
+## preflight
+
+`agent-doc preflight <FILE>` emits non-blocking `warnings[]` in its JSON contract. When frontmatter `agent:` is set and differs from the active harness detected from Claude Code, Codex, or OpenCode environment markers after alias normalization, preflight emits `code: "harness_mismatch"` and keeps running; the skill surfaces the warning and continues with the active harness attribution and closeout path.
+
 ## audit-docs
 
 `agent-doc audit-docs [--root DIR]`

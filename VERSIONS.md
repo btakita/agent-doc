@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Preflight now warns on harness/document mismatch.** `agent-doc preflight` compares frontmatter `agent:` against the active Claude Code, Codex, or OpenCode harness, emits a structured `harness_mismatch` warning without blocking intentional handoffs, and the skill contract tells harnesses to surface it while keeping active-harness attribution and closeout behavior.
+
 - **Claude skill auto-update no longer defaults to context compaction.** Rendered Claude and shared instruction surfaces now use `agent-doc skill install --harness claude --reload restart` by default and reserve `--reload compact` plus `/compact` prompting for sessions that explicitly opt into `agent_doc_auto_compact` in frontmatter or project `.agent-doc/config.toml`. Updated the harness runbook and closeout docs so large-session/session-accretion signals stay advisory instead of triggering an implicit Claude compaction path. This addresses the latest `root.md` auto-compaction report in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Clear Session Context now ignores Codex dim placeholder text.** Protected-input detection for `agent-doc session clear <FILE>` now captures ANSI pane state and treats Codex faint placeholder text as idle chrome, so JetBrains clear no longer refuses with `reason=drafted_prompt_input` when the live pane only shows placeholder/status UI such as `gpt-5.5 high ... Context ... used`. Real non-dim typed prompt input, queued drafts, and shell search still fail closed and point to `session interrupt-clear`. This addresses the latest JetBrains Clear Session Context blocker in `tasks/agent-doc/agent-doc-bugs2.md`.

@@ -8,7 +8,8 @@
 //!   prompt the user to switch.
 //! - Defines `ModelConfig` (under `[model]` in the global TOML config) and `TierMap` (per-harness
 //!   tier→model name resolution under `[model.tiers.<harness>]`).
-//! - `detect_harness()` reads environment variables (`CLAUDE_CODE_SESSION`, `CODEX_SESSION`)
+//! - `detect_harness()` reads environment variables (`CLAUDE_CODE_SESSION`, `CLAUDE_CODE`,
+//!   `CLAUDECODE`, `CODEX_SESSION`, `CODEX_THREAD_ID`, `CODEX_CLI`, `OPENCODE_CLIENT`, `OPENCODE`)
 //!   to identify the active agent harness, falling back to `"default"`.
 //! - `resolve_tier_to_model(tier, harness, config)` maps a `Tier` to the concrete model name
 //!   configured for the given harness, falling back to built-in defaults for the
@@ -184,16 +185,21 @@ fn builtin_for(harness: &str) -> TierMap {
     }
 }
 
-/// Detect the active harness from environment variables.
-///
-/// Returns `"claude-code"` if `CLAUDE_CODE_SESSION` is set, `"codex"` if `CODEX_SESSION`
-/// is set, `"opencode"` if `OPENCODE_CLIENT` is set, otherwise `"default"`.
 pub fn detect_harness() -> String {
-    if std::env::var("CLAUDE_CODE_SESSION").is_ok() || std::env::var("CLAUDECODE").is_ok() {
+    if ["CLAUDE_CODE_SESSION", "CLAUDE_CODE", "CLAUDECODE"]
+        .iter()
+        .any(|key| std::env::var_os(key).is_some())
+    {
         "claude-code".to_string()
-    } else if std::env::var("CODEX_SESSION").is_ok() {
+    } else if ["CODEX_SESSION", "CODEX_THREAD_ID", "CODEX_CLI", "CODEX"]
+        .iter()
+        .any(|key| std::env::var_os(key).is_some())
+    {
         "codex".to_string()
-    } else if std::env::var("OPENCODE_CLIENT").is_ok() {
+    } else if ["OPENCODE_CLIENT", "OPENCODE"]
+        .iter()
+        .any(|key| std::env::var_os(key).is_some())
+    {
         "opencode".to_string()
     } else {
         "default".to_string()
@@ -499,6 +505,56 @@ pub fn parse_model_arg(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvRestore {
+        values: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvRestore {
+        fn clear(keys: &[&'static str]) -> Self {
+            let values = keys
+                .iter()
+                .map(|key| (*key, std::env::var_os(key)))
+                .collect::<Vec<_>>();
+            for key in keys {
+                // SAFETY: test holds the shared env lock before constructing this guard.
+                unsafe { std::env::remove_var(key) };
+            }
+            Self { values }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in &self.values {
+                match value {
+                    Some(value) => {
+                        // SAFETY: test holds the shared env lock while the guard is dropped.
+                        unsafe { std::env::set_var(key, value) };
+                    }
+                    None => {
+                        // SAFETY: test holds the shared env lock while the guard is dropped.
+                        unsafe { std::env::remove_var(key) };
+                    }
+                }
+            }
+        }
+    }
+
+    const HARNESS_ENV_KEYS: &[&str] = &[
+        "CLAUDE_CODE_SESSION",
+        "CLAUDE_CODE",
+        "CLAUDECODE",
+        "CODEX_SESSION",
+        "CODEX_THREAD_ID",
+        "CODEX_CLI",
+        "CODEX",
+        "OPENCODE_CLIENT",
+        "OPENCODE",
+    ];
 
     #[test]
     fn tier_ordering() {
@@ -544,6 +600,30 @@ mod tests {
             matches!(h.as_str(), "claude-code" | "codex" | "opencode" | "default"),
             "unexpected harness: {h}"
         );
+    }
+
+    #[test]
+    fn harness_detection_recognizes_cli_environment_aliases() {
+        let _env_lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _restore = EnvRestore::clear(HARNESS_ENV_KEYS);
+
+        // SAFETY: this test holds the shared env lock.
+        unsafe { std::env::set_var("CLAUDE_CODE", "1") };
+        assert_eq!(detect_harness(), "claude-code");
+        // SAFETY: this test holds the shared env lock.
+        unsafe { std::env::remove_var("CLAUDE_CODE") };
+
+        // SAFETY: this test holds the shared env lock.
+        unsafe { std::env::set_var("CODEX_THREAD_ID", "thread-123") };
+        assert_eq!(detect_harness(), "codex");
+        // SAFETY: this test holds the shared env lock.
+        unsafe { std::env::remove_var("CODEX_THREAD_ID") };
+
+        // SAFETY: this test holds the shared env lock.
+        unsafe { std::env::set_var("OPENCODE", "1") };
+        assert_eq!(detect_harness(), "opencode");
     }
 
     #[test]

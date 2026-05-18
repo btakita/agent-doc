@@ -43,7 +43,7 @@ Done.
 - Verified: `TEST_THREADS=8 cargo test`; `cargo build`; `cargo install --path .`
 - Committed: `7df2670` in agent-doc (`docs: close prefix normalization backlog`)
 - Pushed: yes, `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:de254f86 -->
+<!-- agent:boundary:fe8e7dde -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,18 +58,7 @@ With an agent-doc managed Claude Code session, typing into the Claude Code promp
 ```
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#crossdocpend]~
-- ~do [#spfxnorm]~
-- ~do [#oobpmt]~
-- ~do [#staleflt]~
-- ~do [#busychk]~
-- ~do [#chkptcap]~
-- ~do [#257p]~
-- ~do [#pfxleak2]~
-- ~do [#bppfxstrip2]~
-- ~do [#lastpfx]~
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built

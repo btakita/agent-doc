@@ -35,7 +35,7 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 - Trailing prompt/context: `agent:queue auto` only completes 1 task. Please ensure all tasks are completed using `agent:queue auto`. spec-test-b...
 ❯ `agent:queue auto` only completes 1 task. Please ensure all tasks are completed using `agent:queue auto`. spec-test-build-install-commit-push
-### Re: queue auto completion — gpt-5 (HEAD)
+### Re: queue auto completion — gpt-5
 
 Done.
 
@@ -43,7 +43,7 @@ Done.
 - Verified: `TEST_THREADS=8 cargo test`; `cargo build`; `cargo install --path .`
 - Committed: `7df2670` in agent-doc (`docs: close prefix normalization backlog`)
 - Pushed: yes, `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:3f65004a -->
+<!-- agent:boundary:de254f86 -->
 <!-- /agent:exchange -->
 ###
 <!--

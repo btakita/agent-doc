@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -35,7 +35,7 @@ Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 - Trailing prompt/context: `agent:queue auto` only completes 1 task. Please ensure all tasks are completed using `agent:queue auto`. spec-test-b...
 ❯ `agent:queue auto` only completes 1 task. Please ensure all tasks are completed using `agent:queue auto`. spec-test-build-install-commit-push
-### Re: queue auto completion — gpt-5
+### Re: queue auto completion — gpt-5 (HEAD)
 
 Done.
 

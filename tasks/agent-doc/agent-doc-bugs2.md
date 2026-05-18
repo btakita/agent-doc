@@ -29,25 +29,25 @@ Completed #spfxnorm verification and local install. Next queue item: #oobpmt.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-205606.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-211518.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #spfxnorm
+- Archived 1 response topic(s): do `#oobpmt`
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: do `#oobpmt` — gpt-5
-
-Done.
-
-- Outcome: Active queue prompts now synthesize an in-memory prompt diff when the document itself is unchanged, so preflight/plan open a real cycle instead of returning `no_changes`. Plain `do [#id]` queue directives also keep their closing bracket during directive normalization.
-- Details: Updated `preflight`, `plan`, the shared synthetic diff helper, specs, and changelog; verified live `agent-doc preflight` on this document emits `no_changes: false` for `#oobpmt`.
-- Verified: `cargo fmt --check`; focused regressions; `make check`; `cargo install --path .`; live `agent-doc preflight`/`plan`; latest CI check reviewed; `make tmux-ci`.
-- Committed: `f8554df2` in `src/agent-doc`; parent gitlink `d3d1fed39`.
-- Pushed: yes, agent-doc branch and agent-loop main.
-<!-- agent:boundary:b27ab22a -->
+- Trailing prompt/context: `agent:queue auto` only completes 1 task. Please ensure all tasks are completed using `agent:queue auto`. spec-test-b...
+<!-- agent:boundary:c0db9d0a -->
 <!-- /agent:exchange -->
 ###
 <!--
 Use TEST_THREADS=8. spec-test-build-install-commit-push
+---
+With an agent-doc managed Claude Code session, typing into the Claude Code prompt or Crtl+R shows the stdout from the supervisor process. spec-test-build-install-commit-push
+```
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ [agent-doc] tmux_input_event source=supervisor.pty_filter destination=stdout transform=kitty_keyboard_drop key=kitty_keyboard_pop bytes=4 detail=preserve_kitty_keyboard=false──────────────────────────────────────────────────────────────
+  Opus 4.6 ~/…/src/session-share main brian@cachyos-x8664[agent-doc] tmux_input_event source=supervisor.pty_filter destination=stdout transform=kitty_keyboard_drop key=kitty_keyboard_push bytes=5 detail=preserve_kitty_keyboard=false
+                                                                                                                 [agent-doc] tmux_input_event source=supervisor.pty_filter destination=stdout transform=kitty_keyboard_drop key=kitty_progressive_enhancement bytes=7 detail=preserve_kitty_keyboard=false
+```
 -->
 
 <!-- agent:queue auto -->

@@ -46,3 +46,4 @@
 - 2026-05-15 [#6v38] [recommended] Implement the answered-marker closeout hardening from tasks/agent-doc/plan-finish-closeout-after-answered-marker-drift.md, including an end-to-end closeout/session-check regression for live IDE marker drift.
 - 2026-05-15 [#vkk8] [recommended] Investigate the Agent Doc GitHub Actions workflow jobs that fail before step logs are available; run 25923724699 completed in about three seconds with empty job steps and gh reporting log not found.
 - 2026-05-15 [#kw0r] [recommended] Audit and harden process-global cwd/env test isolation so unbounded cargo test does not intermittently poison session_check tests; make check already uses TEST_THREADS=2 as the supported full-suite entrypoint.
+- 2026-05-18 [#iceboxpatch] Icebox component mutation now has a binary-owned template patch path: `replace:icebox` parses as an icebox component patch and the write path rewrites `agent:icebox` without exchange fallback.

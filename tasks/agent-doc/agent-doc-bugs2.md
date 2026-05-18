@@ -1,9 +1,9 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
-claude_model: claude-opus-4-6
 agent_doc_format: template
 agent_doc_write: crdt
+agent: codex
+claude_model: claude-opus-4-6
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
@@ -29,39 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260515-215210.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-174346.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Claude auto-compaction guard
+- Archived 1 response topic(s): OpenCode arrow-key logging
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + received
-### Re: OpenCode arrow-key logging — gpt-5
-
-Yes. There is already a useful diagnostic path for this.
-
-Start the OpenCode owner with stdin diagnostics enabled, then reproduce the arrow-key failure:
-
-```bash
-AGENT_DOC_TMUX_INPUT_DIAG=1 AGENT_DOC_DEBUG_STDIN=1 agent-doc start /path/to/corky.md 2> >(tee -a /tmp/agent-doc-opencode-keys.log >&2)
-```
-
-Then inspect:
-
-```bash
-rg 'tmux_input_event|opencode_permission_arrow_translation|kitty_keyboard' /tmp/agent-doc-opencode-keys.log .agent-doc/logs/ops.log
-```
-
-The important part is setting the env vars on the long-lived `agent-doc start` owner, not only on a later `agent-doc corky.md` route command. Your symptom starts once a turn is active, so the bytes have to be captured inside the supervisor stdin-to-PTY path.
-
-What to look for:
-
-- `source=supervisor.stdin destination=child_pty transform=raw_forward` shows bytes received by the supervisor and forwarded to OpenCode.
-- `transform=opencode_permission_arrow_translation` means agent-doc detected an active OpenCode permission prompt and rewrote arrows: right/down become Tab, left/up become Shift-Tab. If that appears when no permission prompt is actually active, the prompt detector is the likely bug.
-- `kitty_keyboard_preserve` / `kitty_keyboard_drop` shows whether Kitty keyboard protocol sequences emitted by OpenCode are being preserved or filtered before reaching the terminal.
-- Routed text submissions already log through `input_diag::log_text_submit`; for prompt text this records byte length and SHA-256 rather than raw content.
-
-Relevant code paths are `src/agent-doc/src/input_diag.rs`, `src/agent-doc/src/start.rs` around `normalize_stdin_for_harness_permission_prompt`, and `src/agent-doc/src/supervisor/pty.rs` for the raw stdin/PTY forwarding path.
-<!-- agent:boundary:2470da22 -->
+<!-- agent:boundary:5e99578a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,6 +47,19 @@ Use TEST_THREADS=8. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#hrnsmis] Harness mismatch guard — document declares agent: codex but Claude Code starts the session with no warning. Preflight should detect frontmatter agent: value vs active harness and emit a harness_mismatch warning. Plan: tasks/agent-doc/plan-harness-mismatch-guard.md
+- [ ] [#rspdigest] Direct `agent-doc <FILE>` preserves progress commentary in template patchbacks — captured Codex response can be `progress prose + patch:exchange`; direct run/write applies unmatched prose into the exchange instead of stripping or digesting it like the Codex Stop replay guard. Plan: tasks/agent-doc/plan-direct-run-progress-commentary-digest.md
+- [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
+- [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
+- [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
+- [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
+- [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
+- [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
+- [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death doesn't lose work entirely.
+- [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
+- [ ] [#pfxleak2] content_ours prefix leak + commit churn — plan: tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
+- [ ] [#bppfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
+- [ ] [#lastpfx] Last prompt missing `❯ ` prefix — final user prompt can persist as bare text at the exchange tail even though prompt prefix normalization should make prompt ownership explicit. Plan: tasks/agent-doc/plan-last-prompt-prefix-loss.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

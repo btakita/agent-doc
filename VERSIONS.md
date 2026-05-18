@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Prompt-prefix normalization now preserves committed ownership state through fallback closeouts.** The write path preserves HEAD prefix state when rebuilding `content_ours`, repairs stripped prompt prefixes in sidecar/content_ours fallback paths, and covers bare final prompt repair after merge/adoption. Focused regressions cover committed assistant lines staying unprefixed, committed user prompts staying prefixed, IPC sidecars that strip `❯ `, and final bare prompt repair. This closes `#pfxleak2`, `#bppfxstrip2`, and `#lastpfx` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Active queue prompts no longer get hidden behind empty document diffs.** When `queue_active: true` and the document matches its snapshot, `preflight` and `plan` now synthesize the queue head item as the prompt diff, so `agent-doc <FILE>` opens a real cycle instead of returning `no_changes=true`. Added regressions for the `#oobpmt` queue-resume shape and updated the git integration spec.
 
 - **Preflight now warns on harness/document mismatch.** `agent-doc preflight` compares frontmatter `agent:` against the active Claude Code, Codex, or OpenCode harness, emits a structured `harness_mismatch` warning without blocking intentional handoffs, and the skill contract tells harnesses to surface it while keeping active-harness attribution and closeout behavior.

@@ -28,29 +28,12 @@ Fixed drained auto queue cleanup. Next backlog item: #y9kk.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-211518.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-220253.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do `#oobpmt`
+- Archived 2 response topic(s): queue auto completion; drained auto queue cleanup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-- Trailing prompt/context: `agent:queue auto` only completes 1 task. Please ensure all tasks are completed using `agent:queue auto`. spec-test-b...
-❯ `agent:queue auto` only completes 1 task. Please ensure all tasks are completed using `agent:queue auto`. spec-test-build-install-commit-push
-### Re: queue auto completion — gpt-5
-
-Done.
-
-- Outcome: Verified the already-implemented queue items through #lastpfx. Added an Unreleased VERSIONS note closing #pfxleak2, #bppfxstrip2, and #lastpfx; earlier source notes already close #staleflt, #busychk, #chkptcap, and #257p.
-- Verified: `TEST_THREADS=8 cargo test`; `cargo build`; `cargo install --path .`
-- Committed: `7df2670` in agent-doc (`docs: close prefix normalization backlog`)
-- Pushed: yes, `origin/20260422/codex-agent-backend`
-❯ All items in `agent:queue auto` have been marked complete. agent-doc should remove the content of the completed queue run from `agent:queue` and remove the `auto` attribute. spec-test-build-install-commit-push
-### Re: drained auto queue cleanup — gpt-5
-
-
-- Outcome: Fixed preflight so a completed `agent:queue auto` with no remaining prompts is cleaned to an empty `agent:queue` block with `auto` removed and snapshot synced. Also isolated `plan` tests under per-temp `.agent-doc/snapshots` so `TEST_THREADS=8` no longer shares fallback snapshot state.
-- Verified: `TEST_THREADS=8 cargo test`; `cargo build`; `cargo install --path .`; latest GitHub `CI` run 25773430221 was green and had no separate tmux job.
-- Committed: `754a3304` in agent-doc (`fix: clean drained auto queues`)
-<!-- agent:boundary:8c700f4c -->
+<!-- agent:boundary:d09ebdd7 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -20,7 +20,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed verification/install and closed remaining queue items through #lastpfx. Next backlog item: #y9kk.
+Fixed drained auto queue cleanup. Next backlog item: #y9kk.
 <!-- /agent:status -->
 
 ## Exchange
@@ -43,7 +43,14 @@ Done.
 - Verified: `TEST_THREADS=8 cargo test`; `cargo build`; `cargo install --path .`
 - Committed: `7df2670` in agent-doc (`docs: close prefix normalization backlog`)
 - Pushed: yes, `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:fe8e7dde -->
+❯ All items in `agent:queue auto` have been marked complete. agent-doc should remove the content of the completed queue run from `agent:queue` and remove the `auto` attribute. spec-test-build-install-commit-push
+### Re: drained auto queue cleanup — gpt-5
+
+
+- Outcome: Fixed preflight so a completed `agent:queue auto` with no remaining prompts is cleaned to an empty `agent:queue` block with `auto` removed and snapshot synced. Also isolated `plan` tests under per-temp `.agent-doc/snapshots` so `TEST_THREADS=8` no longer shares fallback snapshot state.
+- Verified: `TEST_THREADS=8 cargo test`; `cargo build`; `cargo install --path .`; latest GitHub `CI` run 25773430221 was green and had no separate tmux job.
+- Committed: `754a3304` in agent-doc (`fix: clean drained auto queues`)
+<!-- agent:boundary:8c700f4c -->
 <!-- /agent:exchange -->
 ###
 <!--

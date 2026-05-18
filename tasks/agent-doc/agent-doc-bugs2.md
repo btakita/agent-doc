@@ -29,28 +29,19 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-175731.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-191556.md`*
 
 Compacted content:
-- Archived 1 response topic(s): harness mismatch guard
+- Archived 1 response topic(s): rspdigest - gpt-5
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#rspdigest]. spec-test-build-install-commit-push
-### Re: rspdigest - gpt-5
-
-Done.
-
-- Outcome: Direct template writes now reuse replay-guard sanitization when unmatched text surrounds a `patch:exchange`, so safe leading progress commentary is stripped and unsafe trailing/interstitial transcript text fails closed. The verified commit also includes the pending CRDT duplicate-scaffold and live prompt prefix-variant repairs that were already in the agent-doc worktree.
-- Verified: `cargo fmt`; focused rspdigest tests; four affected live route tests; `cargo test`; `cargo build`; `make check`; `make tmux-ci`; `cargo install --path .`. GitHub CI latest reviewed as green but predates this branch/run.
-- Committed: `6f7413af` (`fix: sanitize template patchback writes`)
-- Pushed: yes, `origin/20260422/codex-agent-backend`
-<!-- agent:boundary:531ac665 -->
+<!-- agent:boundary:822e871f -->
 <!-- /agent:exchange -->
 ###
 <!--
 Use TEST_THREADS=8. spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - do [#crossdocpend]
 - do [#iceboxpatch]

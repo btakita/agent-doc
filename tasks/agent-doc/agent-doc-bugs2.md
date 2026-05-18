@@ -11,7 +11,7 @@ prompt_presets:
   '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix.
   '#commit-push': commit + push all uncommitted files
   '#follow-up-backlog': Any follow-up items to place in the backlog?
-  '#next-steps': ''
+  '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue_active: false
@@ -34,7 +34,16 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): harness mismatch guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5a49470f -->
+❯ do [#rspdigest]. spec-test-build-install-commit-push
+### Re: rspdigest - gpt-5
+
+Done.
+
+- Outcome: Direct template writes now reuse replay-guard sanitization when unmatched text surrounds a `patch:exchange`, so safe leading progress commentary is stripped and unsafe trailing/interstitial transcript text fails closed. The verified commit also includes the pending CRDT duplicate-scaffold and live prompt prefix-variant repairs that were already in the agent-doc worktree.
+- Verified: `cargo fmt`; focused rspdigest tests; four affected live route tests; `cargo test`; `cargo build`; `make check`; `make tmux-ci`; `cargo install --path .`. GitHub CI latest reviewed as green but predates this branch/run.
+- Committed: `6f7413af` (`fix: sanitize template patchback writes`)
+- Pushed: yes, `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:531ac665 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -42,12 +51,23 @@ Use TEST_THREADS=8. spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- do [#crossdocpend]
+- do [#iceboxpatch]
+- do [#spfxnorm]
+- do [#oobpmt]
+- do [#staleflt]
+- do [#busychk]
+- do [#chkptcap]
+- do [#257p]
+- do [#pfxleak2]
+- do [#bppfxstrip2]
+- do [#lastpfx]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rspdigest] Direct `agent-doc <FILE>` preserves progress commentary in template patchbacks — captured Codex response can be `progress prose + patch:exchange`; direct run/write applies unmatched prose into the exchange instead of stripping or digesting it like the Codex Stop replay guard. Plan: tasks/agent-doc/plan-direct-run-progress-commentary-digest.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.
 - [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md

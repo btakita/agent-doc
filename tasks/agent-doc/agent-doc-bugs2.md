@@ -37,8 +37,6 @@ Compacted content:
 ❯ The agent:queue stalls after the first task completes. spec-test-build-install-commit-push
 ### Re: #spfxnorm
 
-Done.
-
 - Outcome: `#spfxnorm` is already implemented in the agent-doc codebase: sidecar normalization fallback repairs the working tree and redelivers normalized full content to the editor, with the closeout/plugin specs and regression coverage present. I verified the fix and reinstalled the local `agent-doc` binary.
 - Verified: `TEST_THREADS=8 cargo test reposition_repairs_missing_working_tree_prompt_prefix_without_listener`; `TEST_THREADS=8 cargo test sidecar_normalization`; `TEST_THREADS=8 cargo test`; `cargo build`; `cargo install --path .`
 - Committed: pending

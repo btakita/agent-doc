@@ -21,7 +21,7 @@ queue_active: true
 
 <!-- agent:status patch=replace -->
 
-Recorded Codex capability proof verification.
+Completed #spfxnorm verification and local install. Next queue item: #oobpmt.
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,7 +34,16 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): rspdigest - gpt-5
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b14764b1 -->
+❯ The agent:queue stalls after the first task completes. spec-test-build-install-commit-push
+### Re: #spfxnorm
+
+Done.
+
+- Outcome: `#spfxnorm` is already implemented in the agent-doc codebase: sidecar normalization fallback repairs the working tree and redelivers normalized full content to the editor, with the closeout/plugin specs and regression coverage present. I verified the fix and reinstalled the local `agent-doc` binary.
+- Verified: `TEST_THREADS=8 cargo test reposition_repairs_missing_working_tree_prompt_prefix_without_listener`; `TEST_THREADS=8 cargo test sidecar_normalization`; `TEST_THREADS=8 cargo test`; `cargo build`; `cargo install --path .`
+- Committed: pending
+- Pushed: pending
+<!-- agent:boundary:1edd0ef4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +53,7 @@ Use TEST_THREADS=8. spec-test-build-install-commit-push
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#crossdocpend]~
-- do [#spfxnorm]
+- ~do [#spfxnorm]~
 - do [#oobpmt]
 - do [#staleflt]
 - do [#busychk]
@@ -58,7 +67,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#spfxnorm] Sidecar ❯ prefix normalization loss — content_ours fallback recovers snapshot but not working tree. Plan: tasks/agent-doc/plan-sidecar-prefix-normalization-loss.md
 - [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
 - [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
 - [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.

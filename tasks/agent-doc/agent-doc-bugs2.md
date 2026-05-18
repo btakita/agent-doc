@@ -43,7 +43,15 @@ Done.
 - Pushed: yes, to `origin/20260422/codex-agent-backend`
 - Notes: Left pre-existing uncommitted changes in `VERSIONS.md`, `src/template.rs`, and `src/write.rs` untouched.
 ccdo [#hrnsmis]. spec-test-build-install-commit-push
-<!-- agent:boundary:978c40fa -->
+### Re: harness mismatch guard — gpt-5.5
+
+Done.
+
+- Outcome: Implemented the preflight harness mismatch guard and marked `#hrnsmis` complete.
+- Verified: `make check TEST_THREADS=8`; `cargo install --path .`; smoke-tested mismatched `agent:` warning output.
+- Committed: `f9b3af8c`, plus session closeout commits.
+- Pushed: yes.
+<!-- agent:boundary:159a91e9 -->
 <!-- /agent:exchange -->
 ###
 <!--

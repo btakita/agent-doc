@@ -20,7 +20,8 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Fixed drained auto queue cleanup. Next backlog item: #y9kk.
+
+Fixed supervisor PTY filter diagnostic leak. Next backlog item: #y9kk.
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,19 +34,26 @@ Fixed drained auto queue cleanup. Next backlog item: #y9kk.
 Compacted content:
 - Archived 2 response topic(s): queue auto completion; drained auto queue cleanup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d09ebdd7 -->
-<!-- /agent:exchange -->
-###
-<!--
-Use TEST_THREADS=8. spec-test-build-install-commit-push
----
-With an agent-doc managed Claude Code session, typing into the Claude Code prompt or Crtl+R shows the stdout from the supervisor process. spec-test-build-install-commit-push
+❯ With an agent-doc managed Claude Code session, typing into the Claude Code prompt or Ctl+R shows the stdout from the supervisor process. #spec-test-build-install-commit-push
 ```
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 ❯ [agent-doc] tmux_input_event source=supervisor.pty_filter destination=stdout transform=kitty_keyboard_drop key=kitty_keyboard_pop bytes=4 detail=preserve_kitty_keyboard=false──────────────────────────────────────────────────────────────
   Opus 4.6 ~/…/src/session-share main brian@cachyos-x8664[agent-doc] tmux_input_event source=supervisor.pty_filter destination=stdout transform=kitty_keyboard_drop key=kitty_keyboard_push bytes=5 detail=preserve_kitty_keyboard=false
                                                                                                                  [agent-doc] tmux_input_event source=supervisor.pty_filter destination=stdout transform=kitty_keyboard_drop key=kitty_progressive_enhancement bytes=7 detail=preserve_kitty_keyboard=false
 ```
+### Re: supervisor PTY filter diagnostics — gpt-5
+
+Done.
+
+- Outcome: Supervisor PTY filter Kitty keyboard preserve/drop traces are now verbose-only, so normal managed Claude prompt editing/history search will not print `[agent-doc] tmux_input_event source=supervisor.pty_filter ...` into the pane. Input-boundary diagnostics still emit normally; spec and changelog were updated.
+- Verified: `cargo test verbose_input_diagnostics_are_opt_in`; `cargo test kitty_keyboard`; `cargo check`; `TEST_THREADS=8 make check`; `make install`; `agent-doc --version`
+- Committed: `381f1260` in `src/agent-doc`
+- Pushed: yes, `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:96de5e95 -->
+<!-- /agent:exchange -->
+###
+<!--
+Use TEST_THREADS=8. spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->

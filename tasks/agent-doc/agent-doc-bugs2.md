@@ -34,7 +34,16 @@ Completed #spfxnorm verification and local install. Next queue item: #oobpmt.
 Compacted content:
 - Archived 1 response topic(s): #spfxnorm
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:a54fc1fd -->
+### Re: do `#oobpmt` — gpt-5
+
+Done.
+
+- Outcome: Active queue prompts now synthesize an in-memory prompt diff when the document itself is unchanged, so preflight/plan open a real cycle instead of returning `no_changes`. Plain `do [#id]` queue directives also keep their closing bracket during directive normalization.
+- Details: Updated `preflight`, `plan`, the shared synthetic diff helper, specs, and changelog; verified live `agent-doc preflight` on this document emits `no_changes: false` for `#oobpmt`.
+- Verified: `cargo fmt --check`; focused regressions; `make check`; `cargo install --path .`; live `agent-doc preflight`/`plan`; latest CI check reviewed; `make tmux-ci`.
+- Committed: `f8554df2` in `src/agent-doc`; parent gitlink `d3d1fed39`.
+- Pushed: yes, agent-doc branch and agent-loop main.
+<!-- agent:boundary:b27ab22a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,7 +54,7 @@ Use TEST_THREADS=8. spec-test-build-install-commit-push
 preset #spec-test-build-install-commit-push
 - ~do [#crossdocpend]~
 - ~do [#spfxnorm]~
-- do [#oobpmt]
+- ~do [#oobpmt]~
 - do [#staleflt]
 - do [#busychk]
 - do [#chkptcap]
@@ -58,7 +67,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#oobpmt] OOB prompt absorption — preflight commit step absorbs user-content changes (new prompts in status) before diff runs, causing `no_changes: true`. Fix: use pre-commit snapshot as diff baseline, not post-commit snapshot.
 - [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
 - [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
 - [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death doesn't lose work entirely.

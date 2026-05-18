@@ -856,6 +856,9 @@ fn is_safe_duplicate_template_scaffold(segment: &str) -> bool {
     if !has_scaffold_component {
         return false;
     }
+    if !duplicate_scaffold_has_only_structural_residue(trimmed) {
+        return false;
+    }
 
     let wrapped = format!("<!-- agent:scaffold -->\n{trimmed}\n<!-- /agent:scaffold -->\n");
     let Ok(components) = component::parse(&wrapped) else {
@@ -865,6 +868,50 @@ fn is_safe_duplicate_template_scaffold(segment: &str) -> bool {
     components
         .iter()
         .all(|component| allowed.contains(&component.name.as_str()))
+}
+
+fn duplicate_scaffold_has_only_structural_residue(segment: &str) -> bool {
+    let mut residue = segment.to_string();
+    if let Ok(components) = component::parse(segment) {
+        let mut ranges: Vec<(usize, usize)> = components
+            .iter()
+            .filter(|component| {
+                matches!(
+                    component.name.as_str(),
+                    "queue" | "backlog" | "pending" | "icebox" | "done"
+                )
+            })
+            .map(|component| (component.open_start, component.close_end))
+            .collect();
+        ranges.sort_by(|a, b| b.0.cmp(&a.0));
+        for (start, end) in ranges {
+            residue.replace_range(start..end, "");
+        }
+    }
+
+    let residue = strip_html_comments(&residue);
+    residue.lines().all(|line| {
+        let trimmed = line.trim();
+        trimmed.is_empty() || trimmed.starts_with('#')
+    })
+}
+
+fn strip_html_comments(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        let Some(start) = rest.find("<!--") else {
+            result.push_str(rest);
+            break;
+        };
+        result.push_str(&rest[..start]);
+        let after_start = &rest[start + 4..];
+        let Some(end) = after_start.find("-->") else {
+            break;
+        };
+        rest = &after_start[end + 3..];
+    }
+    result
 }
 
 /// Merge duplicate `<!-- agent:exchange -->` openers into a single exchange block.
@@ -4210,6 +4257,51 @@ Existing answer.
         );
         assert!(repaired.contains("JB `Run Agent Doc` failed on this document."));
         assert!(component::parse(&repaired).is_ok());
+    }
+
+    #[test]
+    fn repair_duplicate_exchange_close_scaffold_rejects_mixed_user_text() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "c The arrow\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "corky.md The arrow\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = repair_duplicate_exchange_close_scaffold(doc).unwrap();
+
+        assert!(
+            repaired.is_none(),
+            "mixed user text must not be dropped as duplicated scaffold"
+        );
     }
 
     #[test]

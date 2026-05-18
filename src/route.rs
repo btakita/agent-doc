@@ -9502,7 +9502,7 @@ Body\n\
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         let doc = dir.path().join("route-live-codex-fresh-retry.md");
-        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let snapshot = "---\nagent: codex\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         let stale_agent = write_mock_registered_agent_doc(dir.path());
@@ -9664,7 +9664,7 @@ Body\n\
         let pane = iso.auto_start(session, &cwd).unwrap();
 
         let doc = dir.path().join("route-live-codex-fresh-retry-handoff.md");
-        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let snapshot = "---\nagent: codex\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         let stale_agent = write_mock_registered_agent_doc(dir.path());
@@ -12188,7 +12188,7 @@ Body\n\
         let _ = wait_for_pane_contains(&iso, &actor_pane, "❯ ", std::time::Duration::from_secs(3));
 
         let doc = dir.path().join("dispatch-only-claude-fallback.md");
-        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let snapshot = "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();
@@ -12797,7 +12797,7 @@ Body\n\
         let actor_pane = iso.auto_start(session, &cwd).unwrap();
 
         let doc = dir.path().join("session.md");
-        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let snapshot = "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         crate::snapshot::save(&doc, snapshot).unwrap();

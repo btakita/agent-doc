@@ -2465,6 +2465,33 @@ pub(crate) fn canonicalize_response_for_capture(file: &Path, response: &str) -> 
         .unwrap_or_else(|| response.to_string()))
 }
 
+fn sanitize_template_patchback_response_for_write(response: &mut String) -> Result<()> {
+    let Ok((patches, unmatched)) = template::parse_patches(response) else {
+        return Ok(());
+    };
+    if unmatched.trim().is_empty() || !patches.iter().any(|patch| patch.name == "exchange") {
+        return Ok(());
+    }
+
+    match crate::replay_guard::classify_replay_payload(response) {
+        crate::replay_guard::ReplayPayloadClassification::Replayable(payload) => {
+            let sanitized = payload.into_owned();
+            if sanitized != response.trim() {
+                *response = sanitized;
+            }
+            Ok(())
+        }
+        crate::replay_guard::ReplayPayloadClassification::Empty => {
+            anyhow::bail!("empty response — nothing to write")
+        }
+        crate::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
+            anyhow::bail!(
+                "template response contains unsafe unmatched content around patch blocks: {reason}"
+            )
+        }
+    }
+}
+
 /// Resolve the IPC project root for `canonical` (an already-canonicalized file
 /// path). Uses the nearest `.agent-doc/` directory to match the IDE plugin's
 /// `resolveRootFor` logic — submodule documents use the submodule's own
@@ -3753,6 +3780,7 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
         &crate::component::strip_backlog_patch_attr(&deduped_openers),
         file,
     );
+    let (normalized, _) = dedupe_live_prompt_prefix_variants_in_tail(&normalized, file);
     match crate::template::guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
         Err(err)
@@ -3762,6 +3790,18 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
                     .contains("closing marker <!-- /agent:exchange --> without matching open")
             }) =>
         {
+            if let Some(repaired) =
+                crate::template::repair_duplicate_exchange_close_scaffold(&normalized)?
+            {
+                crate::template::guard_no_conversation_tail_outside_exchange(&repaired)
+                    .with_context(|| {
+                        format!(
+                            "template structure guard failed for {} after duplicate-scaffold repair",
+                            file.display()
+                        )
+                    })?;
+                return Ok(dedupe_consecutive_response_blocks(&repaired, file));
+            }
             if let Some(repaired) =
                 crate::template::repair_duplicate_exchange_close_tail(&normalized)?
             {
@@ -3991,6 +4031,154 @@ struct PromptLineInfo {
     normalized: Option<String>,
     prefixed: bool,
     remove: bool,
+}
+
+fn split_line_segment(segment: &str) -> (&str, &str) {
+    segment
+        .strip_suffix('\n')
+        .map(|line| (line, "\n"))
+        .unwrap_or((segment, ""))
+}
+
+fn last_exchange_boundary_tail_start(exchange: &str) -> Option<usize> {
+    let boundary_prefix = "<!-- agent:boundary:";
+    let mut offset = 0usize;
+    let mut tail_start = None;
+    for segment in exchange.split_inclusive('\n') {
+        let (line, _) = split_line_segment(segment);
+        if line.trim().starts_with(boundary_prefix) {
+            tail_start = Some(offset + segment.len());
+        }
+        offset += segment.len();
+    }
+    tail_start
+}
+
+fn probable_live_prompt_prefix_variant(shorter: &str, longer: &str) -> bool {
+    let shorter = shorter.trim();
+    let longer = longer.trim();
+    if shorter.len() < 16 || longer.len() <= shorter.len() + 2 {
+        return false;
+    }
+    if !longer.starts_with(shorter) || !longer.is_char_boundary(shorter.len()) {
+        return false;
+    }
+    if matches!(
+        shorter.chars().last(),
+        Some('.' | '!' | '?' | ':' | ';' | ')' | ']')
+    ) {
+        return false;
+    }
+    true
+}
+
+fn is_exchange_code_fence_delimiter(trimmed: &str) -> bool {
+    let Some(first) = trimmed.chars().next() else {
+        return false;
+    };
+    if first != '`' && first != '~' {
+        return false;
+    }
+    trimmed.chars().take_while(|ch| *ch == first).count() >= 3
+}
+
+fn dedupe_live_prompt_prefix_variants_in_tail(content: &str, file: &Path) -> (String, bool) {
+    let Ok(components) = component::parse(content) else {
+        return (content.to_string(), false);
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return (content.to_string(), false);
+    };
+    let exchange_content = exchange.content(content);
+    let Some(tail_start) = last_exchange_boundary_tail_start(exchange_content) else {
+        return (content.to_string(), false);
+    };
+    let tail = &exchange_content[tail_start..];
+    if tail.trim().is_empty() {
+        return (content.to_string(), false);
+    }
+
+    #[derive(Clone, Debug)]
+    struct TailLine {
+        segment: String,
+        normalized: Option<String>,
+        remove: bool,
+    }
+
+    let mut in_fence = false;
+    let mut lines = Vec::<TailLine>::new();
+    for segment in tail.split_inclusive('\n') {
+        let (line, _) = split_line_segment(segment);
+        let trimmed = line.trim();
+        let is_fence = is_exchange_code_fence_delimiter(trimmed);
+        let normalized = if !in_fence && !is_fence {
+            normalized_prompt_text(line)
+        } else {
+            None
+        };
+        lines.push(TailLine {
+            segment: segment.to_string(),
+            normalized,
+            remove: false,
+        });
+        if is_fence {
+            in_fence = !in_fence;
+        }
+    }
+    if !tail.ends_with('\n') && !tail.is_empty() {
+        let consumed: usize = lines.iter().map(|line| line.segment.len()).sum();
+        if consumed < tail.len() {
+            let rest = &tail[consumed..];
+            lines.push(TailLine {
+                segment: rest.to_string(),
+                normalized: normalized_prompt_text(rest),
+                remove: false,
+            });
+        }
+    }
+
+    let mut changed = false;
+    for idx in 0..lines.len().saturating_sub(1) {
+        if lines[idx].remove || lines[idx + 1].remove {
+            continue;
+        }
+        let Some(left) = lines[idx].normalized.as_deref() else {
+            continue;
+        };
+        let Some(right) = lines[idx + 1].normalized.as_deref() else {
+            continue;
+        };
+        if probable_live_prompt_prefix_variant(left, right) {
+            lines[idx].remove = true;
+            changed = true;
+        } else if probable_live_prompt_prefix_variant(right, left) {
+            lines[idx + 1].remove = true;
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return (content.to_string(), false);
+    }
+
+    let repaired_tail = lines
+        .into_iter()
+        .filter(|line| !line.remove)
+        .map(|line| line.segment)
+        .collect::<String>();
+    let repaired_exchange = format!("{}{}", &exchange_content[..tail_start], repaired_tail);
+    let repaired = exchange.replace_content(content, &repaired_exchange);
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "live_prompt_prefix_variant_repaired file={} before_commit=true",
+            file.display()
+        ),
+    );
+    (repaired, true)
 }
 
 fn dedupe_prompt_lines_against_before(before: &str, after: &str, file: &Path) -> (String, bool) {
@@ -4390,6 +4578,7 @@ pub fn run_template(
 
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    sanitize_template_patchback_response_for_write(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
@@ -4604,6 +4793,7 @@ pub fn run_stream(
 
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    sanitize_template_patchback_response_for_write(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
@@ -5276,6 +5466,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
 
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    sanitize_template_patchback_response_for_write(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Save response to pending store (survives context compaction)
@@ -5551,9 +5742,11 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
 pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    let mut response = response.to_string();
+    sanitize_template_patchback_response_for_write(&mut response)?;
 
     let (mut patches, mut unmatched) =
-        template::parse_patches(response).context("failed to parse patch blocks from response")?;
+        template::parse_patches(&response).context("failed to parse patch blocks from response")?;
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
@@ -5591,7 +5784,7 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
         &content_ours,
         &content_current,
         snapshot_doc.as_deref(),
-        response,
+        &response,
     )? {
         eprintln!(
             "[write] response already present in current file; adopting normalized current content"
@@ -5849,6 +6042,11 @@ pub(crate) fn dedupe_ipc_snapshot_content(
         if prompt_changed {
             deduped = prompt_deduped;
         }
+    }
+    let (prefix_deduped, prefix_changed) =
+        dedupe_live_prompt_prefix_variants_in_tail(&deduped, file);
+    if prefix_changed {
+        deduped = prefix_deduped;
     }
     let changed = deduped != content;
     if changed {
@@ -7505,6 +7703,69 @@ mod tests {
     }
 
     #[test]
+    fn apply_template_from_string_strips_safe_progress_before_exchange_patch() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "do #rspdigest. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let response = concat!(
+            "I am checking the write path and existing replay guard before editing.\n",
+            "The fix is small; next I will run the targeted regression.\n\n",
+            "<!-- patch:exchange -->\n",
+            "### Re: rspdigest — gpt-5\n\n",
+            "Implemented and verified.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        apply_template_from_string(&doc, response).unwrap();
+
+        let result = fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("### Re: rspdigest — gpt-5"));
+        assert!(result.contains("Implemented and verified."));
+        assert!(!result.contains("I am checking the write path"));
+        assert!(!result.contains("The fix is small"));
+    }
+
+    #[test]
+    fn apply_template_from_string_rejects_trailing_unmatched_patchback_text() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "do #rspdigest. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: rspdigest — gpt-5\n\n",
+            "Implemented.\n",
+            "<!-- /patch:exchange -->\n",
+            "extra transcript text\n",
+        );
+
+        let err = apply_template_from_string(&doc, response).unwrap_err();
+
+        assert!(
+            err.to_string().contains("unsafe unmatched content"),
+            "trailing unmatched patchback text must fail closed, got: {err:#}"
+        );
+    }
+
+    #[test]
     fn guard_rejects_normal_write_when_diff_requests_compact_exchange() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -8560,6 +8821,76 @@ mod tests {
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("ipc_prompt_duplicate_repaired"));
+        assert!(log.contains("ipc_snapshot_deduped"));
+    }
+
+    #[test]
+    fn normalize_template_structure_repairs_live_prompt_prefix_variant_after_boundary() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:613974fd -->\n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + re \n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + received \n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let repaired = normalize_template_structure_or_fail(content, &doc).unwrap();
+
+        assert_eq!(repaired.matches("sent + re \n").count(), 0);
+        assert_eq!(repaired.matches("sent + received \n").count(), 1);
+    }
+
+    #[test]
+    fn normalize_template_structure_keeps_prefix_variant_inside_response_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: example — gpt-5\n\n",
+            "This sentence is a prefix\n",
+            "This sentence is a prefix variant in assistant prose\n",
+            "<!-- agent:boundary:613974fd -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let repaired = normalize_template_structure_or_fail(content, &doc).unwrap();
+
+        assert!(repaired.contains("This sentence is a prefix\n"));
+        assert!(repaired.contains("This sentence is a prefix variant in assistant prose\n"));
+    }
+
+    #[test]
+    fn ipc_snapshot_dedupes_live_prompt_prefix_variant() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let before = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:613974fd -->\n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + re \n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let after = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:613974fd -->\n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + re \n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + received \n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let (repaired, changed) =
+            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc");
+
+        assert!(changed);
+        assert_eq!(repaired.matches("sent + re \n").count(), 0);
+        assert_eq!(repaired.matches("sent + received \n").count(), 1);
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("live_prompt_prefix_variant_repaired"));
         assert!(log.contains("ipc_snapshot_deduped"));
     }
 
@@ -11650,6 +11981,94 @@ Implemented.
             "backlog should remain outside exchange:\n{repaired}"
         );
         assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
+    }
+
+    #[test]
+    fn normalize_template_structure_repairs_duplicate_scaffold_close() {
+        let dir = TempDir::new().unwrap();
+        let doc_path = dir.path().join("doc.md");
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "❯ keep this prompt\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = normalize_template_structure_or_fail(content, &doc_path)
+            .expect("pure duplicated scaffold should be repaired");
+
+        assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:backlog -->").count(), 1);
+        assert!(repaired.contains("❯ keep this prompt"));
+    }
+
+    #[test]
+    fn normalize_template_structure_rejects_duplicate_scaffold_with_user_text() {
+        let dir = TempDir::new().unwrap();
+        let doc_path = dir.path().join("doc.md");
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "c The arrow\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "corky.md The arrow\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Pending / Not Built\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let err = normalize_template_structure_or_fail(content, &doc_path).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("duplicate close repair suffix is ambiguous"),
+            "mixed duplicate scaffold should fail closed, got: {err:#}"
+        );
     }
 }
 

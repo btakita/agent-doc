@@ -2227,11 +2227,23 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
         }
     }
 
-    // Handle queue drain: if active but no prompts, clear queue_active and strip auto
+    // Handle queue drain: if the queue has no remaining prompts, clear
+    // queue_active, strip auto, and remove completed/directive residue.
     let queue_has_prompts = !crate::queue::prompts(&activation.entries_after).is_empty();
     let need_set_active = activation.active && !persisted_active;
     let need_clear_active = !activation.active && persisted_active && !activation.deferred;
     let need_strip_auto = has_auto && !queue_has_prompts;
+    let need_clear_drained_body = need_strip_auto && !activation.deferred;
+
+    if need_clear_drained_body {
+        let comps = crate::component::parse(&current_content)?;
+        let q = comps.iter().find(|c| c.name == "queue").unwrap();
+        if !q.content(&current_content).trim().is_empty() {
+            current_content = q.replace_content(&current_content, "");
+            mutated = true;
+            eprintln!("[preflight] queue: cleared drained queue body");
+        }
+    }
 
     // Strip auto attribute from opening tag when queue drains
     if need_strip_auto {
@@ -2275,7 +2287,11 @@ fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> 
                 && let Ok(snap_comps) = crate::component::parse(&new_snap)
                 && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
             {
-                let new_body = crate::queue::render(&activation.entries_after);
+                let new_body = if need_clear_drained_body {
+                    String::new()
+                } else {
+                    crate::queue::render(&activation.entries_after)
+                };
                 new_snap = snap_q.replace_content(&new_snap, &new_body);
 
                 if need_strip_auto
@@ -3244,6 +3260,48 @@ mod tests {
             crate::cycle_state::CyclePhase::PreflightStarted,
             "active queue prompt should open a cycle even when the file matches the snapshot"
         );
+    }
+
+    #[test]
+    fn preflight_clears_completed_auto_queue_when_no_prompts_remain() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "preset #spec-test-build-install-commit-push\n",
+            "- ~do [#crossdocpend]~\n",
+            "- ~do [#spfxnorm]~\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run(&doc).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));
+        assert!(!updated.contains("agent:queue auto"));
+        assert!(!updated.contains("preset #spec-test-build-install-commit-push"));
+        assert!(!updated.contains("[#crossdocpend]"));
+        assert!(!updated.contains("[#spfxnorm]"));
+        assert!(updated.contains("queue_active: false"));
+
+        let snap = snapshot::load(&doc).unwrap().unwrap();
+        assert!(snap.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));
+        assert!(!snap.contains("agent:queue auto"));
+        assert!(!snap.contains("[#crossdocpend]"));
+        assert!(!snap.contains("[#spfxnorm]"));
     }
 
     #[test]

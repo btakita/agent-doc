@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Drained auto queues now clean up already-completed residue on preflight.** If an `agent:queue auto` block has no remaining prompt entries because every item was already marked complete, preflight now clears the queue body, removes `auto`, syncs the snapshot, and leaves `queue_active: false` instead of preserving a completed queue run for later cycles.
+
 - **Prompt-prefix normalization now preserves committed ownership state through fallback closeouts.** The write path preserves HEAD prefix state when rebuilding `content_ours`, repairs stripped prompt prefixes in sidecar/content_ours fallback paths, and covers bare final prompt repair after merge/adoption. Focused regressions cover committed assistant lines staying unprefixed, committed user prompts staying prefixed, IPC sidecars that strip `❯ `, and final bare prompt repair. This closes `#pfxleak2`, `#bppfxstrip2`, and `#lastpfx` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Active queue prompts no longer get hidden behind empty document diffs.** When `queue_active: true` and the document matches its snapshot, `preflight` and `plan` now synthesize the queue head item as the prompt diff, so `agent-doc <FILE>` opens a real cycle instead of returning `no_changes=true`. Added regressions for the `#oobpmt` queue-resume shape and updated the git integration spec.

@@ -529,9 +529,15 @@ mod tests {
         }
     }
 
+    fn setup_project() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        dir
+    }
+
     #[test]
     fn build_plan_detects_orchestration_handoff_and_existing_pending_item() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -606,7 +612,7 @@ synchronous orcestra
 
     #[test]
     fn build_plan_includes_finalize_placeholder_for_template_docs() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -654,7 +660,7 @@ What changed?
 
     #[test]
     fn build_plan_uses_active_queue_prompt_when_document_has_no_diff() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
         let content = r#"---
 agent_doc_session: test
@@ -702,7 +708,7 @@ Done.
 
     #[test]
     fn build_plan_includes_pending_done_for_bracketed_do_directive() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -767,7 +773,7 @@ do [#dodone]. spec-test-build-install-commit-push
 
     #[test]
     fn build_plan_resolves_existing_icebox_item_for_do_directive() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -832,7 +838,7 @@ do #ice01. spec-test-build-install-commit-push
 
     #[test]
     fn build_plan_dispatches_compact_exchange_request() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -892,7 +898,7 @@ compact exchange
 
     #[test]
     fn test_plan_detects_backlog_request() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -957,7 +963,7 @@ add to backlog: what tasks remain?
 
     #[test]
     fn plan_expect_add_carries_explicit_backlog_target() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
         let target = dir.path().join("bugs.md");
         std::fs::write(
@@ -1021,7 +1027,7 @@ prompt_presets:
 
     #[test]
     fn plan_preserves_agent_doc_bug_declaration_order_for_target_adds() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
         let target = dir.path().join("bugs.md");
         std::fs::write(
@@ -1074,7 +1080,7 @@ prompt_presets:
 
     #[test]
     fn test_plan_detects_recommendation_request() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -1137,7 +1143,7 @@ What should we do next? Any recommendations?
 
     #[test]
     fn test_plan_detects_backlog_request_via_prompt_preset_expansion() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -1206,7 +1212,7 @@ Done.
 
     #[test]
     fn test_plan_no_false_positive_on_questions() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -1271,7 +1277,7 @@ How does the CRDT merge work?
 
     #[test]
     fn build_plan_uses_harness_prompt_when_snapshot_matches_document() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let content = r#"---
@@ -1322,7 +1328,7 @@ Done.
 
     #[test]
     fn build_plan_blocks_shared_doc_plan_reference_without_security_review() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -1383,7 +1389,7 @@ do #spec2. spec-test-build-install-commit-push
 
     #[test]
     fn build_plan_allows_shared_doc_plan_reference_with_security_review() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -1445,7 +1451,7 @@ do #spec2. spec-test-build-install-commit-push
 
     #[test]
     fn build_plan_resolves_existing_pending_item_from_harness_prompt() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let content = r#"---
@@ -1497,7 +1503,7 @@ Done.
 
     #[test]
     fn build_plan_marks_agent_doc_bug_prompt_as_plan_backlog_only() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let content = r#"---
@@ -1541,7 +1547,7 @@ Done.
 
     #[test]
     fn build_plan_does_not_treat_backlog_text_as_agent_doc_bug_prompt_scope() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
 
         let baseline = r#"---
@@ -1605,7 +1611,7 @@ do #pbct. spec-test-build-install-commit-push
 
     #[test]
     fn build_plan_keeps_copied_prompt_preset_definitions_out_of_prompt_scope() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("tmux-router.md");
 
         let baseline = r#"---
@@ -1675,7 +1681,7 @@ do #tmuxreprocmd. spec-test-build-install-commit-push
 
     #[test]
     fn build_plan_does_not_block_on_session_accretion_guard() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
         let long_exchange = (0..260)
             .map(|idx| format!("context line {idx}"))
@@ -1715,7 +1721,7 @@ Done.
 
     #[test]
     fn build_plan_keeps_repeated_noop_closeout_churn_advisory() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1805,7 +1811,7 @@ do #nooploop. spec-test-build-install-commit-push
 
     #[test]
     fn build_plan_allows_turn_after_recent_compaction_recovery() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1947,7 +1953,7 @@ do #cmpclr. spec-test-build-install-commit-push
 
     #[test]
     fn build_plan_allows_post_compaction_rerun_noop_closeouts() {
-        let dir = TempDir::new().unwrap();
+        let dir = setup_project();
         let doc = dir.path().join("plan.md");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

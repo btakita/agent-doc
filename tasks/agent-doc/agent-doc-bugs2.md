@@ -20,8 +20,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Completed #spfxnorm verification and local install. Next queue item: #oobpmt.
+Completed verification/install and closed remaining queue items through #lastpfx. Next backlog item: #y9kk.
 <!-- /agent:status -->
 
 ## Exchange
@@ -35,7 +34,16 @@ Compacted content:
 - Archived 1 response topic(s): do `#oobpmt`
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
 - Trailing prompt/context: `agent:queue auto` only completes 1 task. Please ensure all tasks are completed using `agent:queue auto`. spec-test-b...
-<!-- agent:boundary:c0db9d0a -->
+❯ `agent:queue auto` only completes 1 task. Please ensure all tasks are completed using `agent:queue auto`. spec-test-build-install-commit-push
+### Re: queue auto completion — gpt-5
+
+Done.
+
+- Outcome: Verified the already-implemented queue items through #lastpfx. Added an Unreleased VERSIONS note closing #pfxleak2, #bppfxstrip2, and #lastpfx; earlier source notes already close #staleflt, #busychk, #chkptcap, and #257p.
+- Verified: `TEST_THREADS=8 cargo test`; `cargo build`; `cargo install --path .`
+- Committed: `7df2670` in agent-doc (`docs: close prefix normalization backlog`)
+- Pushed: yes, `origin/20260422/codex-agent-backend`
+<!-- agent:boundary:851f5a43 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -55,25 +63,18 @@ preset #spec-test-build-install-commit-push
 - ~do [#crossdocpend]~
 - ~do [#spfxnorm]~
 - ~do [#oobpmt]~
-- do [#staleflt]
-- do [#busychk]
-- do [#chkptcap]
-- do [#257p]
-- do [#pfxleak2]
-- do [#bppfxstrip2]
-- do [#lastpfx]
+- ~do [#staleflt]~
+- ~do [#busychk]~
+- ~do [#chkptcap]~
+- ~do [#257p]~
+- ~do [#pfxleak2]~
+- ~do [#bppfxstrip2]~
+- ~do [#lastpfx]~
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#staleflt] Stale preflight_started cycle recovery — auto-close empty preflight cycles (no capture, phase=PreflightStarted) on next preflight invocation instead of failing closed. Add time-based staleness check.
-- [ ] [#busychk] Pane busy-check before sync eviction — check for open agent-doc cycles before killing panes during layout reconciliation. Skip eviction if busy, log warning.
-- [ ] [#chkptcap] Periodic checkpoint capture during response streaming — capture partial responses every 30s so mid-generation pane death doesn't lose work entirely.
-- [ ] [#257p] OAuth flow interrupts finalize — skill fails to persist response when an MCP OAuth flow interrupts the cycle. The authenticate tool call consumes the turn and the skill never reaches `agent-doc finalize`. Fix: treat MCP auth as a sub-step and still finalize after, or detect response-without-finalize and warn/recover.
-- [ ] [#pfxleak2] content_ours prefix leak + commit churn — plan: tasks/agent-doc/plan-content-ours-prefix-and-commit-churn.md
-- [ ] [#bppfxstrip2] content_ours strips ❯ from multi-line user prompts during finalize — plan: tasks/agent-doc/plan-prefix-strip-on-user-prompts.md
-- [ ] [#lastpfx] Last prompt missing `❯ ` prefix — final user prompt can persist as bare text at the exchange tail even though prompt prefix normalization should make prompt ownership explicit. Plan: tasks/agent-doc/plan-last-prompt-prefix-loss.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

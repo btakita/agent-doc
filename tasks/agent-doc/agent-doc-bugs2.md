@@ -34,7 +34,16 @@ Recorded Codex capability proof verification.
 Compacted content:
 - Archived 1 response topic(s): OpenCode arrow-key logging
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5e99578a -->
+❯ do [#hrnsmis]. spec-test-build-install-commit-push
+Done.
+
+- Outcome: Implemented the harness mismatch guard for `agent-doc preflight`. It now emits a structured `harness_mismatch` warning when frontmatter `agent:` differs from the detected Claude Code, Codex, or OpenCode harness, while continuing with active-harness attribution and closeout behavior.
+- Verified: `cargo test harness`; `cargo check`; `cargo test preflight_output_includes_warnings`; `make check TEST_THREADS=8`; `cargo install --path .`; smoke-tested `CLAUDE_CODE=1 agent-doc preflight` on an `agent: codex` doc; reviewed latest GitHub CI run `25773430221` as successful with no tmux failure surfaced.
+- Committed: `f9b3af8c fix: warn on harness mismatch during preflight`
+- Pushed: yes, to `origin/20260422/codex-agent-backend`
+- Notes: Left pre-existing uncommitted changes in `VERSIONS.md`, `src/template.rs`, and `src/write.rs` untouched.
+ccdo [#hrnsmis]. spec-test-build-install-commit-push
+<!-- agent:boundary:978c40fa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +56,6 @@ Use TEST_THREADS=8. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#hrnsmis] Harness mismatch guard — document declares agent: codex but Claude Code starts the session with no warning. Preflight should detect frontmatter agent: value vs active harness and emit a harness_mismatch warning. Plan: tasks/agent-doc/plan-harness-mismatch-guard.md
 - [ ] [#rspdigest] Direct `agent-doc <FILE>` preserves progress commentary in template patchbacks — captured Codex response can be `progress prose + patch:exchange`; direct run/write applies unmatched prose into the exchange instead of stripping or digesting it like the Codex Stop replay guard. Plan: tasks/agent-doc/plan-direct-run-progress-commentary-digest.md
 - [ ] [#crossdocpend] Cross-document --pending-add targets wrong file — skill adds to current document backlog instead of preset-specified target file. Plan: tasks/agent-doc/plan-cross-doc-pending-add.md
 - [ ] [#iceboxpatch] Icebox component mutation has no binary-owned path — patch:icebox / replace:icebox in response heredoc not parsed as component patches, --pending-* flags only target agent:backlog. Skill falls back to boundary synthesis, dumping icebox content into exchange body. Needs either --icebox-add flag or template patch parsing for non-backlog components.

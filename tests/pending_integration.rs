@@ -369,6 +369,33 @@ fn write_pending_add_to_missing_target_fails_closed() {
 }
 
 #[test]
+fn write_pending_add_to_target_without_backlog_fails_closed() {
+    let (tmp, doc) = setup_doc("");
+    let target = tmp.path().join("target.md");
+    fs::write(
+        &target,
+        "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+    )
+    .unwrap();
+
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-add-to",
+            target.to_str().unwrap(),
+            "id=xdoc cross document task",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nresponse text\n<!-- /patch:exchange -->\n")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "has no agent:backlog/agent:pending component",
+        ));
+}
+
+#[test]
 fn write_pending_add_multiple_flags_keep_cli_order_at_top() {
     let (_tmp, doc) = setup_doc("- [ ] [#old1] existing task");
     agent_doc()

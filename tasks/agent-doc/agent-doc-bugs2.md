@@ -29,19 +29,12 @@ Completed #spfxnorm verification and local install. Next queue item: #oobpmt.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-191556.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-205606.md`*
 
 Compacted content:
-- Archived 1 response topic(s): rspdigest - gpt-5
+- Archived 1 response topic(s): #spfxnorm
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ The agent:queue stalls after the first task completes. spec-test-build-install-commit-push
-### Re: #spfxnorm
-
-- Outcome: `#spfxnorm` is already implemented in the agent-doc codebase: sidecar normalization fallback repairs the working tree and redelivers normalized full content to the editor, with the closeout/plugin specs and regression coverage present. I verified the fix and reinstalled the local `agent-doc` binary.
-- Verified: `TEST_THREADS=8 cargo test reposition_repairs_missing_working_tree_prompt_prefix_without_listener`; `TEST_THREADS=8 cargo test sidecar_normalization`; `TEST_THREADS=8 cargo test`; `cargo build`; `cargo install --path .`
-- Committed: pending
-- Pushed: pending
-<!-- agent:boundary:1edd0ef4 -->
+<!-- agent:boundary:a54fc1fd -->
 <!-- /agent:exchange -->
 ###
 <!--

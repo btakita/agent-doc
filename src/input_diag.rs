@@ -98,6 +98,20 @@ pub(crate) fn log_key_event(
     );
 }
 
+pub(crate) fn log_key_event_verbose(
+    file: Option<&Path>,
+    source: &str,
+    destination: &str,
+    transform: &str,
+    key: &str,
+    bytes: usize,
+    meta: KeyEventMeta<'_>,
+) {
+    if verbose_enabled() {
+        log_key_event(file, source, destination, transform, key, bytes, meta);
+    }
+}
+
 pub(crate) fn format_payload_event(
     source: &str,
     destination: &str,
@@ -246,6 +260,51 @@ pub(crate) fn log_prompt_detection(
 mod tests {
     use super::*;
 
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+        _lock: crate::test_support::ProcessGlobalLockGuard,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::test_support::env_lock();
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self {
+                key,
+                prior,
+                _lock: lock,
+            }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let lock = crate::test_support::env_lock();
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self {
+                key,
+                prior,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn key_event_format_is_structured_and_sanitized() {
         let event = format_key_event(
@@ -279,5 +338,15 @@ mod tests {
         assert!(event.contains("bytes=6"));
         assert!(event.contains("sha256="));
         assert!(!event.contains("/clear"));
+    }
+
+    #[test]
+    fn verbose_input_diagnostics_are_opt_in() {
+        let _diag_guard = EnvGuard::remove("AGENT_DOC_TMUX_INPUT_DIAG");
+        let _stdin_guard = EnvGuard::remove("AGENT_DOC_DEBUG_STDIN");
+        assert!(!verbose_enabled());
+
+        let _diag_enabled = EnvGuard::set("AGENT_DOC_TMUX_INPUT_DIAG", "1");
+        assert!(verbose_enabled());
     }
 }

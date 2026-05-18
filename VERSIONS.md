@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Supervisor PTY filter diagnostics no longer print into managed prompts.** Child-output Kitty keyboard-mode preserve/drop traces are now opt-in via `AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN`, so normal Claude Code prompt editing and history search do not show `[agent-doc] tmux_input_event source=supervisor.pty_filter ...` lines in the managed pane. Route, queue, supervisor IPC, auto-trigger, tmux submit, and permission-prompt input diagnostics remain available at their normal input boundaries.
+
 - **Drained auto queues now clean up already-completed residue on preflight.** If an `agent:queue auto` block has no remaining prompt entries because every item was already marked complete, preflight now clears the queue body, removes `auto`, syncs the snapshot, and leaves `queue_active: false` instead of preserving a completed queue run for later cycles.
 
 - **Prompt-prefix normalization now preserves committed ownership state through fallback closeouts.** The write path preserves HEAD prefix state when rebuilding `content_ours`, repairs stripped prompt prefixes in sidecar/content_ours fallback paths, and covers bare final prompt repair after merge/adoption. Focused regressions cover committed assistant lines staying unprefixed, committed user prompts staying prefixed, IPC sidecars that strip `❯ `, and final bare prompt repair. This closes `#pfxleak2`, `#bppfxstrip2`, and `#lastpfx` in `tasks/agent-doc/agent-doc-bugs2.md`.

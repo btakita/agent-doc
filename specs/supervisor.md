@@ -122,10 +122,13 @@ The supervisor is a single process that:
   composer navigation is unchanged.
 - Supervisor input diagnostics emit structured `tmux_input_event` lines at the
   input boundaries: operator stdin forwarding, IPC/auto-trigger injection, tmux
-  pane submits, Kitty keyboard-mode preserve/drop decisions, and active
-  permission-prompt key translations. Each line includes source, destination,
-  transform, key, byte count, and harness when known; prompt text is logged only
-  as length plus SHA-256.
+  pane submits, and active permission-prompt key translations. Each line
+  includes source, destination, transform, key, byte count, and harness when
+  known; prompt text is logged only as length plus SHA-256. Child-output
+  Kitty keyboard-mode preserve/drop traces are verbose-only
+  (`AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN`) so normal supervisor
+  filtering cannot print diagnostics into the managed TUI while the operator is
+  typing.
 
 ### Actor lifecycle reporting
 

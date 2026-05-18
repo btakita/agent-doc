@@ -408,6 +408,8 @@ impl PtySession {
 /// OpenCode is the exception for Kitty keyboard sequences: OpenTUI depends on
 /// those mode transitions for real arrow/tab key handling, so the OpenCode
 /// supervisor preserves them while still suppressing unrelated terminal queries.
+/// The preserve/drop trace is verbose-only because this filter runs on child
+/// output that is also rendered in the managed pane.
 ///
 /// Normal escape sequences (SGR colors, cursor movement, etc.) pass through.
 ///
@@ -503,7 +505,7 @@ impl PtyFilter {
                             } else {
                                 "kitty_progressive_enhancement"
                             };
-                            crate::input_diag::log_key_event(
+                            crate::input_diag::log_key_event_verbose(
                                 None,
                                 "supervisor.pty_filter",
                                 "stdout",
@@ -524,7 +526,7 @@ impl PtyFilter {
                                 },
                             );
                         } else if has_lt && final_byte == b'u' {
-                            crate::input_diag::log_key_event(
+                            crate::input_diag::log_key_event_verbose(
                                 None,
                                 "supervisor.pty_filter",
                                 "stdout",

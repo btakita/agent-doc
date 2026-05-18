@@ -1622,6 +1622,26 @@ pub fn unified_diff_from_contents(previous: &str, current: &str) -> Option<Strin
     )
 }
 
+/// Build a minimal unified diff from an in-memory prompt body.
+///
+/// This is used for binary-owned prompt sources that do not directly mutate the
+/// session document, such as harness prompt bodies and active queue items.
+pub(crate) fn synthetic_added_lines_diff(body: &str, target: &str) -> String {
+    let lines = body.lines().collect::<Vec<_>>();
+    let count = lines.len().max(1);
+    let mut diff = format!("--- snapshot\n+++ {target}\n@@ -0,0 +1,{count} @@\n");
+    if lines.is_empty() {
+        diff.push_str("+\n");
+        return diff;
+    }
+    for line in lines {
+        diff.push('+');
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    diff
+}
+
 /// Extract imperative user directives from added lines in a unified diff.
 ///
 /// This is a conservative parser for the binary-enforced directive contract.
@@ -1865,7 +1885,7 @@ fn normalize_imperative_candidate(line: &str) -> Option<String> {
     let normalized = trimmed
         .trim_start_matches('❯')
         .trim_start()
-        .trim_end_matches(|c: char| c.is_ascii_punctuation())
+        .trim_end_matches(|c: char| c.is_ascii_punctuation() && c != ']')
         .trim();
     if normalized.is_empty() {
         None
@@ -3899,6 +3919,7 @@ Please fix the bug.\n\
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,3 @@\n ctx\n\
             +do #6zyp. update spec + tests. build + install for local testing. commit + push\n\
             +do [#dodone]. spec-test-build-install-commit-push\n\
+            +do [#plainid]\n\
             +run benchmarks\n";
         let directives = extract_imperative_directives(diff);
         assert_eq!(
@@ -3906,6 +3927,7 @@ Please fix the bug.\n\
             vec![
                 "do #6zyp. update spec + tests. build + install for local testing. commit + push",
                 "do [#dodone]. spec-test-build-install-commit-push",
+                "do [#plainid]",
                 "run benchmarks",
             ]
         );

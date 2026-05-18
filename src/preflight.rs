@@ -1361,6 +1361,22 @@ pub fn run(file: &Path) -> Result<()> {
         }
     }
 
+    // Step 4b2: Queue component analysis — resolve activation, consume start
+    // fences, and emit queue prompts for the skill. If the document/harness diff
+    // is otherwise empty, an active queue head item becomes the prompt diff for
+    // this cycle. This preserves bare no-op invocations while letting persisted
+    // `queue_active: true` advance without requiring a fresh document edit.
+    let queue_state = run_queue_maintenance(file, diff_result.as_deref()).unwrap_or_else(|e| {
+        eprintln!("[preflight] queue maintenance warning: {}", e);
+        QueueState::default()
+    });
+    if diff_result.is_none()
+        && let Some(head_prompt) = queue_state.queue_prompts.first()
+    {
+        diff_result = Some(diff::synthetic_added_lines_diff(head_prompt, "queue"));
+        classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
+    }
+
     let no_changes = diff_result.is_none();
     if !no_changes {
         let snap = crate::snapshot::load(file).unwrap_or(None);
@@ -1614,14 +1630,6 @@ pub fn run(file: &Path) -> Result<()> {
         frontmatter_tier,
         suggested,
     );
-
-    // Step 4f: Queue component analysis — resolve activation, consume start fences,
-    // and emit queue_prompts for the skill. Runs after diff so exchange triggers
-    // ("do queue") can be detected from user-added lines.
-    let queue_state = run_queue_maintenance(file, diff_result.as_deref()).unwrap_or_else(|e| {
-        eprintln!("[preflight] queue maintenance warning: {}", e);
-        QueueState::default()
-    });
 
     // Step 5: Scan for pending callback requests from other processes.
     let pending_callbacks = crate::callback::scan_pending_callbacks(None).unwrap_or_default();
@@ -3198,6 +3206,43 @@ mod tests {
         assert!(
             state.requires_backlog_capture,
             "harness prompt preset expansion should record backlog capture requirement"
+        );
+    }
+
+    #[test]
+    fn preflight_opens_cycle_from_active_queue_when_document_has_no_diff() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#oobpmt]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#oobpmt] Fix OOB prompt absorption.\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted,
+            "active queue prompt should open a cycle even when the file matches the snapshot"
         );
     }
 

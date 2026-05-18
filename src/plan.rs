@@ -122,8 +122,13 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     } else {
         None
     };
+    let queue_diff = if doc_diff.is_none() && harness_diff.is_none() {
+        active_queue_prompt_diff(&content)
+    } else {
+        None
+    };
 
-    let Some(diff_text) = doc_diff.or(harness_diff.clone()) else {
+    let Some(diff_text) = doc_diff.or(harness_diff.clone()).or(queue_diff) else {
         return Ok(DispatchPlan {
             prompt_targets: Vec::new(),
             execution_scope: ExecutionScope::Normal,
@@ -231,6 +236,29 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         handoff,
         blockers: std::mem::take(&mut blockers),
     })
+}
+
+fn active_queue_prompt_diff(content: &str) -> Option<String> {
+    let components = component::parse(content).ok()?;
+    let queue_component = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries = crate::queue::parse(body).ok()?;
+    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let (fm, _) = frontmatter::parse(content).ok()?;
+    let activation = crate::queue::resolve_activation(
+        &entries,
+        has_auto,
+        false,
+        fm.queue_active.unwrap_or(false),
+    );
+    if !activation.active {
+        return None;
+    }
+    crate::queue::prompts(&activation.entries_after)
+        .first()
+        .map(|prompt| diff::synthetic_added_lines_diff(&prompt.text, "queue"))
 }
 
 fn orchestration_mode_arg(mode: diff::OrchestrationRequestMode) -> &'static str {
@@ -622,6 +650,54 @@ What changed?
         );
         assert_eq!(plan.handoff, HandoffTarget::None);
         assert!(plan.blockers.is_empty());
+    }
+
+    #[test]
+    fn build_plan_uses_active_queue_prompt_when_document_has_no_diff() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue_active: true
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:queue auto -->
+- do [#oobpmt]
+<!-- /agent:queue -->
+
+<!-- agent:backlog -->
+- [ ] [#oobpmt] Fix OOB prompt absorption.
+<!-- /agent:backlog -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        snapshot::save(&doc, content).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(
+            plan.blockers.is_empty(),
+            "active queue prompt should not plan as a no-op"
+        );
+        assert_eq!(plan.repo_actions, vec!["do [#oobpmt]"]);
+        assert_eq!(plan.pending_mutations.len(), 1);
+        assert_eq!(plan.pending_mutations[0].id, "oobpmt");
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|cmd| cmd.contains("--done oobpmt")),
+            "queue do item should require closeout with --done oobpmt: {:?}",
+            plan.required_commands
+        );
     }
 
     #[test]

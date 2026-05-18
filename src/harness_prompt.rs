@@ -90,19 +90,7 @@ fn same_file(lhs: &Path, rhs: &Path) -> bool {
 }
 
 fn synthetic_diff_from_body(body: &str) -> String {
-    let lines = body.lines().collect::<Vec<_>>();
-    let count = lines.len().max(1);
-    let mut diff = format!("--- snapshot\n+++ harness\n@@ -0,0 +1,{} @@\n", count);
-    if lines.is_empty() {
-        diff.push_str("+\n");
-        return diff;
-    }
-    for line in lines {
-        diff.push('+');
-        diff.push_str(line);
-        diff.push('\n');
-    }
-    diff
+    crate::diff::synthetic_added_lines_diff(body, "harness")
 }
 
 fn parse_agent_doc_invocation(prompt: &str, cwd: &Path) -> Option<ParsedInvocation> {

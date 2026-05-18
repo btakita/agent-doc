@@ -36,7 +36,7 @@ Cross-session event coordination via `agent-kit` hooks (v0.3).
 - `UserPromptSubmit` → `agent-doc hook codex-user-prompt-submit`
 - `Stop` → `agent-doc hook codex-stop`
 
-`UserPromptSubmit` tracks both bare `agent-doc <FILE>` reopen prompts and session invocations with same-line or following-line directive bodies, such as `agent-doc <FILE> #code-review` or `agent-doc <FILE>` followed by `do #id ...`. A bare invocation with no body remains a no-op when the document snapshot is unchanged, but a tracked directive body is exposed to preflight/plan as a synthetic prompt diff so it cannot be lost behind `no_changes=true`.
+`UserPromptSubmit` tracks both bare `agent-doc <FILE>` reopen prompts and session invocations with same-line or following-line directive bodies, such as `agent-doc <FILE> #code-review` or `agent-doc <FILE>` followed by `do #id ...`. A bare invocation with no body remains a no-op when the document snapshot is unchanged unless an active `agent:queue` supplies the next prompt. Tracked directive bodies and active queue head prompts are exposed to preflight/plan as synthetic prompt diffs so they cannot be lost behind `no_changes=true`.
 
 Regression coverage must include the full follow-up lifecycle: a routed dispatch leaves a prompt-bearing user edit on top of a committed document, `finalize` or `compact --commit` responds through the normal binary closeout path, and the next `preflight` reports `no_changes=true` without stale prompt-cycle repair, prior-patchback, or snapshot/head guard mismatch diagnostics.
 

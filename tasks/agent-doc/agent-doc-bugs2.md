@@ -29,29 +29,12 @@ Recorded Codex capability proof verification.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-174346.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-175731.md`*
 
 Compacted content:
-- Archived 1 response topic(s): OpenCode arrow-key logging
+- Archived 1 response topic(s): harness mismatch guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#hrnsmis]. spec-test-build-install-commit-push
-Done.
-
-- Outcome: Implemented the harness mismatch guard for `agent-doc preflight`. It now emits a structured `harness_mismatch` warning when frontmatter `agent:` differs from the detected Claude Code, Codex, or OpenCode harness, while continuing with active-harness attribution and closeout behavior.
-- Verified: `cargo test harness`; `cargo check`; `cargo test preflight_output_includes_warnings`; `make check TEST_THREADS=8`; `cargo install --path .`; smoke-tested `CLAUDE_CODE=1 agent-doc preflight` on an `agent: codex` doc; reviewed latest GitHub CI run `25773430221` as successful with no tmux failure surfaced.
-- Committed: `f9b3af8c fix: warn on harness mismatch during preflight`
-- Pushed: yes, to `origin/20260422/codex-agent-backend`
-- Notes: Left pre-existing uncommitted changes in `VERSIONS.md`, `src/template.rs`, and `src/write.rs` untouched.
-ccdo [#hrnsmis]. spec-test-build-install-commit-push
-### Re: harness mismatch guard — gpt-5.5
-
-Done.
-
-- Outcome: Implemented the preflight harness mismatch guard and marked `#hrnsmis` complete.
-- Verified: `make check TEST_THREADS=8`; `cargo install --path .`; smoke-tested mismatched `agent:` warning output.
-- Committed: `f9b3af8c`, plus session closeout commits.
-- Pushed: yes.
-<!-- agent:boundary:159a91e9 -->
+<!-- agent:boundary:5a49470f -->
 <!-- /agent:exchange -->
 ###
 <!--

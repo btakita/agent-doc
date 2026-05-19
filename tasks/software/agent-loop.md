@@ -92,13 +92,30 @@ Repo commit:
 - `ba4734c97 feat: add compose-skills planning skill`
 
 The pending item is complete.
-<!-- agent:boundary:db18d50a -->
+❯ Should composable-skills be part of one of my packages or its own package? I want composable-skills to work with Claude code as well. Ideally, the deterministic logic would be written in Rust to ensure installability without a runtime.
+### Re: composable-skills packaging — gpt-5
+
+I would not make `composable-skills` its own package yet. The best initial home is the skill lifecycle package: either the existing `skill-harness` crate, or a renamed/split `agent-skills` crate if that is where the portable skill standard is heading. The reason is that composition is not a separate product surface yet; it is part of installing, validating, auditing, and distributing portable skills across harnesses.
+
+I would keep `agent-doc` out of the ownership path. `agent-doc` can consume the skill and may have agent-doc-specific examples, but generic skill composition should not be coupled to interactive markdown sessions.
+
+Recommended shape:
+
+- Canonical skill content lives in a portable source tree, probably `.agent/skills/compose-skills/`, not only `.codex/skills/compose-skills/`.
+- `skill-harness` owns install/sync into Claude Code, Codex, OpenCode, and generic layouts.
+- The deterministic checks move from the current Python validator into Rust, exposed as a library plus CLI command, for example `skill-harness compose validate <plan.md>` or `skill-harness validate-composition <plan.md>`.
+- Claude Code support comes from installing the same portable skill into `.claude/skills/compose-skills/SKILL.md`; Codex support can continue to use the Codex-local skill layout or generated AGENTS adapter.
+- A separate package only becomes justified if composition gets a distinct CLI/API surface used independently of skill installation, such as a planner that reads a workflow spec and emits multiple skill directories.
+
+So the packaging path I would take is: keep the current Codex skill as the prototype, move the portable source into `skill-harness` / `agent-skills`, replace the validator with Rust, then add installer tests proving the same skill works for Claude Code and Codex. If that starts to outgrow lifecycle management, split it later as something like `agent-skill-compose`, but make that an extraction after the API stabilizes rather than the first move.
+<!-- agent:boundary:fd41527d -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:pending -->
+- [ ] [#e92b] [recommended] Move compose-skills toward skill-harness/agent-skills with Rust validation and Claude/Codex installer coverage
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`

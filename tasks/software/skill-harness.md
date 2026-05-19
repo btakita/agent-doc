@@ -56,7 +56,28 @@ Verification:
 CI notes:
 - The parent `agent-loop` `Agent Doc` workflow for `3461e4a96` failed with empty `check` and `tmux-ci` job step lists and no logs, so I classified it as an external CI-start/runner allocation failure rather than a code or tmux regression.
 - GitHub emitted Node.js 20 deprecation annotations for `actions/checkout@v4` / `actions/upload-artifact@v4`; they did not block the release.
-<!-- agent:boundary:50fa7497 -->
+❯ Fix the CI issues. spec-test-build-install-commit-push
+### Re: CI issues — gpt-5
+
+I fixed the repo-side CI warning issue and confirmed the remaining parent `Agent Doc` CI failure is external.
+
+Changed and pushed:
+- `btakita/skill-harness` `502b63a ci: update github actions pins`
+  - Updated `actions/checkout` from `v4` to `v6` in CI and Release.
+  - Updated Release artifact actions from `actions/upload-artifact@v4` to `v7` and `actions/download-artifact@v4` to `v8`.
+- `btakita/agent-loop` `15fded44b ci: update workflow action pins`
+  - Updated parent `Agent Doc` workflow checkout steps from `actions/checkout@v4` to `v6`.
+  - Updated the `src/skill-harness` submodule pointer to `502b63a`.
+
+CI status:
+- `skill-harness` CI passed on `main` for `502b63a`: run `26079111898`.
+- Parent `agent-loop` `Agent Doc` still fails before any workflow steps run: run `26079129062` has empty step lists and GitHub annotates both `check` and `tmux-ci` with: “The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings”. That cannot be fixed in the repo; GitHub billing / Actions spending limit has to be resolved, then rerun the workflow.
+
+Local verification completed:
+- `src/skill-harness`: `cargo fmt --check`, `cargo clippy --all-features -- -D warnings`, `cargo test --all-features`, `cargo build --all-features`, `cargo install --path . --force`.
+- `src/agent-doc`: `make check`, `make tmux-ci`.
+- Workflow files parsed successfully with PyYAML. Dedicated `actionlint` was not available in this environment.
+<!-- agent:boundary:2d8edffc -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -35,14 +35,43 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): tsift and recurring agent-doc fixes; Graphify-style tsift next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-synchronous orchestra
-dispatch #spec-test-build-install-commit-push
-- do [#kgnv]
-- do [#fidx]
-- do [#98qd]
-- do [#atvp]
-- do [#g6kf]
-<!-- agent:boundary:69e87c97 -->
+
+❯ do [#kgnv]
+❯ synchronous orchestra
+❯ dispatch #spec-test-build-install-commit-push
+❯ - do [#kgnv]
+❯ - do [#fidx]
+❯ - do [#98qd]
+❯ - do [#atvp]
+❯ - do [#g6kf]
+### Re: #kgnv Graphify-style traversal — gpt-5
+
+Implemented `#kgnv` in `src/tsift`.
+
+What changed:
+- Added `tsift traverse` for Graphify-style traversal over indexed files, indexed symbols, agent-doc session documents, and backlog items.
+- Added stable graph node handles by family: `gfil-*` files, `gsym-*` symbols, `gses-*` session artifacts, and `gbak-*` backlog items.
+- Added JSON and HTML graph outputs, neighborhood reports, shortest-path traversal between graph nodes, and ranked next-node recommendations for bug-fix navigation.
+- Added read helpers for all indexed symbols and stored call edges, plus regression coverage for handle stability, backlog-to-code links, shortest paths, recommendations, HTML/JSON command output, and CLI parsing.
+- Updated `SPEC.md` and `VERSIONS.md` with the traversal contract.
+
+Verification completed:
+- `cargo fmt --check`
+- `cargo clippy --all-targets -- -D warnings`
+- `cargo test` (`597 passed`, `1 ignored`; integration tests `107 passed`)
+- `cargo test -- --ignored` (`sim_world_medium_seed_corpus_runs_wider_deterministic_budget` passed)
+- `cargo build --release`
+- `cargo install --path . --force`
+- Installed binary smoke tests: `tsift --version`, `tsift traverse --path . --limit 3 --format html`, and `tsift traverse main --path . --limit 5 --format json`
+
+CI/tmux evidence:
+- Latest `btakita/tsift` GitHub Actions `CI` run inspected: `25886528744`, success; its `Full CI suite` step passed. The tsift workflow has no separate `tmux-ci` or `tmux-test` leg.
+- Latest parent `btakita/agent-loop` `Agent Doc` run inspected: `26129829228`. Its `tmux-ci` and `check` jobs failed with empty step lists and `gh run view --log-failed` returned `log not found`, so this is an external CI-start/runner allocation blocker rather than a red tmux test after runner startup.
+
+Commits:
+- `btakita/tsift@b163b54` (`feat: add traversal graph handles`) pushed to `origin/main`.
+- Parent repo commit `9c84e9d16` (`chore: update tsift traversal graph`) created with only the `src/tsift` gitlink; it will be pushed after this agent-doc closeout so the session response commit is included.
+<!-- agent:boundary:d48f14f0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +80,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#kgnv] Add Graphify-style tsift traversal primitives: stable graph node handles for files/symbols/backlog/session artifacts, graph HTML/JSON outputs, shortest-path and neighborhood explain APIs, and next-node recommendations for bug-fix navigation.
 - [ ] [#fidx] Gate tsift agent-doc use on fresh incremental indexes: update only changed files before search/graph packets, emit stale/missing diagnostics, and fall back to raw source when graph evidence is stale.
 - [ ] [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
@@ -67,4 +95,6 @@ dispatch #spec-test-build-install-commit-push
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/tsift.done.md -->
+
+<!-- completed work archived in tasks/software/tsift.done.md -->
 <!-- /agent:done -->

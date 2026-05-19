@@ -158,7 +158,41 @@ I would keep the name if these remain true:
 The main risk is only naming perception: people may assume `skill-harness` is test-only. That is fixable with a crisp README, command names, and crate description. It is less costly than forcing a premature rename to a weaker available name.
 
 So my revised recommendation is stronger: keep `skill-harness` as the crate/package name for now. Rename later only if usage proves the name is actively misleading, or if a clean extraction emerges with a much sharper name like `agent-skill-compose` for the composition-only layer.
-<!-- agent:boundary:5fc5d8e6 -->
+❯ do [#e92b]. Keep `skill-harness` name. #spec-test-build-install-commit-push
+### Re: #e92b skill-harness compose-skills — gpt-5
+
+Completed `#e92b` while keeping the crate/package name `skill-harness`.
+
+Implemented in `src/skill-harness`:
+
+- Added portable `skills/compose-skills/` source with `SKILL.md`, `SPEC.md`, and references.
+- Added Rust composition-plan validation as `skill-harness compose validate <plan.md>`.
+- Added `install-dir` plus explicit `--harness` target support, including Claude Code `.claude/skills/<name>/SKILL.md` and Codex `.codex/skills/<name>/SKILL.md` directory installs.
+- Added tests for the validator and Claude/Codex full-directory installer coverage.
+- Updated README, SPEC, and the bundled `skill-harness` skill docs to use `skill-harness` as the durable package name.
+
+Validation completed:
+
+- `cargo fmt`
+- `cargo test`
+- `cargo clippy -- -D warnings`
+- `cargo build`
+- `cargo install --path . --force`
+- `skill-harness compose validate src/skill-harness/skills/compose-skills/references/example-plan.md`
+- Installed binary smoke test for `install-dir` into temporary Codex and Claude roots.
+- Standalone temp-copy verification outside the parent workspace Cargo patch: `cargo test --locked`
+- Root workspace `make check`
+
+CI/tmux evidence:
+
+- `btakita/skill-harness` CI run `26076744803` passed, including `cargo clippy -- -D warnings` and `cargo test`.
+- Root `Agent Doc` run `26076757906` failed before job steps started: both `check` and `tmux-ci` had empty step lists. I classified this as the existing external CI-start blocker, not a code or tmux regression. Local root `make check` passed.
+
+Commits pushed:
+
+- `842c576 feat: add compose-skills validation` to `btakita/skill-harness main`
+- `602c1a838 chore: update skill-harness submodule` to `btakita/agent-loop main`
+<!-- agent:boundary:d1db3829 -->
 <!-- /agent:exchange -->
 ###
 <!--

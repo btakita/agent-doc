@@ -29,30 +29,12 @@ Reviewed recent agent-doc logs; top backlog item: #rtpf.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260518-222637.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-004807.md`*
 
 Compacted content:
-- Archived 1 response topic(s): supervisor PTY filter diagnostics
+- Archived 2 response topic(s): log review and next steps; agent-doc queue
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Review the logs to find agent-doc issues + evaluate effectiveness. #next-steps
-### Re: log review and next steps — gpt-5
-
-Findings: reviewed `.agent-doc/logs/ops.log`, `agent-doc ops summary`, `.agent-doc/logs/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.log`, and `cycles.jsonl`. The commit/IPC closeout path is still mostly effective: recent cycles reach `commit_success`, and the recursive direct-invocation guard prevented a same-pane deadlock. The effectiveness gap is routing confidence: recent Codex dispatches repeatedly degrade to `supervisor_health=unreachable`, `runtime_actor_state=missing`, skipped capability proof, and accepted-only dispatch instead of dispatch-start proof.
-
-I added three prioritized follow-ups to the backlog: restore dispatch-start proof under unreachable-supervisor conditions, re-check zero-patch/late-fallback writers after committed cycles, and harden Clear Session Context so it does not send input to an active `agent-doc` Codex pane. Top backlog item: `#rtpf`.
-
-Verified: `agent-doc preflight`, `agent-doc plan`, `agent-doc ops summary --limit 2000`, `agent-doc ops summary --limit 0 --json`, targeted `rg` over `ops.log`, and log tails for the active session/cycles.
-
-### Re: agent-doc queue — gpt-5
-
-Done.
-
-- Outcome: Implemented and pushed all four requested fixes: dispatch-only degraded routing now fails closed, stale/zero-patch writers are guarded, Clear Session Context refuses active `agent-doc` panes, and IPC timeout fallback/repair now reorder response-before-prompt splits or fail closed.
-- Details: `#px25` adds the shared ordering repair in write/repair paths with regression coverage and spec/README notes.
-- Verified: `cargo fmt --check`; targeted regressions; `TEST_THREADS=8 cargo test`; `make check`; `cargo build`; `cargo install --path .`; `agent-doc --version` -> `agent-doc 0.33.16`.
-- Committed: `794510c9`, `7ea5df8d`.
-- Pushed: yes, `origin 20260422/codex-agent-backend`; root/session repo not pushed because it has unrelated dirty/ahead work.
-<!-- agent:boundary:76a4637f -->
+<!-- agent:boundary:d76e695b -->
 <!-- /agent:exchange -->
 ###
 <!--

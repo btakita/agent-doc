@@ -38,13 +38,38 @@ Operational task document for agent-loop workspace management.
 Compacted content:
 - Archived 1 response topic(s): spec created & items transferred
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca30...
-<!-- agent:boundary:49f106f3 -->
+❯ Read transcript from https://www.youtube.com/watch?v=qOvc9IUKEIc. Provide a plan on creating composable skills. Should we create a skill on creating composable skills?
+### Re: composable skills plan — gpt-5
+
+I read the transcript for `https://www.youtube.com/watch?v=qOvc9IUKEIc` using native captions. The video's core advice is useful, but it should be translated into our skill system with some discipline: prompt skills instead of ad hoc prompts, treat skills as instructions plus tools/resources, split large workflows into small reusable capabilities, and update skills after real usage. The key composability section is around `04:37-06:18`, and the deterministic-script/tooling section is around `06:29-07:34`.
+
+Yes, we should create a skill for creating composable skills if this is going to be a repeated activity. But it should not duplicate the existing `skill-creator` skill. The better shape is either a small companion skill, tentatively `compose-skills` / `skill-architect`, or a new section in `skill-creator` if we want fewer moving parts. I lean toward a companion skill only if it owns a distinct pre-creation workflow: decomposing a domain into multiple cooperating skills before implementation begins.
+
+Plan:
+
+1. Define the decision boundary. The skill should trigger when the user asks to design a skill ecosystem, split an oversized skill, audit skill composability, or decide whether a workflow deserves one skill or several. It should not trigger for ordinary single-skill creation; `skill-creator` already owns that.
+
+2. Create a composability rubric. Score candidate skills on focus, reuse potential, stable inputs/outputs, hidden tool needs, safety/invocation policy, and overlap with existing skills. The output should be a short architecture plan: skill names, responsibilities, what each skill may call or rely on, and what should remain ordinary prompt text.
+
+3. Add decomposition patterns. Include examples such as replacing one broad `content-creation` skill with `research-topic`, `write-script`, and `draft-social-post`; or splitting agent-doc work into session-cycle, routing-diagnostics, commit-closeout, and repair workflows. The examples should show when splitting improves debugging and reuse, and when it adds ceremony.
+
+4. Require a resource inventory. For each proposed skill, identify whether it needs only `SKILL.md`, a `references/` file, a deterministic `scripts/` helper, or reusable `assets/`. This follows the video's point that the leverage is often in tools, not prettier prompt text.
+
+5. Add invocation policy. Decide which skills should be user-invocable, agent-only, or user-only/high-risk. For this codebase, anything that deploys, sends messages, publishes packages, or mutates remote systems should have explicit invocation boundaries.
+
+6. Validate with forward tests. Before treating a composed skill set as good, run realistic prompts that require one skill, multiple skills, and no skill. Check whether the intended skill triggers, whether the agent overuses it, and whether the split actually reduces repeated reasoning.
+
+7. Build an improvement loop. After each real use, ask whether the correction was one-off or should become permanent skill knowledge. Permanent fixes become edits to `SKILL.md`, `references/`, or scripts, followed by validation.
+
+Recommended first artifact: a short `compose-skills` spec or plan, not implementation yet. It should include the trigger description, the rubric, two worked examples from our repo, and a validation checklist. If that plan feels thin after one or two uses, fold it into `skill-creator`; if it proves reusable, promote it into a standalone skill.
+<!-- agent:boundary:01bd65bf -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:pending -->
+- [ ] [#0b3x] [recommended] Create a composable-skill-design skill or extend skill-creator with a composability audit workflow, backed by examples and validation checks
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`

@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Clear Session Context recognizes the default Codex idle placeholder.** The operator status/clear readiness path now treats `› Ask Codex to do anything` plus the Codex model/cwd/context footer as an idle composer, so JetBrains Clear Session Context does not fail closed with `current_command=agent-doc prompt_ready=false` when the pane is only showing the default Codex placeholder/status UI. Drafted prompt input, queued drafts, and shell search still fail closed and point to `session interrupt-clear`.
+
 - **Starting actor route timeouts now coalesce per generation.** When repeated editor reroutes hit the same authoritative actor pane while that current generation is still booting, route now records one typed `route_authoritative_actor_starting_not_ready` timeout for that pane/generation and logs later retries as coalesced waits until the actor reaches ready, closed, or blocked. Added route-state regressions plus SimWorld coverage for the repeated-starting-timeout schedule. This closes `#rtbr` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Supervisor PTY filter diagnostics no longer print into managed prompts.** Child-output Kitty keyboard-mode preserve/drop traces are now opt-in via `AGENT_DOC_TMUX_INPUT_DIAG` / `AGENT_DOC_DEBUG_STDIN`, so normal Claude Code prompt editing and history search do not show `[agent-doc] tmux_input_event source=supervisor.pty_filter ...` lines in the managed pane. Route, queue, supervisor IPC, auto-trigger, tmux submit, and permission-prompt input diagnostics remain available at their normal input boundaries.

@@ -590,7 +590,7 @@ fn codex_idle_placeholder_prompt(trimmed: &str) -> Option<String> {
     }
 
     let normalized = body.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized == "Explain this codebase" {
+    if normalized == "Ask Codex to do anything" || normalized == "Explain this codebase" {
         return Some(format!("› {}", normalized));
     }
 
@@ -1346,6 +1346,21 @@ gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
 gpt-5.5 high · ~/work/btakita/agent-loop · Context 27% used
 ";
         assert_eq!(h.protected_prompt_input_reason(output), None);
+    }
+
+    #[test]
+    fn protected_prompt_input_reason_ignores_default_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Ask Codex to do anything
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 55% used
+";
+        assert_eq!(h.protected_prompt_input_reason(output), None);
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Ask Codex to do anything")
+        );
+        assert!(h.is_dispatch_ready_prompt_line("› Ask Codex to do anything"));
     }
 
     #[test]

@@ -339,8 +339,9 @@ single-owner actor controls:
   instead of leaving the operator with a generic busy timeout. For Codex panes, a capture
   that shows only Codex status/footer chrome such as the model/cwd/context line,
   with no prompt input or busy cue, is direct idle evidence for operator
-  clear/status; Codex idle placeholder prompts such as `› Explain this codebase`
-  are also prompt-ready evidence. These idle forms must override stale
+  clear/status; Codex idle placeholder prompts such as
+  `› Ask Codex to do anything` and `› Explain this codebase` are also
+  prompt-ready evidence. These idle forms must override stale
   actor/supervisor busy projection even though route dispatch still requires a
   real dispatch-ready prompt before injecting a reopen. A
   `closed` actor generation must still accept this explicit clear operator

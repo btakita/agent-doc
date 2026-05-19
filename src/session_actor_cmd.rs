@@ -1925,6 +1925,19 @@ mod tests {
     }
 
     #[test]
+    fn live_pane_prompt_ready_accepts_codex_default_placeholder() {
+        let harness = crate::harness::HarnessConfig::codex();
+
+        assert!(live_pane_prompt_ready(
+            &harness,
+            "\
+› Ask Codex to do anything
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 55% used
+"
+        ));
+    }
+
+    #[test]
     fn live_pane_prompt_ready_rejects_active_output_after_prompt() {
         let harness = crate::harness::HarnessConfig::codex();
 

@@ -43,7 +43,16 @@ I added three prioritized follow-ups to the backlog: restore dispatch-start proo
 
 Verified: `agent-doc preflight`, `agent-doc plan`, `agent-doc ops summary --limit 2000`, `agent-doc ops summary --limit 0 --json`, targeted `rg` over `ops.log`, and log tails for the active session/cycles.
 
-<!-- agent:boundary:abf10ce5 -->
+### Re: agent-doc queue — gpt-5
+
+Done.
+
+- Outcome: Implemented and pushed all four requested fixes: dispatch-only degraded routing now fails closed, stale/zero-patch writers are guarded, Clear Session Context refuses active `agent-doc` panes, and IPC timeout fallback/repair now reorder response-before-prompt splits or fail closed.
+- Details: `#px25` adds the shared ordering repair in write/repair paths with regression coverage and spec/README notes.
+- Verified: `cargo fmt --check`; targeted regressions; `TEST_THREADS=8 cargo test`; `make check`; `cargo build`; `cargo install --path .`; `agent-doc --version` -> `agent-doc 0.33.16`.
+- Committed: `794510c9`, `7ea5df8d`.
+- Pushed: yes, `origin 20260422/codex-agent-backend`; root/session repo not pushed because it has unrelated dirty/ahead work.
+<!-- agent:boundary:76a4637f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,14 +60,16 @@ Use TEST_THREADS=8. spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->
+dispatch #spec-test-build-install-commit-push
+- do [#rtpf]
+- do [#zpfb]
+- do [#clra]
+- do [#px25]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rtpf] [recommended] Restore dispatch-start proof when the Codex supervisor is unreachable: recent agent-doc-bugs2 logs fall back to supervisor_health=unreachable/runtime_actor_state=missing, skip capability proof, and still send accepted-only dispatch. Fail closed or restart/rebind the supervisor before input, with regression coverage.
-- [ ] [#zpfb] [recommended] Re-investigate zero-patch and late-fallback writes after committed cycles: current logs still show zero_patches_warning plus late_fallback_patch_rejected reason=already_committed after socket_full_content writes. Prove stale writers terminate or bind to the next cycle.
-- [ ] [#clra] [recommended] Harden Clear Session Context against active agent-doc Codex panes: logs show session_clear_active_pane_allowed while current_command=agent-doc, followed by reverse-i-search busy-pane routing. Require an idle prompt or clean-exit state before clear sends input.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

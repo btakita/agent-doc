@@ -433,7 +433,7 @@ fn managed_network_child_proof_cache_key(
     harness: &str,
 ) -> String {
     let mut env_pairs: Vec<_> = env.iter().collect();
-    env_pairs.sort_by(|(left, _), (right, _)| left.cmp(right));
+    env_pairs.sort_by_key(|(left, _)| *left);
     let raw = serde_json::json!({
         "harness": harness,
         "command": command,

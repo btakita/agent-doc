@@ -29,99 +29,12 @@ Reviewed recent agent-doc logs; top backlog item: #rtbr.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-073316.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-142753.md`*
 
 Compacted content:
-- Archived 1 response topic(s): JetBrains Clear Session Context
+- Archived 3 response topic(s): JetBrains Clear Session Context validation; JetBrains Clear Session Context 0.2.122 follow-up; idle clear-session footer bug
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ [#jbca] is done.
-❯ JB `Clear Session Context` error:
-```
-Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %23 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
-```
-❯ spec-test-build-install-commit-push
-### Re: JetBrains Clear Session Context validation — gpt-5
-
-`#jbca` is done. I live-validated the JetBrains `Clear Session Context` path, and the replay now surfaces the intended typed busy-session warning instead of leaking the raw command failure.
-
-This cycle pinned the exact observed active-pane warning in regression/spec coverage; there was no production Kotlin behavior change needed after the previous fix. Updated files in `src/agent-doc`:
-
-- `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt`
-- `editors/jetbrains/SPEC.md`
-- `VERSIONS.md`
-
-Verification completed:
-
-- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
-- `make check`
-- `./gradlew test buildPlugin signPlugin`
-- `make install`
-- `agent-doc plugin install --local jetbrains` into IntelliJ IDEA 2026.1
-- Latest GitHub CI run `26082646497` was inspected; it failed before tmux on `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails`, while local `make check` did not reproduce it.
-- Local `make tmux-ci` passed with 228 tmux tests.
-
-Commits pushed:
-
-- `src/agent-doc`: `60d37bf9` (`test: pin jetbrains clear busy warning`) to `origin/20260422/codex-agent-backend`
-- Parent repo: `3d9957305` (`chore: update agent-doc submodule`) to `origin/main`
-
-The final document closeout may add one more parent commit for this session response and backlog completion.
-❯ JB `Clear Session Context` has the error with 0.2.122 running. #spec-test-build-install-commit-push
-```
-Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %23 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 8% used
-```
-### Re: JetBrains Clear Session Context 0.2.122 follow-up — gpt-5
-
-I reproduced the 0.2.122 report from the binary side. The pasted message is the intentional fail-closed path for a still-running `agent-doc` turn, not the old raw command-failed leak: the controller actor can report `ready`, but direct pane evidence still says `alive-busy` with `prompt_ready=false`, so `Clear Session Context` must not retry `/clear` yet. The valid choices in that state are wait for the prompt, refresh after it returns idle, or use explicit `Interrupt and clear` to discard the running turn.
-
-I pinned that distinction in the JetBrains surface:
-
-- Added a `TerminalUtilTest` regression proving a ready actor/controller projection does not enable refresh-retry clear while the direct pane remains `alive-busy prompt_ready=false`.
-- Updated `editors/jetbrains/SPEC.md` to name the ready-projection/live-pane-busy split and the allowed operator paths.
-- Updated `VERSIONS.md` with the 0.2.122 follow-up evidence.
-
-
-- `make tmux-ci` passed locally with 228 live tmux tests.
-
-CI evidence:
-
-- New GitHub CI run `26084392085` started successfully and failed in `Run make check` on `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails` with `parent gitlink should remain stale while index.lock is held`; `Run make tmux-ci` was skipped after that failure. The same suite passed locally, so I captured this as a recommended backlog follow-up.
-
-
-- `src/agent-doc`: `ac71941c` (`test: pin jetbrains clear busy refresh`) to `origin/20260422/codex-agent-backend`
-- Parent repo: `3a9a56875` (`chore: update agent-doc submodule`) to `origin/main`
-
-The session closeout may add one more parent commit for this response and the new recommended backlog item.
-❯ The Codex/Claude session is completely idle. There is a real bug to where a turn never seems to be registered as ended.
-❯ > The valid choices in that state are wait for the prompt, refresh after it returns idle, or use explicit `Interrupt and clear` to discard the running turn.
-
-❯ #spec-test-build-install-commit-push
-### Re: idle clear-session footer bug — gpt-5
-
-Fixed the real idle-state bug behind the latest `Clear Session Context` repro. The clear/status path already recognized a Codex footer when the pane contained only footer chrome, but a normal idle pane can still show older transcript text above the bottom `gpt-5.5 high · ... · Context ... used` footer. That made direct live-pane evidence stay `alive-busy prompt_ready=false` even though the turn had ended.
-
-The binary now treats a bottom Codex model/cwd/context footer as operator idle evidence for `session status` / `session clear`, even with older visible transcript text above it. It still rejects protected states: drafted prompt input, queued composer state, shell/history search, hook review, and other busy cues. Route dispatch remains stricter and still requires a real dispatch-ready prompt before injecting a reopen.
-
-Updated files in `src/agent-doc`:
-
-- `src/session_actor_cmd.rs`
-- `src/harness.rs`
-- `SPEC.md`
-
-
-- `cargo test session_actor_cmd::tests::live_pane_prompt_ready`
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin` from `editors/jetbrains`
-- Local `make tmux-ci` passed with 228 live tmux tests.
-
-
-- New GitHub CI run `26102990109` started after the push and failed in `Run make check` on the same CI-only `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails` failure as prior run `26084392085`; `Run make tmux-ci` was skipped after that failure. Local `make check` and local `make tmux-ci` both passed.
-
-
-- `src/agent-doc`: `314bd66c` (`fix: treat idle codex footer as clear-ready`) to `origin/20260422/codex-agent-backend`
-- Parent repo: `ed833cb8b` (`chore: update agent-doc submodule`) to `origin/main`
-
-I did not add a new backlog item because the remaining CI-only failure is already tracked as `#wnj2`.
-<!-- agent:boundary:335cf7cc -->
+<!-- agent:boundary:61b679f7 -->
 <!-- /agent:exchange -->
 ###
 <!--

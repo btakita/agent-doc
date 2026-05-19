@@ -60,7 +60,29 @@ CI/tmux check: latest root `Agent Doc` workflow run `26077546433` did not start 
 Commits:
 - `src/skill-harness`: `87469b4 test: tighten compose-skills validation`
 - parent repo submodule pointer: `2dfb794e2 chore: update skill-harness submodule`
-<!-- agent:boundary:492f74cb -->
+❯ Provide clear usage instructions in the README.md for skill-harness. Does skill-harness provide a cli?
+### Re: skill-harness README usage — gpt-5
+
+Yes. `skill-harness` provides a CLI named `skill-harness`.
+
+Updated `src/skill-harness/README.md` with clearer usage instructions:
+- states explicitly that the installed command is `skill-harness`;
+- adds a CLI command overview matching `skill-harness --help`;
+- documents common flags: `--harness`, `--root`, `--source`, and `--file`;
+- maps harness targets to their install paths for Claude, Codex, OpenCode, Cursor, and generic `.agent/skills`;
+- separates examples for bundled `compose-skills`, custom skill directories, single-file `SKILL.md` installs, listing, uninstalling, and composition-plan validation.
+
+- `cargo run -- --help`
+- `cargo run -- install-dir --help`
+- `cargo run -- check-dir --help`
+- `cargo run -- install --help`
+- `cargo run -- list --help`
+
+CI/tmux check: latest root `Agent Doc` workflow run `26078260974` did not start `check` or `tmux-ci`; GitHub annotated both jobs as blocked by billing/spending-limit status, so there were no tmux logs to reproduce locally.
+
+- `src/skill-harness`: `d2a49f4 docs: clarify cli usage`
+- parent repo submodule pointer: `5f095958d chore: update skill-harness cli docs`
+<!-- agent:boundary:40a6d653 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -80,7 +102,7 @@ Commits:
 
 ## Completed / Reaped
 
-<!-- agent:done -->
+<!-- agent:done archive=tasks/software/skill-harness.done.md -->
 - 2026-05-19 [#b4ps] [recommended] Make src/skill-harness/skills/compose-skills the canonical source and add a directory-aware check/sync path so Claude and Codex installs can be verified against the bundled skill tree.
 - 2026-05-19 [#jw8x] [recommended] Add compose-skills validation fixtures that cover malformed plans, ambiguous one-skill-vs-many splits, and a real agent-doc workflow decomposition example.
 - 2026-05-19 [#nztw] [recommended] Extend skill-harness install coverage beyond Claude/Codex for compose-skills, prioritizing OpenCode and the generic .agent/skills layout.

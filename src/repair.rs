@@ -421,6 +421,12 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
                 state.cycle_id
             ),
         );
+        crate::flow::closeout::log_closeout_guard_event(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::Completed,
+            crate::flow::closeout::CloseoutGuardReason::StalePreflightLockRepaired,
+        );
         eprintln!(
             "[repair] repaired stale preflight_started cycle {} for {}",
             state.cycle_id,
@@ -447,6 +453,12 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
                 reason
             ),
         );
+        crate::flow::closeout::log_closeout_guard_event(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::Completed,
+            crate::flow::closeout::CloseoutGuardReason::StalePreflightLockRepaired,
+        );
         eprintln!(
             "[repair] closed stale preflight_started cycle {} for {} after repairing committed historical {} drift",
             state.cycle_id,
@@ -457,6 +469,12 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
     }
 
     if let Some(marker) = crate::session_check::detect_bypassed_response_write(file)? {
+        crate::flow::closeout::log_closeout_guard_event(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::FailedClosed,
+            crate::flow::closeout::CloseoutGuardReason::OpenCycle,
+        );
         anyhow::bail!(
             "{} for {}: found visible response patchback ({marker}) but no pending/capture artifact exists and HEAD cannot prove the patchback was already committed",
             AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR,
@@ -493,6 +511,12 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
                     preview
                 ),
             );
+            crate::flow::closeout::log_closeout_guard_event(
+                file,
+                crate::flow::types::FlowStage::TerminalGuard,
+                crate::flow::types::FlowOutcome::FailedClosed,
+                crate::flow::closeout::CloseoutGuardReason::StalePreflightCycleAbandoned,
+            );
             eprintln!(
                 "[repair] abandoned stale empty preflight_started cycle {} for {} after {}s; unresolved prompt remains visible for the next preflight",
                 state.cycle_id,
@@ -501,6 +525,12 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
             );
             return Ok(RepairOutcome::StalePreflightCycleAbandoned);
         }
+        crate::flow::closeout::log_closeout_guard_event(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::OpenCycle,
+        );
         anyhow::bail!(
             "{} for {}: previous cycle `{}` is still `preflight_started`, the live document has unresolved prompt_target: {preview}, and no response exists to replay. The cycle is only {}s old; wait until it is stale or restart the harness pane and rerun `agent-doc {}` (or use `agent-doc start {}` from a fresh pane) so the prompt is handled by a new response cycle.",
             EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR,
@@ -527,6 +557,12 @@ pub(crate) fn repair_stale_preflight_started_cycle(file: &Path) -> Result<Repair
                 state.cycle_id,
                 age_secs
             ),
+        );
+        crate::flow::closeout::log_closeout_guard_event(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::Completed,
+            crate::flow::closeout::CloseoutGuardReason::StalePreflightLockRepaired,
         );
         eprintln!(
             "[repair] closed stale empty preflight_started cycle {} for {} after {}s without a capture",
@@ -599,6 +635,12 @@ pub(crate) fn recover_missing_commit_boundary(
             event,
             reason
         ),
+    );
+    crate::flow::closeout::log_closeout_guard_event(
+        file,
+        crate::flow::types::FlowStage::TerminalGuard,
+        crate::flow::types::FlowOutcome::Completed,
+        crate::flow::closeout::CloseoutGuardReason::CommitBoundaryRecovered,
     );
     Ok(Some(reason))
 }
@@ -1392,6 +1434,12 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
         && let crate::session_check::SessionCheckStatus::Interrupted(message) =
             crate::session_check::inspect(file)?
     {
+        crate::flow::closeout::log_closeout_guard_event(
+            file,
+            crate::flow::types::FlowStage::SessionCheck,
+            crate::flow::types::FlowOutcome::FailedClosed,
+            crate::flow::closeout::CloseoutGuardReason::SessionCheckInterrupted,
+        );
         anyhow::bail!(message);
     }
     Ok(outcome)

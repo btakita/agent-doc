@@ -424,6 +424,10 @@ fn malformed_patchback_is_rejected_instead_of_appended_as_unmatched() {
     let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
     assert!(ops.contains("template_patchback_malformed_rejected"));
     assert!(ops.contains("reason=patch_markers_without_closed_blocks"));
+    assert!(ops.contains("flow_event file="));
+    assert!(ops.contains(
+        "flow=document_mutation stage=patchback_parse outcome=failed_closed reason=malformed_patch"
+    ));
 }
 
 #[test]
@@ -875,6 +879,13 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
         !head_blob(tmp.path()).contains("### Re: recommendations — gpt-5"),
         "pre-write guard failure must not commit the response"
     );
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops.contains(
+            "flow=closeout stage=pre_write_guard outcome=blocked reason=pending_capture_required"
+        ),
+        "pre-write closeout guard should be mirrored as a typed FlowCore event:\n{ops}"
+    );
 
     agent_doc()
         .current_dir(tmp.path())
@@ -900,6 +911,14 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
     let head = head_blob(tmp.path());
     assert!(head.contains("### Re: recommendations — gpt-5"));
     assert!(head.contains("[#rec1] Regression coverage follow-up"));
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(ops.contains(
+        "flow=document_mutation stage=patchback_parse outcome=completed reason=valid_patch"
+    ));
+    assert!(
+        ops.contains("flow=closeout stage=commit outcome=completed reason=commit_success"),
+        "successful retry should cross the typed closeout commit boundary:\n{ops}"
+    );
 }
 
 #[test]

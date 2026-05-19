@@ -1100,6 +1100,12 @@ pub(crate) fn complete_required_closeout(file: &Path) -> Result<bool> {
         crate::git::verify_snapshot_committed(file)?
     {
         eprintln!("[commit] snapshot differs from HEAD after commit — retrying");
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::SnapshotConvergence,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::SnapshotDiffersFromHead,
+        );
         did_commit |= crate::git::commit(file)?;
         timer.mark("git_commit_retry_snapshot");
         ensure_cycle_committed(file)?;
@@ -1116,6 +1122,12 @@ pub(crate) fn complete_required_closeout(file: &Path) -> Result<bool> {
         timer.mark("parent_pointer_verify_failed");
         let parent_head = drift.parent_head.as_deref().unwrap_or("<missing>");
         timer.finish();
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::FailedClosed,
+            crate::flow::closeout::CloseoutGuardReason::ParentPointerStale,
+        );
         anyhow::bail!(
             "parent submodule pointer is not committed for {} after strict closeout: parent HEAD:{}={} but submodule HEAD={}. Run `agent-doc commit {}` to retry the idempotent parent-pointer closeout.",
             file.display(),
@@ -1125,7 +1137,15 @@ pub(crate) fn complete_required_closeout(file: &Path) -> Result<bool> {
             file.display()
         );
     }
-    crate::session_check::enforce_clean_closeout(file)?;
+    if let Err(err) = crate::session_check::enforce_clean_closeout(file) {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::SessionCheck,
+            crate::flow::types::FlowOutcome::FailedClosed,
+            crate::flow::closeout::CloseoutGuardReason::SessionCheckInterrupted,
+        );
+        return Err(err);
+    }
     timer.mark("session_check");
     cleanup_fallback_patch_files(file);
     timer.mark("fallback_cleanup");
@@ -1190,9 +1210,21 @@ fn closeout_latency_message(file: &Path, total_ms: u128, phases: &[(String, u128
 
 fn ensure_cycle_committed(file: &Path) -> Result<()> {
     let Some(state) = crate::cycle_state::load(file)? else {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::FailedClosed,
+            crate::flow::closeout::CloseoutGuardReason::MissingCycleState,
+        );
         anyhow::bail!("finalize did not persist cycle state");
     };
     if state.is_open() {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::OpenCycle,
+        );
         anyhow::bail!(
             "finalize left cycle `{}` open at `{}` ({})",
             state.cycle_id,
@@ -1201,6 +1233,15 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn log_closeout_guard(
+    file: &Path,
+    stage: crate::flow::types::FlowStage,
+    outcome: crate::flow::types::FlowOutcome,
+    reason: crate::flow::closeout::CloseoutGuardReason,
+) {
+    crate::flow::closeout::log_closeout_guard_event(file, stage, outcome, reason);
 }
 
 fn recover_empty_response_for_strict_closeout(file: &Path, flags: &WriteFlags) -> Result<bool> {
@@ -1473,6 +1514,12 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
         && !missing_targets.is_empty()
     {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreCommitGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingCaptureTargetMissing,
+        );
         anyhow::bail!(
             "[finalize] pre-commit gate: active prompt required backlog capture in {} \
              but those tracked-work surfaces did not change this cycle\n\
@@ -1487,6 +1534,12 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         && let Some((expected_count, promised_count)) =
             promised_backlog_item_inventory_shortfall(&state, &response_text)
     {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreCommitGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingCaptureInventoryShortfall,
+        );
         anyhow::bail!(
             "[finalize] pre-commit gate: active #agent-doc-bug contract described at least {} distinct issue(s), \
              but the response only enumerated {} explicit backlog item(s) for target(s) {}\n\
@@ -1509,6 +1562,12 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         && let Some((expected_count, promised_count)) =
             promised_plan_reference_shortfall(file, &state, &response_text)
     {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreCommitGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingCapturePlanShortfall,
+        );
         anyhow::bail!(
             "[finalize] pre-commit gate: active #agent-doc-bug contract required at least {} explicit plan reference(s), \
              but the response only cited {} existing plan path(s)\n\
@@ -1525,6 +1584,12 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
     if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
         && !missing_ids.is_empty()
     {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreCommitGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingCapturePromisedIdsMissing,
+        );
         anyhow::bail!(
             "[finalize] pre-commit gate: response promised new tracked item(s) {} \
              for explicit backlog target(s) {}, but those ids are still missing after this cycle\n\
@@ -1545,6 +1610,12 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         && state.required_backlog_targets.is_empty()
         && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
     {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreCommitGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingCaptureRequired,
+        );
         anyhow::bail!(
             "[finalize] pre-commit gate: active prompt requested backlog capture \
              but no backlog mutations were recorded this cycle\n\
@@ -1574,6 +1645,12 @@ fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         return Ok(());
     }
 
+    log_closeout_guard(
+        file,
+        crate::flow::types::FlowStage::PreCommitGuard,
+        crate::flow::types::FlowOutcome::Blocked,
+        crate::flow::closeout::CloseoutGuardReason::PendingCaptureRecommendations,
+    );
     anyhow::bail!(
         "[finalize] pre-commit gate: response contains ~{} recommendation-like items \
          but no --pending-add flags were used this cycle\n\
@@ -1621,6 +1698,12 @@ fn prewrite_pending_capture_check(
     if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
         && !missing_targets.is_empty()
     {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreWriteGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingCaptureTargetMissing,
+        );
         anyhow::bail!(
             "[finalize] pre-write gate: active prompt required backlog capture in {} \
              but those tracked-work surfaces did not change this cycle\n\
@@ -1636,6 +1719,12 @@ fn prewrite_pending_capture_check(
             .as_ref()
             .and_then(|state| promised_backlog_item_inventory_shortfall(state, &response_text))
     {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreWriteGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingCaptureInventoryShortfall,
+        );
         anyhow::bail!(
             "[finalize] pre-write gate: active #agent-doc-bug contract described at least {} distinct issue(s), \
              but the response only enumerated {} explicit backlog item(s) for target(s) {}\n\
@@ -1664,6 +1753,12 @@ fn prewrite_pending_capture_check(
             .as_ref()
             .and_then(|state| promised_plan_reference_shortfall(file, state, &response_text))
     {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreWriteGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingCapturePlanShortfall,
+        );
         anyhow::bail!(
             "[finalize] pre-write gate: active #agent-doc-bug contract required at least {} explicit plan reference(s), \
              but the response only cited {} existing plan path(s)\n\
@@ -1683,6 +1778,12 @@ fn prewrite_pending_capture_check(
     if !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
         && !missing_ids.is_empty()
     {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreWriteGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingCapturePromisedIdsMissing,
+        );
         anyhow::bail!(
             "[finalize] pre-write gate: response promised new tracked item(s) {} \
              for explicit backlog target(s) {}, but those ids are still missing after this cycle\n\
@@ -1708,6 +1809,12 @@ fn prewrite_pending_capture_check(
         state.requires_backlog_capture && state.required_backlog_targets.is_empty()
     }) && !crate::prompt_contract::response_explicitly_has_no_followups(&response_text)
     {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreWriteGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingCaptureRequired,
+        );
         anyhow::bail!(
             "[finalize] pre-write gate: active prompt requested backlog capture \
              but no backlog mutations were recorded this cycle\n\
@@ -1742,6 +1849,12 @@ fn prewrite_pending_capture_check(
         return Ok(());
     }
 
+    log_closeout_guard(
+        file,
+        crate::flow::types::FlowStage::PreWriteGuard,
+        crate::flow::types::FlowOutcome::Blocked,
+        crate::flow::closeout::CloseoutGuardReason::PendingCaptureRecommendations,
+    );
     anyhow::bail!(
         "[finalize] pre-write gate: response contains ~{} recommendation-like items \
          but no --pending-add flags were used this cycle\n\
@@ -1775,6 +1888,12 @@ fn precommit_pending_done_check(file: &Path) -> Result<()> {
     let response_text = crate::session_check::response_text_for_guards(&capture.response_body);
     let malformed = crate::session_check::malformed_tracked_item_refs(file, Some(&response_text))?;
     if !malformed.is_empty() {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreCommitGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingDoneMalformedTrackedItem,
+        );
         anyhow::bail!(
             "[finalize] pre-commit gate: {}",
             crate::session_check::malformed_tracked_item_message(&malformed)
@@ -1800,6 +1919,12 @@ fn precommit_pending_done_check(file: &Path) -> Result<()> {
         .collect::<Vec<_>>()
         .join(" ");
 
+    log_closeout_guard(
+        file,
+        crate::flow::types::FlowStage::PreCommitGuard,
+        crate::flow::types::FlowOutcome::Blocked,
+        crate::flow::closeout::CloseoutGuardReason::PendingDoneMissing,
+    );
     anyhow::bail!(
         "[finalize] pre-commit gate: response appears to complete existing pending {} \
          but no matching `--done` was recorded this cycle\n\
@@ -1831,6 +1956,12 @@ fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFl
     let response_text = crate::session_check::response_text_for_guards(response_body);
     let malformed = crate::session_check::malformed_tracked_item_refs(file, Some(&response_text))?;
     if !malformed.is_empty() {
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::PreWriteGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::PendingDoneMalformedTrackedItem,
+        );
         anyhow::bail!(
             "[finalize] pre-write gate: {}",
             crate::session_check::malformed_tracked_item_message(&malformed)
@@ -1866,6 +1997,12 @@ fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFl
         })
         .unwrap_or_default();
 
+    log_closeout_guard(
+        file,
+        crate::flow::types::FlowStage::PreWriteGuard,
+        crate::flow::types::FlowOutcome::Blocked,
+        crate::flow::closeout::CloseoutGuardReason::PendingDoneMissing,
+    );
     anyhow::bail!(
         "[finalize] pre-write gate: response appears to complete existing pending {} \
          but no matching `--done` was recorded this cycle\n\
@@ -2542,6 +2679,12 @@ fn validate_template_patchback_parse_shape(
                 || response.contains("## Assistant"),
         },
     );
+    let parse_outcome = if patches.is_empty() && !unmatched.trim().is_empty() {
+        crate::flow::types::FlowOutcome::FailedClosed
+    } else {
+        crate::flow::types::FlowOutcome::Completed
+    };
+    crate::flow::document_mutation::log_patchback_parse_event(file, shape, parse_outcome);
     crate::ops_log::log_op(
         file,
         &format!(
@@ -2567,15 +2710,6 @@ fn validate_template_patchback_parse_shape(
                 marker_count,
                 unmatched.trim().len()
             ),
-        );
-        crate::flow::proof::log_flow_event(
-            file,
-            crate::flow::types::FlowEvent::new(
-                crate::flow::types::FlowName::DocumentMutation,
-                crate::flow::types::FlowStage::PatchbackParse,
-                crate::flow::types::FlowOutcome::FailedClosed,
-            )
-            .with_reason(shape.as_str()),
         );
         anyhow::bail!(
             "malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content"
@@ -5209,6 +5343,12 @@ pub fn run_stream(
                     "[write] run_stream IPC timeout: cycle {} already committed — skipping fallback patch re-write",
                     committed_id
                 );
+                log_closeout_guard(
+                    file,
+                    crate::flow::types::FlowStage::TerminalGuard,
+                    crate::flow::types::FlowOutcome::Blocked,
+                    crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+                );
                 crate::ops_log::log_op(
                     file,
                     &format!(
@@ -5806,6 +5946,12 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             "[write] run_ipc timeout fallback: cycle {} already committed — skipping disk write",
             committed_id
         );
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+        );
         crate::ops_log::log_op(
             file,
             &format!(
@@ -6392,6 +6538,12 @@ pub fn try_ipc(
             cycle_id,
             file.display()
         );
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+        );
         crate::ops_log::log_op(
             file,
             &format!(
@@ -6668,6 +6820,12 @@ pub fn try_ipc(
                         "[write] socket IPC fallback: cycle {} already committed — skipping file IPC",
                         cycle_id
                     );
+                    log_closeout_guard(
+                        file,
+                        crate::flow::types::FlowStage::TerminalGuard,
+                        crate::flow::types::FlowOutcome::Blocked,
+                        crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+                    );
                     crate::ops_log::log_op(
                         file,
                         &format!(
@@ -6711,6 +6869,12 @@ pub fn try_ipc(
         eprintln!(
             "[write] file IPC fallback: cycle {} already committed — skipping patch write",
             cycle_id
+        );
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
         );
         crate::ops_log::log_op(
             file,
@@ -6867,6 +7031,12 @@ fn try_ipc_full_content_with_mode(
             "[write] full-content IPC skipped: cycle {} already committed for {}",
             cycle_id,
             file.display()
+        );
+        log_closeout_guard(
+            file,
+            crate::flow::types::FlowStage::TerminalGuard,
+            crate::flow::types::FlowOutcome::Blocked,
+            crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
         );
         crate::ops_log::log_op(
             file,
@@ -7078,6 +7248,12 @@ fn write_ipc_and_poll(
                 "[write] IPC poll skipped: cycle {} already committed for {}",
                 cycle_id,
                 doc_file.display()
+            );
+            log_closeout_guard(
+                doc_file,
+                crate::flow::types::FlowStage::TerminalGuard,
+                crate::flow::types::FlowOutcome::Blocked,
+                crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
             );
             crate::ops_log::log_op(
                 doc_file,
@@ -14237,6 +14413,9 @@ mod late_fallback_patch_guard_tests {
         let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("late_fallback_patch_rejected"));
         assert!(ops_log.contains("patch_id=current-patch-456"));
+        assert!(ops_log.contains(
+            "flow=closeout stage=terminal_guard outcome=blocked reason=already_committed"
+        ));
         assert!(
             !ops_log.contains("ipc_write_consumed"),
             "terminal skip must not be logged as an IPC consume"
@@ -14295,6 +14474,9 @@ mod late_fallback_patch_guard_tests {
         let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("late_fallback_patch_rejected"));
         assert!(ops_log.contains("patch_id=full_content"));
+        assert!(ops_log.contains(
+            "flow=closeout stage=terminal_guard outcome=blocked reason=already_committed"
+        ));
         assert!(
             !ops_log.contains("socket_full_content"),
             "full-content socket diagnostic must not be emitted after committed-cycle skip"

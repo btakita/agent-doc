@@ -11,8 +11,8 @@ operational events.
 |---|---|---|
 | `session_cycle` | Direct invocation lifecycle: preflight, plan, execution, patchback, commit, session-check | `preflight.rs`, `plan.rs`, `run.rs`, `write.rs`, `git.rs`, `session_check.rs` |
 | `routed_reopen` | Actor binding, readiness barrier, dispatch authorization, submit, dispatch proof | `route.rs`, `start.rs`, `project_controller.rs`, `session_actor.rs`, `supervisor/*` |
-| `closeout` | Terminal response durability and commit/session-check guard | `write.rs`, `git.rs`, `repair.rs`, `session_check.rs`, `cycle_state.rs` |
-| `document_mutation` | Patchback shape parsing, component mutation, prompt ownership normalization, duplicate repair | `write.rs`, `template.rs`, `merge.rs`, `pending.rs`, `repair.rs` |
+| `closeout` | Terminal response durability, pre-write/pre-commit guards, retryable repair boundaries, and commit/session-check guard | `write.rs`, `git.rs`, `repair.rs`, `session_check.rs`, `cycle_state.rs` |
+| `document_mutation` | Patchback shape parsing, component mutation, prompt ownership normalization, duplicate repair, and late fallback mutation refusal | `write.rs`, `template.rs`, `merge.rs`, `pending.rs`, `repair.rs` |
 | `operator_clear` | Clear Session Context and interrupt-clear guard decisions | `session_cmd.rs`, editor clear actions, `route.rs` readiness helpers |
 | `orchestration_batch` | Queue freeze, child dispatch, child patchback normalization, batch stop/resume | `orchestrate.rs`, `queue.rs`, `queue_dispatch.rs`, `plan.rs` |
 
@@ -40,8 +40,8 @@ enums as extraction proceeds:
 |---|---|
 | `proof`, `proof_scope` | `DispatchProof` |
 | `actor_state`, `runtime_state`, `supervisor_health` | routed reopen actor facts |
-| `drift_kind`, `basis`, `reason=already_current` | closeout terminal-state reason |
-| `markers`, `patches`, `exchange_patches`, `unmatched_len` | `PatchbackShape` |
+| `drift_kind`, `basis`, `reason=already_current`, pre-write/pre-commit guard names | `CloseoutGuardReason` and closeout terminal-state reason |
+| `markers`, `patches`, `exchange_patches`, `unmatched_len` | `PatchbackShape` and document-mutation parse event |
 | `source`, `write_mode`, `patch_id`, `cycle_id` | `DocumentMutationKind` and closeout ids |
 | `queue_halted`, `item_modified`, child task labels | orchestration batch outcome |
 | protected/busy/idle clear states | operator clear input state |
@@ -54,11 +54,12 @@ enums as extraction proceeds:
 flow_event file=<path> flow=<flow> stage=<stage> outcome=<outcome> reason=<token>
 ```
 
-`agent-doc ops summary` groups these events by flow stage and outcome. The first
-mirror-mode emitters cover routed reopen prompt-ready failures, malformed
-document mutation patchbacks, and closeout commit completion. Later phases
-should replace tactical log parsing with flow events rather than adding more
-free-form log strings.
+`agent-doc ops summary` groups these events by flow stage and outcome. The
+mirror-mode emitters now cover routed reopen prompt-ready failures, document
+mutation patchback parse outcomes, strict closeout guard blocks, committed-cycle
+late-fallback rejection, repair recovery boundaries, and closeout commit
+completion. Later phases should replace tactical log parsing with flow events
+rather than adding more free-form log strings.
 
 ## Phase Boundaries
 

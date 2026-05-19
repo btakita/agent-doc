@@ -1885,6 +1885,15 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             did_commit = true;
             crate::ops_log::log_cycle(file, "commit", None, None);
             crate::ops_log::log_op(file, &format!("commit_success file={}", file.display()));
+            crate::flow::proof::log_flow_event(
+                file,
+                crate::flow::types::FlowEvent::new(
+                    crate::flow::types::FlowName::Closeout,
+                    crate::flow::types::FlowStage::Commit,
+                    crate::flow::types::FlowOutcome::Completed,
+                )
+                .with_reason("commit_success"),
+            );
             let snap = crate::snapshot::load(file).ok().flatten();
             let file_content = std::fs::read_to_string(file).ok();
             if let Err(e) = crate::cycle_state::mark_committed(

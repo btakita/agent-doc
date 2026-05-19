@@ -1,4 +1,7 @@
-use super::types::{DocumentMutationKind, PatchbackShape};
+use super::types::{
+    DocumentMutationKind, FlowEvent, FlowName, FlowOutcome, FlowStage, PatchbackShape,
+};
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PatchbackShapeFacts {
@@ -34,6 +37,19 @@ pub(crate) fn mutation_kind_for_patch(component: &str) -> DocumentMutationKind {
     }
 }
 
+pub(crate) fn patchback_parse_event(shape: PatchbackShape, outcome: FlowOutcome) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::DocumentMutation,
+        FlowStage::PatchbackParse,
+        outcome,
+    )
+    .with_reason(shape.as_str())
+}
+
+pub(crate) fn log_patchback_parse_event(file: &Path, shape: PatchbackShape, outcome: FlowOutcome) {
+    super::proof::log_flow_event(file, patchback_parse_event(shape, outcome));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,5 +78,16 @@ mod tests {
         });
 
         assert_eq!(shape, PatchbackShape::MixedOutput);
+    }
+
+    #[test]
+    fn patchback_parse_event_carries_shape_reason() {
+        let event =
+            patchback_parse_event(PatchbackShape::MalformedPatch, FlowOutcome::FailedClosed);
+
+        assert_eq!(event.flow, FlowName::DocumentMutation);
+        assert_eq!(event.stage, FlowStage::PatchbackParse);
+        assert_eq!(event.outcome, FlowOutcome::FailedClosed);
+        assert_eq!(event.reason.as_deref(), Some("malformed_patch"));
     }
 }

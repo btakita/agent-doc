@@ -222,6 +222,21 @@ fn classify_flow_event(fields: &BTreeMap<String, String>) -> &'static str {
         (Some("document_mutation"), Some("patchback_parse"), Some("failed_closed")) => {
             "flow document mutation parse failures"
         }
+        (Some("document_mutation"), Some("patchback_parse"), Some("completed")) => {
+            "flow document mutation parsed"
+        }
+        (Some("closeout"), Some("pre_write_guard"), Some("blocked" | "failed_closed")) => {
+            "flow closeout pre-write guard blocked"
+        }
+        (Some("closeout"), Some("pre_commit_guard"), Some("blocked" | "failed_closed")) => {
+            "flow closeout pre-commit guard blocked"
+        }
+        (Some("closeout"), Some("terminal_guard"), Some("blocked" | "failed_closed")) => {
+            "flow closeout terminal guard blocked"
+        }
+        (Some("closeout"), Some("session_check"), Some("blocked" | "failed_closed")) => {
+            "flow closeout session-check failures"
+        }
         (Some("closeout"), Some("commit"), Some("completed")) => "flow closeout commit completed",
         (Some("closeout"), Some("commit"), Some("blocked" | "failed_closed")) => {
             "flow closeout commit failures"
@@ -346,14 +361,17 @@ mod tests {
 [117] flow_event file=/repo/tasks/a.md flow=closeout stage=commit outcome=completed reason=already_current
 [118] flow_event file=/repo/tasks/c.md flow=routed_reopen stage=prompt_ready_barrier outcome=failed_closed reason=starting_actor_not_ready
 [119] flow_event file=/repo/tasks/a.md flow=document_mutation stage=patchback_parse outcome=failed_closed reason=malformed_patchback
-[120] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
+[120] flow_event file=/repo/tasks/a.md flow=closeout stage=pre_write_guard outcome=blocked reason=pending_capture_recommendations
+[121] flow_event file=/repo/tasks/a.md flow=closeout stage=terminal_guard outcome=blocked reason=already_committed
+[122] flow_event file=/repo/tasks/a.md flow=document_mutation stage=patchback_parse outcome=completed reason=valid_patch
+[123] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
 ";
 
         let report =
             summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
 
-        assert_eq!(report.scanned_lines, 21);
-        assert_eq!(report.matched_events, 20);
+        assert_eq!(report.scanned_lines, 24);
+        assert_eq!(report.matched_events, 23);
         assert!(
             report.buckets.iter().any(|bucket| {
                 bucket.category == "write ipc consumed"
@@ -451,6 +469,39 @@ mod tests {
                 bucket.category == "flow document mutation parse failures"
                     && bucket.file == "tasks/a.md"
                     && bucket.samples[0].contains("flow=document_mutation")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "flow closeout pre-write guard blocked"
+                    && bucket.file == "tasks/a.md"
+                    && bucket
+                        .samples
+                        .iter()
+                        .any(|sample| sample.contains("pending_capture_recommendations"))
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "flow closeout terminal guard blocked"
+                    && bucket.file == "tasks/a.md"
+                    && bucket
+                        .samples
+                        .iter()
+                        .any(|sample| sample.contains("already_committed"))
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "flow document mutation parsed"
+                    && bucket.file == "tasks/a.md"
+                    && bucket
+                        .samples
+                        .iter()
+                        .any(|sample| sample.contains("valid_patch"))
             }),
             "{report:#?}"
         );

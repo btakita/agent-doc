@@ -29,46 +29,18 @@ Added route-focused FlowCore refactor next steps. Top backlog item: #rte2.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-155256.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-215452.md`*
 
 Compacted content:
-- Archived 3 response topic(s): FlowCore refactor; refactor next steps; routed reopen FlowCore
+- Archived 1 response topic(s): #873y wedged-cycle recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: #873y wedged-cycle recovery — gpt-5
-
-Implemented the immediate wedged-cycle fix from `tasks/agent-doc/plan-wedged-cycle-unrecoverable.md`.
-
-What changed:
-
-- `src/agent-doc/src/write.rs` now only enters strict commit closeout when the write path succeeds. A pre-write guard failure, such as pending-capture rejection, leaves the active cycle open and retryable instead of committing an unanswered cycle.
-- `src/agent-doc/tests/finalize_integration.rs` now covers failed strict pre-write closeout followed by a successful retry with backlog capture.
-- `src/agent-doc/src/git.rs` now covers historical snapshot repair when a committed assistant response contains an h4 subheading like `#### #next-steps`.
-- `src/agent-doc/specs/07-closeout-commands.md` now documents the retryable pre-write failure boundary.
-- `tasks/agent-doc/plan-wedged-cycle-unrecoverable.md` now records the implementation result and leaves broader FlowCore / cycle-state extraction under existing `#mut2`.
-
-Verification:
-
-- `cargo fmt`
-- `cargo test finalize_prewrite_guard_failure_leaves_cycle_open_for_retry`
-- `cargo test commit_repairs_committed_historical_snapshot_drift`
-- `cargo test finalize_keeps_queue_head_when_later_strict_pending_gate_fails`
-- `make check` after the final spec update
-- `make install`, followed by `agent-doc --version` -> `agent-doc 0.33.16`
-- GitHub CI run `26109770668` on pushed submodule SHA `c11a120a4`: `make check` and `make tmux-ci` passed in job `check`
-
-Commits pushed:
-
-- `btakita/agent-doc` `20260422/codex-agent-backend`: `c11a120a4` (`fix: keep failed prewrite closeouts retryable`)
-- `btakita/agent-loop` `main`: `5bd4af744` (`agent-doc: keep failed prewrite closeouts retryable`)
-
-No new follow-up item is needed for this cycle; the remaining larger architecture work is already tracked by `#mut2` and remains open.
-<!-- agent:boundary:08449d84 -->
+<!-- agent:boundary:39ad2b25 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue au -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - do [#873y]
 - do [#mut2]

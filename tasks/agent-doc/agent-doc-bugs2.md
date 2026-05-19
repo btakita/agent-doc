@@ -64,14 +64,24 @@ Committed and pushed in `src/agent-doc` on `20260422/codex-agent-backend`:
 - `3993a0b3 ci: name tmux integration step`
 
 I left unrelated local/root worktree changes alone. The root superproject gitlink is still modified because `src/agent-doc` now points at the pushed submodule commits; I did not make a root superproject commit because the root worktree already has unrelated dirty files.
-<!-- agent:boundary:ec67025e -->
+❯ Please address this issue on CI. CI should visibly demonstrate tmux-ci was run.
+❯ > but its visible log does not show a separate make tmux-ci leg
+
+❯ #spec-test-build-install-commit-push
+### Re: CI tmux visibility follow-up — gpt-5
+
+The CI visibility issue is addressed in the already-pushed `src/agent-doc` branch head.
+
+I verified `20260422/codex-agent-backend` is at `3993a0b3d94f73180123c21e69a0d4a1198d9274`, and that commit changes `.github/workflows/ci.yml` so CI has a separate step named `Run make tmux-ci` with an explicit `Running make tmux-ci` log marker before invoking `make tmux-ci`. It also names the normal suite step `Run make check`, so the GitHub Actions UI will show the normal suite and live tmux sweep as distinct legs on the next pull-request or main-branch CI run.
+
+No additional source commit was needed in this cycle because the requested CI workflow change was already committed and pushed as:
+
+
+The latest existing GitHub Actions run is still the older main-branch run from before this workflow change, and there is currently no open PR for `20260422/codex-agent-backend`, so GitHub has not yet produced a new PR CI run displaying the renamed tmux step. The pushed workflow is ready for that next CI execution.
+<!-- agent:boundary:5f72f836 -->
 <!-- /agent:exchange -->
 ###
 <!--
-Please address this issue on CI. CI should visibly demonstrate tmux-ci was run.
-> but its visible log does not show a separate make tmux-ci leg
-
-#spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->

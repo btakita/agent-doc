@@ -27,48 +27,17 @@ queue_active: true
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223bcaa3626afc3c261e29d2c9e099b99519b00c1be4df7bfa35b0f57ca-20260519-045515.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223bcaa3626afc3c261e29d2c9e099b99519b00c1be4df7bfa35b0f57ca-20260519-051810.md`*
 
 Compacted content:
-- Archived 1 response topic(s): compose-skills next steps
-- Prior summary/context: ❯ Add #next-steps re: composable skills...which was recently added via agent-loop.md
-### Re: compose-skills skill harness — gpt-5
-Completed the queued skill-harness work.
-
-Implemented `check-dir` and made `install-dir` a true directory sync for full skills. `compose-skills` now defaults to the bundled `skills/compose-skills` tree as its canonical source, so Claude, Codex, OpenCode, and generic installs can be installed and verified without repeating `--source`. Directory checks compare every file and report missing, changed, and extra installed files; sync removes stale files inside the target skill directory so checks converge.
-
-Added compose-skills validation fixtures for malformed plans, an ambiguous one-skill-vs-many split, and an agent-doc workflow decomposition example. Added install/check coverage for OpenCode and generic `.agent/skills` layouts, plus docs/spec updates for the new commands and canonical source behavior.
-
-Committed and pushed:
-- `btakita/skill-harness` `c72c3fe` (`feat: sync bundled compose skill directories`)
-- parent `btakita/agent-loop` `a4d7116dd` (`chore: update skill-harness submodule`)
-
-Verification passed:
-- `cargo test --locked` in `src/skill-harness` (25 tests)
-- `cargo build --locked` in `src/skill-harness`
-- `cargo install --path . --locked`
-- installed binary `skill-harness check-dir compose-skills --harness opencode --root /tmp/tmp.fGcoAoGRna`
-- full repo `make check`
-
-GitHub Actions run `26077466584` failed with empty-step `check` and `tmux-ci` jobs, matching an external CI-start/runner allocation blocker rather than a code or tmux regression. Local verification above is clean.
-### Re: auto queue dispatch — gpt-5
-The auto queue marker is active, but the queued `do` targets are already closed in Completed/Reaped:
-
-- `#b4ps` canonical compose-skills source and directory check/sync
-- `#jw8x` compose-skills validation fixtures
-- `#nztw` OpenCode and generic install coverage
-
-No additional repo mutation was needed this cycle. The prior response already records the code changes, verification, local install, parent/submodule commits, push, and the external GitHub Actions runner-allocation blocker for run `26077466584`.
-<!-- agent:boundary:08079560 -->
+- Archived 2 response topic(s): compose-skills skill harness; auto queue dispatch
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223...
+<!-- agent:boundary:17695ee6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue auto -->
-dispatch #spec-test-build-install-commit-push
-- ~do [#b4ps]~
-- do [#jw8x]
-- do [#nztw]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

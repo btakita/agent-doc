@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Routed-reopen FlowCore owns the first route decision kernel.** Delivery mode,
+  dispatch-start proof, degraded-authority refusal, runtime guard, and
+  prompt-ready-barrier classifiers now live in `flow::routed_reopen`; `route.rs`
+  maps supervisor/controller facts into those typed decisions and remains the
+  tmux/supervisor/controller I/O coordinator. The large route test module was
+  split out to `src/route/tests.rs` so live tmux fixtures no longer live inline
+  in production routing code.
+
 - **FlowCore mirror-mode typed events are in place.** Added the first `flow` module set for session-cycle, routed-reopen, closeout, document-mutation, operator-clear, and orchestration-batch ownership; ops summary now groups `flow_event` diagnostics by flow stage, and route/closeout/write paths emit initial mirror events for prompt-ready failures, commit closeout completion, and malformed patchback parse failures. The new flow map documents hot-path ownership and duplicated state checks for the next extraction phases.
 
 - **Clear Session Context recognizes Codex's `Write tests for @filename` idle placeholder.** Operator status/clear readiness now treats the current dim Codex suggestion `› Write tests for @filename` as prompt-ready idle evidence, so an `agent-doc` wrapper pane with only that placeholder and the Codex model/cwd/context footer no longer stays classified as `alive-busy prompt_ready=false`. Real drafted input, queued drafts, shell search, active permission prompts, and panes showing `Working (... esc to interrupt)` still fail closed.

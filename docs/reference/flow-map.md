@@ -63,8 +63,11 @@ free-form log strings.
 ## Phase Boundaries
 
 Phase 1 adds the vocabulary, pure decision helpers, mirror-mode events, and
-ops-summary grouping. Route, closeout, document mutation, operator clear, and
-orchestration extraction should proceed by moving one pure decision at a time
-behind the new types, then deleting the corresponding tactical branch from the
-legacy module after equivalent deterministic coverage exists.
-
+ops-summary grouping. The routed-reopen extraction has started: delivery mode,
+dispatch-start proof, degraded-authority refusal, runtime guard, and
+prompt-ready-barrier classifiers now live in `flow::routed_reopen`, while
+`route.rs` keeps tmux, supervisor IPC, and controller I/O. Route, closeout,
+document mutation, operator clear, and orchestration extraction should continue
+by moving one pure decision at a time behind the new types, then deleting the
+corresponding tactical branch from the legacy module after equivalent
+deterministic coverage exists.

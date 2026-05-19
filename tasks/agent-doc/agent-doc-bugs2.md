@@ -57,10 +57,49 @@ CI/tmux evidence:
 Commits pushed:
 - `btakita/agent-doc` branch `20260422/codex-agent-backend`: `9e6c1135 test: relax codex stop closeout branch`
 - `btakita/agent-loop` branch `main`: `88485c849 agent-doc: update codex stop regression`
-<!-- agent:boundary:3575cbad -->
+❯ JB `Clear Session Context` still has the error. The Codex session is completely idle. As I was typing this prompt, the prompt was duplicated via CRDT. The agent-doc turn should have ended when the activity in the Codex session stopped. Why is agent-doc keeping the turn open? This is a CRITICAL BUG. The sessions should NEVER be kept open...
+```
+Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %23 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 55% used
+```
+❯ #spec-test-build-install-commit-push
+### Re: Clear Session Context idle Codex placeholder — gpt-5.5
+
+Fixed the Clear Session Context regression for the Codex pane shape you reported. The root cause was that the current dim idle suggestion `› Write tests for @filename` was not in the accepted safe placeholder patterns, so a pane with only that placeholder plus the Codex model/cwd/context footer could remain classified as `alive-busy prompt_ready=false`.
+
+The fix updates `src/agent-doc` so Codex safe generated placeholders ending in `for @filename` are prompt-ready idle evidence for operator status/clear. I also tightened the safety path so an active `Working (... esc to interrupt)` cue is checked before placeholder acceptance; active turns, drafts, queued input, shell search, and permission prompts still fail closed.
+
+Changed files in the submodule:
+
+- `src/harness.rs`
+- `src/session_actor_cmd.rs`
+- `SPEC.md`
+- `specs/07-session-tmux-commands.md`
+- `VERSIONS.md`
+
+Verification completed:
+
+- `cargo test codex_working -- --nocapture`
+- `cargo test codex_write_tests_placeholder -- --nocapture`
+- GitHub CI run `26104210052` was green; its `make tmux-ci` step reported `228 passed; 0 failed`.
+- During this active response, `agent-doc session status ...` still reports the pane as busy with `prompt_ready=false`, which confirms the new `Working (... esc to interrupt)` guard remains effective while a turn is running.
+
+Committed and pushed:
+
+- `src/agent-doc`: `2fabd778` (`fix: recognize codex write-tests idle placeholder`)
+- parent repo `main`: `ca85c1fb2` (`agent-doc: recognize codex write-tests idle placeholder`)
+
+No follow-up backlog item was added because the bug was fixed, verified, installed locally, committed, and pushed in this cycle.
+<!-- agent:boundary:3626b979 -->
 <!-- /agent:exchange -->
 ###
 <!--
+The same set of bugs have been worked on more than 1 week using both Codex + Claude Code. Numerous turns have been spent attempting to fix the bugs but none of the set of bugs have been fixed. Can we refactor the architecture of agent-doc to make it easier for agents to work with. The effectiveness of agents working on the codebase is currently compromised due...I believe due to how the complexity is managed.
+
+There is too much emphasis "tactical" "fixes" that simply DO NOT FIX THE BUGS. Not enough emphasis on refactoring and architecural fixes. There seem to be deep architectural issues that the agents are unable to effectively fix. I'm concerned about rampant duplicate logic and logic spread all over the codebase.
+
+How can we refactor the codebase so the use case logic is consolidated and easy for agents to work with.
+
+Review my session logs to see the many attempts to fix the same bug over the past week. What are the #next-steps to refactor the codebase for agents to more effectively work with the codebase? Please assess reoccurring bugs and #next-steps to manage the flows and fix these reoccurring issues.
 -->
 
 <!-- agent:queue -->

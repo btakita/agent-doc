@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **JetBrains Clear Session Context recognizes active-pane refusals.** The plugin now parses the binary's newer `session_clear refused ... pane ... is still active` output, including the generic `agent-doc command failed` wrapper, and shows the typed running-session warning with retry/status/interrupt/copy actions instead of surfacing the raw command failure. Bumped the JetBrains plugin build version to `0.2.122`.
+
 - **Terminal user follow-ups no longer emit late closeout no-ops.** When the previous cycle is already committed and the working tree only contains a new user follow-up prompt, `agent-doc commit` now treats that state as prompt handoff instead of re-emitting `commit_noop` / `commit_already_current` lifecycle bookkeeping. Open recovery cycles can still close as already-current when needed, but idle post-finalize prompt typing no longer looks like another delayed closeout.
 
 - **CI checks out sibling path dependencies.** Pull-request CI now clones `btakita/agent-kit` and `btakita/tmux-router` next to the `agent-doc` checkout before running `make check`, matching the local workspace layout required by the `../agent-kit` Cargo path dependency and the `Cargo.toml` tmux-router patch.

@@ -248,6 +248,22 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `busy clear refusal parses active agent-doc pane output`() {
+        val output = """
+            agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because pane %23 is still active (reason=active agent-doc pane has not reached an idle prompt or clean-exit state, source=authoritative_actor, current_command=agent-doc, prompt_ready=false, tail="gpt-5.5 high · ~/work/btakita/agent-loop · Context 12% used"). Wait for an idle prompt or clean-exit restart prompt, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to intentionally interrupt the pane and clear context.
+        """.trimIndent()
+
+        val refusal = TerminalUtil.parseBusySessionClearRefusal(output)
+
+        assertNotNull(refusal)
+        assertEquals("/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md", refusal!!.file)
+        assertEquals("%23", refusal.pane)
+        assertEquals("authoritative_actor", refusal.source)
+        assertEquals("agent-doc", refusal.currentCommand)
+        assertEquals("gpt-5.5 high · ~/work/btakita/agent-loop · Context 12% used", refusal.tail)
+    }
+
+    @Test
     fun `busy clear refusal keeps quoted or parenthesized pane tail text`() {
         val output = """
             Error: session_clear refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="Tip says \"Override\" settings (per agent)"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt.

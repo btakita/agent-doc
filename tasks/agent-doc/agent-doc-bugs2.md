@@ -14,14 +14,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-Reviewed recurring bug logs; added FlowCore refactor plan. Top backlog item: #flowcore0.
+Added route-focused FlowCore refactor next steps. Top backlog item: #rte2.
 <!-- /agent:status -->
 
 ## Exchange
@@ -60,7 +60,23 @@ Verification:
 - `make check`
 - `make install`
 - CI review: latest `CI` run `26105584438` was green and included successful `Run make tmux-ci`.
-<!-- agent:boundary:d6166f93 -->
+❯ What are the #next-steps for refactoring the agent-doc codebase? Is it time to refactor routes.rs?
+### Re: refactor next steps — gpt-5
+
+Yes, it is time to refactor [route.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/route.rs:1), but not as a broad rewrite. The safer move is a FlowCore extraction pass: move one pure routed-reopen decision at a time out of the 16.8k-line route coordinator, add deterministic coverage beside [flow/routed_reopen.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/flow/routed_reopen.rs:1), then delete the matching tactical branch from `route.rs` only after the typed decision owns it.
+
+Top backlog item: `#rte2`.
+
+I added the priority refactor items in this order:
+
+- `#rte2`: extract the routed-reopen decision kernel from `route.rs` into FlowCore.
+- `#rte3`: split the live tmux route tests and fixtures out of the production module before larger extraction work.
+- `#mut2`: continue FlowCore extraction for document mutation and closeout guard strings, using the wedged-cycle plan as the acceptance target.
+
+The existing `#873y` wedged-cycle plan stays near the top because closeout recovery is still foundational. I put the route extraction first because the FlowCore map already names `routed_reopen` as the owner for actor binding, readiness barriers, dispatch authorization, submit, and dispatch proof, and the current `route.rs` is carrying all of that plus pane provisioning, startup recovery, diagnostics, and tests.
+
+No test suite was run for this cycle; this was a document/backlog update only.
+<!-- agent:boundary:a0f813fc -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +84,7 @@ Verification:
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#flowcore0]
+- ~do [#flowcore0]~
 - do [#flowroute]
 - do [#flowclose]
 - do [#flowbatch]
@@ -77,7 +93,10 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rte2] Extract the routed-reopen decision kernel from src/agent-doc/src/route.rs into FlowCore: authoritative actor facts, startup prompt-ready barrier, degraded actor refusal, delivery mode, and dispatch-start proof; keep route.rs as the tmux/supervisor I/O coordinator.
+- [ ] [#rte3] Split src/agent-doc/src/route.rs live tmux tests, fixtures, and route-specific assertion helpers into focused route test/support modules before larger extraction work, while keeping pure FlowCore decision coverage next to src/agent-doc/src/flow/routed_reopen.rs.
 - [ ] [#873y] Plan filed for the wedged-cycle incident: a failed finalize (blocked at the pre-write pending_capture_guard) left the cycle marked committed; finalize, write --commit, repair, and reset then all failed to recover it; an h4 '#### #next-steps' heading tripped the prompt-target parser; compact became the only (destructive) escape and rewrote the document unrequested. Architectural fix needed — see tasks/agent-doc/plan-wedged-cycle-unrecoverable.md
+- [ ] [#mut2] Continue FlowCore extraction outside routing by promoting document_mutation and closeout guard strings into typed events, using tasks/agent-doc/plan-wedged-cycle-unrecoverable.md as the acceptance target for recoverable finalize/write/repair boundaries.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

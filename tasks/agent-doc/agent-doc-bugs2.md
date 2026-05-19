@@ -34,7 +34,13 @@ Added prioritized FlowCore refactor next steps. Top backlog item: #rte4.
 Compacted content:
 - Archived 1 response topic(s): FlowCore next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:83ad24a6 -->
+synchronous orchestara
+dispatch #spec-test-build-install-commit-push
+- do [#rte4]
+- do [#mut3]
+- do [#clo3]
+- do [#cyc2]
+<!-- agent:boundary:7fdb0f22 -->
 <!-- /agent:exchange -->
 ###
 <!--

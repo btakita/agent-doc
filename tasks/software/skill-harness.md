@@ -27,21 +27,12 @@ queue_active: false
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223bcaa3626afc3c261e29d2c9e099b99519b00c1be4df7bfa35b0f57ca-20260519-051810.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223bcaa3626afc3c261e29d2c9e099b99519b00c1be4df7bfa35b0f57ca-20260519-051950.md`*
 
 Compacted content:
-- Archived 2 response topic(s): compose-skills skill harness; auto queue dispatch
+- Archived 1 response topic(s): composable-skills next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223...
-❯ What are the #next-steps for composable-skills?
-### Re: composable-skills next steps — gpt-5
-Interpreting this as `compose-skills`, the install/check path is now in good shape. The best next work is to make the planning behavior more deterministic and easier to trust in CI:
-
-1. Add a small harness matrix that installs and checks bundled `compose-skills` across Claude, Codex, OpenCode, and generic temp roots in one command or CI job.
-2. Tighten `compose validate` beyond candidate-name detection: golden diagnostics for missing required sections, weak one-skill-vs-many rationale, and unclear handoff boundaries would catch the real failure modes.
-3. Add one end-to-end example that starts with an oversized workflow prompt, produces the decomposed skill architecture, and shows where implementation hands off to `skill-creator`.
-
-I added those as recommended backlog items here so they can be queued directly later.
-<!-- agent:boundary:3dba9b52 -->
+<!-- agent:boundary:f3ea2837 -->
 <!-- /agent:exchange -->
 
 ## Queue

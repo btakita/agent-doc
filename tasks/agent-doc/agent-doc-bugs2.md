@@ -29,30 +29,12 @@ Added route-focused FlowCore refactor next steps. Top backlog item: #rte2.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-222544.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-224553.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #873y stale queue head
+- Archived 1 response topic(s): #mut2
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#mut2]. #spec-test-build-install-commit-push
-### Re: #mut2 — gpt-5
-
-Implemented `#mut2` in `src/agent-doc`: FlowCore now has typed closeout guard reasons and document-mutation patchback events, and the write/commit/repair paths emit `flow_event` records for pre-write/pre-commit guard blocks, patchback parse outcomes, committed-cycle late fallback rejection, repair recovery boundaries, and commit completion.
-
-Updated the closeout spec, Flow Map, README, and regressions for the wedged-cycle retry target. Commits:
-- `src/agent-doc`: `d36122b5` pushed to `origin/20260422/codex-agent-backend`
-- superproject: `8c9d2690d` records the updated `src/agent-doc` submodule pointer locally; it will be pushed after this session closeout commit lands.
-
-Verification:
-- `cargo fmt`
-- focused FlowCore / ops / late-fallback / finalize regressions
-- `make check`
-- `make install`
-- `agent-doc --version`
-- Latest GitHub CI `Run make tmux-ci` step on CI run `26109770668`: success
-
-No new follow-up backlog items.
-<!-- agent:boundary:24bc22e5 -->
+<!-- agent:boundary:5b1b1248 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,7 +52,8 @@ No new follow-up backlog items.
 - [ ] [#rafe] [recommended] Phase 4 for lower-agent orchestration: implement agent-doc jobs create/list/status/collect plus optional operation-doc generation and closeout links. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ek86] Implement the lower-agent orchestration MVP from tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md, starting with manual job packets plus tsift context packets.
 - [ ] [#fwjw] Define the agent-doc taxonomy for agent docs, job packets, operation docs, runbooks, and plans.
-- [ ] [#0fcx] Specify operation docs/opdocs as retained audit artifacts and how they relate to job packets.<!-- /agent:backlog -->
+- [ ] [#0fcx] Specify operation docs/opdocs as retained audit artifacts and how they relate to job packets.
+<!-- /agent:backlog -->
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->

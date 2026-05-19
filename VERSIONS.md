@@ -6,7 +6,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
-- **CI checks out the sibling agent-kit path dependency.** Pull-request CI now clones `btakita/agent-kit` next to the `agent-doc` checkout before running `make check`, matching the local workspace layout required by the `../agent-kit` Cargo path dependency.
+- **CI checks out sibling path dependencies.** Pull-request CI now clones `btakita/agent-kit` and `btakita/tmux-router` next to the `agent-doc` checkout before running `make check`, matching the local workspace layout required by the `../agent-kit` Cargo path dependency and `.cargo/config.toml` tmux-router patch.
 
 - **CI now names the tmux integration leg explicitly.** The GitHub Actions workflow labels the normal suite as `Run make check` and the live tmux sweep as `Run make tmux-ci`, with a visible `Running make tmux-ci` marker in the step log so reviewers can confirm the tmux leg executed.
 

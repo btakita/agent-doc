@@ -125,14 +125,31 @@ The clean shape is:
 So my recommendation is: make `agent-skills` the target package, but implement it by moving the relevant `skill-harness` code and specs forward. Do not maintain both as peer packages long term unless they have a sharp split, such as `agent-skills` owning the library/domain and `skill-harness` only owning eval/test harness behavior. If there is no separate eval harness product, the `skill-harness` name should go away.
 
 For `compose-skills`, that means the Rust validator and portable source layout should land under `agent-skills`, with tests proving installs into `.claude/skills/compose-skills/SKILL.md` and the Codex skill layout. That gives you the no-runtime installability path and avoids baking a generic skill design system into a Codex-only directory.
-<!-- agent:boundary:fb557798 -->
+❯ agent-skills is taken at https://crates.io/crates/agent-skills
+❯ Please update your recommendation.
+### Re: agent-skills name collision — gpt-5
+
+Updated recommendation: do not create or rename the Rust crate to `agent-skills` if it needs to publish on crates.io. The name is already occupied at [crates.io/crates/agent-skills](https://crates.io/crates/agent-skills), and docs.rs indexes it as an existing crate, currently visible as [`agent-skills 0.2.0`](https://docs.rs/crate/agent-skills/0.2.0/source/Cargo.lock).
+
+That changes the packaging recommendation from "make `agent-skills` the target package" to this:
+
+- Keep `skill-harness` as the immediate Rust crate/package boundary if it already owns the relevant code and can publish today.
+- Use `agent skills` as the domain/product language in docs, specs, commands, and possibly repository naming, but not as the crates.io package name.
+- If the package name should become more durable than `skill-harness`, choose a precise available crate name after registry checks, such as `agent-skillkit`, `agent-skill-tools`, `portable-agent-skills`, or `skill-compose`. I would avoid a rename until the API boundary is clearer.
+- Keep `skill-harness` only if it means lifecycle tooling: install, validate, audit, compose, and test skills across Claude Code, Codex, OpenCode, and generic layouts. If it grows beyond "harness" semantics, rename later to an available name, but do that as a deliberate crate-name migration rather than assuming `agent-skills` is available.
+
+For `compose-skills`, the revised path is: move the portable source layout and Rust validator into `skill-harness` first, add Claude Code and Codex installer tests, and expose commands under whatever CLI name you control. If a future public package split is justified, extract to an available focused crate like `agent-skill-compose` rather than the taken `agent-skills` name.
+
+I also updated the pending item that still pointed at `agent-skills` as the target crate name, and added a follow-up to check registry availability before any rename.
+<!-- agent:boundary:e57f0984 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:pending -->
-- [ ] [#25k6] [recommended] Create or rename toward an agent-skills crate/package, using skill-harness as the migration source and keeping compatibility shims if needed
+- [ ] [#cdvx] [recommended] Check crates.io availability for candidate public crate names before renaming skill-harness
+- [ ] [#25k6] [recommended] Keep skill-harness as the current Rust crate/package boundary, or rename only to an available precise crate name such as agent-skillkit/agent-skill-tools after checking registry availability; do not target the taken agent-skills crate name
 - [ ] [#e92b] [recommended] Move compose-skills toward skill-harness/agent-skills with Rust validation and Claude/Codex installer coverage
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm

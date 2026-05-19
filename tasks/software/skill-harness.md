@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -32,7 +32,16 @@ queue_active: true
 Compacted content:
 - Archived 2 response topic(s): compose-skills skill harness; auto queue dispatch
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223...
-<!-- agent:boundary:17695ee6 -->
+❯ What are the #next-steps for composable-skills?
+### Re: composable-skills next steps — gpt-5
+Interpreting this as `compose-skills`, the install/check path is now in good shape. The best next work is to make the planning behavior more deterministic and easier to trust in CI:
+
+1. Add a small harness matrix that installs and checks bundled `compose-skills` across Claude, Codex, OpenCode, and generic temp roots in one command or CI job.
+2. Tighten `compose validate` beyond candidate-name detection: golden diagnostics for missing required sections, weak one-skill-vs-many rationale, and unclear handoff boundaries would catch the real failure modes.
+3. Add one end-to-end example that starts with an oversized workflow prompt, produces the decomposed skill architecture, and shows where implementation hands off to `skill-creator`.
+
+I added those as recommended backlog items here so they can be queued directly later.
+<!-- agent:boundary:3dba9b52 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -43,6 +52,9 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#0nap] [recommended] Add a CI/eval matrix that runs install-dir plus check-dir for bundled compose-skills across Claude, Codex, OpenCode, and generic temp roots.
+- [ ] [#wqew] [recommended] Tighten compose-skills plan validation with golden diagnostics for required sections, one-skill-vs-many rationale, and handoff boundaries to skill-creator.
+- [ ] [#yjgb] [recommended] Add an end-to-end compose-skills example that starts from an oversized workflow prompt, produces a decomposed skill architecture, and documents the expected next skill-creator handoff.
 <!-- /agent:backlog -->
 
 ## Icebox

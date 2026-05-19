@@ -108,13 +108,31 @@ Recommended shape:
 - A separate package only becomes justified if composition gets a distinct CLI/API surface used independently of skill installation, such as a planner that reads a workflow spec and emits multiple skill directories.
 
 So the packaging path I would take is: keep the current Codex skill as the prototype, move the portable source into `skill-harness` / `agent-skills`, replace the validator with Rust, then add installer tests proving the same skill works for Claude Code and Codex. If that starts to outgrow lifecycle management, split it later as something like `agent-skill-compose`, but make that an extraction after the API stabilizes rather than the first move.
-<!-- agent:boundary:fd41527d -->
+❯ Would you recommend using `skill-harness` or creating a `agent-skills` package?
+### Re: agent-skills vs skill-harness — gpt-5
+
+I would create `agent-skills` as the durable package boundary, but I would not start it as unrelated new code. Use `skill-harness` as the seed and migrate/rename/extract from there.
+
+The reason is naming and ownership. `skill-harness` sounds like a test harness or lifecycle utility. But the thing you are describing is broader: a portable skill format, installation across Claude Code/Codex/OpenCode, deterministic validation, composition planning, and eventually maybe generation. That domain wants a first-class package name: `agent-skills`.
+
+The clean shape is:
+
+- `agent-skills`: Rust library plus CLI for the portable skill model, validation, composition checks, install/sync, and harness adapters.
+- `agent-kit`: low-level shared agent environment detection and generic utilities.
+- `agent-doc`: consumer of skills, not owner of the generic skill system.
+- `skill-harness`: either retired, renamed to `agent-skills`, or kept temporarily as a compatibility wrapper around `agent-skills` commands.
+
+So my recommendation is: make `agent-skills` the target package, but implement it by moving the relevant `skill-harness` code and specs forward. Do not maintain both as peer packages long term unless they have a sharp split, such as `agent-skills` owning the library/domain and `skill-harness` only owning eval/test harness behavior. If there is no separate eval harness product, the `skill-harness` name should go away.
+
+For `compose-skills`, that means the Rust validator and portable source layout should land under `agent-skills`, with tests proving installs into `.claude/skills/compose-skills/SKILL.md` and the Codex skill layout. That gives you the no-runtime installability path and avoids baking a generic skill design system into a Codex-only directory.
+<!-- agent:boundary:fb557798 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:pending -->
+- [ ] [#25k6] [recommended] Create or rename toward an agent-skills crate/package, using skill-harness as the migration source and keeping compatibility shims if needed
 - [ ] [#e92b] [recommended] Move compose-skills toward skill-harness/agent-skills with Rust validation and Claude/Codex installer coverage
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm

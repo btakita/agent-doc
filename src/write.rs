@@ -3970,6 +3970,72 @@ const SHRINK_GUARD_MIN_BYTES: usize = 100;
 /// If the new exchange content is less than this fraction of the old, refuse.
 const SHRINK_GUARD_MAX_RATIO: f64 = 0.10;
 
+/// Minimum size delta before stale snapshot reset drift is considered dangerous.
+const STALE_SNAPSHOT_RESET_DRIFT_MIN_BYTES: usize = 100;
+
+/// Maximum current/snapshot size ratio for reset-drift detection.
+const STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO: f64 = 0.90;
+
+fn stale_snapshot_reset_drift(snapshot_doc: &str, current_doc: &str) -> Option<(usize, usize)> {
+    let snapshot_clean = strip_boundary_for_dedup(snapshot_doc);
+    let current_clean = strip_boundary_for_dedup(current_doc);
+    let snapshot_len = snapshot_clean.len();
+    let current_len = current_clean.len();
+
+    if snapshot_len <= current_len + STALE_SNAPSHOT_RESET_DRIFT_MIN_BYTES {
+        return None;
+    }
+    if current_len as f64 / snapshot_len as f64 >= STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO {
+        return None;
+    }
+    if crate::git::classify_safe_out_of_band_agent_doc_mutation(&snapshot_clean, &current_clean)
+        .is_some()
+    {
+        return None;
+    }
+
+    Some((snapshot_len, current_len))
+}
+
+pub(crate) fn guard_no_stale_snapshot_reset_drift(
+    file: &Path,
+    snapshot_doc: Option<&str>,
+    current_doc: &str,
+    phase: &str,
+) -> Result<()> {
+    let Some(snapshot_doc) = snapshot_doc else {
+        return Ok(());
+    };
+    if let Ok(Some(cleaned)) =
+        crate::template::deleted_conversation_tail_cleanup(snapshot_doc, current_doc)
+        && cleaned == current_doc
+    {
+        return Ok(());
+    }
+    let Some((snapshot_len, current_len)) = stale_snapshot_reset_drift(snapshot_doc, current_doc)
+    else {
+        return Ok(());
+    };
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "stale_snapshot_reset_drift_blocked file={} phase={} snap_len={} file_len={}",
+            file.display(),
+            phase,
+            snapshot_len,
+            current_len
+        ),
+    );
+    anyhow::bail!(
+        "refusing {phase} for {}: snapshot is {} bytes but the visible file is {} bytes, which looks like a manual cleanup with stale snapshot/CRDT state. Reset the sidecars from the current file before writing: `agent-doc reset --from-current {}`",
+        file.display(),
+        snapshot_len,
+        current_len,
+        file.display()
+    );
+}
+
 /// Guard against accidental exchange content truncation.
 ///
 /// Compares the exchange component content in the current file against the
@@ -4652,6 +4718,13 @@ pub fn run_template(
 
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    let snapshot_doc = snapshot::load(file).ok().flatten();
+    guard_no_stale_snapshot_reset_drift(
+        file,
+        snapshot_doc.as_deref(),
+        &current_content,
+        "template write",
+    )?;
     sanitize_template_patchback_response_for_write(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
@@ -4873,6 +4946,13 @@ pub fn run_stream(
 
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    let snapshot_doc = snapshot::load(file).ok().flatten();
+    guard_no_stale_snapshot_reset_drift(
+        file,
+        snapshot_doc.as_deref(),
+        &current_content,
+        "stream write",
+    )?;
     sanitize_template_patchback_response_for_write(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
@@ -5021,7 +5101,6 @@ pub fn run_stream(
             // Uses the snapshot (loaded above) to identify new lines.
             // Compute normalization targets for the IPC plugin so the editor also shows
             // the prefix immediately (not just the snapshot).
-            let snapshot_doc = snapshot::load(file).ok().flatten();
             let normalize_prefix_lines: Vec<String> = if let Some(ref snap) = snapshot_doc {
                 let before = content_ours.clone();
                 content_ours =
@@ -5350,7 +5429,6 @@ pub fn run_stream(
 
     // Normalize user input in exchange: add ❯  prefix to user-added lines.
     // Load snapshot to identify which lines are new (user-typed this cycle).
-    let snapshot_doc = snapshot::load(file).ok().flatten();
     if let Some(ref snap) = snapshot_doc {
         content_ours = normalize_user_prompts_in_exchange_safe(&content_ours, base, snap, file);
     }
@@ -5553,6 +5631,13 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
 
     let current_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    let snapshot_doc = snapshot::load(file).ok().flatten();
+    guard_no_stale_snapshot_reset_drift(
+        file,
+        snapshot_doc.as_deref(),
+        &current_content,
+        "IPC write",
+    )?;
     sanitize_template_patchback_response_for_write(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
@@ -5728,7 +5813,6 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     }
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
-    let snapshot_doc = snapshot::load(file).ok().flatten();
     let (final_content, crdt_state) = if content_current == base {
         let doc = crate::crdt::CrdtDoc::from_text(&content_ours);
         (content_ours.clone(), doc.encode_state())
@@ -10417,6 +10501,45 @@ do #next. spec-test-build-install-commit-push
         assert!(
             result.is_ok(),
             "shrink guard should pass when no exchange component exists"
+        );
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_blocks_large_snapshot_only_content() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let stale_exchange = "duplicated response\n".repeat(20);
+        let snapshot = format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{}<!-- /agent:exchange -->\n",
+            stale_exchange
+        );
+        let current = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\nclean\n<!-- /agent:exchange -->\n";
+
+        let result =
+            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "stream write");
+
+        let message = result
+            .expect_err("stale larger snapshot must fail closed")
+            .to_string();
+        assert!(
+            message.contains("agent-doc reset --from-current"),
+            "recovery guidance should name deterministic sidecar reset: {message}"
+        );
+    }
+
+    #[test]
+    fn stale_snapshot_reset_drift_allows_small_size_delta() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let snapshot = "a".repeat(1000);
+        let current = "b".repeat(940);
+
+        let result =
+            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), &current, "stream write");
+
+        assert!(
+            result.is_ok(),
+            "minor snapshot/file size drift should not block writes"
         );
     }
 

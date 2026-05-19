@@ -71,7 +71,7 @@ Two modes:
 
 ## reset
 
-`agent-doc reset <FILE>` clears the saved session id and deletes the snapshot for the document.
+`agent-doc reset <FILE>` clears the saved session id and deletes the snapshot/CRDT state for the document. `agent-doc reset --from-current <FILE>` clears the saved session id and rebuilds both sidecars from the current visible markdown, which is the recovery path after manually cleaning a document whose persisted snapshot/CRDT state is stale.
 
 ## clean
 

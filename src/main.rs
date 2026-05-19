@@ -379,10 +379,13 @@ enum Commands {
         #[arg(long)]
         to: Option<String>,
     },
-    /// Clear session ID and delete snapshot
+    /// Clear session ID and delete or rebuild snapshot state
     Reset {
         /// Path to the session document
         file: PathBuf,
+        /// Rebuild snapshot and CRDT state from the current visible markdown
+        #[arg(long)]
+        from_current: bool,
     },
     /// Squash session git history into one commit
     Clean {
@@ -1481,7 +1484,7 @@ fn main() -> anyhow::Result<()> {
                 diff::run(&file, wait)
             }
         }
-        Commands::Reset { file } => reset::run(&file),
+        Commands::Reset { file, from_current } => reset::run(&file, from_current),
         Commands::Clean { file, archive } => clean::run(&file, archive),
         Commands::AuditDocs { root } => audit_docs::run(root.as_deref()),
         Commands::Gc { root, dry_run } => {

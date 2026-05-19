@@ -47,9 +47,10 @@ Preview the unified diff that would be sent on the next run. Useful for checking
 
 ```
 agent-doc reset <FILE>
+agent-doc reset --from-current <FILE>
 ```
 
-Clear the session ID from frontmatter and delete the snapshot. The next run starts a fresh session.
+Clear the session ID from frontmatter and delete the snapshot/CRDT sidecars. Use `--from-current` after manually cleaning a corrupted document; it rebuilds the snapshot and CRDT state from the visible markdown so old sidecars cannot resurrect stale content.
 
 ## clean
 

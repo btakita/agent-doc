@@ -1138,7 +1138,7 @@ fn classify_safe_agent_doc_mutation(
     }
 }
 
-fn classify_safe_out_of_band_agent_doc_mutation(
+pub(crate) fn classify_safe_out_of_band_agent_doc_mutation(
     snapshot_doc: &str,
     file_doc: &str,
 ) -> Option<&'static str> {
@@ -1473,6 +1473,12 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             file_len
         ),
     );
+    crate::write::guard_no_stale_snapshot_reset_drift(
+        file,
+        snapshot_content.as_deref(),
+        &file_content,
+        "commit",
+    )?;
 
     let repaired_committed_historical =
         if let Some(reason) = repair_committed_historical_snapshot_drift(file)? {

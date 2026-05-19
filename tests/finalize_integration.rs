@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -77,6 +78,14 @@ fn write_baseline(root: &Path, content: &str) -> PathBuf {
     let baseline = root.join("baseline.md");
     fs::write(&baseline, content).unwrap();
     baseline
+}
+
+fn crdt_path(root: &Path, doc: &Path) -> PathBuf {
+    let canonical = doc.canonicalize().unwrap();
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    let hash = hex::encode(hasher.finalize());
+    root.join(".agent-doc/crdt").join(format!("{hash}.yrs"))
 }
 
 fn head_blob(root: &Path) -> String {
@@ -277,6 +286,121 @@ fn stream_ipc_timeout_commit_removes_fallback_patch_file() {
         !claimed_entries.is_empty(),
         "timeout fallback should leave a claimed-patch sentinel for any watcher that already saw the file"
     );
+}
+
+#[test]
+fn ipc_timeout_fallback_uses_baseline_not_stale_crdt_state() {
+    let tmp = TempDir::new().unwrap();
+    for subdir in [
+        "patches",
+        "snapshots",
+        "crdt",
+        "locks",
+        "pending",
+        "pre-response",
+    ] {
+        fs::create_dir_all(tmp.path().join(".agent-doc").join(subdir)).unwrap();
+    }
+    let doc = tmp.path().join("session.md");
+    let base = concat!(
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ Existing prompt\n",
+        "<!-- agent:boundary:base1234 -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Backlog\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#keep] Keep this backlog item\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    let current = base.replace(
+        "<!-- agent:boundary:base1234 -->",
+        "while typing note\n<!-- agent:boundary:base1234 -->",
+    );
+    let stale = concat!(
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ Existing prompt\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    fs::write(&doc, base).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    fs::write(&doc, &current).unwrap();
+    let baseline = write_baseline(tmp.path(), base);
+    let stale_doc = agent_doc::crdt::CrdtDoc::from_text(stale);
+    fs::write(crdt_path(tmp.path(), &doc), stale_doc.encode_state()).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--ipc",
+            "--commit",
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: ipc stale crdt — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: ipc stale crdt — gpt-5"));
+    assert!(content.contains("while typing note"));
+    assert_eq!(
+        content.matches("[#keep] Keep this backlog item").count(),
+        1,
+        "IPC timeout fallback must not replay shared document structure from stale CRDT state"
+    );
+}
+
+#[test]
+fn malformed_patchback_is_rejected_instead_of_appended_as_unmatched() {
+    let tmp = TempDir::new().unwrap();
+    for subdir in ["snapshots", "crdt", "locks", "pending"] {
+        fs::create_dir_all(tmp.path().join(".agent-doc").join(subdir)).unwrap();
+    }
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ Please reply\n",
+        "<!-- agent:boundary:base1234 -->\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let baseline = write_baseline(tmp.path(), content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--template",
+            "--commit",
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: malformed — gpt-5\nbody without closing patch\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "malformed template patchback: found patch/replace markers but no closed patch blocks parsed",
+        ));
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(!after.contains("### Re: malformed"));
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(ops.contains("template_patchback_malformed_rejected"));
+    assert!(ops.contains("reason=patch_markers_without_closed_blocks"));
 }
 
 #[test]

@@ -2492,6 +2492,80 @@ fn sanitize_template_patchback_response_for_write(response: &mut String) -> Resu
     }
 }
 
+fn patchback_marker_count_outside_code(response: &str) -> usize {
+    let code_ranges = crate::component::find_code_ranges(response);
+    let markers = [
+        "<!-- patch:",
+        "<!-- /patch:",
+        "<!-- replace:",
+        "<!-- /replace:",
+    ];
+    let mut count = 0usize;
+    for marker in markers {
+        let mut search_from = 0usize;
+        while let Some(rel) = response[search_from..].find(marker) {
+            let pos = search_from + rel;
+            if !code_ranges
+                .iter()
+                .any(|&(start, end)| pos >= start && pos < end)
+            {
+                count += 1;
+            }
+            search_from = pos + marker.len();
+        }
+    }
+    count
+}
+
+fn validate_template_patchback_parse_shape(
+    file: &Path,
+    response: &str,
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+    source: &str,
+) -> Result<()> {
+    let marker_count = patchback_marker_count_outside_code(response);
+    if marker_count == 0 {
+        return Ok(());
+    }
+    let exchange_patches = patches
+        .iter()
+        .filter(|patch| patch.name == "exchange")
+        .count();
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "template_patchback_parse_shape file={} source={} response_hash={} markers={} patches={} exchange_patches={} unmatched_len={}",
+            file.display(),
+            source,
+            crate::ops_log::content_hash(response),
+            marker_count,
+            patches.len(),
+            exchange_patches,
+            unmatched.trim().len()
+        ),
+    );
+
+    if patches.is_empty() && !unmatched.trim().is_empty() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "template_patchback_malformed_rejected file={} source={} response_hash={} markers={} unmatched_len={} reason=patch_markers_without_closed_blocks",
+                file.display(),
+                source,
+                crate::ops_log::content_hash(response),
+                marker_count,
+                unmatched.trim().len()
+            ),
+        );
+        anyhow::bail!(
+            "malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content"
+        );
+    }
+
+    Ok(())
+}
+
 /// Resolve the IPC project root for `canonical` (an already-canonicalized file
 /// path). Uses the nearest `.agent-doc/` directory to match the IDE plugin's
 /// `resolveRootFor` logic — submodule documents use the submodule's own
@@ -4585,6 +4659,7 @@ pub fn run_template(
     // Parse patch blocks from response
     let (mut patches, mut unmatched) =
         template::parse_patches(&response).context("failed to parse patch blocks from response")?;
+    validate_template_patchback_parse_shape(file, &response, &patches, &unmatched, "run_template")?;
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
@@ -4808,6 +4883,7 @@ pub fn run_stream(
     // Parse patch blocks from response
     let (mut patches, mut unmatched) =
         template::parse_patches(&response).context("failed to parse patch blocks from response")?;
+    validate_template_patchback_parse_shape(file, &response, &patches, &unmatched, "run_stream")?;
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
@@ -5484,6 +5560,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     // Parse patch blocks from response
     let (mut patches, mut unmatched) =
         template::parse_patches(&response).context("failed to parse patch blocks from response")?;
+    validate_template_patchback_parse_shape(file, &response, &patches, &unmatched, "run_ipc")?;
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
@@ -5649,7 +5726,6 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         content_ours = crate::frontmatter::merge_fields(&content_ours, yaml)
             .context("failed to apply frontmatter patch")?;
     }
-    let doc_lock = acquire_doc_lock(file)?;
     let content_current = std::fs::read_to_string(file)
         .with_context(|| format!("failed to re-read {}", file.display()))?;
     let snapshot_doc = snapshot::load(file).ok().flatten();
@@ -5671,8 +5747,13 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         (repaired_current, doc.encode_state())
     } else {
         eprintln!("[write] File was modified during response generation. CRDT merging...");
-        let crdt_state = snapshot::load_crdt(file)?;
-        match merge::merge_contents_crdt(crdt_state.as_deref(), &content_ours, &content_current) {
+        // Match the normal stream write path: the explicit/locked baseline is
+        // the common ancestor for this response cycle. The persisted `.yrs`
+        // sidecar may be stale relative to that baseline when the editor timed
+        // out while the user was typing, and using it here can replay old
+        // document content as a fresh concurrent insertion.
+        let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
+        match merge::merge_contents_crdt(Some(&base_state), &content_ours, &content_current) {
             Ok(merged) => merged,
             Err(e) => {
                 eprintln!(
@@ -5763,6 +5844,13 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
 
     let (mut patches, mut unmatched) =
         template::parse_patches(&response).context("failed to parse patch blocks from response")?;
+    validate_template_patchback_parse_shape(
+        file,
+        &response,
+        &patches,
+        &unmatched,
+        "apply_template_from_string",
+    )?;
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
@@ -6270,6 +6358,22 @@ pub fn try_ipc(
                 socket_payload["fullContent"] = serde_json::Value::String(ours.to_string());
             }
         }
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "ipc_socket_attempt file={} hash={} patch_id={} patches={} ipc_patches={} unmatched_len={} effective_unmatched_len={} baseline_len={} normalize_targets={} unmatched_marker_count={}",
+                file.display(),
+                hash,
+                patch_id,
+                patches.len(),
+                ipc_patches_json.len(),
+                unmatched.trim().len(),
+                effective_unmatched_socket.len(),
+                baseline.map(str::len).unwrap_or(0),
+                normalize_prefix_lines.map(|lines| lines.len()).unwrap_or(0),
+                patchback_marker_count_outside_code(unmatched)
+            ),
+        );
         // Pre-write fallback patch file before socket send. If socket delivery
         // succeeds but sidecar ack times out, the file watcher can recover the
         // response from this file. patch_id dedup prevents double-apply when
@@ -6355,6 +6459,22 @@ pub fn try_ipc(
                         "[write] snapshot from {} ({} bytes)",
                         snap_source,
                         effective_snap.len()
+                    );
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "ipc_socket_ack_content file={} patch_id={} snap_source={} sidecar_len={} sidecar_hash={} disk_len={} disk_hash={}",
+                            file.display(),
+                            patch_id,
+                            snap_source,
+                            effective_snap.len(),
+                            crate::ops_log::content_hash(&effective_snap),
+                            ipc_before_content.as_deref().map(str::len).unwrap_or(0),
+                            ipc_before_content
+                                .as_deref()
+                                .map(crate::ops_log::content_hash)
+                                .unwrap_or_else(|| "-".to_string())
+                        ),
                     );
                     if let Some(ref path) = fallback_patch_file {
                         let _ = std::fs::remove_file(path);

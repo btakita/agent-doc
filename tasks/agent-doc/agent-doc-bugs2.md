@@ -34,13 +34,23 @@ Added prioritized FlowCore refactor next steps. Top backlog item: #rte4.
 Compacted content:
 - Archived 1 response topic(s): FlowCore next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-synchronous orchestara
-dispatch #spec-test-build-install-commit-push
-- do [#rte4]
-- do [#mut3]
-- do [#clo3]
-- do [#cyc2]
-<!-- agent:boundary:7fdb0f22 -->
+
+❯ do [#rte4]
+❯ synchronous orchestara
+❯ dispatch #spec-test-build-install-commit-push
+❯ - do [#rte4]
+❯ - do [#mut3]
+❯ - do [#clo3]
+❯ - do [#cyc2]
+### Re: routed-reopen FlowCore slice — gpt-5.5
+Completed #rte4.
+
+I extracted the authoritative actor routed-reopen slice into `flow::routed_reopen`: ready-wait facts/logging, retry budgets, delivery-action classification, recovery hints, and dispatch-start proof typing now live in FlowCore. `route.rs` now adapts tmux/supervisor/controller facts into those typed helpers and performs only the selected side effect.
+
+Updated the session-actor spec and Unreleased notes. Verification passed: `cargo check`, `cargo test routed_reopen`, `make check`, `cargo build`, and `cargo install --path .`. Latest GitHub CI run `26130637848` was green, including `Run make tmux-ci`, so no local tmux rerun was required.
+
+Committed and pushed submodule commit `3beb84b0` to `btakita/agent-doc` branch `20260422/codex-agent-backend`, then committed and pushed parent gitlink commit `3737e8cce` to `btakita/agent-loop` `main`.
+<!-- agent:boundary:902a9b92 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,7 +62,6 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rte4] Extract the next routed-reopen slice into FlowCore: move the remaining authoritative actor readiness, retry budget, delivery-mode, and dispatch-proof classification out of route.rs into flow::routed_reopen pure helpers and ports; leave route.rs as tmux/supervisor I/O only. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#mut3] Extract document_mutation as the single pre-visible-write gate for patchback shape parsing, prompt ownership normalization, duplicate scaffold/prompt-prefix repair, and malformed plain-response rejection across write, repair, and orchestrate. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#clo3] Extract closeout as the shared terminal-state transaction for IPC, stream, direct finalize, write --commit, and repair so pre-write failures stay recoverable and late fallback writers cannot mutate a committed cycle. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#cyc2] Promote session_cycle from mirror vocabulary to the owner of preflight -> plan -> response capture -> pending-capture -> finalize/session-check outcomes, including prompt-target parsing and pending mutation requirements. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md

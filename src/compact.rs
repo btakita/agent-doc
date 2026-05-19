@@ -232,7 +232,7 @@ fn apply_compacted_document(
     refresh_crdt: bool,
 ) -> Result<()> {
     let mut applied_via_editor = false;
-    match crate::write::try_ipc_full_content(file, compacted) {
+    match crate::write::try_ipc_full_content_operator_mutation(file, compacted) {
         Ok(true) => {
             applied_via_editor = true;
             eprintln!(
@@ -1301,6 +1301,90 @@ mod tests {
         assert!(!ipc_content.contains("### Re: topic one"));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), ipc_content);
         assert_eq!(snapshot::load(&file).unwrap().unwrap(), ipc_content);
+    }
+
+    #[test]
+    fn component_compact_uses_editor_ipc_after_previous_cycle_committed() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let doc = concat!(
+            "---\nagent_doc_session: test-ipc-committed\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n\n",
+            "### Re: topic two\n\nResponse two.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        let patches_dir = agent_doc_dir.join("patches");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(&patches_dir).unwrap();
+        snapshot::save(&file, doc).unwrap();
+        crate::cycle_state::start_preflight(&file, Some(doc), Some(doc)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &file,
+            "test",
+            Some(doc),
+            Some(doc),
+            "fake-sha",
+            None,
+        )
+        .unwrap();
+        crate::cycle_state::mark_write_applied(&file, "test", Some(doc), Some(doc)).unwrap();
+        crate::cycle_state::mark_committed(&file, "test", Some(doc), Some(doc)).unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let watcher_dir = patches_dir.clone();
+        let watcher_file = file.clone();
+        let watcher = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                let Ok(entries) = std::fs::read_dir(&watcher_dir) else {
+                    std::thread::sleep(Duration::from_millis(20));
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let raw = std::fs::read_to_string(&path).unwrap();
+                    let payload: serde_json::Value = serde_json::from_str(&raw).unwrap();
+                    let full_content = payload
+                        .get("fullContent")
+                        .and_then(|value| value.as_str())
+                        .expect("compact IPC payload should carry fullContent")
+                        .to_string();
+                    std::fs::write(&watcher_file, &full_content).unwrap();
+                    std::fs::remove_file(&path).unwrap();
+                    tx.send(full_content).unwrap();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+
+        run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false).unwrap();
+        watcher.join().unwrap();
+        let ipc_content = rx.recv_timeout(Duration::from_secs(1)).expect(
+            "compact should not skip full-content IPC just because a previous cycle is committed",
+        );
+
+        assert!(ipc_content.contains("Compacted summary."));
+        assert!(!ipc_content.contains("### Re: topic one"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), ipc_content);
+        assert_eq!(snapshot::load(&file).unwrap().unwrap(), ipc_content);
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            !ops_log.contains("late_fallback_patch_rejected"),
+            "operator compact is not a stale response fallback"
+        );
     }
 
     #[test]

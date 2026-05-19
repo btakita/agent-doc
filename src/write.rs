@@ -70,7 +70,11 @@
 //!
 //! - `try_ipc_full_content`: like `try_ipc` but sends a full document
 //!   replacement (`fullContent` field) instead of component patches. Used by
-//!   inline-mode documents without component markers.
+//!   inline-mode documents without component markers. The response-fallback
+//!   variant still skips already committed cycles, while
+//!   `try_ipc_full_content_operator_mutation` is available for fresh operator
+//!   mutations such as Compact Exchange that must reach the editor even after
+//!   the previous response cycle is committed.
 //!
 //! - `try_ipc_reposition_boundary`: fire-and-forget IPC signal with the exact
 //!   committed exchange `boundary_id`. Normalizes the editor buffer back to the
@@ -6792,15 +6796,28 @@ pub fn try_ipc(
         &ipc_payload,
         file,
         ipc_patches.len(),
-        content_ours,
-        normalize_prefix_lines,
-        &project_root,
+        IpcPollOptions {
+            content_ours,
+            normalize_prefix_lines,
+            project_root: &project_root,
+            guard_committed_cycle: true,
+        },
     )?;
     Ok(IpcResult {
         success,
         patch_id,
         skipped_committed_cycle: false,
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FullContentIpcMode {
+    /// Late fallback repair for an agent response. Must not dirty an already
+    /// committed cycle.
+    ResponseFallback,
+    /// Operator-owned replacement such as Compact Exchange. This is a new
+    /// document mutation even when the previous response cycle is committed.
+    OperatorMutation,
 }
 
 /// Attempt to write full document content via IPC.
@@ -6812,11 +6829,25 @@ pub fn try_ipc(
 /// Returns `Ok(true)` if the plugin consumed the patch, `Ok(false)` on timeout.
 #[allow(dead_code)]
 pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
+    try_ipc_full_content_with_mode(file, content, FullContentIpcMode::ResponseFallback)
+}
+
+pub fn try_ipc_full_content_operator_mutation(file: &Path, content: &str) -> Result<bool> {
+    try_ipc_full_content_with_mode(file, content, FullContentIpcMode::OperatorMutation)
+}
+
+fn try_ipc_full_content_with_mode(
+    file: &Path,
+    content: &str,
+    mode: FullContentIpcMode,
+) -> Result<bool> {
     let canonical = file.canonicalize()?;
     let project_root = resolve_ipc_project_root(&canonical);
     let before_content = std::fs::read_to_string(file).ok();
 
-    if let Some(ref cycle_id) = cycle_already_committed(file) {
+    if mode == FullContentIpcMode::ResponseFallback
+        && let Some(ref cycle_id) = cycle_already_committed(file)
+    {
         eprintln!(
             "[write] full-content IPC skipped: cycle {} already committed for {}",
             cycle_id,
@@ -6901,10 +6932,20 @@ pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
         &ipc_payload,
         file,
         0,
-        Some(content),
-        None,
-        &project_root,
+        IpcPollOptions {
+            content_ours: Some(content),
+            normalize_prefix_lines: None,
+            project_root: &project_root,
+            guard_committed_cycle: mode == FullContentIpcMode::ResponseFallback,
+        },
     )
+}
+
+struct IpcPollOptions<'a> {
+    content_ours: Option<&'a str>,
+    normalize_prefix_lines: Option<&'a [String]>,
+    project_root: &'a Path,
+    guard_committed_cycle: bool,
 }
 
 /// Send a reposition-only IPC signal to the plugin.
@@ -6997,9 +7038,7 @@ fn write_ipc_and_poll(
     payload: &serde_json::Value,
     doc_file: &Path,
     patch_count: usize,
-    content_ours: Option<&str>,
-    normalize_prefix_lines: Option<&[String]>,
-    project_root: &Path,
+    options: IpcPollOptions<'_>,
 ) -> Result<bool> {
     let before_content = std::fs::read_to_string(doc_file).ok();
     // Atomic write of patch file
@@ -7017,7 +7056,9 @@ fn write_ipc_and_poll(
     let start = std::time::Instant::now();
 
     while start.elapsed() < timeout {
-        if let Some(ref cycle_id) = cycle_already_committed(doc_file) {
+        if options.guard_committed_cycle
+            && let Some(ref cycle_id) = cycle_already_committed(doc_file)
+        {
             eprintln!(
                 "[write] IPC poll skipped: cycle {} already committed for {}",
                 cycle_id,
@@ -7043,18 +7084,18 @@ fn write_ipc_and_poll(
                 .unwrap_or("");
             let current_on_disk = if !patch_id.is_empty() {
                 match poll_ack_content_sidecar(
-                    project_root,
+                    options.project_root,
                     patch_id,
                     std::time::Duration::from_millis(500),
                     std::time::Duration::from_millis(25),
                 ) {
                     Ok(Some(content)) => {
                         // Verify sidecar preserved normalize_prefix_lines targets.
-                        if let Some(lines) = normalize_prefix_lines
+                        if let Some(lines) = options.normalize_prefix_lines
                             && !lines.is_empty()
                             && !verify_sidecar_normalization(&content, lines)
                         {
-                            if let Some(ours) = content_ours {
+                            if let Some(ours) = options.content_ours {
                                 let baseline = payload
                                     .get("baseline")
                                     .and_then(|value| value.as_str())

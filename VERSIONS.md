@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Compact Exchange IPC is no longer blocked by committed response-cycle state.** The compact command now sends its full-document replacement through an operator-mutation IPC path, so JetBrains can apply Compact Exchange through the Document API even after the prior agent-doc response is already committed instead of falling back to a direct disk write and surfacing an external-file-change dialog. Added a regression for committed-cycle Compact Exchange IPC and refreshed the shared editor spec.
+
 - **Clear Session Context recognizes the default Codex idle placeholder.** The operator status/clear readiness path now treats `› Ask Codex to do anything` plus the Codex model/cwd/context footer as an idle composer, so JetBrains Clear Session Context does not fail closed with `current_command=agent-doc prompt_ready=false` when the pane is only showing the default Codex placeholder/status UI. Drafted prompt input, queued drafts, and shell search still fail closed and point to `session interrupt-clear`.
 
 - **Starting actor route timeouts now coalesce per generation.** When repeated editor reroutes hit the same authoritative actor pane while that current generation is still booting, route now records one typed `route_authoritative_actor_starting_not_ready` timeout for that pane/generation and logs later retries as coalesced waits until the actor reaches ready, closed, or blocked. Added route-state regressions plus SimWorld coverage for the repeated-starting-timeout schedule. This closes `#rtbr` in `tasks/agent-doc/agent-doc-bugs2.md`.

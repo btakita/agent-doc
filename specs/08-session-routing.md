@@ -70,7 +70,7 @@ Last-call-wins: any `claim` overwrites the previous mapping for that document's 
 
 **Failed fresh-start cleanup guard:** If route creates a new pane, registers it, and later fails closed because fresh-start acknowledgment was not observed, cleanup must preserve that pane when it is still the live registered owner for the document. The operator should see the startup-ack failure, not a killed pane.
 
-The starting-actor wait decision is conjunctive: route continues through `starting`, through restart-bootstrap `busy`, and through `ready` without prompt proof; only `ready` plus dispatch-ready prompt proof plus dispatch eligibility may release the route.
+The starting-actor wait decision is conjunctive: route continues through `starting`, through restart-bootstrap `busy`, and through `ready` without prompt proof; only `ready` plus dispatch-ready prompt proof plus dispatch eligibility may release the route. If that wait times out, the timeout is keyed by document, pane, and actor generation so repeated editor reroutes produce one `route_authoritative_actor_starting_not_ready` diagnostic for the stuck generation and only coalesced wait telemetry until the actor reaches `ready`, `closed`, or `blocked` or a different pane/generation becomes authoritative.
 
 ## Stash Window Routing
 

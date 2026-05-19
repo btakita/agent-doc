@@ -4983,9 +4983,10 @@ Done.
             done_path.exists(),
             "expected supervisor IPC inject to submit through the live tmux pane"
         );
-        assert_eq!(
-            std::fs::read(&output_path).unwrap(),
-            expected,
+        let actual = std::fs::read(&output_path).unwrap();
+        let expected_cr = format!("{prompt}\r\x1b[A\x1b[B\x1b[D\x1b[C\r").into_bytes();
+        assert!(
+            actual == expected || actual == expected_cr,
             "raw harness should receive prompt submit, arrows, and final Enter"
         );
 

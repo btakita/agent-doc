@@ -237,6 +237,7 @@ struct RouteModel {
     durable: ActorState,
     projection: ActorState,
     pending_dispatch: Option<DispatchReceipt>,
+    starting_timeout: Option<(u64, String)>,
 }
 
 impl RouteModel {
@@ -246,6 +247,7 @@ impl RouteModel {
             projection: durable.clone(),
             durable,
             pending_dispatch: None,
+            starting_timeout: None,
         }
     }
 }
@@ -267,6 +269,8 @@ struct Coverage {
     route_dispatch_proofs: usize,
     session_clears: usize,
     starting_dispatch_blocks: usize,
+    starting_timeout_records: usize,
+    starting_timeout_coalesces: usize,
     prompt_duplicate_repairs: usize,
     starting_prompt_promotions: usize,
     busy_dispatch_blocks: usize,
@@ -342,6 +346,8 @@ impl Coverage {
         self.route_dispatch_proofs += other.route_dispatch_proofs;
         self.session_clears += other.session_clears;
         self.starting_dispatch_blocks += other.starting_dispatch_blocks;
+        self.starting_timeout_records += other.starting_timeout_records;
+        self.starting_timeout_coalesces += other.starting_timeout_coalesces;
         self.prompt_duplicate_repairs += other.prompt_duplicate_repairs;
         self.starting_prompt_promotions += other.starting_prompt_promotions;
         self.busy_dispatch_blocks += other.busy_dispatch_blocks;
@@ -749,12 +755,27 @@ impl SimWorld {
         if projection_was_current {
             self.route.projection.lifecycle = lifecycle;
         }
+        if matches!(
+            lifecycle,
+            SupervisorLifecycle::Ready | SupervisorLifecycle::Closed | SupervisorLifecycle::Blocked
+        ) {
+            self.route.starting_timeout = None;
+        }
         self.coverage.supervisor_lifecycle_updates += 1;
         Ok(())
     }
 
     fn dispatch_route_prompt(&mut self) -> Result<()> {
         let pane_id = self.current_dispatch_pane()?;
+        if self.route.durable.lifecycle == SupervisorLifecycle::Starting {
+            let current = (self.route.durable.generation, pane_id.clone());
+            if self.route.starting_timeout.as_ref() == Some(&current) {
+                self.coverage.starting_timeout_coalesces += 1;
+            } else {
+                self.route.starting_timeout = Some(current);
+                self.coverage.starting_timeout_records += 1;
+            }
+        }
         if self.route.durable.lifecycle != SupervisorLifecycle::Ready {
             bail!(
                 "supervisor lifecycle {:?} cannot accept route dispatch; seed={} trace={:?}",
@@ -1533,6 +1554,25 @@ fn route_sim_blocks_starting_to_busy_bootstrap_until_current_ready_prompt() {
     assert_eq!(world.coverage.route_dispatch_acceptances, 0);
 
     world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::ProveDispatchAccepted).unwrap();
+
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+    assert_eq!(world.coverage.route_dispatch_proofs, 1);
+}
+
+#[test]
+fn route_sim_coalesces_repeated_starting_timeouts_for_same_generation() {
+    let mut world = SimWorld::new(2_009);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+
+    assert_eq!(world.coverage.starting_timeout_records, 1);
+    assert_eq!(world.coverage.starting_timeout_coalesces, 1);
+    assert_eq!(world.coverage.route_dispatch_acceptances, 0);
+
+    world.apply(SimCommand::PromoteStartingPromptReady).unwrap();
     world.apply(SimCommand::DispatchRoutePrompt).unwrap();
     world.apply(SimCommand::ProveDispatchAccepted).unwrap();
 

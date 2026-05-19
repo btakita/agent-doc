@@ -2602,11 +2602,45 @@ fn load_authoritative_actor_dispatch_target(
     .filter(authoritative_actor_dispatch_target_eligible))
 }
 
+fn load_authoritative_actor_for_registered_pane(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    pane: &str,
+) -> Result<Option<AuthoritativeActorDispatchTarget>> {
+    let base_dir = registry_base_dir_for_dispatch(file_path);
+    let document_id = crate::session_actor::canonical_document_id_in(&base_dir, file_path);
+    let record = crate::project_controller::load_actor_store(&base_dir)?
+        .values()
+        .find(|record| {
+            record.document_id == document_id
+                && record.session_id == session_id
+                && record.pane_id == pane
+        })
+        .cloned();
+    let Some(record) = record else {
+        return Ok(None);
+    };
+    if !tmux.pane_alive(&record.pane_id) {
+        return Ok(None);
+    }
+    Ok(Some(AuthoritativeActorDispatchTarget {
+        record,
+        runtime: query_supervisor_runtime(file, session_id),
+    }))
+}
+
 fn dispatch_only_can_use_degraded_authoritative_actor(
     actor: &AuthoritativeActorDispatchTarget,
     registered: Option<&str>,
     live_owner: Option<&str>,
 ) -> bool {
+    if actor.record.last_transition.caller == "register"
+        && actor.record.last_transition.reason == "register"
+    {
+        return false;
+    }
     let pane = actor.record.pane_id.as_str();
     registered == Some(pane) || live_owner == Some(pane)
 }
@@ -2627,32 +2661,6 @@ fn degraded_authoritative_actor_refusal(
         runtime_actor_state_label(&actor.runtime),
         file.display()
     )
-}
-
-fn degraded_authoritative_actor_requires_restart_before_dispatch(
-    tmux: &Tmux,
-    file: &Path,
-    actor: &AuthoritativeActorDispatchTarget,
-    harness: &HarnessConfig,
-    prompt_bearing_marker: Option<&str>,
-) -> Result<bool> {
-    if !matches!(
-        actor.runtime.health,
-        SupervisorHealth::Unreachable | SupervisorHealth::NoSocket
-    ) {
-        return Ok(false);
-    }
-    match ensure_existing_pane_ready_for_dispatch(
-        tmux,
-        file,
-        &actor.record.pane_id,
-        harness,
-        prompt_bearing_marker,
-    )? {
-        ExistingPaneDispatchReadiness::Ready => Ok(true),
-        ExistingPaneDispatchReadiness::BusyAlreadyRunning
-        | ExistingPaneDispatchReadiness::BusyNeedsAutoFix { .. } => Ok(false),
-    }
 }
 
 fn authoritative_actor_start_wait_terminal_state(state: crate::session_actor::ActorState) -> bool {
@@ -2677,6 +2685,81 @@ fn route_starting_actor_not_ready_log_line(
         elapsed.as_millis(),
         facts.log_fields()
     )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct StartingActorTimeoutRecord {
+    pane_id: String,
+    generation: u64,
+    log_line: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartingActorTimeoutLogDecision {
+    NewTimeout,
+    DuplicateTimeout,
+}
+
+fn starting_actor_timeout_paths(file_path: &str) -> Option<(PathBuf, PathBuf)> {
+    let requested = PathBuf::from(file_path);
+    let root = crate::snapshot::find_project_root(&requested)?;
+    let hash = crate::snapshot::doc_hash_from_str(file_path);
+    let state_dir = root.join(".agent-doc/state/route-starting-timeouts");
+    let lock_dir = root.join(".agent-doc/locks");
+    Some((
+        state_dir.join(format!("{hash}.json")),
+        lock_dir.join(format!("route-starting-timeout-{hash}.lock")),
+    ))
+}
+
+fn record_starting_actor_timeout(
+    file_path: &str,
+    facts: &AuthoritativeActorReadyFacts,
+    log_line: &str,
+) -> Result<StartingActorTimeoutLogDecision> {
+    let Some((state_path, lock_path)) = starting_actor_timeout_paths(file_path) else {
+        return Ok(StartingActorTimeoutLogDecision::NewTimeout);
+    };
+
+    if let Some(parent) = state_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)?;
+    lock.lock_exclusive()?;
+
+    let existing = std::fs::read_to_string(&state_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<StartingActorTimeoutRecord>(&content).ok());
+    if existing.as_ref().is_some_and(|record| {
+        record.pane_id == facts.pane_id && record.generation == facts.generation
+    }) {
+        let _ = lock.unlock();
+        return Ok(StartingActorTimeoutLogDecision::DuplicateTimeout);
+    }
+
+    let record = StartingActorTimeoutRecord {
+        pane_id: facts.pane_id.clone(),
+        generation: facts.generation,
+        log_line: log_line.to_string(),
+    };
+    std::fs::write(&state_path, serde_json::to_string_pretty(&record)?)?;
+    let _ = lock.unlock();
+    Ok(StartingActorTimeoutLogDecision::NewTimeout)
+}
+
+fn clear_starting_actor_timeout_record(file_path: &str) {
+    let Some((state_path, _)) = starting_actor_timeout_paths(file_path) else {
+        return;
+    };
+    let _ = std::fs::remove_file(state_path);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2731,6 +2814,7 @@ fn wait_for_authoritative_actor_ready(
             ) {
                 AuthoritativeActorReadyPollDecision::Ready => {
                     let elapsed_ms = start.elapsed().as_millis();
+                    clear_starting_actor_timeout_record(file_path);
                     crate::ops_log::log_op(
                         file,
                         &format!(
@@ -2745,6 +2829,7 @@ fn wait_for_authoritative_actor_ready(
                 }
                 AuthoritativeActorReadyPollDecision::Terminal => {
                     let elapsed_ms = start.elapsed().as_millis();
+                    clear_starting_actor_timeout_record(file_path);
                     crate::ops_log::log_op(
                         file,
                         &format!(
@@ -2764,10 +2849,33 @@ fn wait_for_authoritative_actor_ready(
     }
 
     let elapsed = start.elapsed();
-    crate::ops_log::log_op(
-        file,
-        &route_starting_actor_not_ready_log_line(file, harness, timeout, elapsed, &last_facts),
-    );
+    let log_line =
+        route_starting_actor_not_ready_log_line(file, harness, timeout, elapsed, &last_facts);
+    match record_starting_actor_timeout(file_path, &last_facts, &log_line) {
+        Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
+            crate::ops_log::log_op(file, &log_line);
+        }
+        Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_starting_actor_timeout_coalesced file={} harness={} elapsed_ms={} {}",
+                    file.display(),
+                    harness.binary,
+                    elapsed.as_millis(),
+                    last_facts.log_fields()
+                ),
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "[route] warning: failed to persist starting actor timeout for {}: {}",
+                file.display(),
+                err
+            );
+            crate::ops_log::log_op(file, &log_line);
+        }
+    }
     Ok(None)
 }
 
@@ -3138,6 +3246,13 @@ fn resolve_or_create_pane_dispatch_only(
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
     let authoritative_actor =
         load_authoritative_actor_binding(tmux, file, session_id, file_path, harness, false, false)?;
+    let registered_actor = if authoritative_actor.is_none() {
+        registered.as_deref().map_or(Ok(None), |pane| {
+            load_authoritative_actor_for_registered_pane(tmux, file, session_id, file_path, pane)
+        })?
+    } else {
+        None
+    };
     if let Some(actor) = authoritative_actor
         .as_ref()
         .filter(|actor| authoritative_actor_dispatch_target_eligible(actor))
@@ -3181,22 +3296,15 @@ fn resolve_or_create_pane_dispatch_only(
         );
     };
 
-    if let Some(actor) = authoritative_actor.as_ref()
+    let degraded_authoritative_actor = authoritative_actor.as_ref().or(registered_actor.as_ref());
+    if let Some(actor) = degraded_authoritative_actor
         && let Some(reason) = authoritative_actor_dispatch_guard_reason(&actor.runtime)
     {
         if dispatch_only_can_use_degraded_authoritative_actor(
             actor,
             registered.as_deref(),
             live_owner.as_deref(),
-        ) && degraded_authoritative_actor_requires_restart_before_dispatch(
-            tmux,
-            file,
-            actor,
-            harness,
-            pending_prompt_context
-                .as_ref()
-                .map(|context| context.marker.as_str()),
-        )? {
+        ) {
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -16636,5 +16744,71 @@ Body\n\
         assert!(line.contains("prompt_ready=false"));
         assert!(line.contains("last_transition_reason=restart_bootstrap"));
         assert!(line.contains("last_transition_caller=start"));
+    }
+
+    #[test]
+    fn starting_actor_timeout_record_coalesces_same_generation_and_pane() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/agent-doc/timeout.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let facts = AuthoritativeActorReadyFacts {
+            pane_id: "%7".to_string(),
+            generation: 42,
+            actor_state: crate::session_actor::ActorState::Starting,
+            supervisor_health: "healthy".to_string(),
+            runtime_state: "starting".to_string(),
+            prompt_ready: false,
+            last_transition_reason: "session_start".to_string(),
+            last_transition_caller: "start".to_string(),
+        };
+
+        assert_eq!(
+            record_starting_actor_timeout(&file_path, &facts, "first timeout").unwrap(),
+            StartingActorTimeoutLogDecision::NewTimeout
+        );
+        assert_eq!(
+            record_starting_actor_timeout(&file_path, &facts, "repeat timeout").unwrap(),
+            StartingActorTimeoutLogDecision::DuplicateTimeout
+        );
+
+        let mut next_generation = facts.clone();
+        next_generation.generation += 1;
+        assert_eq!(
+            record_starting_actor_timeout(&file_path, &next_generation, "next timeout").unwrap(),
+            StartingActorTimeoutLogDecision::NewTimeout
+        );
+    }
+
+    #[test]
+    fn starting_actor_timeout_record_clears_after_ready_or_terminal_refresh() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/agent-doc/timeout-clear.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let facts = AuthoritativeActorReadyFacts {
+            pane_id: "%9".to_string(),
+            generation: 5,
+            actor_state: crate::session_actor::ActorState::Starting,
+            supervisor_health: "healthy".to_string(),
+            runtime_state: "starting".to_string(),
+            prompt_ready: false,
+            last_transition_reason: "session_start".to_string(),
+            last_transition_caller: "start".to_string(),
+        };
+
+        assert_eq!(
+            record_starting_actor_timeout(&file_path, &facts, "first timeout").unwrap(),
+            StartingActorTimeoutLogDecision::NewTimeout
+        );
+        clear_starting_actor_timeout_record(&file_path);
+        assert_eq!(
+            record_starting_actor_timeout(&file_path, &facts, "after clear").unwrap(),
+            StartingActorTimeoutLogDecision::NewTimeout
+        );
     }
 }

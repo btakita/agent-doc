@@ -1392,6 +1392,9 @@ fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) 
 }
 
 fn live_pane_prompt_ready(harness: &crate::harness::HarnessConfig, captured: &str) -> bool {
+    if harness.has_busy_cue(captured) {
+        return false;
+    }
     if harness
         .last_prompt_candidate(captured)
         .is_some_and(|line| harness.is_dispatch_ready_prompt_line(&line))
@@ -1409,7 +1412,7 @@ fn live_pane_bottom_status_is_idle(
     harness: &crate::harness::HarnessConfig,
     captured: &str,
 ) -> bool {
-    if harness.binary != "codex" || harness.has_busy_cue(captured) {
+    if harness.binary != "codex" {
         return false;
     }
     let Some(last_line) = captured
@@ -1992,6 +1995,34 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
             "\
 › Ask Codex to do anything
 gpt-5.5 high · ~/work/btakita/agent-loop · Context 55% used
+"
+        ));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_accepts_codex_write_tests_placeholder() {
+        let harness = crate::harness::HarnessConfig::codex();
+
+        assert!(live_pane_prompt_ready(
+            &harness,
+            "\
+› Write tests for @filename
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
+"
+        ));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_rejects_codex_working_status_above_placeholder() {
+        let harness = crate::harness::HarnessConfig::codex();
+
+        assert!(!live_pane_prompt_ready(
+            &harness,
+            "\
+• Working (1m 34s • esc to interrupt)
+
+› Write tests for @filename
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 "
         ));
     }

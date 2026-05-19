@@ -314,6 +314,13 @@ impl HarnessConfig {
         }
 
         if recent.iter().any(|line| {
+            (line.starts_with("working (") || line.starts_with("• working ("))
+                && line.contains("esc to interrupt")
+        }) {
+            return Some("active codex turn".to_string());
+        }
+
+        if recent.iter().any(|line| {
             line.contains("hook needs review") || line.contains("open /hooks to review")
         }) {
             return Some("codex hook review prompt".to_string());
@@ -625,8 +632,9 @@ fn codex_idle_placeholder_prompt(trimmed: &str) -> Option<String> {
         return None;
     }
 
-    let has_placeholder_target =
-        normalized.ends_with("in @filename") || normalized.ends_with("on my current changes");
+    let has_placeholder_target = normalized.ends_with("in @filename")
+        || normalized.ends_with("for @filename")
+        || normalized.ends_with("on my current changes");
     if !has_placeholder_target {
         return None;
     }
@@ -1205,6 +1213,20 @@ gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
     }
 
     #[test]
+    fn last_prompt_candidate_detects_codex_write_tests_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+› Write tests for @filename
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
+";
+        assert_eq!(
+            h.last_prompt_candidate(output).as_deref(),
+            Some("› Write tests for @filename")
+        );
+        assert!(h.is_dispatch_ready_prompt_line("› Write tests for @filename"));
+    }
+
+    #[test]
     fn last_prompt_candidate_detects_future_codex_idle_placeholder_shape() {
         let h = HarnessConfig::codex();
         let output = "\
@@ -1253,6 +1275,22 @@ gpt-5.4 medium · ~/work/btakita/agent-loop · Context 0% used
 tab to queue message
 gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
 ";
+        assert!(h.has_busy_cue(output));
+    }
+
+    #[test]
+    fn has_busy_cue_detects_codex_working_status_with_idle_placeholder() {
+        let h = HarnessConfig::codex();
+        let output = "\
+• Working (1m 34s • esc to interrupt)
+
+› Write tests for @filename
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("active codex turn")
+        );
         assert!(h.has_busy_cue(output));
     }
 

@@ -340,10 +340,12 @@ single-owner actor controls:
   that shows only Codex status/footer chrome such as the model/cwd/context line,
   with no prompt input or busy cue, is direct idle evidence for operator
   clear/status; Codex idle placeholder prompts such as
-  `› Ask Codex to do anything` and `› Explain this codebase` are also
-  prompt-ready evidence. These idle forms must override stale
-  actor/supervisor busy projection even though route dispatch still requires a
-  real dispatch-ready prompt before injecting a reopen. A
+  `› Ask Codex to do anything`, `› Explain this codebase`, and safe generated
+  placeholders ending in `in @filename`, `for @filename`, or
+  `on my current changes` are also prompt-ready evidence when the pane does not
+  show an active `Working (... esc to interrupt)` cue. These idle forms must
+  override stale actor/supervisor busy projection even though route dispatch
+  still requires a real dispatch-ready prompt before injecting a reopen. A
   `closed` actor generation must still accept this explicit clear operator
   command, because closed only blocks duplicate reopen dispatch; it must not
   prevent clearing the live harness context before the next run.

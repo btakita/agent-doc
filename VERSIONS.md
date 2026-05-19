@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Clear Session Context recognizes Codex's `Write tests for @filename` idle placeholder.** Operator status/clear readiness now treats the current dim Codex suggestion `› Write tests for @filename` as prompt-ready idle evidence, so an `agent-doc` wrapper pane with only that placeholder and the Codex model/cwd/context footer no longer stays classified as `alive-busy prompt_ready=false`. Real drafted input, queued drafts, shell search, active permission prompts, and panes showing `Working (... esc to interrupt)` still fail closed.
+
 - **Codex Stop parent-pointer regression now accepts earlier strict-closeout blocks.** The Stop-hook submodule closeout regression now only requires stale parent gitlink drift when the response commit advanced inside the submodule and the parent-pointer commit is the failing layer. If strict closeout fails earlier before the submodule commit advances, the hook still blocks and preserves tracking, and the spec now states that no parent gitlink drift is required in that branch. This closes `#wnj2` in `tasks/agent-doc/agent-doc-bugs2.md`.
 
 - **Clear Session Context treats an idle Codex footer below old transcript text as idle.** Operator status/clear evidence now accepts a bottom Codex model/cwd/context footer as `prompt_ready=true` even when previous assistant output remains visible above it, while drafted prompt input, queued composer state, and other busy cues still fail closed. Route dispatch still requires a real dispatch-ready prompt before injecting a reopen.

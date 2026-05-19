@@ -148,25 +148,31 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::flow::routed_reopen::{
-    ActorDispatchState, ActorRuntimeHealth, AuthoritativeRuntimeFacts, BusyPaneAutoFixFacts,
+    ActorDispatchState, ActorRuntimeHealth, AuthoritativeActorDispatchAction,
+    AuthoritativeActorDispatchActionFacts, AuthoritativeActorReadyFacts,
+    AuthoritativePromptReadyBarrierFacts, AuthoritativeRuntimeFacts, BusyPaneAutoFixFacts,
     BusyPaneAutoFixOutcome, DegradedAuthoritativeActorFacts, DegradedAuthoritativeActorRefusal,
     DirectPaneSubmitStatus as CommandDispatchStatus, DispatchOnlyProofOutcomeFacts,
     DispatchOnlyProofPolicyFacts, DispatchOnlyReopenDelivery, DispatchStartProofDecision,
-    PromptReadyBarrierDecision, PromptReadyBarrierFacts, ReopenMode, RoutedDispatchStartProof,
-    RoutedReopenFacts, accepted_only_dispatch_start_log_message,
-    accepted_only_dispatch_start_refusal_message, actor_can_queue_optimistically,
-    actor_dispatch_blocker_reason, actor_waiting_input_recoverable,
+    DispatchStartProofFacts, PromptReadyBarrierDecision, ReopenMode, RoutedDispatchStartProof,
+    RoutedReopenFacts, StartingActorLogFacts, accepted_only_dispatch_start_log_message,
+    accepted_only_dispatch_start_refusal_message, actor_dispatch_blocker_reason,
+    actor_recovery_hint,
     authoritative_actor_dispatch_guard_reason as flow_authoritative_actor_dispatch_guard_reason,
+    authoritative_actor_ready_retry_budget,
     busy_existing_pane_auto_fix_outcome as flow_busy_existing_pane_auto_fix_outcome,
-    can_use_degraded_authoritative_actor, classify_prompt_ready_barrier,
-    decide_authoritative_reopen, decide_dispatch_start_proof,
-    degraded_authoritative_actor_refusal_message,
+    can_use_degraded_authoritative_actor, classify_authoritative_actor_dispatch_action,
+    classify_authoritative_prompt_ready_barrier, classify_dispatch_start_proof,
+    decide_authoritative_reopen, degraded_authoritative_actor_refusal_message,
     direct_pane_submit_outcome as flow_direct_pane_submit_outcome,
     dispatch_only_dispatch_start_proof_required as flow_dispatch_only_dispatch_start_proof_required,
     dispatch_only_sent_console_message, dispatch_only_sent_log_message,
+    dispatch_only_starting_pane_ready_retry_budget,
+    dispatch_only_starting_pane_recovery_retry_budget,
     should_print_dispatch_only_unproven_progress as flow_should_print_dispatch_only_unproven_progress,
+    starting_actor_not_ready_log_line, starting_actor_ready_log_line,
+    starting_actor_terminal_log_line, starting_actor_timeout_coalesced_log_line,
 };
-use crate::flow::types::RouteDecision;
 use crate::harness::HarnessConfig;
 use crate::sessions::Tmux;
 use crate::supervisor::ipc::IpcMethod;
@@ -226,50 +232,6 @@ struct AuthoritativeActorDispatchTarget {
 impl AuthoritativeActorDispatchTarget {
     fn actor_state(&self) -> crate::session_actor::ActorState {
         self.runtime.actor_state.unwrap_or(self.record.state)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AuthoritativeActorReadyFacts {
-    pane_id: String,
-    generation: u64,
-    actor_state: crate::session_actor::ActorState,
-    supervisor_health: String,
-    runtime_state: String,
-    prompt_ready: bool,
-    last_transition_reason: String,
-    last_transition_caller: String,
-}
-
-impl AuthoritativeActorReadyFacts {
-    fn from_target(
-        target: &AuthoritativeActorDispatchTarget,
-        prompt_ready: bool,
-    ) -> AuthoritativeActorReadyFacts {
-        AuthoritativeActorReadyFacts {
-            pane_id: target.record.pane_id.clone(),
-            generation: target.record.generation,
-            actor_state: target.actor_state(),
-            supervisor_health: supervisor_health_label(target.runtime.health),
-            runtime_state: runtime_actor_state_label(&target.runtime).to_string(),
-            prompt_ready,
-            last_transition_reason: target.record.last_transition.reason.clone(),
-            last_transition_caller: target.record.last_transition.caller.clone(),
-        }
-    }
-
-    fn log_fields(&self) -> String {
-        format!(
-            "pane={} generation={} actor_state={} supervisor_health={} runtime_state={} prompt_ready={} last_transition_reason={} last_transition_caller={}",
-            self.pane_id,
-            self.generation,
-            self.actor_state.as_str(),
-            self.supervisor_health,
-            self.runtime_state,
-            self.prompt_ready,
-            self.last_transition_reason,
-            self.last_transition_caller
-        )
     }
 }
 
@@ -686,6 +648,22 @@ fn runtime_actor_state_label(runtime: &SupervisorRuntime) -> &'static str {
         .actor_state
         .map(crate::session_actor::ActorState::as_str)
         .unwrap_or("missing")
+}
+
+fn authoritative_actor_ready_facts_from_target(
+    target: &AuthoritativeActorDispatchTarget,
+    prompt_ready: bool,
+) -> AuthoritativeActorReadyFacts {
+    AuthoritativeActorReadyFacts {
+        pane_id: target.record.pane_id.clone(),
+        generation: target.record.generation,
+        actor_state: actor_dispatch_state(target.actor_state()),
+        supervisor_health: supervisor_health_label(target.runtime.health),
+        runtime_state: runtime_actor_state_label(&target.runtime).to_string(),
+        prompt_ready,
+        last_transition_reason: target.record.last_transition.reason.clone(),
+        last_transition_caller: target.record.last_transition.caller.clone(),
+    }
 }
 
 fn authoritative_actor_dispatch_guard_reason(runtime: &SupervisorRuntime) -> Option<String> {
@@ -1521,9 +1499,7 @@ fn dispatch_only_starting_pane_ready_timeout_for_binary(
     binary: Option<&str>,
     test_mode: bool,
 ) -> Duration {
-    crate::flow::routed_reopen::dispatch_only_starting_pane_ready_timeout_for_binary(
-        binary, test_mode,
-    )
+    dispatch_only_starting_pane_ready_retry_budget(binary, test_mode).timeout
 }
 
 fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duration {
@@ -1531,10 +1507,11 @@ fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duratio
 }
 
 fn dispatch_only_starting_pane_recovery_timeout(harness: Option<&HarnessConfig>) -> Duration {
-    crate::flow::routed_reopen::dispatch_only_starting_pane_recovery_timeout_for_binary(
+    dispatch_only_starting_pane_recovery_retry_budget(
         harness.map(|h| h.binary.as_str()),
         cfg!(test),
     )
+    .timeout
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1598,9 +1575,11 @@ fn wait_for_starting_pane_recovery_target(
     initial_status: Option<&crate::startup_miss::SessionLogStatus>,
 ) -> Option<StartingPaneRecoveryTarget> {
     let registry_base_dir = registry_base_dir_for_dispatch(file_path);
-    let deadline =
-        std::time::Instant::now() + dispatch_only_starting_pane_recovery_timeout(Some(harness));
-    let poll = Duration::from_millis(100);
+    let budget = dispatch_only_starting_pane_recovery_retry_budget(
+        Some(harness.binary.as_str()),
+        cfg!(test),
+    );
+    let deadline = std::time::Instant::now() + budget.timeout;
 
     while std::time::Instant::now() < deadline {
         let current_status = crate::startup_miss::session_log_status(file, session_id)
@@ -1630,7 +1609,7 @@ fn wait_for_starting_pane_recovery_target(
             _ => {}
         }
 
-        std::thread::sleep(poll);
+        std::thread::sleep(budget.poll_interval);
     }
 
     None
@@ -1860,9 +1839,11 @@ fn require_dispatch_only_dispatch_start_proof(
     dispatch_start: RoutedDispatchStartProof,
 ) -> Result<()> {
     let proof_required = dispatch_only_dispatch_start_proof_required(file, harness);
-    if decide_dispatch_start_proof(dispatch_start, proof_required)
-        == DispatchStartProofDecision::Accepted
-    {
+    let classification = classify_dispatch_start_proof(DispatchStartProofFacts {
+        proof: dispatch_start,
+        dispatch_start_proof_required: proof_required,
+    });
+    if classification.decision == DispatchStartProofDecision::Accepted {
         return Ok(());
     }
 
@@ -2602,14 +2583,14 @@ fn route_starting_actor_not_ready_log_line(
     elapsed: Duration,
     facts: &AuthoritativeActorReadyFacts,
 ) -> String {
-    format!(
-        "route_authoritative_actor_starting_not_ready file={} harness={} timeout_ms={} elapsed_ms={} {}",
-        file.display(),
-        harness.binary,
-        timeout.as_millis(),
-        elapsed.as_millis(),
-        facts.log_fields()
-    )
+    let file_display = file.display().to_string();
+    starting_actor_not_ready_log_line(StartingActorLogFacts {
+        file_display: file_display.as_str(),
+        harness_binary: harness.binary.as_str(),
+        timeout,
+        elapsed,
+        ready_facts: facts,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -2695,10 +2676,9 @@ fn wait_for_authoritative_actor_ready(
     harness: &HarnessConfig,
     initial: &AuthoritativeActorDispatchTarget,
 ) -> Result<Option<AuthoritativeActorDispatchTarget>> {
-    let timeout = dispatch_only_starting_pane_recovery_timeout(Some(harness));
-    let deadline = Instant::now() + timeout;
-    let poll = Duration::from_millis(100);
-    let mut last_facts = AuthoritativeActorReadyFacts::from_target(
+    let budget = authoritative_actor_ready_retry_budget(Some(harness.binary.as_str()), cfg!(test));
+    let deadline = Instant::now() + budget.timeout;
+    let mut last_facts = authoritative_actor_ready_facts_from_target(
         initial,
         current_generation_ready_prompt_proven(tmux, initial, harness),
     );
@@ -2708,40 +2688,40 @@ fn wait_for_authoritative_actor_ready(
         if let Some(refreshed) = load_authoritative_actor_binding(
             tmux, file, session_id, file_path, harness, false, false,
         )? {
-            let refreshed_state = refreshed.actor_state();
             let prompt_ready = current_generation_ready_prompt_proven(tmux, &refreshed, harness);
-            last_facts = AuthoritativeActorReadyFacts::from_target(&refreshed, prompt_ready);
-            match classify_prompt_ready_barrier(PromptReadyBarrierFacts {
-                actor_state: actor_dispatch_state(refreshed_state),
-                prompt_ready,
-                dispatch_eligible: authoritative_actor_dispatch_target_eligible(&refreshed),
-            }) {
+            last_facts = authoritative_actor_ready_facts_from_target(&refreshed, prompt_ready);
+            match classify_authoritative_prompt_ready_barrier(
+                AuthoritativePromptReadyBarrierFacts {
+                    ready_facts: &last_facts,
+                    dispatch_eligible: authoritative_actor_dispatch_target_eligible(&refreshed),
+                },
+            ) {
                 PromptReadyBarrierDecision::Ready => {
-                    let elapsed_ms = start.elapsed().as_millis();
+                    let elapsed = start.elapsed();
+                    let file_display = file.display().to_string();
                     clear_starting_actor_timeout_record(file_path);
                     crate::ops_log::log_op(
                         file,
-                        &format!(
-                            "route_starting_actor_ready file={} harness={} elapsed_ms={} {}",
-                            file.display(),
-                            harness.binary,
-                            elapsed_ms,
-                            last_facts.log_fields()
+                        &starting_actor_ready_log_line(
+                            file_display.as_str(),
+                            harness.binary.as_str(),
+                            elapsed,
+                            &last_facts,
                         ),
                     );
                     return Ok(Some(refreshed));
                 }
                 PromptReadyBarrierDecision::Terminal => {
-                    let elapsed_ms = start.elapsed().as_millis();
+                    let elapsed = start.elapsed();
+                    let file_display = file.display().to_string();
                     clear_starting_actor_timeout_record(file_path);
                     crate::ops_log::log_op(
                         file,
-                        &format!(
-                            "route_authoritative_actor_starting_terminal file={} harness={} elapsed_ms={} {}",
-                            file.display(),
-                            harness.binary,
-                            elapsed_ms,
-                            last_facts.log_fields()
+                        &starting_actor_terminal_log_line(
+                            file_display.as_str(),
+                            harness.binary.as_str(),
+                            elapsed,
+                            &last_facts,
                         ),
                     );
                     return Ok(Some(refreshed));
@@ -2749,12 +2729,17 @@ fn wait_for_authoritative_actor_ready(
                 PromptReadyBarrierDecision::Continue => {}
             }
         }
-        std::thread::sleep(poll);
+        std::thread::sleep(budget.poll_interval);
     }
 
     let elapsed = start.elapsed();
-    let log_line =
-        route_starting_actor_not_ready_log_line(file, harness, timeout, elapsed, &last_facts);
+    let log_line = route_starting_actor_not_ready_log_line(
+        file,
+        harness,
+        budget.timeout,
+        elapsed,
+        &last_facts,
+    );
     match record_starting_actor_timeout(file_path, &last_facts, &log_line) {
         Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
             crate::ops_log::log_op(file, &log_line);
@@ -2769,14 +2754,14 @@ fn wait_for_authoritative_actor_ready(
             );
         }
         Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
+            let file_display = file.display().to_string();
             crate::ops_log::log_op(
                 file,
-                &format!(
-                    "route_starting_actor_timeout_coalesced file={} harness={} elapsed_ms={} {}",
-                    file.display(),
-                    harness.binary,
-                    elapsed.as_millis(),
-                    last_facts.log_fields()
+                &starting_actor_timeout_coalesced_log_line(
+                    file_display.as_str(),
+                    harness.binary.as_str(),
+                    elapsed,
+                    &last_facts,
                 ),
             );
         }
@@ -2893,39 +2878,50 @@ fn route_via_authoritative_actor(
 
     let prompt_ready = actor_state == crate::session_actor::ActorState::Ready
         || current_generation_ready_prompt_proven(tmux, &actor, harness);
+    let reopen_mode = if dispatch_only {
+        ReopenMode::DispatchOnly
+    } else {
+        ReopenMode::Managed
+    };
+    let actor_dispatch_state = actor_dispatch_state(actor_state);
     let reopen_outcome = decide_authoritative_reopen(RoutedReopenFacts {
-        actor_state: actor_dispatch_state(actor_state),
+        actor_state: actor_dispatch_state,
         prompt_ready,
         has_prompt_bearing_work: prompt_bearing_marker.is_some(),
-        mode: if dispatch_only {
-            ReopenMode::DispatchOnly
-        } else {
-            ReopenMode::Managed
-        },
+        mode: reopen_mode,
         degraded_authority: false,
         dispatch_eligible: authoritative_actor_dispatch_target_eligible(&actor),
     });
+    let action =
+        classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+            mode: reopen_mode,
+            actor_state: actor_dispatch_state,
+            has_prompt_bearing_work: prompt_bearing_marker.is_some(),
+            reopen_decision: reopen_outcome.decision,
+        });
 
-    if let Some(reason) = authoritative_actor_dispatch_blocker_reason(actor_state) {
-        if let Err(e) = tmux.select_pane(&dispatch_pane) {
-            eprintln!(
-                "[route] warning: failed to focus pane {}: {}",
-                dispatch_pane, e
-            );
-        }
-        if prompt_bearing_marker.is_none() {
+    if actor_dispatch_blocker_reason(actor_dispatch_state).is_some()
+        && let Err(e) = tmux.select_pane(&dispatch_pane)
+    {
+        eprintln!(
+            "[route] warning: failed to focus pane {}: {}",
+            dispatch_pane, e
+        );
+    }
+
+    match action {
+        AuthoritativeActorDispatchAction::FocusOnly => {
             eprintln!(
                 "[route] authoritative actor for {} remains in state {} on pane {} — focusing without injecting a duplicate reopen",
                 file.display(),
                 actor_state.as_str(),
                 dispatch_pane
             );
-            return Ok(dispatch_pane);
+            Ok(dispatch_pane)
         }
-        if dispatch_only
-            && authoritative_actor_dispatch_can_queue_optimistically(actor_state)
-            && reopen_outcome.decision == RouteDecision::FailClosed
-        {
+        AuthoritativeActorDispatchAction::DispatchOnlyBusyFailClosed => {
+            let reason =
+                actor_dispatch_blocker_reason(actor_dispatch_state).unwrap_or("actor not ready");
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -2957,8 +2953,8 @@ fn route_via_authoritative_actor(
                 authoritative_actor_dispatch_recovery_hint(actor_state, file)
             );
         }
-        if dispatch_only && authoritative_actor_dispatch_waiting_input_recoverable(actor_state) {
-            return recover_dispatch_only_authoritative_waiting_input(
+        AuthoritativeActorDispatchAction::RecoverDispatchOnlyWaitingInput => {
+            recover_dispatch_only_authoritative_waiting_input(
                 tmux,
                 file,
                 session_id,
@@ -2968,11 +2964,9 @@ fn route_via_authoritative_actor(
                 harness,
                 &dispatch_pane,
                 actor.record.generation,
-            );
+            )
         }
-        if reopen_outcome.decision == RouteDecision::ReuseReady
-            && authoritative_actor_dispatch_can_queue_optimistically(actor_state)
-        {
+        AuthoritativeActorDispatchAction::ManagedSupervisorQueue => {
             crate::ops_log::log_op(
                 file,
                 &format!(
@@ -3025,83 +3019,93 @@ fn route_via_authoritative_actor(
                 true,
                 dispatch_start,
             )?;
-            return Ok(ack_pane.unwrap_or(dispatch_pane));
+            Ok(ack_pane.unwrap_or(dispatch_pane))
         }
-        anyhow::bail!(
-            "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {} (waited {}s for {} startup). {}",
-            actor.record.generation,
-            file.display(),
-            dispatch_pane,
-            reason,
-            dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
-            harness.binary,
-            authoritative_actor_dispatch_recovery_hint(actor_state, file)
-        );
-    }
-
-    if dispatch_only {
-        let _authorization = authorize_controller_dispatch(
-            file,
-            session_id,
-            file_path,
-            &actor,
-            "dispatch_only_reopen",
-            &format!(
-                "submit=direct_pane actor_state={} harness={}",
-                actor_state.as_str(),
-                harness.binary
-            ),
-        )?;
-        dispatch_only_send_reopen(
-            tmux,
-            file,
-            session_id,
-            &dispatch_pane,
-            file_path,
-            harness,
-            DispatchOnlyReopenDelivery::DirectPaneSubmit,
-        )?;
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "route_dispatch_only_via_actor_direct_pane_submit file={} pane={} harness={} generation={}",
+        AuthoritativeActorDispatchAction::FailClosed => {
+            let reason =
+                actor_dispatch_blocker_reason(actor_dispatch_state).unwrap_or("actor not ready");
+            anyhow::bail!(
+                "authoritative actor generation {} for {} owns pane {} but route will not inject a new trigger because {} (waited {}s for {} startup). {}",
+                actor.record.generation,
                 file.display(),
                 dispatch_pane,
+                reason,
+                dispatch_only_starting_pane_recovery_timeout(Some(harness)).as_secs(),
                 harness.binary,
-                actor.record.generation
-            ),
-        );
-        return Ok(dispatch_pane);
+                authoritative_actor_dispatch_recovery_hint(actor_state, file)
+            );
+        }
+        AuthoritativeActorDispatchAction::DispatchOnlyDirectPane => {
+            let _authorization = authorize_controller_dispatch(
+                file,
+                session_id,
+                file_path,
+                &actor,
+                "dispatch_only_reopen",
+                &format!(
+                    "submit=direct_pane actor_state={} harness={}",
+                    actor_state.as_str(),
+                    harness.binary
+                ),
+            )?;
+            dispatch_only_send_reopen(
+                tmux,
+                file,
+                session_id,
+                &dispatch_pane,
+                file_path,
+                harness,
+                DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            )?;
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_via_actor_direct_pane_submit file={} pane={} harness={} generation={}",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    actor.record.generation
+                ),
+            );
+            Ok(dispatch_pane)
+        }
+        AuthoritativeActorDispatchAction::ManagedSupervisorIpc => {
+            let _authorization = authorize_controller_dispatch(
+                file,
+                session_id,
+                file_path,
+                &actor,
+                "managed_reopen",
+                &format!(
+                    "submit=supervisor_ipc actor_state={} harness={}",
+                    actor_state.as_str(),
+                    harness.binary
+                ),
+            )?;
+            let dispatch_start = dispatch_via_supervisor_ipc(
+                tmux,
+                file,
+                &dispatch_pane,
+                session_id,
+                file_path,
+                harness,
+            )?;
+
+            let ack_pane = require_routed_cycle_ack(
+                tmux,
+                file,
+                &dispatch_pane,
+                session_id,
+                file_path,
+                harness,
+                baseline,
+                prompt_bearing_marker,
+                true,
+                dispatch_start,
+            )?;
+            Ok(ack_pane.unwrap_or(dispatch_pane))
+        }
     }
-
-    let _authorization = authorize_controller_dispatch(
-        file,
-        session_id,
-        file_path,
-        &actor,
-        "managed_reopen",
-        &format!(
-            "submit=supervisor_ipc actor_state={} harness={}",
-            actor_state.as_str(),
-            harness.binary
-        ),
-    )?;
-    let dispatch_start =
-        dispatch_via_supervisor_ipc(tmux, file, &dispatch_pane, session_id, file_path, harness)?;
-
-    let ack_pane = require_routed_cycle_ack(
-        tmux,
-        file,
-        &dispatch_pane,
-        session_id,
-        file_path,
-        harness,
-        baseline,
-        prompt_bearing_marker,
-        true,
-        dispatch_start,
-    )?;
-    Ok(ack_pane.unwrap_or(dispatch_pane))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4746,51 +4750,18 @@ fn dispatch_via_supervisor_ipc(
     )
 }
 
-fn authoritative_actor_dispatch_blocker_reason(
-    state: crate::session_actor::ActorState,
-) -> Option<&'static str> {
-    actor_dispatch_blocker_reason(actor_dispatch_state(state))
-}
-
 fn authoritative_actor_dispatch_recovery_hint(
     state: crate::session_actor::ActorState,
     file: &Path,
 ) -> String {
-    match state {
-        crate::session_actor::ActorState::Starting => format!(
-            "Wait for the pane to show a dispatch-ready prompt (`prompt_ready=true`), then rerun `agent-doc {}`. If the pane stays stuck, restart the owner with `agent-doc start {}`.",
-            file.display(),
-            file.display()
-        ),
-        crate::session_actor::ActorState::Busy => {
-            "Wait for the active turn to finish before rerouting this document.".to_string()
-        }
-        crate::session_actor::ActorState::WaitingInput => format!(
-            "Answer the supervisor prompt in the pane, or restart the owner with `agent-doc start {}`.",
-            file.display()
-        ),
-        crate::session_actor::ActorState::Closed => format!(
-            "Start a new owner with `agent-doc start {}` before rerouting.",
-            file.display()
-        ),
-        crate::session_actor::ActorState::Blocked => format!(
-            "Inspect the pane diagnostics, then restart the owner with `agent-doc start {}`.",
-            file.display()
-        ),
-        crate::session_actor::ActorState::Ready => String::new(),
-    }
+    actor_recovery_hint(actor_dispatch_state(state), &file.display().to_string())
 }
 
+#[cfg(test)]
 fn authoritative_actor_dispatch_can_queue_optimistically(
     state: crate::session_actor::ActorState,
 ) -> bool {
-    actor_can_queue_optimistically(actor_dispatch_state(state))
-}
-
-fn authoritative_actor_dispatch_waiting_input_recoverable(
-    state: crate::session_actor::ActorState,
-) -> bool {
-    actor_waiting_input_recoverable(actor_dispatch_state(state))
+    crate::flow::routed_reopen::actor_can_queue_optimistically(actor_dispatch_state(state))
 }
 
 fn canonical_dispatch_file(path: &std::path::Path) -> std::path::PathBuf {

@@ -1,4 +1,4 @@
-use super::types::RouteDecision;
+use super::types::{DispatchProof, RouteDecision};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +82,51 @@ pub(crate) fn dispatch_only_starting_pane_recovery_timeout_for_binary(
         Some("codex") => Duration::from_secs(8),
         _ => Duration::from_secs(5),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RetryBudget {
+    pub(crate) timeout: Duration,
+    pub(crate) poll_interval: Duration,
+}
+
+impl RetryBudget {
+    pub(crate) const fn new(timeout: Duration, poll_interval: Duration) -> Self {
+        Self {
+            timeout,
+            poll_interval,
+        }
+    }
+}
+
+pub(crate) fn authoritative_actor_ready_retry_budget(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> RetryBudget {
+    RetryBudget::new(
+        dispatch_only_starting_pane_recovery_timeout_for_binary(binary, test_mode),
+        Duration::from_millis(100),
+    )
+}
+
+pub(crate) fn dispatch_only_starting_pane_ready_retry_budget(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> RetryBudget {
+    RetryBudget::new(
+        dispatch_only_starting_pane_ready_timeout_for_binary(binary, test_mode),
+        Duration::from_millis(100),
+    )
+}
+
+pub(crate) fn dispatch_only_starting_pane_recovery_retry_budget(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> RetryBudget {
+    RetryBudget::new(
+        dispatch_only_starting_pane_recovery_timeout_for_binary(binary, test_mode),
+        Duration::from_millis(100),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,6 +245,14 @@ impl RoutedDispatchStartProof {
             Self::HookStateAdvanced => "submission",
         }
     }
+
+    pub(crate) const fn typed_proof(self) -> DispatchProof {
+        match self {
+            Self::CommandAcceptedOnly => DispatchProof::AcceptedOnly,
+            Self::HookPromptMatched => DispatchProof::Consumed,
+            Self::HookStateAdvanced => DispatchProof::DispatchStarted,
+        }
+    }
 }
 
 pub(crate) fn direct_pane_submit_outcome(
@@ -227,6 +280,27 @@ pub(crate) fn decide_dispatch_start_proof(
         DispatchStartProofDecision::FailClosedAcceptedOnly
     } else {
         DispatchStartProofDecision::Accepted
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DispatchStartProofFacts {
+    pub(crate) proof: RoutedDispatchStartProof,
+    pub(crate) dispatch_start_proof_required: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DispatchStartProofClassification {
+    pub(crate) decision: DispatchStartProofDecision,
+    pub(crate) typed_proof: DispatchProof,
+}
+
+pub(crate) fn classify_dispatch_start_proof(
+    facts: DispatchStartProofFacts,
+) -> DispatchStartProofClassification {
+    DispatchStartProofClassification {
+        decision: decide_dispatch_start_proof(facts.proof, facts.dispatch_start_proof_required),
+        typed_proof: facts.proof.typed_proof(),
     }
 }
 
@@ -382,6 +456,57 @@ pub(crate) fn decide_authoritative_reopen(facts: RoutedReopenFacts) -> RoutedReo
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AuthoritativeActorDispatchAction {
+    FocusOnly,
+    DispatchOnlyBusyFailClosed,
+    RecoverDispatchOnlyWaitingInput,
+    ManagedSupervisorQueue,
+    FailClosed,
+    DispatchOnlyDirectPane,
+    ManagedSupervisorIpc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AuthoritativeActorDispatchActionFacts {
+    pub(crate) mode: ReopenMode,
+    pub(crate) actor_state: ActorDispatchState,
+    pub(crate) has_prompt_bearing_work: bool,
+    pub(crate) reopen_decision: RouteDecision,
+}
+
+pub(crate) fn classify_authoritative_actor_dispatch_action(
+    facts: AuthoritativeActorDispatchActionFacts,
+) -> AuthoritativeActorDispatchAction {
+    if actor_dispatch_blocker_reason(facts.actor_state).is_some() {
+        if !facts.has_prompt_bearing_work {
+            return AuthoritativeActorDispatchAction::FocusOnly;
+        }
+        if facts.mode == ReopenMode::DispatchOnly
+            && actor_can_queue_optimistically(facts.actor_state)
+            && facts.reopen_decision == RouteDecision::FailClosed
+        {
+            return AuthoritativeActorDispatchAction::DispatchOnlyBusyFailClosed;
+        }
+        if facts.mode == ReopenMode::DispatchOnly
+            && actor_waiting_input_recoverable(facts.actor_state)
+        {
+            return AuthoritativeActorDispatchAction::RecoverDispatchOnlyWaitingInput;
+        }
+        if facts.reopen_decision == RouteDecision::ReuseReady
+            && actor_can_queue_optimistically(facts.actor_state)
+        {
+            return AuthoritativeActorDispatchAction::ManagedSupervisorQueue;
+        }
+        return AuthoritativeActorDispatchAction::FailClosed;
+    }
+
+    match facts.mode {
+        ReopenMode::DispatchOnly => AuthoritativeActorDispatchAction::DispatchOnlyDirectPane,
+        ReopenMode::Managed => AuthoritativeActorDispatchAction::ManagedSupervisorIpc,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PromptReadyBarrierFacts {
     pub(crate) actor_state: ActorDispatchState,
     pub(crate) prompt_ready: bool,
@@ -408,6 +533,115 @@ pub(crate) fn classify_prompt_ready_barrier(
         return PromptReadyBarrierDecision::Terminal;
     }
     PromptReadyBarrierDecision::Continue
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AuthoritativeActorReadyFacts {
+    pub(crate) pane_id: String,
+    pub(crate) generation: u64,
+    pub(crate) actor_state: ActorDispatchState,
+    pub(crate) supervisor_health: String,
+    pub(crate) runtime_state: String,
+    pub(crate) prompt_ready: bool,
+    pub(crate) last_transition_reason: String,
+    pub(crate) last_transition_caller: String,
+}
+
+impl AuthoritativeActorReadyFacts {
+    pub(crate) fn log_fields(&self) -> String {
+        format!(
+            "pane={} generation={} actor_state={} supervisor_health={} runtime_state={} prompt_ready={} last_transition_reason={} last_transition_caller={}",
+            self.pane_id,
+            self.generation,
+            self.actor_state.as_str(),
+            self.supervisor_health,
+            self.runtime_state,
+            self.prompt_ready,
+            self.last_transition_reason,
+            self.last_transition_caller
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AuthoritativePromptReadyBarrierFacts<'a> {
+    pub(crate) ready_facts: &'a AuthoritativeActorReadyFacts,
+    pub(crate) dispatch_eligible: bool,
+}
+
+pub(crate) fn classify_authoritative_prompt_ready_barrier(
+    facts: AuthoritativePromptReadyBarrierFacts<'_>,
+) -> PromptReadyBarrierDecision {
+    classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+        actor_state: facts.ready_facts.actor_state,
+        prompt_ready: facts.ready_facts.prompt_ready,
+        dispatch_eligible: facts.dispatch_eligible,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StartingActorLogFacts<'a> {
+    pub(crate) file_display: &'a str,
+    pub(crate) harness_binary: &'a str,
+    pub(crate) timeout: Duration,
+    pub(crate) elapsed: Duration,
+    pub(crate) ready_facts: &'a AuthoritativeActorReadyFacts,
+}
+
+pub(crate) fn starting_actor_not_ready_log_line(facts: StartingActorLogFacts<'_>) -> String {
+    format!(
+        "route_authoritative_actor_starting_not_ready file={} harness={} timeout_ms={} elapsed_ms={} {}",
+        facts.file_display,
+        facts.harness_binary,
+        facts.timeout.as_millis(),
+        facts.elapsed.as_millis(),
+        facts.ready_facts.log_fields()
+    )
+}
+
+pub(crate) fn starting_actor_ready_log_line(
+    file_display: &str,
+    harness_binary: &str,
+    elapsed: Duration,
+    facts: &AuthoritativeActorReadyFacts,
+) -> String {
+    format!(
+        "route_starting_actor_ready file={} harness={} elapsed_ms={} {}",
+        file_display,
+        harness_binary,
+        elapsed.as_millis(),
+        facts.log_fields()
+    )
+}
+
+pub(crate) fn starting_actor_terminal_log_line(
+    file_display: &str,
+    harness_binary: &str,
+    elapsed: Duration,
+    facts: &AuthoritativeActorReadyFacts,
+) -> String {
+    format!(
+        "route_authoritative_actor_starting_terminal file={} harness={} elapsed_ms={} {}",
+        file_display,
+        harness_binary,
+        elapsed.as_millis(),
+        facts.log_fields()
+    )
+}
+
+pub(crate) fn starting_actor_timeout_coalesced_log_line(
+    file_display: &str,
+    harness_binary: &str,
+    elapsed: Duration,
+    facts: &AuthoritativeActorReadyFacts,
+) -> String {
+    format!(
+        "route_starting_actor_timeout_coalesced file={} harness={} elapsed_ms={} {}",
+        file_display,
+        harness_binary,
+        elapsed.as_millis(),
+        facts.log_fields()
+    )
 }
 
 pub(crate) const fn actor_start_wait_terminal_state(state: ActorDispatchState) -> bool {
@@ -439,6 +673,27 @@ pub(crate) const fn actor_can_queue_optimistically(state: ActorDispatchState) ->
 
 pub(crate) const fn actor_waiting_input_recoverable(state: ActorDispatchState) -> bool {
     matches!(state, ActorDispatchState::WaitingInput)
+}
+
+pub(crate) fn actor_recovery_hint(state: ActorDispatchState, file_display: &str) -> String {
+    match state {
+        ActorDispatchState::Starting => format!(
+            "Wait for the pane to show a dispatch-ready prompt (`prompt_ready=true`), then rerun `agent-doc {file_display}`. If the pane stays stuck, restart the owner with `agent-doc start {file_display}`."
+        ),
+        ActorDispatchState::Busy => {
+            "Wait for the active turn to finish before rerouting this document.".to_string()
+        }
+        ActorDispatchState::WaitingInput => format!(
+            "Answer the supervisor prompt in the pane, or restart the owner with `agent-doc start {file_display}`."
+        ),
+        ActorDispatchState::Closed => {
+            format!("Start a new owner with `agent-doc start {file_display}` before rerouting.")
+        }
+        ActorDispatchState::Blocked => format!(
+            "Inspect the pane diagnostics, then restart the owner with `agent-doc start {file_display}`."
+        ),
+        ActorDispatchState::Ready | ActorDispatchState::Missing => String::new(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -583,6 +838,64 @@ mod tests {
     }
 
     #[test]
+    fn authoritative_actor_dispatch_action_classifies_delivery_boundary() {
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::DispatchOnly,
+                actor_state: ActorDispatchState::Ready,
+                has_prompt_bearing_work: true,
+                reopen_decision: RouteDecision::ReuseReady,
+            }),
+            AuthoritativeActorDispatchAction::DispatchOnlyDirectPane
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::Managed,
+                actor_state: ActorDispatchState::Ready,
+                has_prompt_bearing_work: true,
+                reopen_decision: RouteDecision::ReuseReady,
+            }),
+            AuthoritativeActorDispatchAction::ManagedSupervisorIpc
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::Managed,
+                actor_state: ActorDispatchState::Busy,
+                has_prompt_bearing_work: true,
+                reopen_decision: RouteDecision::ReuseReady,
+            }),
+            AuthoritativeActorDispatchAction::ManagedSupervisorQueue
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::DispatchOnly,
+                actor_state: ActorDispatchState::Busy,
+                has_prompt_bearing_work: true,
+                reopen_decision: RouteDecision::FailClosed,
+            }),
+            AuthoritativeActorDispatchAction::DispatchOnlyBusyFailClosed
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::DispatchOnly,
+                actor_state: ActorDispatchState::WaitingInput,
+                has_prompt_bearing_work: true,
+                reopen_decision: RouteDecision::FailClosed,
+            }),
+            AuthoritativeActorDispatchAction::RecoverDispatchOnlyWaitingInput
+        );
+        assert_eq!(
+            classify_authoritative_actor_dispatch_action(AuthoritativeActorDispatchActionFacts {
+                mode: ReopenMode::Managed,
+                actor_state: ActorDispatchState::Blocked,
+                has_prompt_bearing_work: false,
+                reopen_decision: RouteDecision::FailClosed,
+            }),
+            AuthoritativeActorDispatchAction::FocusOnly
+        );
+    }
+
+    #[test]
     fn prompt_ready_barrier_requires_state_prompt_and_eligibility() {
         assert_eq!(
             classify_prompt_ready_barrier(PromptReadyBarrierFacts {
@@ -635,6 +948,48 @@ mod tests {
                 dispatch_eligible: true,
             }),
             PromptReadyBarrierDecision::Terminal
+        );
+    }
+
+    #[test]
+    fn authoritative_ready_facts_own_log_shape_and_barrier_input() {
+        let facts = AuthoritativeActorReadyFacts {
+            pane_id: "%42".to_string(),
+            generation: 7,
+            actor_state: ActorDispatchState::Ready,
+            supervisor_health: "healthy".to_string(),
+            runtime_state: "ready".to_string(),
+            prompt_ready: true,
+            last_transition_reason: "dispatch_bind".to_string(),
+            last_transition_caller: "route".to_string(),
+        };
+
+        assert_eq!(
+            classify_authoritative_prompt_ready_barrier(AuthoritativePromptReadyBarrierFacts {
+                ready_facts: &facts,
+                dispatch_eligible: true,
+            }),
+            PromptReadyBarrierDecision::Ready
+        );
+        assert!(facts.log_fields().contains("generation=7"));
+        assert!(
+            starting_actor_ready_log_line(
+                "/tmp/doc.md",
+                "codex",
+                Duration::from_millis(12),
+                &facts
+            )
+            .contains("route_starting_actor_ready")
+        );
+        assert!(
+            starting_actor_not_ready_log_line(StartingActorLogFacts {
+                file_display: "/tmp/doc.md",
+                harness_binary: "codex",
+                timeout: Duration::from_secs(8),
+                elapsed: Duration::from_secs(8),
+                ready_facts: &facts,
+            })
+            .contains("timeout_ms=8000")
         );
     }
 
@@ -733,6 +1088,15 @@ mod tests {
             decide_dispatch_start_proof(RoutedDispatchStartProof::HookPromptMatched, true),
             DispatchStartProofDecision::Accepted
         );
+        let classification = classify_dispatch_start_proof(DispatchStartProofFacts {
+            proof: RoutedDispatchStartProof::HookStateAdvanced,
+            dispatch_start_proof_required: true,
+        });
+        assert_eq!(
+            classification.decision,
+            DispatchStartProofDecision::Accepted
+        );
+        assert_eq!(classification.typed_proof, DispatchProof::DispatchStarted);
     }
 
     #[test]
@@ -780,6 +1144,22 @@ mod tests {
                 codex_dispatch_start_tracking_enabled: false,
             }
         ));
+    }
+
+    #[test]
+    fn retry_budgets_are_centralized_by_harness_and_test_mode() {
+        assert_eq!(
+            authoritative_actor_ready_retry_budget(Some("codex"), true),
+            RetryBudget::new(Duration::from_millis(400), Duration::from_millis(100))
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_ready_retry_budget(Some("codex"), true),
+            RetryBudget::new(Duration::from_millis(250), Duration::from_millis(100))
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_recovery_retry_budget(Some("opencode"), false).timeout,
+            Duration::from_secs(15)
+        );
     }
 
     #[test]

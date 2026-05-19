@@ -1,4 +1,5 @@
 use super::*;
+use crate::flow::routed_reopen::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
 use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
 
 // A smaller lock for startup-sensitive isolated tmux tests that inject the
@@ -9521,7 +9522,7 @@ fn route_starting_actor_not_ready_log_line_includes_typed_lifecycle_facts() {
     let facts = AuthoritativeActorReadyFacts {
         pane_id: "%7".to_string(),
         generation: 42,
-        actor_state: crate::session_actor::ActorState::Busy,
+        actor_state: ActorDispatchState::Busy,
         supervisor_health: "healthy".to_string(),
         runtime_state: "busy".to_string(),
         prompt_ready: false,
@@ -9563,7 +9564,7 @@ fn starting_actor_timeout_record_coalesces_same_generation_and_pane() {
     let facts = AuthoritativeActorReadyFacts {
         pane_id: "%7".to_string(),
         generation: 42,
-        actor_state: crate::session_actor::ActorState::Starting,
+        actor_state: ActorDispatchState::Starting,
         supervisor_health: "healthy".to_string(),
         runtime_state: "starting".to_string(),
         prompt_ready: false,
@@ -9599,7 +9600,7 @@ fn starting_actor_timeout_record_clears_after_ready_or_terminal_refresh() {
     let facts = AuthoritativeActorReadyFacts {
         pane_id: "%9".to_string(),
         generation: 5,
-        actor_state: crate::session_actor::ActorState::Starting,
+        actor_state: ActorDispatchState::Starting,
         supervisor_health: "healthy".to_string(),
         runtime_state: "starting".to_string(),
         prompt_ready: false,

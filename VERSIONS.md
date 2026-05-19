@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Routed-reopen FlowCore owns the authoritative actor action slice.** The
+  authoritative actor ready-wait facts, retry budgets, recovery hints,
+  delivery-action classifier, and dispatch-start proof typing now live in
+  `flow::routed_reopen`. `route.rs` maps tmux/supervisor/controller runtime
+  facts into those pure helpers, then performs only the selected side effect.
+
 - **Routed-reopen FlowCore owns the first route decision kernel.** Delivery mode,
   dispatch-start proof, degraded-authority refusal, runtime guard, and
   prompt-ready-barrier classifiers now live in `flow::routed_reopen`; `route.rs`

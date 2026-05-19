@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compose Skills"
+  short_description: "Design reusable skill systems"
+  default_prompt: "Use $compose-skills to split this workflow into focused, reusable skills."

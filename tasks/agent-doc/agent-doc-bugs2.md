@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -76,25 +76,42 @@ I added the priority refactor items in this order:
 The existing `#873y` wedged-cycle plan stays near the top because closeout recovery is still foundational. I put the route extraction first because the FlowCore map already names `routed_reopen` as the owner for actor binding, readiness barriers, dispatch authorization, submit, and dispatch proof, and the current `route.rs` is carrying all of that plus pane provisioning, startup recovery, diagnostics, and tests.
 
 No test suite was run for this cycle; this was a document/backlog update only.
-<!-- agent:boundary:a0f813fc -->
+### Re: routed reopen FlowCore — gpt-5
+
+Completed `#rte2` and `#rte3`.
+
+What changed:
+
+- Extracted the first routed-reopen decision kernel into `flow::routed_reopen`: delivery mode, dispatch-start proof labels/scope, accepted-only proof failure, prompt-ready barrier classification, supervisor runtime guard, degraded-authority matching, and degraded refusal text.
+- Updated `route.rs` to map supervisor/controller/tmux facts into those FlowCore decisions while keeping route as the tmux, supervisor IPC, and controller I/O coordinator.
+- Split the large inline `route.rs` test module into `src/route/tests.rs`, so live tmux fixtures and route assertion helpers no longer live inside production routing code.
+- Updated routing/session-actor specs, the Flow Map reference, and `VERSIONS.md` to document the new boundary.
+
+Commits:
+
+- `src/agent-doc`: `8769dcd5` (`feat: extract routed reopen flowcore decisions`)
+- parent repo gitlink: `e0cf79bf3` (`chore: update agent-doc routed reopen flowcore`)
+
+
+- `cargo check --tests`
+- `cargo test route::tests::authoritative_actor --all-targets`
+- `cargo test route::tests::dispatch_only_submit_proof_gate_allows_non_codex_and_hook_proven_codex --all-targets`
+- CI review: latest GitHub `CI` run `26107078975` was green, including successful `Run make tmux-ci`.
+<!-- agent:boundary:1a3df1cd -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#flowcore0]~
-- do [#flowroute]
-- do [#flowclose]
-- do [#flowbatch]
+- do [#rte2]
+- do [#rte3]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rte2] Extract the routed-reopen decision kernel from src/agent-doc/src/route.rs into FlowCore: authoritative actor facts, startup prompt-ready barrier, degraded actor refusal, delivery mode, and dispatch-start proof; keep route.rs as the tmux/supervisor I/O coordinator.
-- [ ] [#rte3] Split src/agent-doc/src/route.rs live tmux tests, fixtures, and route-specific assertion helpers into focused route test/support modules before larger extraction work, while keeping pure FlowCore decision coverage next to src/agent-doc/src/flow/routed_reopen.rs.
 - [ ] [#873y] Plan filed for the wedged-cycle incident: a failed finalize (blocked at the pre-write pending_capture_guard) left the cycle marked committed; finalize, write --commit, repair, and reset then all failed to recover it; an h4 '#### #next-steps' heading tripped the prompt-target parser; compact became the only (destructive) escape and rewrote the document unrequested. Architectural fix needed — see tasks/agent-doc/plan-wedged-cycle-unrecoverable.md
 - [ ] [#mut2] Continue FlowCore extraction outside routing by promoting document_mutation and closeout guard strings into typed events, using tasks/agent-doc/plan-wedged-cycle-unrecoverable.md as the acceptance target for recoverable finalize/write/repair boundaries.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

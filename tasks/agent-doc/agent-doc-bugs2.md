@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Reviewed recent agent-doc logs; top backlog item: #rtpf.
+Reviewed recent agent-doc logs; top backlog item: #rtbr.
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,7 +33,17 @@ Reviewed recent agent-doc logs; top backlog item: #rtpf.
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d27e057e -->
+❯ Review logs for agent-doc bugs. #next-steps
+### Re: log review / next steps — gpt-5
+
+Reviewed the recent agent-doc logs for this document. The active signal is still startup routing: the latest ops summary shows four `route_authoritative_actor_starting_not_ready` entries for `tasks/agent-doc/agent-doc-bugs2.md` generation 182, after an auto-started Codex pane stayed in `starting` past the 8s route window.
+
+I added `#rtbr` as the new top backlog item, tied to the existing `tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md` plan. That keeps the priority on replacing fixed startup sleep budgets with a current-generation ready-prompt barrier or one typed timeout.
+
+I did not add a separate item for the single `post_commit_local_drift kind=working_tree_edits` / `commit_noop drift_kind=working_tree_edits` entry because this cycle deliberately changed the prompt tail and removed the old queue entries; it is worth watching, but the route timeout recurrence is the clearer actionable bug.
+
+Top backlog item: `#rtbr`.
+<!-- agent:boundary:f22a0785 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -41,16 +51,12 @@ Use TEST_THREADS=8. spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->
-dispatch #spec-test-build-install-commit-push
-- do [#rtpf]
-- do [#zpfb]
-- do [#clra]
-- do [#px25]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rtbr] [recommended] Close the recurring starting-actor route timeout gap: May 19 ops logs still show four route_authoritative_actor_starting_not_ready entries for agent-doc-bugs2.md generation 182 after earlier #startroute/#r313 work; implement a current-generation ready-prompt barrier or single typed timeout, with SimWorld and tmux coverage. Plan: tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

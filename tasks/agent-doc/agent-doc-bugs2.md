@@ -112,7 +112,31 @@ The referenced CRDT duplicate-scaffold plan is about the dangerous case inside t
 So the answer is: the late closeout exists because closeout is a persisted commit/session-check boundary, not a UI timestamp. The bug is not the delay by itself; the bug class is any delayed closeout path that treats live mixed user text as repairable scaffold instead of stopping.
 
 No new backlog item is needed from this answer; the referenced plan already captures the concrete bug work.
-<!-- agent:boundary:a0101dc5 -->
+❯ The agent-doc turn ends where finalize is already called. Minutes pass. Yet the "closeout" bug still occurs. It just occurred while I was writing this prompt. The codex session was idle. "Closeout" should not happen this late. This is a real bug.
+❯ spec-test-build-install-commit-push
+### Re: terminal follow-up closeout no-op fix — gpt-5
+
+Fixed the late closeout no-op path in `src/agent-doc`.
+
+Root cause: `agent-doc commit` treated a HEAD-current snapshot plus a later user follow-up prompt as an already-current closeout even when the prior cycle was already terminal. That did not commit the prompt, but it still emitted `commit_noop` / `commit_already_current` lifecycle bookkeeping after `finalize` had already succeeded, which made idle prompt typing look like another delayed closeout.
+
+- `src/git.rs` now treats terminal-cycle user follow-up drift as prompt handoff only. It logs `post_commit_user_follow_up` plus `commit_prompt_handoff_noop`, returns without rewriting committed cycle state, and does not emit `commit_noop` / `commit_already_current`.
+- Open/recoverable cycles still retain the old already-current recovery behavior.
+- Added regression coverage for terminal user follow-up drift and updated `SPEC.md` / `VERSIONS.md`.
+
+Verification:
+- `cargo test commit_skips_terminal_user_follow_up_noop_closeout --all-targets`
+- `cargo test commit_repairs_committed_head_before_user_follow_up_noop --all-targets`
+- `cargo test commit_closes_cycle_when_staged_snapshot_already_matches_head --all-targets`
+- `make tmux-ci` (228 passed)
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+CI note: latest existing PR CI run `26080886360` failed on the old branch head in `Run make check`; `Run make tmux-ci` was skipped, so there was no red tmux leg. The local fix passes `make check` and `make tmux-ci`.
+
+- `540f6fad fix: skip terminal follow-up closeout noops`
+
+I left unrelated local changes untouched: `CLAUDE.md` typechange and untracked `AGENTS.md` in `src/agent-doc`, plus existing root worktree dirt.
+<!-- agent:boundary:2140bac5 -->
 <!-- /agent:exchange -->
 ###
 <!--

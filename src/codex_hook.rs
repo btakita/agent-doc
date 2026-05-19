@@ -1220,31 +1220,34 @@ agent-doc {}\n",
         })
         .unwrap();
 
-        match response {
+        let blocked_after_submodule_commit = match response {
             StopResponse::Block { reason, .. } => {
                 assert!(
                     reason.contains("could not finish the required commit boundary"),
                     "block reason should name closeout failure, got: {reason}"
                 );
-                let names_parent_pointer =
-                    reason.contains("parent submodule pointer is not committed")
-                        && reason.contains("agent-doc commit");
+                let names_parent_pointer = reason
+                    .contains("parent submodule pointer is not committed")
+                    && reason.contains("agent-doc commit");
                 let names_open_cycle = reason.contains("finalize left cycle")
                     && reason.contains("agent-doc session-check");
                 assert!(
                     names_parent_pointer || names_open_cycle,
                     "block reason should name the missing parent layer or the earlier open-cycle closeout boundary, got: {reason}"
                 );
+                names_parent_pointer
             }
             other => panic!("expected recoverable block response, got {other:?}"),
-        }
+        };
 
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("direct-chat answer was written through the Stop hook"));
-        assert!(
-            crate::git::submodule_pointer_drift(&doc).unwrap().is_some(),
-            "parent gitlink should remain stale while index.lock is held"
-        );
+        if blocked_after_submodule_commit {
+            assert!(
+                crate::git::submodule_pointer_drift(&doc).unwrap().is_some(),
+                "parent gitlink should remain stale while index.lock is held"
+            );
+        }
         let root = project_root_for(&doc).unwrap();
         assert!(
             load_state(&root, "codex-session").unwrap().is_some(),

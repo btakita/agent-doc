@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Codex Stop parent-pointer regression now accepts earlier strict-closeout blocks.** The Stop-hook submodule closeout regression now only requires stale parent gitlink drift when the response commit advanced inside the submodule and the parent-pointer commit is the failing layer. If strict closeout fails earlier before the submodule commit advances, the hook still blocks and preserves tracking, and the spec now states that no parent gitlink drift is required in that branch. This closes `#wnj2` in `tasks/agent-doc/agent-doc-bugs2.md`.
+
 - **Clear Session Context treats an idle Codex footer below old transcript text as idle.** Operator status/clear evidence now accepts a bottom Codex model/cwd/context footer as `prompt_ready=true` even when previous assistant output remains visible above it, while drafted prompt input, queued composer state, and other busy cues still fail closed. Route dispatch still requires a real dispatch-ready prompt before injecting a reopen.
 
 - **JetBrains Clear Session Context recognizes active-pane refusals.** The plugin now parses the binary's newer `session_clear refused ... pane ... is still active` output, including the generic `agent-doc command failed` wrapper, and shows the typed running-session warning with retry/status/interrupt/copy actions instead of surfacing the raw command failure. Bumped the JetBrains plugin build version to `0.2.122`.

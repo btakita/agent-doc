@@ -29,12 +29,11 @@ Reviewed recent agent-doc logs; top backlog item: #rtpf.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-004807.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-023545.md`*
 
 Compacted content:
-- Archived 2 response topic(s): log review and next steps; agent-doc queue
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d76e695b -->
+<!-- agent:boundary:d27e057e -->
 <!-- /agent:exchange -->
 ###
 <!--

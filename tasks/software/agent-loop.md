@@ -62,14 +62,43 @@ Plan:
 7. Build an improvement loop. After each real use, ask whether the correction was one-off or should become permanent skill knowledge. Permanent fixes become edits to `SKILL.md`, `references/`, or scripts, followed by validation.
 
 Recommended first artifact: a short `compose-skills` spec or plan, not implementation yet. It should include the trigger description, the rubric, two worked examples from our repo, and a validation checklist. If that plan feels thin after one or two uses, fold it into `skill-creator`; if it proves reusable, promote it into a standalone skill.
-<!-- agent:boundary:01bd65bf -->
+❯ do [#0b3x]. #spec-test-build-install-commit-push
+### Re: #0b3x compose-skills implementation — gpt-5
+
+Implemented `#0b3x` as a standalone Codex skill rather than extending `skill-creator`, because the reusable boundary is pre-implementation architecture: deciding whether a workflow should be one skill, several cooperating skills, or ordinary prompt guidance. `skill-creator` remains the implementation path for each individual skill after the composition plan is validated.
+
+Changed files:
+
+- `.codex/skills/compose-skills/SKILL.md` — workflow, decision boundary, resource inventory, invocation policy, and validation instructions.
+- `.codex/skills/compose-skills/SPEC.md` — functional contract for the skill architecture plan.
+- `.codex/skills/compose-skills/references/examples.md` — worked examples for content workflows, agent-doc workflows, and browser automation.
+- `.codex/skills/compose-skills/references/example-plan.md` — valid sample plan fixture.
+- `.codex/skills/compose-skills/scripts/validate_composition_plan.py` — deterministic validator for required plan sections and candidate skill entries.
+- `.codex/skills/compose-skills/agents/openai.yaml` — UI metadata.
+
+Validation:
+
+- `python3 /home/brian/.codex/skills/.system/skill-creator/scripts/quick_validate.py .codex/skills/compose-skills` passed.
+- `python3 .codex/skills/compose-skills/scripts/validate_composition_plan.py .codex/skills/compose-skills/references/example-plan.md` passed.
+- Installed locally to `/home/brian/.codex/skills/compose-skills` and re-ran both validation checks there; both passed.
+- `make check` passed at the workspace root, covering `instruction-files`, `src/agent-doc`, and `src/corky`.
+
+CI/tmux review:
+
+- Latest root `Agent Doc` GitHub Actions run `26075147189` had empty-step failures for both `check` and `tmux-ci`, with no job steps started. I classified this as an external CI-start blocker, not a tmux regression. Local verification evidence above is clean.
+
+Repo commit:
+
+- `ba4734c97 feat: add compose-skills planning skill`
+
+The pending item is complete.
+<!-- agent:boundary:db18d50a -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:pending -->
-- [ ] [#0b3x] [recommended] Create a composable-skill-design skill or extend skill-creator with a composability audit workflow, backed by examples and validation checks
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
 - [ ] [#04hc] Test `claude` against local model via `ANTHROPIC_BASE_URL`
@@ -80,4 +109,5 @@ Recommended first artifact: a short `compose-skills` spec or plan, not implement
 <!-- agent:done -->
 - 2026-05-11 [#aaj9] Transfer snapshot GC feature to agent-doc-feat.md
 - 2026-05-11 [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
+- 2026-05-19 [#0b3x] [recommended] Create a composable-skill-design skill or extend skill-creator with a composability audit workflow, backed by examples and validation checks
 <!-- /agent:done -->

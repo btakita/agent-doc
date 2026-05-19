@@ -34,22 +34,49 @@ Reviewed recurring bug logs; added FlowCore refactor plan. Top backlog item: #fl
 Compacted content:
 - Archived 1 response topic(s): recurring agent-doc bugs and refactor path
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:47c61073 -->
+### Re: FlowCore refactor — gpt-5
+
+Implemented the first FlowCore pass across the requested backlog batch.
+
+Completed:
+
+- `#flowcore0`: added the Phase 0 flow ownership map at `src/agent-doc/docs/reference/flow-map.md`, linked it from the docs index, and added `src/agent-doc/src/flow` with typed flow names, stages, outcomes, closeout states, route decisions, dispatch proof, patchback shape, and mirror-mode event logging.
+- `#flowroute`: added `flow::routed_reopen` pure route decision coverage for starting, dispatch-only busy, managed busy, degraded authority, and missing actor outcomes; route now emits typed `flow_event` diagnostics for prompt-ready-barrier fail-closed branches.
+- `#flowclose`: added `flow::closeout` terminal-state helpers and closeout mirror events for already-current commit completion; closeout specs now name FlowCore stages for patchback parse, mutation, snapshot convergence, commit, and session-check.
+- `#flowbatch`: added `flow::orchestration_batch` outcome scaffolding and updated the orchestration spec to assign queue freeze, child closeout normalization, mid-run mutation stops, and child proof recording to FlowCore.
+
+Also added `flow::document_mutation` patchback-shape classification, wired malformed template patchbacks into typed flow diagnostics, and updated `agent-doc ops summary` so flow events group by stage instead of only by tactical log strings. Changelog entry: `VERSIONS.md` Unreleased.
+
+Implementation commits:
+
+- `src/agent-doc`: `ab26b3df` (`feat: add flowcore mirror events`), pushed to `origin/20260422/codex-agent-backend`.
+- parent repo gitlink: `dc6bf9f9e` (`chore: update agent-doc flowcore`), pushed to `origin/main`.
+
+Verification:
+
+- `cargo check`
+- `cargo test flow:: --all-targets`
+- `cargo test ops_report::tests::ops_summary_groups_tracked_events_by_file_and_session --all-targets`
+- `make check`
+- `make install`
+- CI review: latest `CI` run `26105584438` was green and included successful `Run make tmux-ci`.
+<!-- agent:boundary:d6166f93 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#flowcore0]
+- do [#flowroute]
+- do [#flowclose]
+- do [#flowbatch]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#flowcore0] [recommended] Implement FlowCore Phase 0/1 from tasks/agent-doc/plan-agent-doc-flowcore-refactor.md: inventory hot-path state ownership, add typed flow events/outcomes in mirror mode, and make ops summary group failures by flow stage before behavior changes.
-- [ ] [#flowroute] [recommended] Extract routed reopen from route.rs into flow::routed_reopen with pure route decisions, prompt-ready barrier, dispatch-start proof, and one bounded retry/fail-closed policy. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
-- [ ] [#flowclose] [recommended] Extract closeout/document mutation from write/git/template/session_check into shared flow::closeout and flow::document_mutation so IPC, stream, direct finalize, and repair use one terminal-state guard. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
-- [ ] [#flowbatch] [recommended] Move Clear Session Context and orchestrate/queue batch behavior onto FlowCore typed outcomes after route/closeout extraction; cover interrupt-clear, active agent-doc pane refusal, and child patchback normalization. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#873y] Plan filed for the wedged-cycle incident: a failed finalize (blocked at the pre-write pending_capture_guard) left the cycle marked committed; finalize, write --commit, repair, and reset then all failed to recover it; an h4 '#### #next-steps' heading tripped the prompt-target parser; compact became the only (destructive) escape and rewrote the document unrequested. Architectural fix needed — see tasks/agent-doc/plan-wedged-cycle-unrecoverable.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

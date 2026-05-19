@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check out agent-kit path dependency
+        run: git clone --depth 1 https://github.com/btakita/agent-kit ../agent-kit
+
       - name: Install tmux for integration tests
         run: sudo apt-get update && sudo apt-get install -y tmux
 

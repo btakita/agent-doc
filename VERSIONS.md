@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **CI checks out the sibling agent-kit path dependency.** Pull-request CI now clones `btakita/agent-kit` next to the `agent-doc` checkout before running `make check`, matching the local workspace layout required by the `../agent-kit` Cargo path dependency.
+
 - **CI now names the tmux integration leg explicitly.** The GitHub Actions workflow labels the normal suite as `Run make check` and the live tmux sweep as `Run make tmux-ci`, with a visible `Running make tmux-ci` marker in the step log so reviewers can confirm the tmux leg executed.
 
 - **Compact Exchange IPC is no longer blocked by committed response-cycle state.** The compact command now sends its full-document replacement through an operator-mutation IPC path, so JetBrains can apply Compact Exchange through the Document API even after the prior agent-doc response is already committed instead of falling back to a direct disk write and surfacing an external-file-change dialog. Added a regression for committed-cycle Compact Exchange IPC and refreshed the shared editor spec.

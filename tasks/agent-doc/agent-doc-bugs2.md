@@ -29,37 +29,15 @@ Reviewed recent agent-doc logs; top backlog item: #rtbr.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-043705.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-045404.md`*
 
 Compacted content:
-- Archived 2 response topic(s): log review / next steps; rtbr
+- Archived 1 response topic(s): scaf2 and live CRDT write
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#scaf2]. #spec-test-build-install-commit-push
-### Re: scaf2 and live CRDT write — gpt-5
-
-`#scaf2` is completed and reaped. The guard is present in `src/agent-doc`: the normal template closeout path now tries `repair_duplicate_exchange_close_scaffold` before the older duplicate-close tail repair, repairs pure duplicated scaffold, and rejects mixed scaffold plus live user text.
-
-Your follow-up question exposed the remaining mechanism: agent-doc does not need another agent turn to be running to write while you type. The `finalize`/`write --stream` closeout itself is a document writer. In this run it used socket IPC, the editor-side path accepted the patch while you were editing the scaffold HTML comment, and the visible file briefly became malformed before commit refused it because the snapshot size no longer matched the visible file. That is better than committing corruption, but it is still not good enough because the editor-visible document was mutated before the fail-closed boundary.
-
-I repaired the live document without dropping your text, reset the sidecars from the repaired visible file, and used a force-disk committed write for this response to avoid re-entering the same IPC path. I also added a new backlog item for the remaining IPC-visible-write gap.
-
-Verification completed:
-- `cargo test scaffold --lib -- --test-threads=8`
-- `cargo test --all-targets normalize_template_structure_ -- --test-threads=8`
-- `make check TEST_THREADS=8`
-- `make tmux-ci TMUX_TEST_THREADS=1` (228 tmux/ignored tests passed)
-- `cargo build --release`
-- `cargo install --path .`
-- `cargo build --release --lib`
-- `agent-doc lib-install`
-
-CI check: latest `CI` workflow on `main` is green (`fix: repair main ci checks`, run `25773430221`, completed 2026-05-13). The scaf2 plan artifact is committed as `d317ed90a`; the session recovery/reap commit is `62d535134`.
-<!-- agent:boundary:62418af8 -->
+<!-- agent:boundary:230bf70e -->
 <!-- /agent:exchange -->
 ###
 <!--
-Re [#scaf2]: Why is there a duplicate CRDT operation happening in the first place? No turn is running so why does agent-doc attempt to corrupt the document? Note the corruption happened as I replaced content in the html comment under agent:exchange in this document? Why is content being written into the document as the user types?
-spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->

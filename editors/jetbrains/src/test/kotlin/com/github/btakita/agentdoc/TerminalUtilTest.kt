@@ -366,6 +366,28 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `session status ready actor does not enable refresh retry while live pane is busy`() {
+        val output = """
+            document: /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+            session_id: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+            harness: codex
+            actor: generation=183 pane=%23 window=@15 state=ready
+            actor_last_transition: caller=route reason=dispatch_bind prior_generation=183 new_generation=183 at=2026-05-19T07:49:04Z
+            registry: pane=%23 window=@15 pid=2142801 cwd=/home/brian/work/btakita/agent-loop supervisor_instance_id=none
+            live_pane: state=alive-busy pane=%23 source=authoritative_actor current_command=agent-doc prompt_ready=false tail=gpt-5.5 high · ~/work/btakita/agent-loop · Context 17% used
+            supervisor: health=healthy state=healthy actor_state=ready restart_count=0 socket=/home/brian/work/btakita/agent-loop/.agent-doc/supervisor/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.sock
+            supervisor_process: pid=2192763 child_pid=2192893 cwd_source=project_root instance_id=f4ea4a3c-3fd0-42ae-8870-3ae4558e115e
+            startup_miss: none
+            session_log: latest_start_pane=%23 latest_open=true committed_after_latest_run=true last_event=document_cycle phase=preflight_started cycle=cycle-1779176949689 event=preflight_started
+            codex_capability_proof: proven
+            controller_lease: generation=183 pid=2192763 runtime_state=ready heartbeat=2026-05-19T07:49:44Z socket=/home/brian/work/btakita/agent-loop/.agent-doc/supervisor/b26b9957-8de6-4eae-bb98-5d7fe4d6b781.sock
+            controller_last_command: kind=dispatch_only_reopen accepted_stage=ready failed_stage=none at=2026-05-19T07:49:04Z
+        """.trimIndent()
+
+        assertFalse(TerminalUtil.sessionStatusShowsIdleDirectPane(output))
+    }
+
+    @Test
     fun `session status exposes projection and live pane evidence for stale busy diagnosis`() {
         val output = """
             document: /repo/tasks/root.md

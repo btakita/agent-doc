@@ -10,6 +10,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 - **JetBrains Clear Session Context typed warning was live-validated.** A live IDEA replay against `tasks/agent-doc/agent-doc-bugs2.md` now surfaces the typed running-session warning for an active `agent-doc` pane, including retry guidance, interrupt-clear recovery, and the latest pane output. The editor spec and regression suite now pin that observed warning shape.
 
+- **JetBrains Clear Session Context keeps live-pane busy evidence authoritative.** A follow-up 0.2.122 replay showed the actor/controller projection can be `ready` while the direct Codex pane is still running the active `agent-doc` turn. The JetBrains refresh-retry readiness helper now has coverage that `alive-busy prompt_ready=false` does not retry clear from that state; the spec names waiting, refresh-after-idle, or explicit interrupt-clear as the valid operator choices.
+
 - **Terminal user follow-ups no longer emit late closeout no-ops.** When the previous cycle is already committed and the working tree only contains a new user follow-up prompt, `agent-doc commit` now treats that state as prompt handoff instead of re-emitting `commit_noop` / `commit_already_current` lifecycle bookkeeping. Open recovery cycles can still close as already-current when needed, but idle post-finalize prompt typing no longer looks like another delayed closeout.
 
 - **CI checks out sibling path dependencies.** Pull-request CI now clones `btakita/agent-kit` and `btakita/tmux-router` next to the `agent-doc` checkout before running `make check`, matching the local workspace layout required by the `../agent-kit` Cargo path dependency and the `Cargo.toml` tmux-router patch.

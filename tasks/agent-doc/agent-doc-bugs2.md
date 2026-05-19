@@ -34,7 +34,35 @@ Added route-focused FlowCore refactor next steps. Top backlog item: #rte2.
 Compacted content:
 - Archived 3 response topic(s): FlowCore refactor; refactor next steps; routed reopen FlowCore
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:84f78a78 -->
+### Re: #873y wedged-cycle recovery — gpt-5
+
+Implemented the immediate wedged-cycle fix from `tasks/agent-doc/plan-wedged-cycle-unrecoverable.md`.
+
+What changed:
+
+- `src/agent-doc/src/write.rs` now only enters strict commit closeout when the write path succeeds. A pre-write guard failure, such as pending-capture rejection, leaves the active cycle open and retryable instead of committing an unanswered cycle.
+- `src/agent-doc/tests/finalize_integration.rs` now covers failed strict pre-write closeout followed by a successful retry with backlog capture.
+- `src/agent-doc/src/git.rs` now covers historical snapshot repair when a committed assistant response contains an h4 subheading like `#### #next-steps`.
+- `src/agent-doc/specs/07-closeout-commands.md` now documents the retryable pre-write failure boundary.
+- `tasks/agent-doc/plan-wedged-cycle-unrecoverable.md` now records the implementation result and leaves broader FlowCore / cycle-state extraction under existing `#mut2`.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test finalize_prewrite_guard_failure_leaves_cycle_open_for_retry`
+- `cargo test commit_repairs_committed_historical_snapshot_drift`
+- `cargo test finalize_keeps_queue_head_when_later_strict_pending_gate_fails`
+- `make check` after the final spec update
+- `make install`, followed by `agent-doc --version` -> `agent-doc 0.33.16`
+- GitHub CI run `26109770668` on pushed submodule SHA `c11a120a4`: `make check` and `make tmux-ci` passed in job `check`
+
+Commits pushed:
+
+- `btakita/agent-doc` `20260422/codex-agent-backend`: `c11a120a4` (`fix: keep failed prewrite closeouts retryable`)
+- `btakita/agent-loop` `main`: `5bd4af744` (`agent-doc: keep failed prewrite closeouts retryable`)
+
+No new follow-up item is needed for this cycle; the remaining larger architecture work is already tracked by `#mut2` and remains open.
+<!-- agent:boundary:08449d84 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -42,14 +70,13 @@ Compacted content:
 
 <!-- agent:queue au -->
 preset #spec-test-build-install-commit-push
-- do  [#873y]
+- do [#873y]
 - do [#mut2]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#873y] Plan filed for the wedged-cycle incident: a failed finalize (blocked at the pre-write pending_capture_guard) left the cycle marked committed; finalize, write --commit, repair, and reset then all failed to recover it; an h4 '#### #next-steps' heading tripped the prompt-target parser; compact became the only (destructive) escape and rewrote the document unrequested. Architectural fix needed — see tasks/agent-doc/plan-wedged-cycle-unrecoverable.md
 - [ ] [#mut2] Continue FlowCore extraction outside routing by promoting document_mutation and closeout guard strings into typed events, using tasks/agent-doc/plan-wedged-cycle-unrecoverable.md as the acceptance target for recoverable finalize/write/repair boundaries.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

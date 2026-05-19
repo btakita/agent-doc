@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -34,7 +34,7 @@ Added route-focused FlowCore refactor next steps. Top backlog item: #rte2.
 Compacted content:
 - Archived 1 response topic(s): #873y wedged-cycle recovery
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:39ad2b25 -->
+<!-- agent:boundary:d0b64d89 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -42,7 +42,7 @@ Compacted content:
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#873y]
+- ~do [#873y]~
 - do [#mut2]
 <!-- /agent:queue -->
 

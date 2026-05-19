@@ -141,7 +141,25 @@ That changes the packaging recommendation from "make `agent-skills` the target p
 For `compose-skills`, the revised path is: move the portable source layout and Rust validator into `skill-harness` first, add Claude Code and Codex installer tests, and expose commands under whatever CLI name you control. If a future public package split is justified, extract to an available focused crate like `agent-skill-compose` rather than the taken `agent-skills` name.
 
 I also updated the pending item that still pointed at `agent-skills` as the target crate name, and added a follow-up to check registry availability before any rename.
-<!-- agent:boundary:e57f0984 -->
+❯ Why not just keep the name skill-harness?
+### Re: keeping skill-harness — gpt-5
+
+That is probably the right answer now: keep `skill-harness`.
+
+My earlier push toward a broader name was based on the package owning more than test harness behavior. But given `agent-skills` is unavailable, the bar for renaming should be higher. `skill-harness` is already yours, already connected to the code lineage, and it can plausibly mean the harness that installs, validates, tests, and composes portable skills across agent runtimes.
+
+I would keep the name if these remain true:
+
+- The crate is primarily lifecycle tooling: validation, installation, sync, fixtures, adapters, tests, and composition checks.
+- The public CLI can make the domain clear through commands, for example `skill-harness compose validate`, `skill-harness install --harness claude`, and `skill-harness audit`.
+- The docs define "harness" explicitly as the cross-runtime skill lifecycle harness, not only an eval harness.
+- You avoid creating a second peer crate unless there is a real split between reusable library APIs and test/eval harness behavior.
+
+The main risk is only naming perception: people may assume `skill-harness` is test-only. That is fixable with a crisp README, command names, and crate description. It is less costly than forcing a premature rename to a weaker available name.
+
+So my revised recommendation is stronger: keep `skill-harness` as the crate/package name for now. Rename later only if usage proves the name is actively misleading, or if a clean extraction emerges with a much sharper name like `agent-skill-compose` for the composition-only layer.
+
+<!-- agent:boundary:2a200f2d -->
 <!-- /agent:exchange -->
 ###
 <!--

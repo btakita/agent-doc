@@ -1,3 +1,9 @@
 # Agent Doc Completed Work
 
+- 2026-05-13 [#xcst] Fix session-cost/log guardrail wording for agent-doc logs so restart_loop warnings are only emitted when restart churn is actually present; ops.log currently reports fresh_restart=0 auto_trigger_timeout=0 ctrl_d_restart_loop=0 while still warning restart churn detected.
+- 2026-05-13 [#xlog] Teach tsift log-digest to classify agent-doc runtime/churn/failure events as signals; current tsift-v0.1.log digest reports signals:0 even though session-digest finds claude_exit, auto_trigger_timeout, fresh_restart, ctrl_d_restart_loop, and closeout churn.
+- 2026-05-13 [#srgd] Promote session-review/log guardrails into next-context unresolved failures or action items; current review/logs report restart/noop churn while next-context says unresolved_failures is empty.
+- 2026-05-13 [#qtoe] Tune agent-doc log-digest restart-churn classification to separate clean user quits/EOF from actual restart loops/timeouts, so quit_after_eof does not overstate risk.
 - 2026-05-13 [#idxf] Refresh stale tsift index state and add a lightweight status/context-pack reminder when the tsift repo index is stale; status currently reports 8 stale files and no summaries.
+- 2026-05-19 [#kgnv] Add Graphify-style tsift traversal primitives: stable graph node handles for files/symbols/backlog/session artifacts, graph HTML/JSON outputs, shortest-path and neighborhood explain APIs, and next-node recommendations for bug-fix navigation.
+- 2026-05-19 [#fidx] Gate tsift agent-doc use on fresh incremental indexes: update only changed files before search/graph packets, emit stale/missing diagnostics, and fall back to raw source when graph evidence is stale.

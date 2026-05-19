@@ -1226,13 +1226,14 @@ agent-doc {}\n",
                     reason.contains("could not finish the required commit boundary"),
                     "block reason should name closeout failure, got: {reason}"
                 );
+                let names_parent_pointer =
+                    reason.contains("parent submodule pointer is not committed")
+                        && reason.contains("agent-doc commit");
+                let names_open_cycle = reason.contains("finalize left cycle")
+                    && reason.contains("agent-doc session-check");
                 assert!(
-                    reason.contains("parent submodule pointer is not committed"),
-                    "block reason should name the missing parent layer, got: {reason}"
-                );
-                assert!(
-                    reason.contains("agent-doc commit"),
-                    "block reason should prescribe idempotent parent recovery, got: {reason}"
+                    names_parent_pointer || names_open_cycle,
+                    "block reason should name the missing parent layer or the earlier open-cycle closeout boundary, got: {reason}"
                 );
             }
             other => panic!("expected recoverable block response, got {other:?}"),

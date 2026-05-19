@@ -29,41 +29,12 @@ Reviewed recent agent-doc logs; top backlog item: #rtbr.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-023545.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-043705.md`*
 
 Compacted content:
+- Archived 2 response topic(s): log review / next steps; rtbr
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Review logs for agent-doc bugs. #next-steps
-### Re: log review / next steps — gpt-5
-
-Reviewed the recent agent-doc logs for this document. The active signal is still startup routing: the latest ops summary shows four `route_authoritative_actor_starting_not_ready` entries for `tasks/agent-doc/agent-doc-bugs2.md` generation 182, after an auto-started Codex pane stayed in `starting` past the 8s route window.
-
-I added `#rtbr` as the new top backlog item, tied to the existing `tasks/agent-doc/plan-current-tmux-route-sync-next-steps.md` plan. That keeps the priority on replacing fixed startup sleep budgets with a current-generation ready-prompt barrier or one typed timeout.
-
-I did not add a separate item for the single `post_commit_local_drift kind=working_tree_edits` / `commit_noop drift_kind=working_tree_edits` entry because this cycle deliberately changed the prompt tail and removed the old queue entries; it is worth watching, but the route timeout recurrence is the clearer actionable bug.
-
-Top backlog item: `#rtbr`.
-❯ do [#rtbr]. #spec-test-build-install-commit-push
-### Re: rtbr — gpt-5
-Implemented `#rtbr`.
-
-The route now records starting-actor timeouts per document, pane, and actor generation. The first timeout for a stuck generation still writes the typed `route_authoritative_actor_starting_not_ready` diagnostic; later reroutes against the same pane/generation write `route_starting_actor_timeout_coalesced` instead. The timeout sentinel clears when that generation reaches `ready`, `closed`, or `blocked`, so a later real state transition or new generation gets fresh diagnostics.
-
-I added route-state unit coverage and SimWorld coverage for the repeated-starting-timeout schedule, and updated the README/spec/version notes for the new coalescing contract. While rerunning tmux CI, I also fixed two exposed guard issues: plain `register/register` actor projections no longer get treated as degraded managed authoritative actors, and the live raw tmux input test now accepts the CR byte sequence tmux emits for Enter in raw mode.
-
-Verification completed:
-
-- `make check` passed.
-- `TEST_THREADS=8 TMUX_TEST_THREADS=8 make tmux-ci` passed: 228 live/ignored tests run.
-- Focused regressions for starting timeout coalescing, SimWorld, degraded authoritative fallback, dispatch-only busy/startup-miss routing, and supervisor IPC tmux input all passed.
-- `make install` completed and installed `agent-doc 0.33.16` plus `libagent_doc-0.33.16.so`.
-- CI review: latest available GitHub CI run on `main` was successful (`25773430221`, 2026-05-13). No branch CI run exists for `20260422/codex-agent-backend`; local `make tmux-ci` is the tmux evidence for this turn.
-
-Commits:
-
-- `src/agent-doc`: `433f119b` (`fix: coalesce starting actor route timeouts`), pushed to `origin/20260422/codex-agent-backend`.
-- superproject: `aa44cdf88` (`chore: update agent-doc submodule`) created with only the `src/agent-doc` pointer staged; I am leaving this document closeout to `agent-doc finalize` before pushing `main`.
-<!-- agent:boundary:ce090356 -->
+<!-- agent:boundary:da4de5f0 -->
 <!-- /agent:exchange -->
 ###
 <!--

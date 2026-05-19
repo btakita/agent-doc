@@ -1,7 +1,7 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 agent: codex
-claude_model: claude-opus-4-6
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
@@ -34,7 +34,39 @@ Reviewed recent agent-doc logs; top backlog item: #rtbr.
 Compacted content:
 - Archived 1 response topic(s): JetBrains Clear Session Context
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:ece0aab9 -->
+❯ [#jbca] is done.
+❯ JB `Clear Session Context` error:
+```
+Session is still running for tasks/agent-doc/agent-doc-bugs2.md. Pane %23 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+```
+❯ spec-test-build-install-commit-push
+### Re: JetBrains Clear Session Context validation — gpt-5
+
+`#jbca` is done. I live-validated the JetBrains `Clear Session Context` path, and the replay now surfaces the intended typed busy-session warning instead of leaking the raw command failure.
+
+This cycle pinned the exact observed active-pane warning in regression/spec coverage; there was no production Kotlin behavior change needed after the previous fix. Updated files in `src/agent-doc`:
+
+- `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/TerminalUtilTest.kt`
+- `editors/jetbrains/SPEC.md`
+- `VERSIONS.md`
+
+Verification completed:
+
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest`
+- `make check`
+- `./gradlew test buildPlugin signPlugin`
+- `make install`
+- `agent-doc plugin install --local jetbrains` into IntelliJ IDEA 2026.1
+- Latest GitHub CI run `26082646497` was inspected; it failed before tmux on `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails`, while local `make check` did not reproduce it.
+- Local `make tmux-ci` passed with 228 tmux tests.
+
+Commits pushed:
+
+- `src/agent-doc`: `60d37bf9` (`test: pin jetbrains clear busy warning`) to `origin/20260422/codex-agent-backend`
+- Parent repo: `3d9957305` (`chore: update agent-doc submodule`) to `origin/main`
+
+The final document closeout may add one more parent commit for this session response and backlog completion.
+<!-- agent:boundary:888b5c90 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +78,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#jbca] [recommended] Restart IntelliJ IDEA 2026.1 and live-click JetBrains Clear Session Context against tasks/agent-doc/agent-doc-bugs2.md to confirm the installed 0.2.122 plugin shows the typed running-session warning instead of the raw command failure.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

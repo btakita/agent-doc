@@ -29,24 +29,12 @@ Added prioritized FlowCore refactor next steps. Top backlog item: #rte4.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-224553.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-224900.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #mut2
+- Archived 1 response topic(s): FlowCore next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ What are the #next-steps in the flow core refactoring?
-### Re: FlowCore next steps — gpt-5
-
-The FlowCore refactor is past the inventory and mirror-mode starting point: `src/agent-doc/src/flow` exists, routed reopen already has typed decisions, and the flow map says the remaining work should move one pure decision boundary at a time before deleting legacy branches.
-
-I added the next FlowCore backlog slice in priority order. Top backlog item: #rte4.
-
-1. #rte4: finish the routed-reopen extraction by moving the remaining authoritative actor readiness, retry budget, delivery-mode, and dispatch-proof classification out of `route.rs` into `flow::routed_reopen`.
-2. #mut3: make `document_mutation` the single pre-visible-write gate for patchback parsing, prompt ownership normalization, and duplicate scaffold/prompt-prefix repair.
-3. #clo3: make `closeout` the shared terminal-state transaction for IPC, stream, direct finalize, `write --commit`, and repair.
-4. #cyc2: promote `session_cycle` from mirror vocabulary to the owner of preflight, plan, response capture, pending-capture, finalize, and session-check outcomes.
-5. #ops2: after route and closeout are stable, move Clear Session Context and orchestration batch behavior onto typed FlowCore outcomes.
-<!-- agent:boundary:cf09b867 -->
+<!-- agent:boundary:83ad24a6 -->
 <!-- /agent:exchange -->
 ###
 <!--

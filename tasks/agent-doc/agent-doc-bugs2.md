@@ -100,11 +100,22 @@ Local verification passed:
 Current PR state: latest head is `a3480589d43fcdf96ed041c35a73f682e5be80bb`, PR #43 is open, and GitHub CI run `26080886360` is in progress on that head at the `Run make check` step. `Run make tmux-ci` is queued behind it. The run URL is https://github.com/btakita/agent-doc/actions/runs/26080886360/job/76682036564
 
 I left unrelated local files in `src/agent-doc` untouched: `CLAUDE.md` typechange and untracked `AGENTS.md`.
-<!-- agent:boundary:ebe58f04 -->
+❯ re tasks/agent-doc/plan-crdt-duplicate-scaffold-closeout.md: Why is a "closeout" occurring long after a turn ends?
+### Re: delayed closeout timing — gpt-5
+
+A closeout is not the human-visible end of the turn. In agent-doc it is the durability boundary: the response has to be written, committed, cycle-state marked terminal, and accepted by `session-check`. If an earlier visible response landed in the file or snapshot but did not complete that boundary, a later `preflight`, `session-check`, hook, or `agent-doc <file>` invocation can resume the missing commit boundary minutes or hours later.
+
+That delayed recovery is intentional. It is how agent-doc avoids losing responses when a harness stops after patchback, IPC succeeds but commit is interrupted, or the snapshot/HEAD state proves the response was already committed but the cycle marker was left open. In those cases the later closeout should be idempotent: either commit the already-written response, mark the cycle as already current, repair stale snapshot metadata, or fail closed.
+
+The referenced CRDT duplicate-scaffold plan is about the dangerous case inside that expected lifecycle. A delayed closeout may be working from older cycle state while the user is already typing a new prompt. If the CRDT/template merge duplicated only inert scaffold, it can repair that scaffold. If the duplicated scaffold is interleaved with live user text, it must not guess, delete, or reorder that text; it has to fail closed so the user prompt remains authoritative.
+
+So the answer is: the late closeout exists because closeout is a persisted commit/session-check boundary, not a UI timestamp. The bug is not the delay by itself; the bug class is any delayed closeout path that treats live mixed user text as repairable scaffold instead of stopping.
+
+No new backlog item is needed from this answer; the referenced plan already captures the concrete bug work.
+<!-- agent:boundary:a0101dc5 -->
 <!-- /agent:exchange -->
 ###
 <!--
-re tasks/agent-doc/plan-crdt-duplicate-scaffold-closeout.md: Why is a "closeout" occurring long after a turn ends?
 -->
 
 <!-- agent:queue -->

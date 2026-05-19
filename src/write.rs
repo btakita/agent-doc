@@ -1035,11 +1035,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         }
     }
 
-    let commit_result = if write_result
-        .as_ref()
-        .map(|_| true)
-        .unwrap_or_else(|err| !err.to_string().contains("empty response"))
-    {
+    let commit_result = if write_result.is_ok() {
         finalize_commit(file, commit_mode)
     } else {
         Ok(())

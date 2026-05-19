@@ -3474,6 +3474,8 @@ Implemented.
             old body\n\
             ### Re: historical\n\
             repaired body\n\
+            #### #next-steps\n\
+            Follow up.\n\
             ### Re: newer\n\
             new body\n\
             <!-- /agent:exchange -->\n";
@@ -4506,6 +4508,8 @@ Done.
             old body\n\
             ### Re: historical\n\
             repaired body\n\
+            #### #next-steps\n\
+            Follow up.\n\
             ### Re: newer\n\
             new body\n\
             <!-- /agent:exchange -->\n";
@@ -4529,6 +4533,10 @@ Done.
         assert!(
             snap.contains("### Re: historical\n"),
             "snapshot should repair to the committed historical response:\n{snap}"
+        );
+        assert!(
+            snap.contains("#### #next-steps\n"),
+            "h4 response sub-headings that look like prompt presets should not block repair:\n{snap}"
         );
 
         let committed = show_head(&doc).unwrap().unwrap();

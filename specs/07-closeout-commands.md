@@ -82,7 +82,7 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 `agent-doc finalize <FILE> [write flags...]`
 
 - Strict happy-path closeout for session responses.
-- Validates git-backed context before mutation, runs the normal write pipeline, forces `git::commit(<FILE>)` even after partial write errors, and fails unless the final cycle state is `committed`.
+- Validates git-backed context before mutation, runs the normal write pipeline, and only enters the commit closeout after the write path succeeds or performs an explicit empty-response recovery. Pre-write guard failures must leave the document, snapshot, queue, and active cycle open for retry instead of committing an unanswered cycle. Successful closeout still fails unless the final cycle state is `committed`.
 - For submodule-hosted documents, strict closeout also verifies the parent repository pointer reached the new submodule commit; a best-effort pointer update failure must interrupt instead of reporting success.
 - When strict closeout crosses the latency budget, it must surface phase timings for git commit, retry, cycle-state, session-check, and cleanup work in a `closeout_latency` diagnostic so operators can tell which closeout layer delayed response durability.
 - When `--baseline-file` points at a missing hash-keyed preflight baseline because the session document was moved after preflight, closeout must retry the current document hash's migrated baseline before failing. This preserves the explicit baseline contract across `git mv` / rename migration.

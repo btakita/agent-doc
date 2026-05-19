@@ -32,8 +32,38 @@ queue_active: false
 Compacted content:
 - Archived 2 response topic(s): release + publish; CI issues
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223...
-<!-- agent:boundary:370cc3ee -->
+❯ Please add gh releases for Linux, OSX, and Windows.
+❯ Add a cross-platform `curl | sh` installation script.
+### Re: release assets + installer — gpt-5
+
+Implemented the release/installer follow-up in `src/skill-harness`.
+
+Changed:
+- Added `workflow_dispatch` to `.github/workflows/release.yml` so the GitHub Release workflow can be run manually as well as by `v*` tags.
+- Extended the Release matrix with `aarch64-pc-windows-msvc`, so future tagged releases publish Windows ARM64 alongside the existing Linux, macOS, and x86_64 Windows assets.
+- Reworked `install.sh` into a cross-platform `curl | sh` installer for Linux, macOS, and Windows POSIX shells (`mingw`, `msys`, `cygwin`). It now selects `.tar.gz` for Unix targets and `.zip` for Windows, supports `VERSION=...` and `INSTALL_DIR=...`, and can extract Windows zips with `unzip` or `powershell.exe`.
+- Documented the installer knobs and release asset names in `README.md`.
+
+Current release state:
+- `v0.1.1` already has GitHub Release assets for Linux x86_64/aarch64, macOS x86_64/aarch64, and Windows x86_64.
+- The new Windows ARM64 asset will be produced on the next release tag or manual Release workflow run after these changes are pushed.
+
+Verification:
+- `sh -n install.sh`
+- workflow YAML parse with PyYAML
+- `cargo fmt --check`
+- `cargo clippy --all-features -- -D warnings`
+- `cargo test --all-features` passed, 30 tests
+- `cargo build --all-features`
+- live installer smoke test: `VERSION=v0.1.1 INSTALL_DIR=<tmp> ./install.sh` then `<tmp>/skill-harness --help`
+- `gh release view v0.1.1 --repo btakita/skill-harness --json tagName,assets,url`
+- `skill-harness` latest CI on `main` is green: run `26079111898`
+- Parent `agent-loop` latest `Agent Doc` CI still fails before runner startup: both `check` and `tmux-ci` have empty step lists/logs, `runner_id=0`, and the annotation says the job was not started because account payments failed or the spending limit needs to be increased. I classified that as the same external CI-start blocker rather than a code or tmux regression.
+<!-- agent:boundary:7fb2d84e -->
 <!-- /agent:exchange -->
+###
+<!--
+-->
 
 ## Queue
 

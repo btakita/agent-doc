@@ -2,7 +2,7 @@
 agent_doc_session: be20dd6e-31ce-4f16-93ed-42c9c2a21b98
 agent_doc_format: template
 agent_doc_write: crdt
-agent: opencode
+agent: codex
 claude_model: claude-opus-4-6
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
@@ -33,27 +33,12 @@ Operational task document for agent-loop workspace management.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260511-154008.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260519-035814.md`*
 
 Compacted content:
-- Archived 11 response topic(s): optimizing /context, plugins on demand; context audit; token optimization strategies; 8 more
-- Prior summary/context: Completed releases: corky v0.26.3 (7-platform GitHub Release, fixed CI through 5 iterations: OpenSSL, host libssl-dev...
-❯ My logitech webcam is not connecting to Zoom after the machine rebooted. Please troubleshoot.
-### Re: spec created & items transferred — opus-4-6
-
-Done. Created the spec in `tasks/tsift.md` with:
-
-- **Spec: AST-Aware Code RAG** section — covers architecture (tsift + tsift-graph crate), per-submodule isolation tiers, storage layout, new subcommands, output contract, and development phases
-- **8 new pending items** added to tsift.md covering the full implementation path:
-  - `#ast1`–`#ast4`: tree-sitter integration + SQLite symbols + search wiring
-  - `#grp1`–`#grp2`: tsift-graph crate + callers/callees subcommands
-  - `#iso1`: per-submodule config + isolation
-  - `#bamc`: graphify evaluation (transferred from here)
-
-The existing tsift pending items (release workflow, audit subcommands) are preserved alongside the new ones.
-
-Marked `#bamc` done here — it now lives in `tasks/tsift.md`.
-<!-- agent:boundary:6ff88172 -->
+- Archived 1 response topic(s): spec created & items transferred
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca30...
+<!-- agent:boundary:49f106f3 -->
 <!-- /agent:exchange -->
 ###
 <!--

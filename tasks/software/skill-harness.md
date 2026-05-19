@@ -32,7 +32,31 @@ queue_active: false
 Compacted content:
 - Archived 2 response topic(s): skill-harness compose-skills follow-ups; skill-harness README usage
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223...
-<!-- agent:boundary:d8584bf7 -->
+❯ release + publish
+### Re: release + publish — gpt-5
+
+Released `skill-harness` `v0.1.1`.
+
+Completed:
+- Bumped `src/skill-harness` from `0.1.0` to `0.1.1` in `Cargo.toml` and `Cargo.lock`.
+- Committed and pushed `btakita/skill-harness` commit `7729921 chore: release v0.1.1`.
+- Tagged and pushed `v0.1.1`.
+- GitHub Release `v0.1.1` completed: https://github.com/btakita/skill-harness/releases/tag/v0.1.1
+- crates.io now reports `skill-harness = "0.1.1"`.
+- Committed and pushed the parent `agent-loop` submodule pointer as `3461e4a96 chore: update skill-harness release`.
+
+Verification:
+- `cargo fmt --check`
+- `cargo clippy --all-features -- -D warnings`
+- `cargo test --all-features` passed: 30 tests.
+- `cargo publish --dry-run` passed before tagging.
+- `skill-harness` CI passed on `main` for `7729921`.
+- `skill-harness` Release workflow passed for `v0.1.1`, including all platform builds, GitHub Release creation, and crates.io publish.
+
+CI notes:
+- The parent `agent-loop` `Agent Doc` workflow for `3461e4a96` failed with empty `check` and `tmux-ci` job step lists and no logs, so I classified it as an external CI-start/runner allocation failure rather than a code or tmux regression.
+- GitHub emitted Node.js 20 deprecation annotations for `actions/checkout@v4` / `actions/upload-artifact@v4`; they did not block the release.
+<!-- agent:boundary:50fa7497 -->
 <!-- /agent:exchange -->
 
 ## Queue

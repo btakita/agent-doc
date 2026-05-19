@@ -66,6 +66,9 @@ predicates = "3"
 proptest = "1"
 tempfile = "3"
 
+[patch.crates-io]
+tmux-router = { path = "../tmux-router" }
+
 [profile.release]
 opt-level = 3
 lto = "fat"

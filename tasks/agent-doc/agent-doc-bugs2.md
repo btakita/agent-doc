@@ -78,10 +78,33 @@ No additional source commit was needed in this cycle because the requested CI wo
 
 
 The latest existing GitHub Actions run is still the older main-branch run from before this workflow change, and there is currently no open PR for `20260422/codex-agent-backend`, so GitHub has not yet produced a new PR CI run displaying the renamed tmux step. The pushed workflow is ready for that next CI execution.
-<!-- agent:boundary:5f72f836 -->
+❯ Create a PR for `20260422/codex-agent-backend` and ensure CI is running on the PR.
+### Re: PR CI for compact exchange branch — gpt-5
+
+Created PR #43 for `20260422/codex-agent-backend`: https://github.com/btakita/agent-doc/pull/43
+
+The PR initially had no checks because GitHub considered the branch conflicted. I merged `origin/main` into the branch, resolved the `Makefile` and `src/audit_docs.rs` conflicts, pushed merge commit `872d81d0`, and the PR moved out of the `DIRTY` state.
+
+I then fixed the CI setup and Rust 1.95 failures that surfaced after checks attached:
+
+- `8d56d3c0` checks out the sibling `agent-kit` path dependency in CI.
+- `99a3210e` adds the `tmux-router` path patch after `ba409b5d` added the checkout.
+- `991cc886` and `741ebf8e` fix Rust 1.95 clippy `unnecessary_sort_by` lints.
+- `a3480589` accepts the earlier open-cycle closeout boundary in the Codex hook submodule test, matching the failure surface GitHub exposed.
+
+Local verification passed:
+
+- `make tmux-ci` earlier after the merge, with 228 passed / 0 failed
+- targeted rerun of `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails`
+
+Current PR state: latest head is `a3480589d43fcdf96ed041c35a73f682e5be80bb`, PR #43 is open, and GitHub CI run `26080886360` is in progress on that head at the `Run make check` step. `Run make tmux-ci` is queued behind it. The run URL is https://github.com/btakita/agent-doc/actions/runs/26080886360/job/76682036564
+
+I left unrelated local files in `src/agent-doc` untouched: `CLAUDE.md` typechange and untracked `AGENTS.md`.
+<!-- agent:boundary:ebe58f04 -->
 <!-- /agent:exchange -->
 ###
 <!--
+re tasks/agent-doc/plan-crdt-duplicate-scaffold-closeout.md: Why is a "closeout" occurring long after a turn ends?
 -->
 
 <!-- agent:queue -->

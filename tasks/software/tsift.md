@@ -35,7 +35,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): public tsift release
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:3ba5a16f -->
+❯ Please evaluate how tsift is used in agent-doc-bugs2.md? Notice the reoccurring attempts to fix the same issues. Did tsift disrupt Codex's and Claude's ability to fix the bugs?
+### Re: tsift and recurring agent-doc fixes — gpt-5
+
+Short answer: I would not blame `tsift` as the thing that disrupted Codex or Claude's ability to fix the recurring `agent-doc` bugs. The stronger read is that `tsift` is currently a diagnostic/context-shaping idea around `agent-doc-bugs2.md`, not a mature execution dependency in the bug-fix path. It exposed churn, and in some places it was too stale or too incomplete to prevent churn, but the root problem is still the `agent-doc` route/closeout/session architecture.
+
+What is actually in `agent-doc-bugs2.md` now: `tsift` appears in the lower-agent orchestration backlog, especially `#v44k`, `#ffsm`, and `#ek86`. Those items say agent-doc should eventually use tsift JSON contracts, context packets, stable handles, freshness checks, and missing/stale fallback behavior. The linked plan is explicit that tsift is a future optional context-shaping layer: lower agents should receive bounded job packets, not whole sessions, and tsift should provide context packs, source handles, diff/test/log digests, session review, index status, and routing history. That is not the same as tsift already controlling the present `agent-doc-bugs2.md` fixes.
+
+The recurring-attempt pattern is real. The done archive shows the same classes repeatedly returning under new IDs: startup/route readiness (`#startreadytimeout`, `#clearstartingrace`, `#opsreadinessrace`, `#startroute`, then `#rtbr`), late fallback or zero-patch closeout churn (`#latefallbackloop`, `#ds58`, `#djwb`, `#zpfb`), and prompt/scaffold ownership problems (`#spfxnorm`, `#bppfxstrip2`, `#lastpfx`, `#scaf2`, `#nd87`). The FlowCore plan says the same thing directly: route, write, git, sync, preflight, and session-check each own pieces of one lifecycle, so agents keep landing tactical fixes instead of changing the owning state machine.
+
+I ran the installed `tsift 0.1.42` against the bug doc. `tsift session-review --next-context --json tasks/agent-doc/agent-doc-bugs2.md` correctly reported the live active target as `do [#mut2]. #spec-test-build-install-commit-push`; it did not replay old done IDs as current work. The fuller session review matched 12 sessions and surfaced the actual workflow smell: about 76M prompt tokens across matched sessions, 97% cached input ratio, largest turn around 244k tokens, fresh_restart=200, auto_trigger_timeout=23, ctrl_d_restart_loop=15, and commit_already_current=5675. That is useful diagnostic evidence of context/restart/closeout churn.
+
+There is one important caveat: `tsift status --json` says the workspace index is stale, with 2629 stale files and missing generated instructions. So I would not trust tsift search/explain/graph output here without reindexing. If an agent had used stale tsift search as authoritative source localization, that could have wasted time. But in this document, the visible recurrence is not explained by tsift injecting bad code direction. It is explained by agents repeatedly fixing symptoms in a large, distributed lifecycle without a single typed owner for route proof, document mutation, closeout state, and prompt ownership.
+
+My conclusion: tsift did not materially disrupt the bug fixing. It also did not yet solve the disruption it was meant to solve. The right sequencing is to keep `#mut2`/FlowCore first: make route and closeout state explicit in agent-doc itself. Then bring tsift in as a bounded evidence generator only after fresh-index gating, stable JSON contracts, and explicit missing/stale fallback behavior are implemented. Otherwise tsift remains a helpful mirror of churn, not a guardrail against it.
+<!-- agent:boundary:38a2456a -->
 <!-- /agent:exchange -->
 ###
 <!--

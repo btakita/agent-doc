@@ -34,10 +34,44 @@ Reviewed recent agent-doc logs; top backlog item: #rtbr.
 Compacted content:
 - Archived 1 response topic(s): JetBrains Clear Session Context default Codex placeholder
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:798d244c -->
+❯ JB `Compact Exchange` results in an external file edit. The CRDT should handle the compaction with no external file edit dialog. #spec-test-build-install-commit-push
+### Re: Compact Exchange editor IPC and CI tmux visibility — gpt-5
+
+Fixed the JetBrains Compact Exchange external-file-edit issue in `src/agent-doc`.
+
+Root cause: Compact Exchange reused the response-fallback full-content IPC path. That path correctly rejects stale response repair after the prior cycle is already committed, but compact is an operator mutation, not late response repair. The rejection forced compact to fall back to a direct disk write, which is what caused JetBrains to show the external file edit dialog.
+
+What changed:
+
+- `src/write.rs` now separates full-content IPC into response fallback and operator mutation modes. The already-committed-cycle guard still protects response fallback, while operator mutation can use editor IPC after a committed prior cycle.
+- `src/compact.rs` now applies compacted documents through the operator-mutation IPC path.
+- Added regression coverage for Compact Exchange after a previous cycle is already committed, including proof that it emits/uses `fullContent` IPC and does not log `late_fallback_patch_rejected`.
+- Updated `editors/SPEC.md` and `VERSIONS.md` with the expected Compact Exchange IPC behavior.
+- Updated `.github/workflows/ci.yml` so GitHub Actions visibly shows separate `Run make check` and `Run make tmux-ci` steps, with a `Running make tmux-ci` log marker in the tmux step.
+
+Verification completed:
+
+- `cargo test component_compact`
+- `cargo test full_content_ipc_skips_committed_cycle_before_socket_or_file_fallback`
+- `make check`
+- `make tmux-ci` (`228 passed; 0 failed` in the live tmux sweep)
+- `make install`
+- Inspected latest GitHub CI run `25773430221`: it was green, but its old workflow log did not visibly show a separate tmux leg. The workflow now will show `Run make tmux-ci` as its own step on the next CI run.
+
+Committed and pushed in `src/agent-doc` on `20260422/codex-agent-backend`:
+
+- `a4c0f3e5 fix: keep compact exchange on editor IPC`
+- `3993a0b3 ci: name tmux integration step`
+
+I left unrelated local/root worktree changes alone. The root superproject gitlink is still modified because `src/agent-doc` now points at the pushed submodule commits; I did not make a root superproject commit because the root worktree already has unrelated dirty files.
+<!-- agent:boundary:ec67025e -->
 <!-- /agent:exchange -->
 ###
 <!--
+Please address this issue on CI. CI should visibly demonstrate tmux-ci was run.
+> but its visible log does not show a separate make tmux-ci leg
+
+#spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->

@@ -923,7 +923,7 @@ fn duplicate_scaffold_has_only_structural_residue(segment: &str) -> bool {
             })
             .map(|component| (component.open_start, component.close_end))
             .collect();
-        ranges.sort_by(|a, b| b.0.cmp(&a.0));
+        ranges.sort_by_key(|range| std::cmp::Reverse(range.0));
         for (start, end) in ranges {
             residue.replace_range(start..end, "");
         }

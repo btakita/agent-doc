@@ -15,7 +15,7 @@ jobs:
     name: check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Checkout agent-doc submodules
         run: |
           git -c url.https://github.com/.insteadOf=git@github.com: \
@@ -31,7 +31,7 @@ jobs:
     name: tmux-ci
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Checkout agent-doc submodules
         run: |
           git -c url.https://github.com/.insteadOf=git@github.com: \

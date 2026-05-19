@@ -131,6 +131,31 @@ pub struct FfiPatchResult {
     pub error: *mut c_char,
 }
 
+fn ffi_patch_ok(text: String) -> FfiPatchResult {
+    FfiPatchResult {
+        text: CString::new(text).unwrap_or_default().into_raw(),
+        error: ptr::null_mut(),
+    }
+}
+
+fn ffi_patch_err(msg: &str) -> FfiPatchResult {
+    FfiPatchResult {
+        text: ptr::null_mut(),
+        error: CString::new(msg).unwrap_or_default().into_raw(),
+    }
+}
+
+fn ffi_patch_from_result(result: anyhow::Result<String>) -> FfiPatchResult {
+    match result {
+        Ok(text) => ffi_patch_ok(text),
+        Err(e) => ffi_patch_err(&format!("{e:#}")),
+    }
+}
+
+fn normalize_editor_visible_result(text: String) -> anyhow::Result<String> {
+    template::normalize_editor_visible_template_structure(&text)
+}
+
 /// Result of [`agent_doc_resolve_project_path`].
 #[repr(C)]
 pub struct FfiProjectPath {
@@ -268,26 +293,21 @@ pub unsafe extern "C" fn agent_doc_apply_patch(
     content: *const c_char,
     mode: *const c_char,
 ) -> FfiPatchResult {
-    let make_err = |msg: &str| FfiPatchResult {
-        text: ptr::null_mut(),
-        error: CString::new(msg).unwrap_or_default().into_raw(),
-    };
-
     let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
     };
     let name = match unsafe { CStr::from_ptr(component_name) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid component name UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid component name UTF-8: {e}")),
     };
     let patch_content = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid content UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid content UTF-8: {e}")),
     };
     let mode_str = match unsafe { CStr::from_ptr(mode) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid mode UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid mode UTF-8: {e}")),
     };
 
     // Build a patch block and apply it
@@ -300,13 +320,10 @@ pub unsafe extern "C" fn agent_doc_apply_patch(
     // apply_patches_with_overrides needs a file path for config lookup — use a dummy
     // since we're providing explicit overrides
     let dummy_path = std::path::Path::new("/dev/null");
-    match template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides) {
-        Ok(result) => FfiPatchResult {
-            text: CString::new(result).unwrap_or_default().into_raw(),
-            error: ptr::null_mut(),
-        },
-        Err(e) => make_err(&format!("{e}")),
-    }
+    ffi_patch_from_result(
+        template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides)
+            .and_then(normalize_editor_visible_result),
+    )
 }
 
 /// Apply a component patch with cursor-aware ordering for append mode.
@@ -328,41 +345,33 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_caret(
     mode: *const c_char,
     caret_offset: i32,
 ) -> FfiPatchResult {
-    let make_err = |msg: &str| FfiPatchResult {
-        text: ptr::null_mut(),
-        error: CString::new(msg).unwrap_or_default().into_raw(),
-    };
-
     let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
     };
     let name = match unsafe { CStr::from_ptr(component_name) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid component name UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid component name UTF-8: {e}")),
     };
     let patch_content = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid content UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid content UTF-8: {e}")),
     };
     let mode_str = match unsafe { CStr::from_ptr(mode) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid mode UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid mode UTF-8: {e}")),
     };
 
     // If append mode with a valid caret, use cursor-aware insertion
     if mode_str == "append" && caret_offset >= 0 {
         let components = match component::parse(doc_str) {
             Ok(c) => c,
-            Err(e) => return make_err(&format!("{e}")),
+            Err(e) => return ffi_patch_err(&format!("{e}")),
         };
         if let Some(comp) = components.iter().find(|c| c.name == name) {
             let result =
                 comp.append_with_caret(doc_str, patch_content, Some(caret_offset as usize));
-            return FfiPatchResult {
-                text: CString::new(result).unwrap_or_default().into_raw(),
-                error: ptr::null_mut(),
-            };
+            return ffi_patch_from_result(normalize_editor_visible_result(result));
         }
     }
 
@@ -371,13 +380,10 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_caret(
     let mut overrides = std::collections::HashMap::new();
     overrides.insert(name.to_string(), mode_str.to_string());
     let dummy_path = std::path::Path::new("/dev/null");
-    match template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides) {
-        Ok(result) => FfiPatchResult {
-            text: CString::new(result).unwrap_or_default().into_raw(),
-            error: ptr::null_mut(),
-        },
-        Err(e) => make_err(&format!("{e}")),
-    }
+    ffi_patch_from_result(
+        template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides)
+            .and_then(normalize_editor_visible_result),
+    )
 }
 
 /// Apply a component patch using a boundary marker for insertion point.
@@ -400,37 +406,32 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
     mode: *const c_char,
     boundary_id: *const c_char,
 ) -> FfiPatchResult {
-    let make_err = |msg: &str| FfiPatchResult {
-        text: ptr::null_mut(),
-        error: CString::new(msg).unwrap_or_default().into_raw(),
-    };
-
     let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
     };
     let name = match unsafe { CStr::from_ptr(component_name) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid component name UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid component name UTF-8: {e}")),
     };
     let patch_content = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid content UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid content UTF-8: {e}")),
     };
     let mode_str = match unsafe { CStr::from_ptr(mode) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid mode UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid mode UTF-8: {e}")),
     };
     let bid = match unsafe { CStr::from_ptr(boundary_id) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid boundary_id UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid boundary_id UTF-8: {e}")),
     };
 
     // Use boundary-aware insertion for append mode
     if mode_str == "append" && !bid.is_empty() {
         let components = match component::parse(doc_str) {
             Ok(c) => c,
-            Err(e) => return make_err(&format!("{e}")),
+            Err(e) => return ffi_patch_err(&format!("{e}")),
         };
         if let Some(comp) = components.iter().find(|c| c.name == name) {
             let result = comp.append_with_boundary(doc_str, patch_content, bid);
@@ -439,10 +440,7 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
             } else {
                 result
             };
-            return FfiPatchResult {
-                text: CString::new(result).unwrap_or_default().into_raw(),
-                error: ptr::null_mut(),
-            };
+            return ffi_patch_from_result(normalize_editor_visible_result(result));
         }
     }
 
@@ -451,13 +449,10 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
     let mut overrides = std::collections::HashMap::new();
     overrides.insert(name.to_string(), mode_str.to_string());
     let dummy_path = std::path::Path::new("/dev/null");
-    match template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides) {
-        Ok(result) => FfiPatchResult {
-            text: CString::new(result).unwrap_or_default().into_raw(),
-            error: ptr::null_mut(),
-        },
-        Err(e) => make_err(&format!("{e}")),
-    }
+    ffi_patch_from_result(
+        template::apply_patches_with_overrides(doc_str, &[patch], "", dummy_path, &overrides)
+            .and_then(normalize_editor_visible_result),
+    )
 }
 
 /// CRDT merge (3-way conflict-free).
@@ -612,21 +607,13 @@ pub unsafe extern "C" fn agent_doc_merge_frontmatter(
 pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end(
     doc: *const c_char,
 ) -> FfiPatchResult {
-    let make_err = |msg: &str| FfiPatchResult {
-        text: ptr::null_mut(),
-        error: CString::new(msg).unwrap_or_default().into_raw(),
-    };
-
     let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
     };
 
     let result = template::reposition_boundary_to_end_clean(doc_str);
-    FfiPatchResult {
-        text: CString::new(result).unwrap_or_default().into_raw(),
-        error: ptr::null_mut(),
-    }
+    ffi_patch_from_result(normalize_editor_visible_result(result))
 }
 
 /// Reposition boundary marker to end of exchange component using an explicit ID.
@@ -643,25 +630,17 @@ pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_with_id(
     doc: *const c_char,
     boundary_id: *const c_char,
 ) -> FfiPatchResult {
-    let make_err = |msg: &str| FfiPatchResult {
-        text: ptr::null_mut(),
-        error: CString::new(msg).unwrap_or_default().into_raw(),
-    };
-
     let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
     };
     let boundary_id_str = match unsafe { CStr::from_ptr(boundary_id) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid boundary_id UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid boundary_id UTF-8: {e}")),
     };
 
     let result = template::reposition_boundary_to_end_clean_with_id(doc_str, Some(boundary_id_str));
-    FfiPatchResult {
-        text: CString::new(result).unwrap_or_default().into_raw(),
-        error: ptr::null_mut(),
-    }
+    ffi_patch_from_result(normalize_editor_visible_result(result))
 }
 
 /// Reposition boundary marker to end of exchange, preserving `(HEAD)` markers.
@@ -677,21 +656,13 @@ pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_with_id(
 pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_preserve_head(
     doc: *const c_char,
 ) -> FfiPatchResult {
-    let make_err = |msg: &str| FfiPatchResult {
-        text: ptr::null_mut(),
-        error: CString::new(msg).unwrap_or_default().into_raw(),
-    };
-
     let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
     };
 
     let result = template::reposition_boundary_to_end_preserve_head(doc_str);
-    FfiPatchResult {
-        text: CString::new(result).unwrap_or_default().into_raw(),
-        error: ptr::null_mut(),
-    }
+    ffi_patch_from_result(normalize_editor_visible_result(result))
 }
 
 /// Reposition boundary using an explicit ID, preserving `(HEAD)` markers.
@@ -704,26 +675,41 @@ pub unsafe extern "C" fn agent_doc_reposition_boundary_to_end_preserve_head_with
     doc: *const c_char,
     boundary_id: *const c_char,
 ) -> FfiPatchResult {
-    let make_err = |msg: &str| FfiPatchResult {
-        text: ptr::null_mut(),
-        error: CString::new(msg).unwrap_or_default().into_raw(),
-    };
-
     let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid doc UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
     };
     let boundary_id_str = match unsafe { CStr::from_ptr(boundary_id) }.to_str() {
         Ok(s) => s,
-        Err(e) => return make_err(&format!("invalid boundary_id UTF-8: {e}")),
+        Err(e) => return ffi_patch_err(&format!("invalid boundary_id UTF-8: {e}")),
     };
 
     let result =
         template::reposition_boundary_to_end_preserve_head_with_id(doc_str, Some(boundary_id_str));
-    FfiPatchResult {
-        text: CString::new(result).unwrap_or_default().into_raw(),
-        error: ptr::null_mut(),
-    }
+    ffi_patch_from_result(normalize_editor_visible_result(result))
+}
+
+/// Normalize/fail-close template structure before editor-visible IPC writes.
+///
+/// Safe duplicate scaffold shells are repaired. Ambiguous duplicate scaffold
+/// content, conversation text outside exchange, or malformed component shape
+/// returns an error so editor plugins can refuse to mutate the visible buffer.
+///
+/// # Safety
+///
+/// `doc` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_normalize_template_structure(
+    doc: *const c_char,
+) -> FfiPatchResult {
+    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
+    };
+
+    ffi_patch_from_result(template::normalize_editor_visible_template_structure(
+        doc_str,
+    ))
 }
 
 /// Record a document change event for debounce tracking.
@@ -1459,6 +1445,69 @@ mod tests {
         assert!(text.contains("### Re: latest — gpt-5 (HEAD)\n"));
         assert_eq!(text.matches("(HEAD)").count(), 1, "got:\n{text}");
         unsafe { agent_doc_free_string(result.text) };
+    }
+
+    #[test]
+    fn normalize_template_structure_ffi_repairs_safe_duplicate_scaffold() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let c_doc = CString::new(doc).unwrap();
+
+        let result = unsafe { agent_doc_normalize_template_structure(c_doc.as_ptr()) };
+
+        assert!(result.error.is_null());
+        assert!(!result.text.is_null());
+        let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
+        assert_eq!(text.matches("<!-- /agent:exchange -->").count(), 1);
+        assert_eq!(text.matches("<!-- agent:queue -->").count(), 1);
+        assert_eq!(text.matches("<!-- agent:backlog -->").count(), 1);
+        unsafe { agent_doc_free_string(result.text) };
+    }
+
+    #[test]
+    fn normalize_template_structure_ffi_rejects_mixed_duplicate_scaffold() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+            "user typed into duplicated shell\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        let c_doc = CString::new(doc).unwrap();
+
+        let result = unsafe { agent_doc_normalize_template_structure(c_doc.as_ptr()) };
+
+        assert!(result.text.is_null());
+        assert!(!result.error.is_null());
+        let error = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
+        assert!(
+            error.contains("duplicate close repair suffix is ambiguous")
+                || error.contains("closing marker <!-- /agent:exchange -->"),
+            "ambiguous scaffold should fail closed, got: {error}"
+        );
+        unsafe { agent_doc_free_string(result.error) };
     }
 
     #[test]

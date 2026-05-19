@@ -598,6 +598,10 @@ class PatchWatcher(private val project: Project) : Disposable {
             result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
         }
         result = annotateExchangeHeadingsAgainstBaselineUtil(result, "exchange", content) ?: result
+        result = NativePatching.normalizeTemplateStructure(result) ?: run {
+            LOG.warn("Patch rejected by native template-structure guard for ${patch.file}")
+            return false
+        }
 
         if (result == content) {
             LOG.warn("Patch produced no changes for ${patch.file}")
@@ -678,6 +682,10 @@ class PatchWatcher(private val project: Project) : Disposable {
                 result = normalizeExchangePrefixes(result, patch.normalizePrefixLines)
             }
             result = annotateExchangeHeadingsAgainstBaselineUtil(result, "exchange", content) ?: result
+            result = NativePatching.normalizeTemplateStructure(result) ?: run {
+                LOG.warn("VFS patch rejected by native template-structure guard for ${patch.file}")
+                return false
+            }
 
             if (result != content) {
                 ApplicationManager.getApplication().runWriteAction {

@@ -67,6 +67,7 @@ Binary                    Filesystem              Plugin
   │                          │                      │ read JSON
   │                          │                      │ find Document
   │                          │                      │ apply patches
+  │                          │                      │ normalize/guard structure
   │                          │                      │ save document
   │                          │  delete <hash>.json  │
   │                          │<─────────────────────┤
@@ -100,6 +101,8 @@ Binary                    Filesystem              Plugin
 
 Each patch targets a `<!-- agent:name -->...<!-- /agent:name -->` component. The plugin replaces the content between markers with the patch content.
 
+Before the plugin mutates the editor-visible buffer or writes an ACK sidecar, it passes the final candidate document through `agent_doc_normalize_template_structure`. That shared FFI guard repairs safe duplicate scaffold shells and rejects ambiguous malformed template structure, preventing a socket/file IPC write from making a bad exchange/scaffold merge visible.
+
 ### Fallback
 
 If the patch file is not consumed within 2 seconds (plugin not installed or IDE not running), the binary:
@@ -116,6 +119,7 @@ This makes `--ipc` safe to use unconditionally in the SKILL.md workflow.
 |--------|--------|---------|
 | `write.rs:run_ipc()` | `PatchWatcher.kt` | End-to-end IPC flow |
 | `template::parse_patches()` | `applyComponentPatch()` | Patch extraction/application |
+| `template::normalize_editor_visible_template_structure()` | `agent_doc_normalize_template_structure()` | Final visible-write structure guard |
 | `snapshot::save()` | `FileDocumentManager.saveDocument()` | Persistence |
 | `atomic_write()` (patch JSON) | NIO `WatchService` | File-based IPC transport |
 

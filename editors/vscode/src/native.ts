@@ -76,6 +76,7 @@ function resetBindings(): void {
     _reposition_boundary_to_end = null;
     _reposition_boundary_to_end_preserve_head = null;
     _reposition_boundary_to_end_preserve_head_with_id = null;
+    _normalize_template_structure = null;
     _visual_tokens_json = null;
     _is_idle = null;
     _await_idle = null;
@@ -171,6 +172,7 @@ let _reposition_boundary_to_end: any = null;
 let _reposition_boundary_to_end_with_id: any = null;
 let _reposition_boundary_to_end_preserve_head: any = null;
 let _reposition_boundary_to_end_preserve_head_with_id: any = null;
+let _normalize_template_structure: any = null;
 let _visual_tokens_json: any = null;
 let _is_idle: any = null;
 let _await_idle: any = null;
@@ -181,7 +183,7 @@ let _free_string: any = null;
 let _version: any = null;
 
 function bindFunctions(): void {
-    if (_reposition_boundary_to_end) return;
+    if (_reposition_boundary_to_end && _normalize_template_structure) return;
 
     // Define the FfiPatchResult struct
     const FfiPatchResultType = koffi.struct('FfiPatchResult', {
@@ -210,6 +212,7 @@ function bindFunctions(): void {
         FfiPatchResultType,
         ['str', 'str'],
     );
+    _normalize_template_structure = lib.func('agent_doc_normalize_template_structure', FfiPatchResultType, ['str']);
     _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', 'char*', ['str']);
     _is_idle = lib.func('agent_doc_is_idle', 'bool', ['str', 'int64']);
     _await_idle = lib.func('agent_doc_await_idle', 'bool', ['str', 'int64', 'int64']);
@@ -283,6 +286,29 @@ export function repositionBoundaryToEndPreserveHead(doc: string, projectRoot?: s
         if (!result.text) return null;
         const text = koffi.decode(result.text, 'char', -1);
         return text;
+    } finally {
+        if (result.text) _free_string(result.text);
+    }
+}
+
+/**
+ * Normalize/fail-close template structure before editor-visible IPC writes.
+ * Returns null when FFI is unavailable or the shared Rust guard rejects the doc.
+ */
+export function normalizeTemplateStructure(doc: string, projectRoot?: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+
+    const result = _normalize_template_structure(doc);
+    try {
+        if (result.error) {
+            const error = koffi.decode(result.error, 'char', -1);
+            console.warn(`[agent-doc/native] normalize_template_structure error: ${error}`);
+            _free_string(result.error);
+            return null;
+        }
+        if (!result.text) return null;
+        return koffi.decode(result.text, 'char', -1);
     } finally {
         if (result.text) _free_string(result.text);
     }

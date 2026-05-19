@@ -836,6 +836,46 @@ pub fn repair_duplicate_exchange_close_scaffold(doc: &str) -> Result<Option<Stri
     Ok(Some(repaired))
 }
 
+/// Normalize the structural template invariants required before an editor IPC
+/// client mutates the visible document.
+///
+/// This is intentionally in the library layer so all editor integrations can
+/// share the same duplicate-scaffold repair/fail-closed behavior as the binary
+/// write path. Safe duplicate exchange-close scaffolds are dropped; ambiguous
+/// mixed user text remains an error so the editor can refuse the visible write.
+pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> {
+    let mut normalized = crate::component::strip_backlog_patch_attr(doc);
+    while let Some(merged) = repair_duplicate_exchange_opener(&normalized)? {
+        normalized = merged;
+    }
+
+    match guard_no_conversation_tail_outside_exchange(&normalized) {
+        Ok(()) => Ok(normalized),
+        Err(err)
+            if err.chain().any(|cause| {
+                cause
+                    .to_string()
+                    .contains("closing marker <!-- /agent:exchange --> without matching open")
+            }) =>
+        {
+            if let Some(repaired) = repair_duplicate_exchange_close_scaffold(&normalized)? {
+                guard_no_conversation_tail_outside_exchange(&repaired).with_context(
+                    || "template structure guard failed after duplicate-scaffold repair",
+                )?;
+                return Ok(repaired);
+            }
+            if let Some(repaired) = repair_duplicate_exchange_close_tail(&normalized)? {
+                guard_no_conversation_tail_outside_exchange(&repaired).with_context(
+                    || "template structure guard failed after duplicate-close repair",
+                )?;
+                return Ok(repaired);
+            }
+            Err(err).context("template structure guard failed")
+        }
+        Err(err) => Err(err).context("template structure guard failed"),
+    }
+}
+
 fn is_safe_duplicate_template_scaffold(segment: &str) -> bool {
     let trimmed = segment.trim();
     if trimmed.is_empty() {
@@ -4301,6 +4341,70 @@ Existing answer.
         assert!(
             repaired.is_none(),
             "mixed user text must not be dropped as duplicated scaffold"
+        );
+    }
+
+    #[test]
+    fn normalize_editor_visible_template_structure_repairs_duplicate_scaffold() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!--\n",
+            "Use TEST_THREADS=8.\n",
+            "-->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#aaaa] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = normalize_editor_visible_template_structure(doc)
+            .expect("safe duplicate scaffold should repair before editor write");
+
+        assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:backlog -->").count(), 1);
+        guard_no_conversation_tail_outside_exchange(&repaired).unwrap();
+    }
+
+    #[test]
+    fn normalize_editor_visible_template_structure_rejects_mixed_duplicate_scaffold() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+            "user typed into duplicated shell\n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+
+        let err = normalize_editor_visible_template_structure(doc).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("duplicate close repair suffix is ambiguous")
+                || err
+                    .to_string()
+                    .contains("closing marker <!-- /agent:exchange -->"),
+            "ambiguous duplicate scaffold must fail closed, got: {err:#}"
         );
     }
 

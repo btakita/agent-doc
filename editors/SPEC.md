@@ -102,6 +102,8 @@ Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that
 
 **Response heading visibility:** During normal IPC patch application (before post-commit cleanup), plugins must preserve transient ` (HEAD)` markers on newly added `### Re:` headings in `agent:exchange`. That marker is part of the user-visible "fresh response is still uncommitted" state; only the explicit clean reposition/commit path is allowed to strip it.
 
+**Visible-write structure guard:** Before acknowledging an IPC component patch and before mutating the editor-visible document buffer, plugins must run the shared Rust template-structure guard (`agent_doc_normalize_template_structure`) on the final candidate document. The guard may repair safe duplicate scaffold shells, such as a duplicated queue/backlog scaffold between two `<!-- /agent:exchange -->` closers, but it must fail closed when that duplicated shell contains user text or other ambiguous content. A rejected guard means the plugin must not call `Document.setText`, `WorkspaceEdit`, or VFS binary-content replacement for that candidate.
+
 ## 10. CLI Dependency
 
 - Plugins resolve `agent-doc` from: `~/bin/`, `~/.local/bin/`, `~/.cargo/bin/`, `/usr/local/bin/`, or `$PATH`.

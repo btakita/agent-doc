@@ -1513,8 +1513,8 @@ class PatchWatcher implements vscode.Disposable {
             }
         }
 
+        const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
         if (patch.reposition_boundary) {
-            const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
             content = native.repositionBoundaryToEnd(content, projectRoot, patch.reposition_boundary_id)
                 ?? this.repositionBoundaryToEndTs(content, 'exchange', patch.reposition_boundary_id)
                 ?? content;
@@ -1527,6 +1527,12 @@ class PatchWatcher implements vscode.Disposable {
         }
 
         content = annotateExchangeHeadingsAgainstBaseline(content, 'exchange', baselineContent) ?? content;
+        const normalized = native.normalizeTemplateStructure(content, projectRoot);
+        if (normalized == null) {
+            this.outputChannel.appendLine(`PatchWatcher: native template-structure guard rejected ${patch.file}`);
+            return false;
+        }
+        content = normalized;
 
         // Apply the combined edit
         if (content !== baselineContent) {

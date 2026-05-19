@@ -127,6 +127,11 @@ interface AgentDocLib : Library {
     ): FfiPatchResult.ByValue
 
     /**
+     * Normalize/fail-close template structure before editor-visible IPC writes.
+     */
+    fun agent_doc_normalize_template_structure(doc: String): FfiPatchResult.ByValue
+
+    /**
      * Parse components from a document.
      * Returns JSON array of component objects.
      */
@@ -503,6 +508,27 @@ object NativePatching {
             if (result.text == null) return null
             val text = result.text!!.getString(0)
             return text
+        } finally {
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
+    /**
+     * Normalize/fail-close template structure using the shared Rust guard.
+     * Returns null when FFI is unavailable or when the guard rejects the document.
+     */
+    fun normalizeTemplateStructure(doc: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = lib.agent_doc_normalize_template_structure(doc)
+        try {
+            if (result.error != null) {
+                val error = result.error!!.getString(0)
+                LOG.warn("[native] normalize_template_structure error: $error")
+                lib.agent_doc_free_string(result.error)
+                return null
+            }
+            if (result.text == null) return null
+            return result.text!!.getString(0)
         } finally {
             lib.agent_doc_free_string(result.text)
         }

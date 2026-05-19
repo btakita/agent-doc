@@ -92,7 +92,36 @@ CI evidence:
 - Parent repo: `3a9a56875` (`chore: update agent-doc submodule`) to `origin/main`
 
 The session closeout may add one more parent commit for this response and the new recommended backlog item.
-<!-- agent:boundary:ba3c9902 -->
+❯ The Codex/Claude session is completely idle. There is a real bug to where a turn never seems to be registered as ended.
+❯ > The valid choices in that state are wait for the prompt, refresh after it returns idle, or use explicit `Interrupt and clear` to discard the running turn.
+
+❯ #spec-test-build-install-commit-push
+### Re: idle clear-session footer bug — gpt-5
+
+Fixed the real idle-state bug behind the latest `Clear Session Context` repro. The clear/status path already recognized a Codex footer when the pane contained only footer chrome, but a normal idle pane can still show older transcript text above the bottom `gpt-5.5 high · ... · Context ... used` footer. That made direct live-pane evidence stay `alive-busy prompt_ready=false` even though the turn had ended.
+
+The binary now treats a bottom Codex model/cwd/context footer as operator idle evidence for `session status` / `session clear`, even with older visible transcript text above it. It still rejects protected states: drafted prompt input, queued composer state, shell/history search, hook review, and other busy cues. Route dispatch remains stricter and still requires a real dispatch-ready prompt before injecting a reopen.
+
+Updated files in `src/agent-doc`:
+
+- `src/session_actor_cmd.rs`
+- `src/harness.rs`
+- `SPEC.md`
+
+
+- `cargo test session_actor_cmd::tests::live_pane_prompt_ready`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin signPlugin` from `editors/jetbrains`
+- Local `make tmux-ci` passed with 228 live tmux tests.
+
+
+- New GitHub CI run `26102990109` started after the push and failed in `Run make check` on the same CI-only `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails` failure as prior run `26084392085`; `Run make tmux-ci` was skipped after that failure. Local `make check` and local `make tmux-ci` both passed.
+
+
+- `src/agent-doc`: `314bd66c` (`fix: treat idle codex footer as clear-ready`) to `origin/20260422/codex-agent-backend`
+- Parent repo: `ed833cb8b` (`chore: update agent-doc submodule`) to `origin/main`
+
+I did not add a new backlog item because the remaining CI-only failure is already tracked as `#wnj2`.
+<!-- agent:boundary:335cf7cc -->
 <!-- /agent:exchange -->
 ###
 <!--

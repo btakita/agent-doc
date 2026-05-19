@@ -29,114 +29,12 @@ Reviewed recent agent-doc logs; top backlog item: #rtbr.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-053118.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-070924.md`*
 
 Compacted content:
-- Archived 1 response topic(s): JetBrains Clear Session Context default Codex placeholder
+- Archived 5 response topic(s): Compact Exchange editor IPC and CI tmux visibility; CI tmux visibility follow-up; PR CI for compact exchange branch; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB `Compact Exchange` results in an external file edit. The CRDT should handle the compaction with no external file edit dialog. #spec-test-build-install-commit-push
-### Re: Compact Exchange editor IPC and CI tmux visibility — gpt-5
-
-Fixed the JetBrains Compact Exchange external-file-edit issue in `src/agent-doc`.
-
-Root cause: Compact Exchange reused the response-fallback full-content IPC path. That path correctly rejects stale response repair after the prior cycle is already committed, but compact is an operator mutation, not late response repair. The rejection forced compact to fall back to a direct disk write, which is what caused JetBrains to show the external file edit dialog.
-
-What changed:
-
-- `src/write.rs` now separates full-content IPC into response fallback and operator mutation modes. The already-committed-cycle guard still protects response fallback, while operator mutation can use editor IPC after a committed prior cycle.
-- `src/compact.rs` now applies compacted documents through the operator-mutation IPC path.
-- Added regression coverage for Compact Exchange after a previous cycle is already committed, including proof that it emits/uses `fullContent` IPC and does not log `late_fallback_patch_rejected`.
-- Updated `editors/SPEC.md` and `VERSIONS.md` with the expected Compact Exchange IPC behavior.
-- Updated `.github/workflows/ci.yml` so GitHub Actions visibly shows separate `Run make check` and `Run make tmux-ci` steps, with a `Running make tmux-ci` log marker in the tmux step.
-
-Verification completed:
-
-- `cargo test component_compact`
-- `cargo test full_content_ipc_skips_committed_cycle_before_socket_or_file_fallback`
-- `make check`
-- `make tmux-ci` (`228 passed; 0 failed` in the live tmux sweep)
-- `make install`
-- Inspected latest GitHub CI run `25773430221`: it was green, but its old workflow log did not visibly show a separate tmux leg. The workflow now will show `Run make tmux-ci` as its own step on the next CI run.
-
-Committed and pushed in `src/agent-doc` on `20260422/codex-agent-backend`:
-
-- `a4c0f3e5 fix: keep compact exchange on editor IPC`
-- `3993a0b3 ci: name tmux integration step`
-
-I left unrelated local/root worktree changes alone. The root superproject gitlink is still modified because `src/agent-doc` now points at the pushed submodule commits; I did not make a root superproject commit because the root worktree already has unrelated dirty files.
-❯ Please address this issue on CI. CI should visibly demonstrate tmux-ci was run.
-❯ > but its visible log does not show a separate make tmux-ci leg
-
-❯ #spec-test-build-install-commit-push
-### Re: CI tmux visibility follow-up — gpt-5
-
-The CI visibility issue is addressed in the already-pushed `src/agent-doc` branch head.
-
-I verified `20260422/codex-agent-backend` is at `3993a0b3d94f73180123c21e69a0d4a1198d9274`, and that commit changes `.github/workflows/ci.yml` so CI has a separate step named `Run make tmux-ci` with an explicit `Running make tmux-ci` log marker before invoking `make tmux-ci`. It also names the normal suite step `Run make check`, so the GitHub Actions UI will show the normal suite and live tmux sweep as distinct legs on the next pull-request or main-branch CI run.
-
-No additional source commit was needed in this cycle because the requested CI workflow change was already committed and pushed as:
-
-
-The latest existing GitHub Actions run is still the older main-branch run from before this workflow change, and there is currently no open PR for `20260422/codex-agent-backend`, so GitHub has not yet produced a new PR CI run displaying the renamed tmux step. The pushed workflow is ready for that next CI execution.
-❯ Create a PR for `20260422/codex-agent-backend` and ensure CI is running on the PR.
-### Re: PR CI for compact exchange branch — gpt-5
-
-Created PR #43 for `20260422/codex-agent-backend`: https://github.com/btakita/agent-doc/pull/43
-
-The PR initially had no checks because GitHub considered the branch conflicted. I merged `origin/main` into the branch, resolved the `Makefile` and `src/audit_docs.rs` conflicts, pushed merge commit `872d81d0`, and the PR moved out of the `DIRTY` state.
-
-I then fixed the CI setup and Rust 1.95 failures that surfaced after checks attached:
-
-- `8d56d3c0` checks out the sibling `agent-kit` path dependency in CI.
-- `99a3210e` adds the `tmux-router` path patch after `ba409b5d` added the checkout.
-- `991cc886` and `741ebf8e` fix Rust 1.95 clippy `unnecessary_sort_by` lints.
-- `a3480589` accepts the earlier open-cycle closeout boundary in the Codex hook submodule test, matching the failure surface GitHub exposed.
-
-Local verification passed:
-
-- `make tmux-ci` earlier after the merge, with 228 passed / 0 failed
-- targeted rerun of `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails`
-
-Current PR state: latest head is `a3480589d43fcdf96ed041c35a73f682e5be80bb`, PR #43 is open, and GitHub CI run `26080886360` is in progress on that head at the `Run make check` step. `Run make tmux-ci` is queued behind it. The run URL is https://github.com/btakita/agent-doc/actions/runs/26080886360/job/76682036564
-
-I left unrelated local files in `src/agent-doc` untouched: `CLAUDE.md` typechange and untracked `AGENTS.md`.
-❯ re tasks/agent-doc/plan-crdt-duplicate-scaffold-closeout.md: Why is a "closeout" occurring long after a turn ends?
-### Re: delayed closeout timing — gpt-5
-
-A closeout is not the human-visible end of the turn. In agent-doc it is the durability boundary: the response has to be written, committed, cycle-state marked terminal, and accepted by `session-check`. If an earlier visible response landed in the file or snapshot but did not complete that boundary, a later `preflight`, `session-check`, hook, or `agent-doc <file>` invocation can resume the missing commit boundary minutes or hours later.
-
-That delayed recovery is intentional. It is how agent-doc avoids losing responses when a harness stops after patchback, IPC succeeds but commit is interrupted, or the snapshot/HEAD state proves the response was already committed but the cycle marker was left open. In those cases the later closeout should be idempotent: either commit the already-written response, mark the cycle as already current, repair stale snapshot metadata, or fail closed.
-
-The referenced CRDT duplicate-scaffold plan is about the dangerous case inside that expected lifecycle. A delayed closeout may be working from older cycle state while the user is already typing a new prompt. If the CRDT/template merge duplicated only inert scaffold, it can repair that scaffold. If the duplicated scaffold is interleaved with live user text, it must not guess, delete, or reorder that text; it has to fail closed so the user prompt remains authoritative.
-
-So the answer is: the late closeout exists because closeout is a persisted commit/session-check boundary, not a UI timestamp. The bug is not the delay by itself; the bug class is any delayed closeout path that treats live mixed user text as repairable scaffold instead of stopping.
-
-No new backlog item is needed from this answer; the referenced plan already captures the concrete bug work.
-❯ The agent-doc turn ends where finalize is already called. Minutes pass. Yet the "closeout" bug still occurs. It just occurred while I was writing this prompt. The codex session was idle. "Closeout" should not happen this late. This is a real bug.
-❯ spec-test-build-install-commit-push
-### Re: terminal follow-up closeout no-op fix — gpt-5
-
-Fixed the late closeout no-op path in `src/agent-doc`.
-
-Root cause: `agent-doc commit` treated a HEAD-current snapshot plus a later user follow-up prompt as an already-current closeout even when the prior cycle was already terminal. That did not commit the prompt, but it still emitted `commit_noop` / `commit_already_current` lifecycle bookkeeping after `finalize` had already succeeded, which made idle prompt typing look like another delayed closeout.
-
-- `src/git.rs` now treats terminal-cycle user follow-up drift as prompt handoff only. It logs `post_commit_user_follow_up` plus `commit_prompt_handoff_noop`, returns without rewriting committed cycle state, and does not emit `commit_noop` / `commit_already_current`.
-- Open/recoverable cycles still retain the old already-current recovery behavior.
-- Added regression coverage for terminal user follow-up drift and updated `SPEC.md` / `VERSIONS.md`.
-
-Verification:
-- `cargo test commit_skips_terminal_user_follow_up_noop_closeout --all-targets`
-- `cargo test commit_repairs_committed_head_before_user_follow_up_noop --all-targets`
-- `cargo test commit_closes_cycle_when_staged_snapshot_already_matches_head --all-targets`
-- `make tmux-ci` (228 passed)
-- `agent-doc --version` -> `agent-doc 0.33.16`
-
-CI note: latest existing PR CI run `26080886360` failed on the old branch head in `Run make check`; `Run make tmux-ci` was skipped, so there was no red tmux leg. The local fix passes `make check` and `make tmux-ci`.
-
-- `540f6fad fix: skip terminal follow-up closeout noops`
-
-I left unrelated local changes untouched: `CLAUDE.md` typechange and untracked `AGENTS.md` in `src/agent-doc`, plus existing root worktree dirt.
-<!-- agent:boundary:2140bac5 -->
+<!-- agent:boundary:11d74f9b -->
 <!-- /agent:exchange -->
 ###
 <!--

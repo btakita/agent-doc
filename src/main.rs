@@ -61,6 +61,7 @@ mod diff;
 mod editor_route_errors;
 mod env;
 mod extract;
+mod flow;
 mod focus;
 mod fs_util;
 mod gc;

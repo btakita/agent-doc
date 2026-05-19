@@ -2536,6 +2536,16 @@ fn validate_template_patchback_parse_shape(
         .iter()
         .filter(|patch| patch.name == "exchange")
         .count();
+    let shape = crate::flow::document_mutation::classify_patchback_shape(
+        crate::flow::document_mutation::PatchbackShapeFacts {
+            marker_count,
+            patch_count: patches.len(),
+            exchange_patch_count: exchange_patches,
+            unmatched_len: unmatched.trim().len(),
+            has_transcript_markers: response.contains("## User")
+                || response.contains("## Assistant"),
+        },
+    );
     crate::ops_log::log_op(
         file,
         &format!(
@@ -2561,6 +2571,15 @@ fn validate_template_patchback_parse_shape(
                 marker_count,
                 unmatched.trim().len()
             ),
+        );
+        crate::flow::proof::log_flow_event(
+            file,
+            crate::flow::types::FlowEvent::new(
+                crate::flow::types::FlowName::DocumentMutation,
+                crate::flow::types::FlowStage::PatchbackParse,
+                crate::flow::types::FlowOutcome::FailedClosed,
+            )
+            .with_reason(shape.as_str()),
         );
         anyhow::bail!(
             "malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content"

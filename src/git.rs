@@ -2590,6 +2590,15 @@ fn finalize_already_committed_noop(
             drift_kind
         ),
     );
+    crate::flow::proof::log_flow_event(
+        file,
+        crate::flow::types::FlowEvent::new(
+            crate::flow::types::FlowName::Closeout,
+            crate::flow::types::FlowStage::Commit,
+            crate::flow::types::FlowOutcome::Completed,
+        )
+        .with_reason(format!("already_current_{drift_kind}")),
+    );
     crate::ops_log::log_op(
         file,
         &format!("commit_already_current file={} basis=head", file.display()),

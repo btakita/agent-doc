@@ -2,6 +2,14 @@
 
 # Orchestration Commands
 
+FlowCore `orchestration_batch` owns batch-level invariants: freeze the source
+task list at start, normalize each child response through the same patchback
+contract used by closeout, stop before the next child when the task list changes
+mid-run, and record each child result as structured proof. Existing
+`orchestrate.rs` / `queue_dispatch.rs` behavior remains the execution surface,
+but new queue/orchestrate fixes should map child closeout outcomes to FlowCore
+instead of adding free-form batch state.
+
 This file covers binary-owned planning/orchestration and the queue surface that reuses the same document lifecycle.
 
 ## plan

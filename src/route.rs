@@ -2854,6 +2854,15 @@ fn wait_for_authoritative_actor_ready(
     match record_starting_actor_timeout(file_path, &last_facts, &log_line) {
         Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
             crate::ops_log::log_op(file, &log_line);
+            crate::flow::proof::log_flow_event(
+                file,
+                crate::flow::types::FlowEvent::new(
+                    crate::flow::types::FlowName::RoutedReopen,
+                    crate::flow::types::FlowStage::PromptReadyBarrier,
+                    crate::flow::types::FlowOutcome::FailedClosed,
+                )
+                .with_reason("starting_actor_not_ready"),
+            );
         }
         Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
             crate::ops_log::log_op(
@@ -2874,6 +2883,15 @@ fn wait_for_authoritative_actor_ready(
                 err
             );
             crate::ops_log::log_op(file, &log_line);
+            crate::flow::proof::log_flow_event(
+                file,
+                crate::flow::types::FlowEvent::new(
+                    crate::flow::types::FlowName::RoutedReopen,
+                    crate::flow::types::FlowStage::PromptReadyBarrier,
+                    crate::flow::types::FlowOutcome::FailedClosed,
+                )
+                .with_reason("starting_actor_not_ready_unpersisted"),
+            );
         }
     }
     Ok(None)
@@ -2996,6 +3014,15 @@ fn route_via_authoritative_actor(
                     actor.record.generation,
                     actor_state.as_str()
                 ),
+            );
+            crate::flow::proof::log_flow_event(
+                file,
+                crate::flow::types::FlowEvent::new(
+                    crate::flow::types::FlowName::RoutedReopen,
+                    crate::flow::types::FlowStage::PromptReadyBarrier,
+                    crate::flow::types::FlowOutcome::FailedClosed,
+                )
+                .with_reason("dispatch_only_busy_actor_not_ready"),
             );
             anyhow::bail!(
                 "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",

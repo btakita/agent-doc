@@ -72,6 +72,15 @@ Last-call-wins: any `claim` overwrites the previous mapping for that document's 
 
 The starting-actor wait decision is conjunctive: route continues through `starting`, through restart-bootstrap `busy`, and through `ready` without prompt proof; only `ready` plus dispatch-ready prompt proof plus dispatch eligibility may release the route. If that wait times out, the timeout is keyed by document, pane, and actor generation so repeated editor reroutes produce one `route_authoritative_actor_starting_not_ready` diagnostic for the stuck generation and only coalesced wait telemetry until the actor reaches `ready`, `closed`, or `blocked` or a different pane/generation becomes authoritative.
 
+`routed_reopen` is the FlowCore owner for these decisions. Route may keep tmux,
+controller, and supervisor side effects in `route.rs`, but actor binding,
+prompt-ready barrier, dispatch authorization, submit, and dispatch-proof
+branches must be representable as typed FlowCore outcomes. Prompt-ready
+fail-closed branches emit mirror-mode `flow_event flow=routed_reopen
+stage=prompt_ready_barrier outcome=failed_closed ...` diagnostics so ops
+summary can group route failures by stage instead of relying only on tactical
+log strings.
+
 ## Stash Window Routing
 
 The stash system preserves running Claude sessions when the user switches editor tabs. Panes are moved to a hidden stash window rather than killed, keeping the Claude session alive for later reuse.

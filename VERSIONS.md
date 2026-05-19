@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **FlowCore mirror-mode typed events are in place.** Added the first `flow` module set for session-cycle, routed-reopen, closeout, document-mutation, operator-clear, and orchestration-batch ownership; ops summary now groups `flow_event` diagnostics by flow stage, and route/closeout/write paths emit initial mirror events for prompt-ready failures, commit closeout completion, and malformed patchback parse failures. The new flow map documents hot-path ownership and duplicated state checks for the next extraction phases.
+
 - **Clear Session Context recognizes Codex's `Write tests for @filename` idle placeholder.** Operator status/clear readiness now treats the current dim Codex suggestion `› Write tests for @filename` as prompt-ready idle evidence, so an `agent-doc` wrapper pane with only that placeholder and the Codex model/cwd/context footer no longer stays classified as `alive-busy prompt_ready=false`. Real drafted input, queued drafts, shell search, active permission prompts, and panes showing `Working (... esc to interrupt)` still fail closed.
 
 - **Codex Stop parent-pointer regression now accepts earlier strict-closeout blocks.** The Stop-hook submodule closeout regression now only requires stale parent gitlink drift when the response commit advanced inside the submodule and the parent-pointer commit is the failing layer. If strict closeout fails earlier before the submodule commit advances, the hook still blocks and preserves tracking, and the spec now states that no parent gitlink drift is required in that branch. This closes `#wnj2` in `tasks/agent-doc/agent-doc-bugs2.md`.

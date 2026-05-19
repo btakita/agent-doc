@@ -165,6 +165,7 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
     let fields = parse_fields(message);
 
     let category = match event_name {
+        "flow_event" => classify_flow_event(&fields),
         "ipc_write_consumed" => "write ipc consumed",
         "commit_success" => "commit success",
         "commit_noop" if field_eq(&fields, "drift_kind", "user_follow_up") => {
@@ -204,6 +205,44 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
         session: fields.get("session").cloned(),
         detail: render_detail(event_name, &fields),
     })
+}
+
+fn classify_flow_event(fields: &BTreeMap<String, String>) -> &'static str {
+    match (
+        fields.get("flow").map(String::as_str),
+        fields.get("stage").map(String::as_str),
+        fields.get("outcome").map(String::as_str),
+    ) {
+        (Some("routed_reopen"), Some("prompt_ready_barrier"), Some("failed_closed")) => {
+            "flow routed reopen prompt-ready failures"
+        }
+        (Some("routed_reopen"), Some("dispatch_submit"), Some("failed_closed")) => {
+            "flow routed reopen dispatch failures"
+        }
+        (Some("document_mutation"), Some("patchback_parse"), Some("failed_closed")) => {
+            "flow document mutation parse failures"
+        }
+        (Some("closeout"), Some("commit"), Some("completed")) => "flow closeout commit completed",
+        (Some("closeout"), Some("commit"), Some("blocked" | "failed_closed")) => {
+            "flow closeout commit failures"
+        }
+        (
+            Some("orchestration_batch"),
+            Some("child_closeout"),
+            Some("blocked" | "failed_closed"),
+        ) => "flow orchestration child closeout failures",
+        (Some("operator_clear"), Some("operator_guard"), Some("blocked" | "failed_closed")) => {
+            "flow operator clear guard failures"
+        }
+        (Some("session_cycle"), _, Some("blocked" | "failed_closed")) => {
+            "flow session cycle failures"
+        }
+        (Some("routed_reopen"), _, Some("blocked" | "failed_closed")) => {
+            "flow routed reopen failures"
+        }
+        (Some("closeout"), _, Some("blocked" | "failed_closed")) => "flow closeout failures",
+        _ => "flow events",
+    }
 }
 
 fn parse_log_line(line: &str) -> (Option<u64>, &str) {
@@ -264,6 +303,9 @@ fn render_detail(event_name: &str, fields: &BTreeMap<String, String>) -> String 
         "patches",
         "generation",
         "actor_state",
+        "flow",
+        "stage",
+        "outcome",
     ] {
         if let Some(value) = fields.get(key) {
             parts.push(format!("{key}={value}"));
@@ -301,14 +343,17 @@ mod tests {
 [114] session_clear_live_busy_guard_refused file=/repo/tasks/a.md pane=%1 source=authoritative_actor current_command=agent-doc
 [115] route_authoritative_actor_starting_not_ready file=tasks/c.md pane=%3 harness=codex generation=9 actor_state=starting
 [116] sync_latency phase=prune_stash_panes elapsed_ms=309 budget_ms=250 status=over_budget mode=full
-[117] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
+[117] flow_event file=/repo/tasks/a.md flow=closeout stage=commit outcome=completed reason=already_current
+[118] flow_event file=/repo/tasks/c.md flow=routed_reopen stage=prompt_ready_barrier outcome=failed_closed reason=starting_actor_not_ready
+[119] flow_event file=/repo/tasks/a.md flow=document_mutation stage=patchback_parse outcome=failed_closed reason=malformed_patchback
+[120] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
 ";
 
         let report =
             summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
 
-        assert_eq!(report.scanned_lines, 18);
-        assert_eq!(report.matched_events, 17);
+        assert_eq!(report.scanned_lines, 21);
+        assert_eq!(report.matched_events, 20);
         assert!(
             report.buckets.iter().any(|bucket| {
                 bucket.category == "write ipc consumed"
@@ -390,6 +435,22 @@ mod tests {
                 bucket.category == "sync over budget"
                     && bucket.file == "<global>"
                     && bucket.samples[0].contains("phase=prune_stash_panes")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "flow routed reopen prompt-ready failures"
+                    && bucket.file == "tasks/c.md"
+                    && bucket.samples[0].contains("stage=prompt_ready_barrier")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "flow document mutation parse failures"
+                    && bucket.file == "tasks/a.md"
+                    && bucket.samples[0].contains("flow=document_mutation")
             }),
             "{report:#?}"
         );

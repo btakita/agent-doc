@@ -26,5 +26,6 @@
 # Reference
 
 - [Specification](reference/specs.md)
+- [Flow Map](reference/flow-map.md)
 - [IPC](reference/ipc.md)
 - [Changelog](reference/changelog.md)

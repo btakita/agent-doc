@@ -34,7 +34,31 @@ Reviewed recent agent-doc logs; top backlog item: #rtbr.
 Compacted content:
 - Archived 5 response topic(s): Compact Exchange editor IPC and CI tmux visibility; CI tmux visibility follow-up; PR CI for compact exchange branch; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:11d74f9b -->
+❯ JB `Clear Session Context`. spec-test-build-install-commit-push
+```
+agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because pane %23 is still active (reason=active agent-doc pane has not reached an idle prompt or clean-exit state, source=authoritative_actor, current_command=agent-doc, prompt_ready=false, tail="gpt-5.5 high · ~/work/btakita/agent-loop · Context 12% used"). Wait for an idle prompt or clean-exit restart prompt, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to intentionally interrupt the pane and clear context.
+```
+### Re: JetBrains Clear Session Context — gpt-5
+
+Fixed the JetBrains-side handling for the current `session_clear refused ... pane ... is still active` output. The binary was already correctly failing closed for an active `agent-doc` pane; the plugin was missing this newer refusal shape, so it surfaced the raw `agent-doc command failed` text instead of the typed running-session warning.
+
+Changes landed in `src/agent-doc`:
+- `TerminalUtil.kt` now parses both legacy `alive-busy` refusals and the newer `is still active` refusal, including the wrapped command-failed output.
+- `TerminalUtilTest.kt` includes the exact active-pane wrapper shape from this report and verifies pane/source/command/tail extraction.
+- `editors/jetbrains/SPEC.md` now states that active/busy and protected clear refusals get typed warning actions instead of generic failure text.
+- `editors/jetbrains/gradle.properties` bumped the plugin build to `0.2.122`.
+- `VERSIONS.md` has an unreleased note for the JetBrains Clear Session Context parser fix.
+
+Verification completed:
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest` passed.
+- `make check` passed locally.
+- `./gradlew test buildPlugin signPlugin` passed and produced `agent-doc-jetbrains-0.2.122-signed.zip`.
+- `agent-doc plugin install --local jetbrains` installed the signed plugin into `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`; restart IDEA to activate it.
+- `make install` refreshed the local `agent-doc` CLI and `libagent_doc.so`.
+- Latest GitHub CI run `26081963703` failed before the tmux step in `Run make check` on `codex_hook::tests::stop_blocks_when_parent_submodule_pointer_closeout_fails`; that specific latest CI run skipped `Run make tmux-ci`. The current local tree passed `make check`, and local `make tmux-ci` passed with 228 ignored/live tmux tests.
+
+Committed and pushed `src/agent-doc` commit `91199d45` (`fix: parse active clear refusals in jetbrains`) to `origin/20260422/codex-agent-backend`.
+<!-- agent:boundary:1d29befe -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,6 +70,7 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#3yrv] [recommended] Restart IntelliJ IDEA 2026.1 and live-click JetBrains Clear Session Context against tasks/agent-doc/agent-doc-bugs2.md to confirm the installed 0.2.122 plugin shows the typed running-session warning instead of the raw command failure.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

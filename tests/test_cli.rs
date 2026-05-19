@@ -522,6 +522,48 @@ fn test_preflight_finalize_preflight_follow_up_lifecycle_has_no_stale_cycle() {
 }
 
 #[test]
+fn test_preflight_warns_on_frontmatter_agent_harness_mismatch() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    let content = concat!(
+        "---\n",
+        "agent_doc_session: test-session\n",
+        "agent_doc_format: template\n",
+        "agent: codex\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: prior response — gpt-5\n",
+        "Already committed.\n",
+        "<!-- /agent:exchange -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, content);
+
+    let mut preflight = agent_doc_cmd();
+    preflight.current_dir(root);
+    preflight.env("CLAUDE_CODE", "1");
+    preflight.args(["preflight", doc.to_str().unwrap()]);
+    let output = preflight.output().unwrap();
+    assert!(
+        output.status.success(),
+        "preflight failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("preflight output should be JSON");
+    assert_eq!(json["warnings"][0]["code"], "harness_mismatch");
+    assert_eq!(json["warnings"][0]["document_agent"], "codex");
+    assert_eq!(json["warnings"][0]["active_harness"], "claude-code");
+    assert_eq!(json["no_changes"], true);
+}
+
+#[test]
 fn test_cli_bare_file_path_aliases_to_run() {
     let tmp = tempfile::TempDir::new().unwrap();
     let missing = tmp.path().join("missing.md");

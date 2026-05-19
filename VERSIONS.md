@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Clear Session Context treats an idle Codex footer below old transcript text as idle.** Operator status/clear evidence now accepts a bottom Codex model/cwd/context footer as `prompt_ready=true` even when previous assistant output remains visible above it, while drafted prompt input, queued composer state, and other busy cues still fail closed. Route dispatch still requires a real dispatch-ready prompt before injecting a reopen.
+
 - **JetBrains Clear Session Context recognizes active-pane refusals.** The plugin now parses the binary's newer `session_clear refused ... pane ... is still active` output, including the generic `agent-doc command failed` wrapper, and shows the typed running-session warning with retry/status/interrupt/copy actions instead of surfacing the raw command failure. Bumped the JetBrains plugin build version to `0.2.122`.
 
 - **JetBrains Clear Session Context typed warning was live-validated.** A live IDEA replay against `tasks/agent-doc/agent-doc-bugs2.md` now surfaces the typed running-session warning for an active `agent-doc` pane, including retry guidance, interrupt-clear recovery, and the latest pane output. The editor spec and regression suite now pin that observed warning shape.

@@ -229,6 +229,19 @@ impl HarnessConfig {
         }
     }
 
+    pub fn is_idle_status_line(&self, line: &str) -> bool {
+        let stripped = crate::prompt::strip_ansi(line);
+        let trimmed = stripped.trim();
+        match self.binary.as_str() {
+            "codex" => is_context_usage_status_line(trimmed),
+            "opencode" => {
+                is_context_usage_status_line(trimmed)
+                    || is_opencode_cwd_version_status_line(trimmed)
+            }
+            _ => false,
+        }
+    }
+
     /// Return true when the visible pane contains only status/footer UI
     /// chrome and no busy cue or prompt input. This is not enough for route
     /// dispatch for Codex, but it is enough for operator status/clear to avoid
@@ -249,10 +262,7 @@ impl HarnessConfig {
             if !self.is_ignorable_output_line(trimmed) {
                 return false;
             }
-            if is_context_usage_status_line(trimmed)
-                || is_opencode_idle_splash_anchor_line(trimmed)
-                || is_opencode_cwd_version_status_line(trimmed)
-            {
+            if self.is_idle_status_line(trimmed) || is_opencode_idle_splash_anchor_line(trimmed) {
                 saw_status = true;
             }
         }

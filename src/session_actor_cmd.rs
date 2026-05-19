@@ -1402,6 +1402,38 @@ fn live_pane_prompt_ready(harness: &crate::harness::HarnessConfig, captured: &st
         return true;
     }
     harness.is_idle_chrome_only_output(captured)
+        || live_pane_bottom_status_is_idle(harness, captured)
+}
+
+fn live_pane_bottom_status_is_idle(
+    harness: &crate::harness::HarnessConfig,
+    captured: &str,
+) -> bool {
+    if harness.binary != "codex" || harness.has_busy_cue(captured) {
+        return false;
+    }
+    let Some(last_line) = captured
+        .lines()
+        .rev()
+        .map(crate::prompt::strip_ansi)
+        .map(|line| line.trim().to_string())
+        .find(|line| !line.is_empty())
+    else {
+        return false;
+    };
+    if !harness.is_idle_status_line(&last_line) {
+        return false;
+    }
+    if let Some(candidate) = harness.last_prompt_candidate(captured) {
+        let stripped = crate::prompt::strip_ansi(&candidate);
+        let trimmed = stripped.trim();
+        if matches!(trimmed.chars().next(), Some('>' | '›' | '❯'))
+            && !harness.is_dispatch_ready_prompt_line(trimmed)
+        {
+            return false;
+        }
+    }
+    true
 }
 
 fn last_meaningful_pane_line(captured: &str) -> Option<String> {
@@ -1921,6 +1953,33 @@ mod tests {
         assert!(live_pane_prompt_ready(
             &harness,
             "gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used\n"
+        ));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_accepts_codex_footer_below_prior_output() {
+        let harness = crate::harness::HarnessConfig::codex();
+
+        assert!(live_pane_prompt_ready(
+            &harness,
+            "\
+### Re: prior turn
+The valid choices in that state are wait for the prompt, refresh after it returns idle, or use explicit clear.
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+"
+        ));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_rejects_codex_drafted_input_above_footer() {
+        let harness = crate::harness::HarnessConfig::codex();
+
+        assert!(!live_pane_prompt_ready(
+            &harness,
+            "\
+› investigate this issue
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+"
         ));
     }
 

@@ -71,7 +71,27 @@ CI/tmux evidence:
 Commits:
 - `btakita/tsift@b163b54` (`feat: add traversal graph handles`) pushed to `origin/main`.
 - Parent repo commit `9c84e9d16` (`chore: update tsift traversal graph`) created with only the `src/tsift` gitlink; it will be pushed after this agent-doc closeout so the session response commit is included.
-<!-- agent:boundary:d48f14f0 -->
+
+❯ do [#fidx]
+### Re: #fidx fresh index gate — gpt-5
+
+Implemented `#fidx` in `src/tsift`.
+
+- Added a freshness gate for agent-facing graph/context packets before they read indexed symbols or call edges.
+- `tsift traverse` now checks the matching root/scoped index, incrementally refreshes missing or changed files, and reports a concise refresh diagnostic in graph warnings.
+- If the index cannot be refreshed, for example because another writer holds the index lock, traversal now skips stale symbol/call evidence and falls back to live raw source file nodes with `tsift source-read` expansion commands.
+- `context-pack` now runs the same freshness preparation before handoff status/context is assembled and carries refresh or stale/missing diagnostics in `status_reminders`.
+- Updated `SPEC.md` plus regression tests for traversal refresh, raw-source fallback under blocked refresh, and context-pack refresh before handoff.
+
+- `cargo test` (`600 passed`, `1 ignored`; integration tests `107 passed`)
+- Installed smoke checks: `tsift --version`, `tsift traverse --path . --limit 3 --format json`, and `tsift --envelope context-pack ../../tasks/software/tsift.md --budget small --json`
+
+- Latest `btakita/tsift` CI run inspected: `26130630285`, success; job `clippy + test` completed and its `Full CI suite` step passed.
+- Latest parent `btakita/agent-loop` Agent Doc run inspected: `26130674026`, failure with empty `tmux-ci`/`check` step lists and `gh run view --log-failed` returned `log not found`, so this remains an external CI-start/runner allocation blocker rather than a red tmux regression after runner startup.
+
+- `btakita/tsift@3aebc7e` (`feat: gate graph packets on fresh indexes`) pushed to `origin/main`.
+- Parent repo commit `370643c85` (`chore: update tsift freshness gate`) created with only the `src/tsift` gitlink; I will push it after this agent-doc closeout so the session response commit is included.
+<!-- agent:boundary:44c9ef50 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,7 +100,6 @@ Commits:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#fidx] Gate tsift agent-doc use on fresh incremental indexes: update only changed files before search/graph packets, emit stale/missing diagnostics, and fall back to raw source when graph evidence is stale.
 - [ ] [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.

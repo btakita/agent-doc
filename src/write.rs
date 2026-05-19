@@ -4657,8 +4657,13 @@ pub fn run_template(
         eprintln!("[write] File was modified during response generation. Merging...");
         merge::merge_contents(base, &content_ours, &content_current)?
     };
-    let mut final_content =
-        normalize_final_template_content(file, base, snapshot_doc.as_deref(), &final_content)?;
+    let mut final_content = normalize_final_template_content(
+        file,
+        base,
+        snapshot_doc.as_deref(),
+        &final_content,
+        Some(&response),
+    )?;
     let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
         file,
         base,
@@ -5153,6 +5158,7 @@ pub fn run_stream(
                 base,
                 snapshot_doc.as_deref(),
                 &final_content,
+                Some(&response),
             )?;
             let snapshot_mode = snapshot_persist_mode_with_current(
                 baseline,
@@ -5324,8 +5330,13 @@ pub fn run_stream(
             }
         }
     };
-    let mut final_content =
-        normalize_final_template_content(file, base, snapshot_doc.as_deref(), &final_content)?;
+    let mut final_content = normalize_final_template_content(
+        file,
+        base,
+        snapshot_doc.as_deref(),
+        &final_content,
+        Some(&response),
+    )?;
     let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
         file,
         base,
@@ -5674,8 +5685,13 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
             }
         }
     };
-    let final_content =
-        normalize_final_template_content(file, base, snapshot_doc.as_deref(), &final_content)?;
+    let final_content = normalize_final_template_content(
+        file,
+        base,
+        snapshot_doc.as_deref(),
+        &final_content,
+        Some(&response),
+    )?;
     log_exchange_write_diagnostic(
         file,
         "run_ipc_timeout_fallback",
@@ -5795,8 +5811,13 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     } else {
         merge::merge_contents(&content, &content_ours, &content_current)?
     };
-    let final_content =
-        normalize_final_template_content(file, &content, snapshot_doc.as_deref(), &final_content)?;
+    let final_content = normalize_final_template_content(
+        file,
+        &content,
+        snapshot_doc.as_deref(),
+        &final_content,
+        Some(response.as_str()),
+    )?;
 
     atomic_write(file, &final_content)?;
     // Save snapshot as the repaired/merged final content.
@@ -7433,12 +7454,320 @@ fn normalize_final_template_content(
     base: &str,
     snapshot: Option<&str>,
     content: &str,
+    response: Option<&str>,
 ) -> Result<String> {
     let mut normalized = content.to_string();
     if let Some(snapshot_doc) = snapshot {
         normalized = normalize_user_prompts_in_exchange_safe(&normalized, base, snapshot_doc, file);
     }
-    normalize_template_structure_or_fail(&normalized, file)
+    normalized = normalize_template_structure_or_fail(&normalized, file)?;
+    if let Some(repaired) =
+        repair_response_precedes_prompt_in_exchange(&normalized, response, file, Some(base))?
+    {
+        normalized = repaired;
+        normalized = normalize_template_structure_or_fail(&normalized, file)?;
+    }
+    if response_precedes_prompt_in_exchange(&normalized, response, Some(base)) {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "response_prompt_order_rejected file={} reason=response_precedes_prompt",
+                file.display()
+            ),
+        );
+        anyhow::bail!(
+            "response patchback is still positioned before prompt-bearing exchange text; refusing to commit mis-ordered closeout"
+        );
+    }
+    Ok(normalized)
+}
+
+#[derive(Clone, Debug)]
+struct ExchangeLineSegment {
+    segment: String,
+    line: String,
+}
+
+fn split_exchange_line_segments(content: &str) -> Vec<ExchangeLineSegment> {
+    content
+        .split_inclusive('\n')
+        .map(|segment| {
+            let line = segment
+                .strip_suffix('\n')
+                .map(str::to_string)
+                .unwrap_or_else(|| segment.to_string());
+            ExchangeLineSegment {
+                segment: segment.to_string(),
+                line,
+            }
+        })
+        .collect()
+}
+
+fn line_is_exchange_boundary(trimmed: &str) -> bool {
+    trimmed.starts_with("<!-- agent:boundary:")
+}
+
+fn normalized_response_signature_lines(
+    response: Option<&str>,
+) -> std::collections::HashSet<String> {
+    response
+        .unwrap_or("")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.starts_with("<!--"))
+        .filter(|line| *line != "Done.")
+        .map(|line| line.trim_start_matches('❯').trim().to_string())
+        .collect()
+}
+
+fn exchange_response_block_matches_signature(
+    segments: &[ExchangeLineSegment],
+    heading_idx: usize,
+    prompt_idx: usize,
+    signature: &std::collections::HashSet<String>,
+    response: Option<&str>,
+) -> bool {
+    let Some(response) = response else {
+        return false;
+    };
+    if response.trim().is_empty() {
+        return false;
+    }
+    let heading = segments[heading_idx].line.trim();
+    if response.contains(heading) {
+        return true;
+    }
+    if signature.is_empty() {
+        return false;
+    }
+    segments[heading_idx..prompt_idx].iter().any(|segment| {
+        let normalized = segment
+            .line
+            .trim()
+            .trim_start_matches('❯')
+            .trim()
+            .to_string();
+        !normalized.is_empty() && signature.contains(&normalized)
+    })
+}
+
+fn find_response_precedes_prompt_candidate(
+    exchange_content: &str,
+    response: Option<&str>,
+) -> Option<(usize, usize, usize)> {
+    let segments = split_exchange_line_segments(exchange_content);
+    let signature = normalized_response_signature_lines(response);
+
+    for heading_idx in 0..segments.len() {
+        let heading = segments[heading_idx].line.trim();
+        if !is_exchange_response_heading_for_prefix_repair(heading) {
+            continue;
+        }
+        let mut saw_boundary_after_heading = false;
+        for idx in (heading_idx + 1)..segments.len() {
+            let trimmed = segments[idx].line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if line_is_exchange_boundary(trimmed) {
+                saw_boundary_after_heading = true;
+                continue;
+            }
+            if trimmed.starts_with("<!--") {
+                continue;
+            }
+            if is_exchange_response_heading_for_prefix_repair(trimmed) {
+                break;
+            }
+            let normalized = trimmed.trim_start_matches('❯').trim();
+            let is_target = signature.contains(normalized);
+            if saw_boundary_after_heading
+                && starts_prompt_run_after_response(trimmed, is_target)
+                && exchange_response_block_matches_signature(
+                    &segments,
+                    heading_idx,
+                    idx,
+                    &signature,
+                    response,
+                )
+            {
+                let mut prompt_end = segments.len();
+                for (next_idx, next) in segments.iter().enumerate().skip(idx + 1) {
+                    if is_exchange_response_heading_for_prefix_repair(next.line.trim()) {
+                        prompt_end = next_idx;
+                        break;
+                    }
+                }
+                return Some((heading_idx, idx, prompt_end));
+            }
+        }
+    }
+    None
+}
+
+fn response_precedes_prompt_in_exchange(
+    doc: &str,
+    response: Option<&str>,
+    prompt_must_exist_in: Option<&str>,
+) -> bool {
+    let Ok(components) = component::parse(doc) else {
+        return false;
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return false;
+    };
+    let exchange_content = exchange.content(doc);
+    let Some((_, prompt_idx, prompt_end)) =
+        find_response_precedes_prompt_candidate(exchange_content, response)
+    else {
+        return false;
+    };
+    if let Some(required_doc) = prompt_must_exist_in {
+        let segments = split_exchange_line_segments(exchange_content);
+        let prompt_lines =
+            normalized_non_boundary_exchange_lines(&segments[prompt_idx..prompt_end]);
+        return exchange_contains_normalized_line_sequence(required_doc, &prompt_lines);
+    }
+    true
+}
+
+pub(crate) fn repair_response_precedes_prompt_in_exchange(
+    doc: &str,
+    response: Option<&str>,
+    file: &Path,
+    prompt_must_exist_in: Option<&str>,
+) -> Result<Option<String>> {
+    let components = component::parse(doc).with_context(|| {
+        format!(
+            "failed to parse {} for response/prompt order repair",
+            file.display()
+        )
+    })?;
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let exchange_content = exchange.content(doc);
+    let Some((heading_idx, prompt_idx, prompt_end)) =
+        find_response_precedes_prompt_candidate(exchange_content, response)
+    else {
+        return Ok(None);
+    };
+    let segments = split_exchange_line_segments(exchange_content);
+    if let Some(required_doc) = prompt_must_exist_in {
+        let prompt_lines =
+            normalized_non_boundary_exchange_lines(&segments[prompt_idx..prompt_end]);
+        if !exchange_contains_normalized_line_sequence(required_doc, &prompt_lines) {
+            return Ok(None);
+        }
+    }
+    let boundary_id = crate::boundary::find_boundary_id_in_component(doc, exchange);
+    let boundary_marker = boundary_id
+        .as_deref()
+        .map(crate::boundary::format_marker)
+        .unwrap_or_else(|| crate::boundary::format_marker(&crate::boundary::new_id()));
+
+    let keep_non_boundary =
+        |segment: &ExchangeLineSegment| !line_is_exchange_boundary(segment.line.trim());
+    let prefix = segments[..heading_idx]
+        .iter()
+        .filter(|segment| keep_non_boundary(segment))
+        .map(|segment| segment.segment.as_str())
+        .collect::<String>();
+    let response_block = segments[heading_idx..prompt_idx]
+        .iter()
+        .filter(|segment| keep_non_boundary(segment))
+        .map(|segment| segment.segment.as_str())
+        .collect::<String>();
+    let prompt_block = segments[prompt_idx..prompt_end]
+        .iter()
+        .filter(|segment| keep_non_boundary(segment))
+        .map(|segment| segment.segment.as_str())
+        .collect::<String>();
+    let suffix = segments[prompt_end..]
+        .iter()
+        .filter(|segment| keep_non_boundary(segment))
+        .map(|segment| segment.segment.as_str())
+        .collect::<String>();
+
+    let mut repaired_exchange = String::new();
+    repaired_exchange.push_str(&prefix);
+    if !repaired_exchange.is_empty()
+        && !repaired_exchange.ends_with('\n')
+        && !prompt_block.is_empty()
+    {
+        repaired_exchange.push('\n');
+    }
+    repaired_exchange.push_str(&prompt_block);
+    if !repaired_exchange.is_empty()
+        && !repaired_exchange.ends_with('\n')
+        && !response_block.is_empty()
+    {
+        repaired_exchange.push('\n');
+    }
+    repaired_exchange.push_str(&response_block);
+    if !repaired_exchange.ends_with('\n') {
+        repaired_exchange.push('\n');
+    }
+    repaired_exchange.push_str(&boundary_marker);
+    repaired_exchange.push('\n');
+    repaired_exchange.push_str(&suffix);
+
+    let repaired = exchange.replace_content(doc, &repaired_exchange);
+    if repaired == doc {
+        return Ok(None);
+    }
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "response_prompt_order_repaired file={} before_commit=true",
+            file.display()
+        ),
+    );
+    Ok(Some(repaired))
+}
+
+fn normalized_non_boundary_exchange_lines(segments: &[ExchangeLineSegment]) -> Vec<String> {
+    segments
+        .iter()
+        .filter_map(|segment| {
+            let trimmed = segment.line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with("<!--")
+                || line_is_exchange_boundary(trimmed)
+            {
+                return None;
+            }
+            Some(trimmed.trim_start_matches('❯').trim().to_string())
+        })
+        .collect()
+}
+
+fn exchange_contains_normalized_line_sequence(doc: &str, needle: &[String]) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let Ok(components) = component::parse(doc) else {
+        return false;
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return false;
+    };
+    let haystack = split_exchange_line_segments(exchange.content(doc));
+    let haystack = normalized_non_boundary_exchange_lines(&haystack);
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 /// Transfer the tracked backlog/pending component content from `source` into
@@ -11924,7 +12253,7 @@ Implemented.
 
         std::fs::write(&doc, merged).unwrap();
         let repaired =
-            normalize_final_template_content(&doc, base, Some(snapshot), merged).unwrap();
+            normalize_final_template_content(&doc, base, Some(snapshot), merged, None).unwrap();
 
         assert!(repaired.contains("❯ do #dupfx. spec-test-build-install-commit-push"));
         assert!(!repaired.contains("\ndo #dupfx. spec-test-build-install-commit-push\n"));
@@ -11958,8 +12287,9 @@ Verification:
 <!-- /agent:exchange -->
 ";
 
-        let repaired = normalize_final_template_content(&doc, baseline, Some(baseline), duplicated)
-            .expect("duplicate response repair should succeed");
+        let repaired =
+            normalize_final_template_content(&doc, baseline, Some(baseline), duplicated, None)
+                .expect("duplicate response repair should succeed");
 
         assert_eq!(
             repaired.matches("### Re: #duppb — gpt-5").count(),
@@ -12001,7 +12331,7 @@ Implemented.
 
         std::fs::write(&doc, merged).unwrap();
         let repaired =
-            normalize_final_template_content(&doc, base, Some(snapshot), merged).unwrap();
+            normalize_final_template_content(&doc, base, Some(snapshot), merged, None).unwrap();
 
         let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
         let response = repaired.find("### Re: #xguard — gpt-5").unwrap();
@@ -12016,6 +12346,55 @@ Implemented.
             "backlog should remain outside exchange:\n{repaired}"
         );
         assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
+    }
+
+    #[test]
+    fn normalize_final_template_content_repairs_response_before_prompt_tail() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+❯ Please handle the timeout fallback.
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let base = "\
+<!-- agent:exchange patch=append -->
+❯ Please handle the timeout fallback.
+Can you preserve the second paragraph too?
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let merged = "\
+<!-- agent:exchange patch=append -->
+❯ Please handle the timeout fallback.
+### Re: timeout fallback — gpt-5
+
+Done.
+<!-- agent:boundary:new -->
+Can you preserve the second paragraph too?
+<!-- /agent:exchange -->
+";
+        let response = "### Re: timeout fallback — gpt-5\n\nDone.\n";
+
+        let repaired =
+            normalize_final_template_content(&doc, base, Some(snapshot), merged, Some(response))
+                .unwrap();
+
+        let prompt_tail = repaired
+            .find("Can you preserve the second paragraph too?")
+            .unwrap();
+        let response_heading = repaired.find("### Re: timeout fallback").unwrap();
+        let boundary = repaired.find("<!-- agent:boundary:").unwrap();
+        let close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        assert!(
+            prompt_tail < response_heading,
+            "prompt tail must move before response:\n{repaired}"
+        );
+        assert!(
+            response_heading < boundary && boundary < close,
+            "boundary must close the repaired response turn:\n{repaired}"
+        );
     }
 
     #[test]

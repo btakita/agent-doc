@@ -727,6 +727,12 @@ fn repair_template_doc_if_needed(
     let boundary_repaired = repair_answered_stale_boundary_if_safe(file, &tail_repaired)?;
     let boundary_changed = boundary_repaired.is_some();
     let mut repaired = boundary_repaired.unwrap_or_else(|| tail_repaired.clone());
+    let order_repaired =
+        write::repair_response_precedes_prompt_in_exchange(&repaired, known_response, file, None)?;
+    let order_changed = order_repaired.is_some();
+    if let Some(ordered) = order_repaired {
+        repaired = ordered;
+    }
 
     let (fm, _) = frontmatter::parse(&repaired)
         .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
@@ -750,6 +756,7 @@ fn repair_template_doc_if_needed(
         || duplicate_scaffold_changed
         || tail_changed
         || boundary_changed
+        || order_changed
         || prompt_changed
     {
         let save_repaired_snapshot = match snapshot::load(file)? {
@@ -809,6 +816,16 @@ fn repair_template_doc_if_needed(
             );
             eprintln!(
                 "[repair] moved stale boundary to the end of the completed exchange turn in {}",
+                file.display()
+            );
+        }
+        if order_changed {
+            crate::ops_log::log_op(
+                file,
+                &format!("repair_response_prompt_order file={}", file.display()),
+            );
+            eprintln!(
+                "[repair] repaired response/prompt ordering in {}",
                 file.display()
             );
         }
@@ -1569,6 +1586,54 @@ mod tests {
 
         let repaired_snapshot = snapshot::load(&doc).unwrap().unwrap();
         assert_eq!(repaired_snapshot, repaired);
+    }
+
+    #[test]
+    fn repair_reorders_response_before_prompt_tail_when_pending_response_is_visible() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let response = "### Re: timeout fallback — gpt-5\n\nDone.\n";
+        let snapshot_content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please handle the timeout fallback.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current_content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please handle the timeout fallback.\n",
+            "### Re: timeout fallback — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:new -->\n",
+            "Can you preserve the second paragraph too?\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, current_content).unwrap();
+        snapshot::save(&doc, snapshot_content).unwrap();
+        save_pending(&doc, response).unwrap();
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::AlreadyApplied);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        let prompt_tail = repaired
+            .find("Can you preserve the second paragraph too?")
+            .unwrap();
+        let response_heading = repaired.find("### Re: timeout fallback").unwrap();
+        let boundary = repaired.find("<!-- agent:boundary:").unwrap();
+        let close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        assert!(
+            prompt_tail < response_heading,
+            "repair should move prompt tail before response:\n{repaired}"
+        );
+        assert!(
+            response_heading < boundary && boundary < close,
+            "boundary should close the repaired response turn:\n{repaired}"
+        );
     }
 
     #[test]

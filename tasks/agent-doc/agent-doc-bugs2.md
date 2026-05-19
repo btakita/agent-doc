@@ -34,10 +34,41 @@ Reviewed recent agent-doc logs; top backlog item: #rtbr.
 Compacted content:
 - Archived 1 response topic(s): scaf2 and live CRDT write
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:230bf70e -->
+❯ do [#nd87]. spec-test-build-install-commit-push
+### Re: #nd87 IPC visible-write guard — gpt-5
+
+Implemented the IPC visible-write guard for the duplicate scaffold/comment edit path.
+
+What changed:
+- Added `template::normalize_editor_visible_template_structure()` and exported it through `agent_doc_normalize_template_structure` so editor IPC clients share the Rust duplicate-scaffold repair/fail-closed guard.
+- Made JetBrains and VS Code run that guard on the final candidate document before mutating the visible editor buffer or acknowledging a component IPC patch.
+- Kept safe duplicate scaffold shells repairable, but reject ambiguous duplicate scaffolds containing user text before `Document.setText`, `WorkspaceEdit`, or VFS replacement.
+- Updated IPC/editor specs and bumped the JetBrains plugin patch version to `0.2.121`.
+
+Commits:
+- `src/agent-doc`: `e32753e3 fix: guard editor ipc template writes`, pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo: `a5640e621 chore: update agent-doc submodule`; parent push will run after this binary-owned session closeout so the response commit is included.
+
+Verification:
+- `cargo test normalize_editor_visible_template_structure --lib`
+- `cargo test normalize_template_structure_ffi --lib`
+- `npm test` in `editors/vscode`
+- `make check`
+- `cargo build`
+- `make install` (`agent-doc 0.33.16`, `agent-doc lib-path` -> `/home/brian/.cargo/bin/libagent_doc.so`)
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`
+
+CI/tmux evidence:
+- Latest GitHub `Agent Doc` workflow run `26076961527` had `check` and `tmux-ci` jobs fail with zero steps after 3-5 seconds. I classified this as an external CI-start blocker, not a code/tmux regression, and continued with local verification evidence.
+<!-- agent:boundary:fb8d58cc -->
 <!-- /agent:exchange -->
 ###
 <!--
+JB `Clear Session Context` on this document:
+```
+agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because pane %23 is still active (reason=active agent-doc pane has not reached an idle prompt or clean-exit state, source=authoritative_actor, current_command=agent-doc, prompt_ready=false, tail="gpt-5.5 high · ~/work/btakita/agent-loop · Context 55% used"). Wait for an idle prompt or clean-exit restart prompt, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to intentionally interrupt the pane and clear context.
+```
+#spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->
@@ -46,7 +77,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#nd87] [recommended] Fix the IPC visible-write stale snapshot path for concurrent scaffold/comment edits: finalize delivered a socket IPC patch while the user edited the scaffold HTML comment, produced a malformed exchange/scaffold rewrite in the visible file, then refused commit on stale snapshot size. Ensure IPC sidecar/ack paths run the duplicate-scaffold guard before mutating the editor-visible document or fail closed before editor write.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

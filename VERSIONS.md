@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **CI now names the tmux integration leg explicitly.** The GitHub Actions workflow labels the normal suite as `Run make check` and the live tmux sweep as `Run make tmux-ci`, with a visible `Running make tmux-ci` marker in the step log so reviewers can confirm the tmux leg executed.
+
 - **Compact Exchange IPC is no longer blocked by committed response-cycle state.** The compact command now sends its full-document replacement through an operator-mutation IPC path, so JetBrains can apply Compact Exchange through the Document API even after the prior agent-doc response is already committed instead of falling back to a direct disk write and surfacing an external-file-change dialog. Added a regression for committed-cycle Compact Exchange IPC and refreshed the shared editor spec.
 
 - **Clear Session Context recognizes the default Codex idle placeholder.** The operator status/clear readiness path now treats `› Ask Codex to do anything` plus the Codex model/cwd/context footer as an idle composer, so JetBrains Clear Session Context does not fail closed with `current_command=agent-doc prompt_ready=false` when the pane is only showing the default Codex placeholder/status UI. Drafted prompt input, queued drafts, and shell search still fail closed and point to `session interrupt-clear`.

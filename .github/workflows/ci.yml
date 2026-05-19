@@ -12,12 +12,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install tmux for integration tests
+        run: sudo apt-get update && sudo apt-get install -y tmux
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
 
-      - run: make check
+      - name: Run make check
+        run: make check
 
-      - run: make tmux-ci
+      - name: Run make tmux-ci
+        run: |
+          echo "Running make tmux-ci"
+          make tmux-ci

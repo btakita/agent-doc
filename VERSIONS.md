@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Terminal user follow-ups no longer emit late closeout no-ops.** When the previous cycle is already committed and the working tree only contains a new user follow-up prompt, `agent-doc commit` now treats that state as prompt handoff instead of re-emitting `commit_noop` / `commit_already_current` lifecycle bookkeeping. Open recovery cycles can still close as already-current when needed, but idle post-finalize prompt typing no longer looks like another delayed closeout.
+
 - **CI checks out sibling path dependencies.** Pull-request CI now clones `btakita/agent-kit` and `btakita/tmux-router` next to the `agent-doc` checkout before running `make check`, matching the local workspace layout required by the `../agent-kit` Cargo path dependency and the `Cargo.toml` tmux-router patch.
 
 - **CI now names the tmux integration leg explicitly.** The GitHub Actions workflow labels the normal suite as `Run make check` and the live tmux sweep as `Run make tmux-ci`, with a visible `Running make tmux-ci` marker in the step log so reviewers can confirm the tmux leg executed.

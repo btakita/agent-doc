@@ -77,6 +77,7 @@
 //! - commit_repairs_committed_historical_snapshot_drift: historical direct response already committed in `HEAD` repairs the stale snapshot without creating a duplicate commit
 //! - commit_repairs_committed_head_before_user_follow_up_noop: snapshot lags behind a committed response in `HEAD`, working tree adds only a new user follow-up, and commit repairs the snapshot up to `HEAD` instead of staging the stale snapshot and rewinding the doc
 //! - commit_closes_cycle_when_staged_snapshot_already_matches_head: stale open cycle + later user edit → close as already committed instead of `commit_failed`
+//! - commit_skips_terminal_user_follow_up_noop_closeout: terminal committed cycle + later user follow-up → leave the prompt untouched without re-emitting closeout lifecycle bookkeeping
 //! - commit_already_current_repairs_transient_working_tree_churn: already-committed no-op closeout repairs boundary / `(HEAD)`-only file drift back to clean `HEAD`
 //! - commit_already_current_repairs_transient_working_tree_churn_refreshes_crdt_and_signal: no-op closeout cleanup also refreshes CRDT/editor-facing sidecars so stale transient churn cannot reappear from cached live state
 //! - verify_snapshot_committed_returns_committed_when_matching: snapshot matches HEAD → `Committed`
@@ -1722,6 +1723,23 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                         file.display()
                     ),
                 );
+                if cycle_is_terminal(file) {
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "commit_prompt_handoff_noop file={} basis=head",
+                            file.display()
+                        ),
+                    );
+                    let elapsed_total = t_total.elapsed().as_millis();
+                    if elapsed_total > 0 {
+                        eprintln!("[perf] commit total: {}ms", elapsed_total);
+                    }
+                    return Ok(CommitOutcome {
+                        did_commit: false,
+                        vcs_refresh_signaled: None,
+                    });
+                }
             } else {
                 eprintln!(
                     "[commit] detected post-commit local drift for {} — HEAD already contains the committed response; leaving {} uncommitted",
@@ -2583,6 +2601,13 @@ fn finalize_already_committed_noop(
     if let Err(e) = crate::capture::mark_committed(file) {
         eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
     }
+}
+
+fn cycle_is_terminal(file: &Path) -> bool {
+    crate::cycle_state::load(file)
+        .ok()
+        .flatten()
+        .is_some_and(|state| !state.is_open())
 }
 
 /// Create and checkout a branch for the session.
@@ -5006,6 +5031,79 @@ Done.
         assert!(
             !log.contains("out_of_band_write file="),
             "classified follow-up prompt drift must not be mislabeled as out-of-band write:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_skips_terminal_user_follow_up_noop_closeout() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let committed = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: previous\n\
+            previous body\n\
+            <!-- agent:boundary:head -->\n\
+            <!-- /agent:exchange -->\n";
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let committed_state = crate::cycle_state::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        let with_user_follow_up = format!(
+            "{}❯ follow-up question\n",
+            committed.replace("<!-- /agent:exchange -->\n", "")
+        ) + "<!-- /agent:exchange -->\n";
+        fs::write(&doc, &with_user_follow_up).unwrap();
+
+        let did_commit =
+            commit(&doc).expect("terminal user-follow-up drift should remain a prompt handoff");
+        assert!(!did_commit, "no new commit should be created");
+
+        let state_after = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state_after, committed_state,
+            "terminal user follow-up drift must not rewrite committed cycle state"
+        );
+
+        let working_after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            working_after.contains("❯ follow-up question"),
+            "working tree should preserve the user's follow-up prompt:\n{working_after}"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("post_commit_user_follow_up file="),
+            "prompt handoff should still be diagnosed:\n{log}"
+        );
+        assert!(
+            log.contains("commit_prompt_handoff_noop file="),
+            "prompt handoff should have a non-closeout noop marker:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_noop file=") && !log.contains("commit_already_current file="),
+            "terminal prompt handoff must not emit closeout lifecycle noop markers:\n{log}"
         );
     }
 

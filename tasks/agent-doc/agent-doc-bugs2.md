@@ -29,42 +29,12 @@ Reviewed recent agent-doc logs; top backlog item: #rtbr.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-051719.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-053118.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #nd87 IPC visible-write guard
+- Archived 1 response topic(s): JetBrains Clear Session Context default Codex placeholder
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ JB `Clear Session Context` on this document:
-```
-agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because pane %23 is still active (reason=active agent-doc pane has not reached an idle prompt or clean-exit state, source=authoritative_actor, current_command=agent-doc, prompt_ready=false, tail="gpt-5.5 high · ~/work/btakita/agent-loop · Context 55% used"). Wait for an idle prompt or clean-exit restart prompt, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to intentionally interrupt the pane and clear context.
-```
-❯ #spec-test-build-install-commit-push
-### Re: JetBrains Clear Session Context default Codex placeholder — gpt-5
-
-Implemented the Clear Session Context fix.
-
-Root cause: the protected-input path already ignored Codex dim placeholder text, but the live-pane prompt-ready path did not recognize the plain captured default placeholder `› Ask Codex to do anything`. That left an otherwise idle Codex pane classified as `alive-busy` when `pane_current_command=agent-doc`, producing the JetBrains refusal with `prompt_ready=false` and only the model/cwd/context footer in the tail.
-
-What changed:
-- Added `› Ask Codex to do anything` to the Codex idle placeholder recognizer.
-- Added regressions for prompt-ready detection and protected-input detection around the default placeholder plus status footer.
-- Updated `SPEC.md`, `specs/07-session-tmux-commands.md`, and `VERSIONS.md` for the operator clear/status contract.
-
-Verification:
-- `cargo test default_placeholder`
-- `make check`
-- `make build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- GitHub Actions review: latest `CI` on `main` is green, run `25773430221` from 2026-05-13.
-- `make tmux-ci` passed locally: 228 live/ignored tmux tests, 0 failed.
-
-Commits:
-- `src/agent-doc`: `b3e44713` (`fix: recognize default codex placeholder`), pushed to `origin/20260422/codex-agent-backend`.
-- Parent repo: `67048d5df` (`agent-doc: recognize default codex placeholder`) created with only the `src/agent-doc` pointer staged; parent `main` push runs immediately after this binary-owned closeout so the session response commit is included.
-
-No follow-up backlog item is needed for this fix.
-<!-- agent:boundary:ac41179d -->
+<!-- agent:boundary:798d244c -->
 <!-- /agent:exchange -->
 ###
 <!--

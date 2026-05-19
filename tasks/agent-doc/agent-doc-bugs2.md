@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -34,22 +34,36 @@ Added route-focused FlowCore refactor next steps. Top backlog item: #rte2.
 Compacted content:
 - Archived 1 response topic(s): #873y stale queue head
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7cfef9cb -->
+❯ do [#mut2]. #spec-test-build-install-commit-push
+### Re: #mut2 — gpt-5
+
+Implemented `#mut2` in `src/agent-doc`: FlowCore now has typed closeout guard reasons and document-mutation patchback events, and the write/commit/repair paths emit `flow_event` records for pre-write/pre-commit guard blocks, patchback parse outcomes, committed-cycle late fallback rejection, repair recovery boundaries, and commit completion.
+
+Updated the closeout spec, Flow Map, README, and regressions for the wedged-cycle retry target. Commits:
+- `src/agent-doc`: `d36122b5` pushed to `origin/20260422/codex-agent-backend`
+- superproject: `8c9d2690d` records the updated `src/agent-doc` submodule pointer locally; it will be pushed after this session closeout commit lands.
+
+Verification:
+- `cargo fmt`
+- focused FlowCore / ops / late-fallback / finalize regressions
+- `make check`
+- `make install`
+- `agent-doc --version`
+- Latest GitHub CI `Run make tmux-ci` step on CI run `26109770668`: success
+
+No new follow-up backlog items.
+<!-- agent:boundary:24bc22e5 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#873y]~
-- do [#mut2]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#mut2] Continue FlowCore extraction outside routing by promoting document_mutation and closeout guard strings into typed events, using tasks/agent-doc/plan-wedged-cycle-unrecoverable.md as the acceptance target for recoverable finalize/write/repair boundaries.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

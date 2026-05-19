@@ -27,62 +27,12 @@ queue_active: false
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223bcaa3626afc3c261e29d2c9e099b99519b00c1be4df7bfa35b0f57ca-20260519-051950.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223bcaa3626afc3c261e29d2c9e099b99519b00c1be4df7bfa35b0f57ca-20260519-053848.md`*
 
 Compacted content:
-- Archived 1 response topic(s): composable-skills next steps
+- Archived 2 response topic(s): skill-harness compose-skills follow-ups; skill-harness README usage
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71050223...
-❯ dispatch #spec-test-build-install-commit-push
-❯ - do [#0nap]
-❯ - do [#wqew]
-❯ - do [#yjgb]
-### Re: skill-harness compose-skills follow-ups — gpt-5
-
-Implemented and committed the requested `#spec-test-build-install-commit-push` batch.
-
-Completed:
-- `#0nap`: added a bundled `compose-skills` install/check matrix covering Claude, Codex, OpenCode, and generic `.agent/skills` targets.
-- `#wqew`: tightened `compose-skills` plan validation with explicit one-skill-vs-many rationale checks, `skill-creator` handoff diagnostics, and golden diagnostic regressions.
-- `#yjgb`: added an end-to-end oversized workflow fixture that starts from a broad workflow prompt, decomposes the skill architecture, and documents the expected `skill-creator` handoff.
-
-Updated docs/spec surfaces to describe the new validation contract and fixture coverage.
-
-Verification:
-- `cargo fmt`
-- `cargo test`
-- `cargo test --all-features`
-- `cargo build`
-- `cargo install --path . --force`
-- CLI smoke: `install-dir` + `check-dir` for `claude`, `codex`, `opencode`, and `generic`, plus `compose validate` on the oversized workflow fixture.
-
-CI/tmux check: latest root `Agent Doc` workflow run `26077546433` did not start `check` or `tmux-ci`; GitHub annotated both jobs as blocked by billing/spending-limit status, so there were no tmux logs to reproduce locally.
-
-Commits:
-- `src/skill-harness`: `87469b4 test: tighten compose-skills validation`
-- parent repo submodule pointer: `2dfb794e2 chore: update skill-harness submodule`
-❯ Provide clear usage instructions in the README.md for skill-harness. Does skill-harness provide a cli?
-### Re: skill-harness README usage — gpt-5
-
-Yes. `skill-harness` provides a CLI named `skill-harness`.
-
-Updated `src/skill-harness/README.md` with clearer usage instructions:
-- states explicitly that the installed command is `skill-harness`;
-- adds a CLI command overview matching `skill-harness --help`;
-- documents common flags: `--harness`, `--root`, `--source`, and `--file`;
-- maps harness targets to their install paths for Claude, Codex, OpenCode, Cursor, and generic `.agent/skills`;
-- separates examples for bundled `compose-skills`, custom skill directories, single-file `SKILL.md` installs, listing, uninstalling, and composition-plan validation.
-
-- `cargo run -- --help`
-- `cargo run -- install-dir --help`
-- `cargo run -- check-dir --help`
-- `cargo run -- install --help`
-- `cargo run -- list --help`
-
-CI/tmux check: latest root `Agent Doc` workflow run `26078260974` did not start `check` or `tmux-ci`; GitHub annotated both jobs as blocked by billing/spending-limit status, so there were no tmux logs to reproduce locally.
-
-- `src/skill-harness`: `d2a49f4 docs: clarify cli usage`
-- parent repo submodule pointer: `5f095958d chore: update skill-harness cli docs`
-<!-- agent:boundary:40a6d653 -->
+<!-- agent:boundary:d8584bf7 -->
 <!-- /agent:exchange -->
 
 ## Queue

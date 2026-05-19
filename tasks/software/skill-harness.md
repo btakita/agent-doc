@@ -1,9 +1,9 @@
 ---
 agent_doc_session: a1a5456d-df6d-4c12-bbf9-f25dcf3811f1
-agent_doc_format: template
-agent_doc_write: crdt
 agent: codex
 claude_model: claude-opus-4-6
+agent_doc_format: template
+agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
@@ -14,6 +14,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue_active: true
 ---
 
 ## Status
@@ -50,14 +51,22 @@ Verification passed:
 - full repo `make check`
 
 GitHub Actions run `26077466584` failed with empty-step `check` and `tmux-ci` jobs, matching an external CI-start/runner allocation blocker rather than a code or tmux regression. Local verification above is clean.
-<!-- agent:boundary:57ef84d3 -->
+### Re: auto queue dispatch — gpt-5
+The auto queue marker is active, but the queued `do` targets are already closed in Completed/Reaped:
+
+- `#b4ps` canonical compose-skills source and directory check/sync
+- `#jw8x` compose-skills validation fixtures
+- `#nztw` OpenCode and generic install coverage
+
+No additional repo mutation was needed this cycle. The prior response already records the code changes, verification, local install, parent/submodule commits, push, and the external GitHub Actions runner-allocation blocker for run `26077466584`.
+<!-- agent:boundary:08079560 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
-- do [#b4ps]
+- ~do [#b4ps]~
 - do [#jw8x]
 - do [#nztw]
 <!-- /agent:queue -->

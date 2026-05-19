@@ -203,9 +203,10 @@ Later phases may refine caller values without changing the field names.
   `route_dispatch_only_authoritative_fallback_refused`, including supervisor
   health and runtime actor state, and tells the operator to restart or rebind the
   owner with `agent-doc start <FILE>` before rerouting. The pure degraded
-  authority decision, runtime guard, refusal message, delivery mode, and
-  dispatch-start proof classifiers live in `flow::routed_reopen`; route-specific
-  wrappers only map supervisor/controller facts into those FlowCore types and
-  perform the tmux/supervisor/controller side effects. Pure unit tests must cover
-  all supervisor health variants and matching/non-matching pane bindings so
-  degraded authority cannot become an accepted-only dispatch path.
+  authority decision, runtime guard, refusal message, delivery mode, retry
+  budget, direct-submit outcome, proof policy, and dispatch-start proof
+  classifiers live in `flow::routed_reopen`; route-specific wrappers only map
+  supervisor/controller facts into those FlowCore types and perform the
+  tmux/supervisor/controller side effects. Pure unit tests must cover all
+  supervisor health variants and matching/non-matching pane bindings so degraded
+  authority cannot become an accepted-only dispatch path.

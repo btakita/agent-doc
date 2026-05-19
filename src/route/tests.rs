@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::supervisor::ipc::{IpcMethod, IpcResponse, SupervisorIpc};
 
@@ -108,20 +107,32 @@ fn authoritative_actor_ready_poll_requires_ready_state_and_prompt_proof() {
     ];
     for (state, prompt_ready, dispatch_eligible) in schedule {
         assert_eq!(
-            classify_authoritative_actor_ready_poll(state, prompt_ready, dispatch_eligible),
-            AuthoritativeActorReadyPollDecision::Continue,
+            classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: actor_dispatch_state(state),
+                prompt_ready,
+                dispatch_eligible,
+            }),
+            PromptReadyBarrierDecision::Continue,
             "route must keep waiting while the current generation is {state:?} prompt_ready={prompt_ready} eligible={dispatch_eligible}"
         );
     }
 
     assert_eq!(
-        classify_authoritative_actor_ready_poll(ActorState::Ready, true, false),
-        AuthoritativeActorReadyPollDecision::Continue,
+        classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+            actor_state: actor_dispatch_state(ActorState::Ready),
+            prompt_ready: true,
+            dispatch_eligible: false,
+        }),
+        PromptReadyBarrierDecision::Continue,
         "a ready actor still cannot dispatch until the target passes dispatch eligibility"
     );
     assert_eq!(
-        classify_authoritative_actor_ready_poll(ActorState::Ready, true, true),
-        AuthoritativeActorReadyPollDecision::Ready,
+        classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+            actor_state: actor_dispatch_state(ActorState::Ready),
+            prompt_ready: true,
+            dispatch_eligible: true,
+        }),
+        PromptReadyBarrierDecision::Ready,
         "route may dispatch only after ready state, prompt proof, and eligibility agree"
     );
 }
@@ -131,12 +142,20 @@ fn authoritative_actor_ready_poll_surfaces_terminal_states() {
     use crate::session_actor::ActorState;
 
     assert_eq!(
-        classify_authoritative_actor_ready_poll(ActorState::Closed, false, true),
-        AuthoritativeActorReadyPollDecision::Terminal
+        classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+            actor_state: actor_dispatch_state(ActorState::Closed),
+            prompt_ready: false,
+            dispatch_eligible: true,
+        }),
+        PromptReadyBarrierDecision::Terminal
     );
     assert_eq!(
-        classify_authoritative_actor_ready_poll(ActorState::Blocked, false, true),
-        AuthoritativeActorReadyPollDecision::Terminal
+        classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+            actor_state: actor_dispatch_state(ActorState::Blocked),
+            prompt_ready: false,
+            dispatch_eligible: true,
+        }),
+        PromptReadyBarrierDecision::Terminal
     );
 }
 

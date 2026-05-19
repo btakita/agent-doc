@@ -80,6 +80,7 @@ fail-closed branches emit mirror-mode `flow_event flow=routed_reopen
 stage=prompt_ready_barrier outcome=failed_closed ...` diagnostics so ops
 summary can group route failures by stage instead of relying only on tactical
 log strings. The route coordinator imports the pure routed-reopen delivery,
+retry-budget, direct-submit outcome, dispatch-only proof policy,
 dispatch-start proof, degraded-authority, and prompt-ready-barrier classifiers
 from `flow::routed_reopen`; `route.rs` remains the tmux/supervisor/controller
 I/O boundary.

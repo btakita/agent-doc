@@ -1,4 +1,88 @@
 use super::types::RouteDecision;
+use std::time::Duration;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DirectPaneSubmitStatus {
+    Accepted,
+    TimedOut,
+}
+
+pub(crate) fn direct_pane_submit_acceptance_timeout() -> Duration {
+    Duration::from_secs(5)
+}
+
+pub(crate) fn direct_pane_submit_acceptance_budget() -> Duration {
+    // tmux/control-mode delivery can spend the whole acceptance window plus a
+    // final capture poll before pane input disappears. Keep the budget above
+    // that window so "over_budget" means slower than the path can observe.
+    Duration::from_secs(6)
+}
+
+pub(crate) fn routed_dispatch_start_timeout(test_mode: bool) -> Duration {
+    if test_mode {
+        Duration::from_secs(1)
+    } else {
+        Duration::from_secs(10)
+    }
+}
+
+pub(crate) fn fresh_route_start_ack_timeout(test_mode: bool) -> Duration {
+    if test_mode {
+        Duration::from_secs(2)
+    } else {
+        Duration::from_secs(30)
+    }
+}
+
+pub(crate) fn routed_cycle_ack_timeout(live_child_for_file: bool, test_mode: bool) -> Duration {
+    if test_mode {
+        if live_child_for_file {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_secs(1)
+        }
+    } else if live_child_for_file {
+        Duration::from_secs(30)
+    } else {
+        Duration::from_secs(15)
+    }
+}
+
+pub(crate) fn existing_pane_ready_timeout(test_mode: bool) -> Duration {
+    if test_mode {
+        Duration::from_secs(2)
+    } else {
+        Duration::from_secs(15)
+    }
+}
+
+pub(crate) fn dispatch_only_starting_pane_ready_timeout_for_binary(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> Duration {
+    if test_mode {
+        Duration::from_millis(250)
+    } else if matches!(binary, Some("opencode")) {
+        Duration::from_secs(15)
+    } else {
+        Duration::from_secs(2)
+    }
+}
+
+pub(crate) fn dispatch_only_starting_pane_recovery_timeout_for_binary(
+    binary: Option<&str>,
+    test_mode: bool,
+) -> Duration {
+    if test_mode {
+        return Duration::from_millis(400);
+    }
+    match binary {
+        Some("opencode") => Duration::from_secs(15),
+        Some("claude") => Duration::from_secs(10),
+        Some("codex") => Duration::from_secs(8),
+        _ => Duration::from_secs(5),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActorDispatchState {
@@ -118,6 +202,17 @@ impl RoutedDispatchStartProof {
     }
 }
 
+pub(crate) fn direct_pane_submit_outcome(
+    status: DirectPaneSubmitStatus,
+    dispatch_start_proof: Option<RoutedDispatchStartProof>,
+) -> &'static str {
+    match (status, dispatch_start_proof) {
+        (DirectPaneSubmitStatus::Accepted, _) => "accepted",
+        (DirectPaneSubmitStatus::TimedOut, Some(_)) => "acceptance_unobserved_dispatch_proven",
+        (DirectPaneSubmitStatus::TimedOut, None) => "acceptance_unobserved",
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DispatchStartProofDecision {
     Accepted,
@@ -133,6 +228,95 @@ pub(crate) fn decide_dispatch_start_proof(
     } else {
         DispatchStartProofDecision::Accepted
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DispatchOnlyProofPolicyFacts<'a> {
+    pub(crate) harness_binary: &'a str,
+    pub(crate) codex_dispatch_start_tracking_enabled: bool,
+}
+
+pub(crate) fn dispatch_only_dispatch_start_proof_required(
+    facts: DispatchOnlyProofPolicyFacts<'_>,
+) -> bool {
+    match facts.harness_binary {
+        "codex" => facts.codex_dispatch_start_tracking_enabled,
+        "opencode" => true,
+        _ => false,
+    }
+}
+
+pub(crate) fn should_print_dispatch_only_unproven_progress(
+    facts: DispatchOnlyProofPolicyFacts<'_>,
+) -> bool {
+    facts.harness_binary != "codex" || !facts.codex_dispatch_start_tracking_enabled
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DispatchOnlyProofOutcomeFacts<'a> {
+    pub(crate) file_display: &'a str,
+    pub(crate) pane: &'a str,
+    pub(crate) harness_binary: &'a str,
+    pub(crate) delivery: DispatchOnlyReopenDelivery,
+    pub(crate) dispatch_start: RoutedDispatchStartProof,
+    pub(crate) timeout_secs: u64,
+}
+
+pub(crate) fn dispatch_only_sent_log_message(facts: DispatchOnlyProofOutcomeFacts<'_>) -> String {
+    format!(
+        "route_dispatch_only_sent file={} pane={} harness={} delivery={} submit_mode={} proof={} proof_scope={}",
+        facts.file_display,
+        facts.pane,
+        facts.harness_binary,
+        facts.delivery.label(),
+        facts.delivery.submit_mode(),
+        facts.dispatch_start.dispatch_stage_label(),
+        facts.dispatch_start.proof_scope_label()
+    )
+}
+
+pub(crate) fn dispatch_only_sent_console_message(
+    facts: DispatchOnlyProofOutcomeFacts<'_>,
+) -> String {
+    format!(
+        "[route] dispatch-only {} reopen for {} was sent to pane {} via {} ({}) with {} proof ({})",
+        facts.harness_binary,
+        facts.file_display,
+        facts.pane,
+        facts.delivery.label(),
+        facts.delivery.submit_mode(),
+        facts.dispatch_start.dispatch_stage_label(),
+        facts.dispatch_start.proof_scope_description()
+    )
+}
+
+pub(crate) fn accepted_only_dispatch_start_log_message(
+    facts: DispatchOnlyProofOutcomeFacts<'_>,
+) -> String {
+    format!(
+        "route_dispatch_only_submit_unproven file={} pane={} harness={} delivery={} submit_mode={} proof=accepted proof_scope=accepted_only timeout_secs={}",
+        facts.file_display,
+        facts.pane,
+        facts.harness_binary,
+        facts.delivery.label(),
+        facts.delivery.submit_mode(),
+        facts.timeout_secs
+    )
+}
+
+pub(crate) fn accepted_only_dispatch_start_refusal_message(
+    facts: DispatchOnlyProofOutcomeFacts<'_>,
+) -> String {
+    format!(
+        "dispatch-only {} reopen for {} was accepted in pane {} via {} ({}), but only pane-input acceptance proof was available after waiting {}s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle {} prompt or restart the session and reroute again",
+        facts.harness_binary,
+        facts.file_display,
+        facts.pane,
+        facts.delivery.label(),
+        facts.delivery.submit_mode(),
+        facts.timeout_secs,
+        facts.harness_binary
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,6 +439,38 @@ pub(crate) const fn actor_can_queue_optimistically(state: ActorDispatchState) ->
 
 pub(crate) const fn actor_waiting_input_recoverable(state: ActorDispatchState) -> bool {
     matches!(state, ActorDispatchState::WaitingInput)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BusyPaneAutoFixOutcome {
+    RetryRoute,
+    RetryRouteAfterSupervisorRestart,
+    RetryRouteAfterFreshRestart,
+    FailClosed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BusyPaneAutoFixFacts {
+    pub(crate) test_hook_changed: bool,
+    pub(crate) fix_made_changes: bool,
+    pub(crate) supervisor_healthy: bool,
+    pub(crate) restarted_supervisor: bool,
+}
+
+pub(crate) fn busy_existing_pane_auto_fix_outcome(
+    facts: BusyPaneAutoFixFacts,
+) -> BusyPaneAutoFixOutcome {
+    if facts.restarted_supervisor {
+        return BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart;
+    }
+    if facts.test_hook_changed || facts.fix_made_changes {
+        return BusyPaneAutoFixOutcome::RetryRoute;
+    }
+    if facts.supervisor_healthy {
+        BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart
+    } else {
+        BusyPaneAutoFixOutcome::FailClosed
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -516,6 +732,104 @@ mod tests {
         assert_eq!(
             decide_dispatch_start_proof(RoutedDispatchStartProof::HookPromptMatched, true),
             DispatchStartProofDecision::Accepted
+        );
+    }
+
+    #[test]
+    fn direct_submit_outcome_separates_acceptance_from_dispatch_proof() {
+        assert_eq!(
+            direct_pane_submit_outcome(DirectPaneSubmitStatus::Accepted, None),
+            "accepted"
+        );
+        assert_eq!(
+            direct_pane_submit_outcome(DirectPaneSubmitStatus::TimedOut, None),
+            "acceptance_unobserved"
+        );
+        assert_eq!(
+            direct_pane_submit_outcome(
+                DirectPaneSubmitStatus::TimedOut,
+                Some(RoutedDispatchStartProof::HookStateAdvanced),
+            ),
+            "acceptance_unobserved_dispatch_proven"
+        );
+    }
+
+    #[test]
+    fn dispatch_only_proof_policy_requires_hook_visible_codex_and_opencode() {
+        assert!(dispatch_only_dispatch_start_proof_required(
+            DispatchOnlyProofPolicyFacts {
+                harness_binary: "codex",
+                codex_dispatch_start_tracking_enabled: true,
+            }
+        ));
+        assert!(!dispatch_only_dispatch_start_proof_required(
+            DispatchOnlyProofPolicyFacts {
+                harness_binary: "codex",
+                codex_dispatch_start_tracking_enabled: false,
+            }
+        ));
+        assert!(dispatch_only_dispatch_start_proof_required(
+            DispatchOnlyProofPolicyFacts {
+                harness_binary: "opencode",
+                codex_dispatch_start_tracking_enabled: false,
+            }
+        ));
+        assert!(!dispatch_only_dispatch_start_proof_required(
+            DispatchOnlyProofPolicyFacts {
+                harness_binary: "claude",
+                codex_dispatch_start_tracking_enabled: false,
+            }
+        ));
+    }
+
+    #[test]
+    fn dispatch_only_sent_messages_preserve_proof_scope() {
+        let facts = DispatchOnlyProofOutcomeFacts {
+            file_display: "/tmp/doc.md",
+            pane: "%7",
+            harness_binary: "codex",
+            delivery: DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            dispatch_start: RoutedDispatchStartProof::CommandAcceptedOnly,
+            timeout_secs: 10,
+        };
+
+        let log = dispatch_only_sent_log_message(facts);
+        assert!(log.contains("proof=accepted"));
+        assert!(log.contains("proof_scope=accepted_only"));
+
+        let refusal = accepted_only_dispatch_start_refusal_message(facts);
+        assert!(refusal.contains("only pane-input acceptance proof was available"));
+        assert!(refusal.contains("treating this as not dispatched"));
+    }
+
+    #[test]
+    fn busy_pane_auto_fix_decision_prefers_explicit_retry_evidence() {
+        assert_eq!(
+            busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+                test_hook_changed: false,
+                fix_made_changes: false,
+                supervisor_healthy: true,
+                restarted_supervisor: false,
+            }),
+            BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart
+        );
+        assert_eq!(
+            busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+                test_hook_changed: true,
+                fix_made_changes: false,
+                supervisor_healthy: false,
+                restarted_supervisor: false,
+            }),
+            BusyPaneAutoFixOutcome::RetryRoute
+        );
+        assert_eq!(
+            busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+                test_hook_changed: false,
+                fix_made_changes: false,
+                supervisor_healthy: false,
+                restarted_supervisor: true,
+            }),
+            BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart
         );
     }
 }

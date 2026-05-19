@@ -148,27 +148,29 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::flow::routed_reopen::{
-    ActorDispatchState, ActorRuntimeHealth, AuthoritativeRuntimeFacts,
-    DegradedAuthoritativeActorFacts, DegradedAuthoritativeActorRefusal, DispatchOnlyReopenDelivery,
-    DispatchStartProofDecision, PromptReadyBarrierDecision, PromptReadyBarrierFacts, ReopenMode,
-    RoutedDispatchStartProof, RoutedReopenFacts, actor_can_queue_optimistically,
+    ActorDispatchState, ActorRuntimeHealth, AuthoritativeRuntimeFacts, BusyPaneAutoFixFacts,
+    BusyPaneAutoFixOutcome, DegradedAuthoritativeActorFacts, DegradedAuthoritativeActorRefusal,
+    DirectPaneSubmitStatus as CommandDispatchStatus, DispatchOnlyProofOutcomeFacts,
+    DispatchOnlyProofPolicyFacts, DispatchOnlyReopenDelivery, DispatchStartProofDecision,
+    PromptReadyBarrierDecision, PromptReadyBarrierFacts, ReopenMode, RoutedDispatchStartProof,
+    RoutedReopenFacts, accepted_only_dispatch_start_log_message,
+    accepted_only_dispatch_start_refusal_message, actor_can_queue_optimistically,
     actor_dispatch_blocker_reason, actor_waiting_input_recoverable,
     authoritative_actor_dispatch_guard_reason as flow_authoritative_actor_dispatch_guard_reason,
+    busy_existing_pane_auto_fix_outcome as flow_busy_existing_pane_auto_fix_outcome,
     can_use_degraded_authoritative_actor, classify_prompt_ready_barrier,
     decide_authoritative_reopen, decide_dispatch_start_proof,
     degraded_authoritative_actor_refusal_message,
+    direct_pane_submit_outcome as flow_direct_pane_submit_outcome,
+    dispatch_only_dispatch_start_proof_required as flow_dispatch_only_dispatch_start_proof_required,
+    dispatch_only_sent_console_message, dispatch_only_sent_log_message,
+    should_print_dispatch_only_unproven_progress as flow_should_print_dispatch_only_unproven_progress,
 };
 use crate::flow::types::RouteDecision;
 use crate::harness::HarnessConfig;
 use crate::sessions::Tmux;
 use crate::supervisor::ipc::IpcMethod;
 use crate::{frontmatter, prompt, resync, sessions, snapshot, sync};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CommandDispatchStatus {
-    Accepted,
-    TimedOut,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CommandDispatchResult {
@@ -190,14 +192,6 @@ enum ExistingPaneDispatchReadiness {
         provenance: String,
         blocker_reason: Option<String>,
     },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BusyPaneAutoFixOutcome {
-    RetryRoute,
-    RetryRouteAfterSupervisorRestart,
-    RetryRouteAfterFreshRestart,
-    FailClosed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -301,25 +295,18 @@ fn route_latency_status(elapsed: Duration, budget: Duration) -> &'static str {
 }
 
 fn direct_pane_submit_acceptance_timeout() -> Duration {
-    Duration::from_secs(5)
+    crate::flow::routed_reopen::direct_pane_submit_acceptance_timeout()
 }
 
 fn direct_pane_submit_acceptance_budget() -> Duration {
-    // tmux/control-mode delivery can spend the whole acceptance window plus a
-    // final capture poll before pane input disappears. Keep the budget above
-    // that window so "over_budget" means slower than the path can observe.
-    Duration::from_secs(6)
+    crate::flow::routed_reopen::direct_pane_submit_acceptance_budget()
 }
 
 fn direct_pane_submit_outcome(
     status: CommandDispatchStatus,
     dispatch_start_proof: Option<RoutedDispatchStartProof>,
 ) -> &'static str {
-    match (status, dispatch_start_proof) {
-        (CommandDispatchStatus::Accepted, _) => "accepted",
-        (CommandDispatchStatus::TimedOut, Some(_)) => "acceptance_unobserved_dispatch_proven",
-        (CommandDispatchStatus::TimedOut, None) => "acceptance_unobserved",
-    }
+    flow_direct_pane_submit_outcome(status, dispatch_start_proof)
 }
 
 fn route_latency_message(
@@ -476,11 +463,7 @@ fn build_routed_dispatch_start_tracker(
 }
 
 fn routed_dispatch_start_timeout() -> Duration {
-    if cfg!(test) {
-        Duration::from_secs(1)
-    } else {
-        Duration::from_secs(10)
-    }
+    crate::flow::routed_reopen::routed_dispatch_start_timeout(cfg!(test))
 }
 
 fn codex_state_advanced(
@@ -1538,13 +1521,9 @@ fn dispatch_only_starting_pane_ready_timeout_for_binary(
     binary: Option<&str>,
     test_mode: bool,
 ) -> Duration {
-    if test_mode {
-        Duration::from_millis(250)
-    } else if matches!(binary, Some("opencode")) {
-        Duration::from_secs(15)
-    } else {
-        Duration::from_secs(2)
-    }
+    crate::flow::routed_reopen::dispatch_only_starting_pane_ready_timeout_for_binary(
+        binary, test_mode,
+    )
 }
 
 fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duration {
@@ -1552,15 +1531,10 @@ fn dispatch_only_starting_pane_ready_timeout(harness: &HarnessConfig) -> Duratio
 }
 
 fn dispatch_only_starting_pane_recovery_timeout(harness: Option<&HarnessConfig>) -> Duration {
-    if cfg!(test) {
-        return Duration::from_millis(400);
-    }
-    match harness.map(|h| h.binary.as_str()) {
-        Some("opencode") => Duration::from_secs(15),
-        Some("claude") => Duration::from_secs(10),
-        Some("codex") => Duration::from_secs(8),
-        _ => Duration::from_secs(5),
-    }
+    crate::flow::routed_reopen::dispatch_only_starting_pane_recovery_timeout_for_binary(
+        harness.map(|h| h.binary.as_str()),
+        cfg!(test),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1865,15 +1839,17 @@ fn dispatch_only_send_reopen(
 }
 
 fn should_print_dispatch_only_unproven_progress(file: &Path, harness: &HarnessConfig) -> bool {
-    harness.binary != "codex" || !codex_dispatch_start_tracking_enabled(file)
+    flow_should_print_dispatch_only_unproven_progress(DispatchOnlyProofPolicyFacts {
+        harness_binary: harness.binary.as_str(),
+        codex_dispatch_start_tracking_enabled: codex_dispatch_start_tracking_enabled(file),
+    })
 }
 
 fn dispatch_only_dispatch_start_proof_required(file: &Path, harness: &HarnessConfig) -> bool {
-    match harness.binary.as_str() {
-        "codex" => codex_dispatch_start_tracking_enabled(file),
-        "opencode" => true,
-        _ => false,
-    }
+    flow_dispatch_only_dispatch_start_proof_required(DispatchOnlyProofPolicyFacts {
+        harness_binary: harness.binary.as_str(),
+        codex_dispatch_start_tracking_enabled: codex_dispatch_start_tracking_enabled(file),
+    })
 }
 
 fn require_dispatch_only_dispatch_start_proof(
@@ -1890,9 +1866,16 @@ fn require_dispatch_only_dispatch_start_proof(
         return Ok(());
     }
 
-    let delivery_label = delivery.label();
-    let submit_mode = delivery.submit_mode();
     let timeout = routed_dispatch_start_timeout().as_secs();
+    let file_display = file.display().to_string();
+    let facts = DispatchOnlyProofOutcomeFacts {
+        file_display: file_display.as_str(),
+        pane,
+        harness_binary: harness.binary.as_str(),
+        delivery,
+        dispatch_start,
+        timeout_secs: timeout,
+    };
     crate::flow::proof::log_flow_event(
         file,
         crate::flow::types::FlowEvent::new(
@@ -1902,28 +1885,8 @@ fn require_dispatch_only_dispatch_start_proof(
         )
         .with_reason("accepted_only_dispatch_start_proof"),
     );
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "route_dispatch_only_submit_unproven file={} pane={} harness={} delivery={} submit_mode={} proof=accepted proof_scope=accepted_only timeout_secs={}",
-            file.display(),
-            pane,
-            harness.binary,
-            delivery_label,
-            submit_mode,
-            timeout
-        ),
-    );
-    anyhow::bail!(
-        "dispatch-only {} reopen for {} was accepted in pane {} via {} ({}), but only pane-input acceptance proof was available after waiting {}s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle {} prompt or restart the session and reroute again",
-        harness.binary,
-        file.display(),
-        pane,
-        delivery_label,
-        submit_mode,
-        timeout,
-        harness.binary
-    );
+    crate::ops_log::log_op(file, &accepted_only_dispatch_start_log_message(facts));
+    anyhow::bail!(accepted_only_dispatch_start_refusal_message(facts));
 }
 
 fn route_dispatch_only_sent_log_message(
@@ -1933,16 +1896,15 @@ fn route_dispatch_only_sent_log_message(
     delivery: DispatchOnlyReopenDelivery,
     dispatch_start: RoutedDispatchStartProof,
 ) -> String {
-    format!(
-        "route_dispatch_only_sent file={} pane={} harness={} delivery={} submit_mode={} proof={} proof_scope={}",
-        file.display(),
+    let file_display = file.display().to_string();
+    dispatch_only_sent_log_message(DispatchOnlyProofOutcomeFacts {
+        file_display: file_display.as_str(),
         pane,
-        harness.binary,
-        delivery.label(),
-        delivery.submit_mode(),
-        dispatch_start.dispatch_stage_label(),
-        dispatch_start.proof_scope_label()
-    )
+        harness_binary: harness.binary.as_str(),
+        delivery,
+        dispatch_start,
+        timeout_secs: routed_dispatch_start_timeout().as_secs(),
+    })
 }
 
 fn route_dispatch_only_sent_console_message(
@@ -1952,16 +1914,15 @@ fn route_dispatch_only_sent_console_message(
     delivery: DispatchOnlyReopenDelivery,
     dispatch_start: RoutedDispatchStartProof,
 ) -> String {
-    format!(
-        "[route] dispatch-only {} reopen for {} was sent to pane {} via {} ({}) with {} proof ({})",
-        harness.binary,
-        file.display(),
+    let file_display = file.display().to_string();
+    dispatch_only_sent_console_message(DispatchOnlyProofOutcomeFacts {
+        file_display: file_display.as_str(),
         pane,
-        delivery.label(),
-        delivery.submit_mode(),
-        dispatch_start.dispatch_stage_label(),
-        dispatch_start.proof_scope_description()
-    )
+        harness_binary: harness.binary.as_str(),
+        delivery,
+        dispatch_start,
+        timeout_secs: routed_dispatch_start_timeout().as_secs(),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2726,29 +2687,6 @@ fn clear_starting_actor_timeout_record(file_path: &str) {
     let _ = std::fs::remove_file(state_path);
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AuthoritativeActorReadyPollDecision {
-    Ready,
-    Terminal,
-    Continue,
-}
-
-fn classify_authoritative_actor_ready_poll(
-    actor_state: crate::session_actor::ActorState,
-    prompt_ready: bool,
-    dispatch_eligible: bool,
-) -> AuthoritativeActorReadyPollDecision {
-    match classify_prompt_ready_barrier(PromptReadyBarrierFacts {
-        actor_state: actor_dispatch_state(actor_state),
-        prompt_ready,
-        dispatch_eligible,
-    }) {
-        PromptReadyBarrierDecision::Ready => AuthoritativeActorReadyPollDecision::Ready,
-        PromptReadyBarrierDecision::Terminal => AuthoritativeActorReadyPollDecision::Terminal,
-        PromptReadyBarrierDecision::Continue => AuthoritativeActorReadyPollDecision::Continue,
-    }
-}
-
 fn wait_for_authoritative_actor_ready(
     tmux: &Tmux,
     file: &Path,
@@ -2773,12 +2711,12 @@ fn wait_for_authoritative_actor_ready(
             let refreshed_state = refreshed.actor_state();
             let prompt_ready = current_generation_ready_prompt_proven(tmux, &refreshed, harness);
             last_facts = AuthoritativeActorReadyFacts::from_target(&refreshed, prompt_ready);
-            match classify_authoritative_actor_ready_poll(
-                refreshed_state,
+            match classify_prompt_ready_barrier(PromptReadyBarrierFacts {
+                actor_state: actor_dispatch_state(refreshed_state),
                 prompt_ready,
-                authoritative_actor_dispatch_target_eligible(&refreshed),
-            ) {
-                AuthoritativeActorReadyPollDecision::Ready => {
+                dispatch_eligible: authoritative_actor_dispatch_target_eligible(&refreshed),
+            }) {
+                PromptReadyBarrierDecision::Ready => {
                     let elapsed_ms = start.elapsed().as_millis();
                     clear_starting_actor_timeout_record(file_path);
                     crate::ops_log::log_op(
@@ -2793,7 +2731,7 @@ fn wait_for_authoritative_actor_ready(
                     );
                     return Ok(Some(refreshed));
                 }
-                AuthoritativeActorReadyPollDecision::Terminal => {
+                PromptReadyBarrierDecision::Terminal => {
                     let elapsed_ms = start.elapsed().as_millis();
                     clear_starting_actor_timeout_record(file_path);
                     crate::ops_log::log_op(
@@ -2808,7 +2746,7 @@ fn wait_for_authoritative_actor_ready(
                     );
                     return Ok(Some(refreshed));
                 }
-                AuthoritativeActorReadyPollDecision::Continue => {}
+                PromptReadyBarrierDecision::Continue => {}
             }
         }
         std::thread::sleep(poll);
@@ -5239,11 +5177,7 @@ fn validate_routed_trigger_payload(
 }
 
 fn existing_pane_ready_timeout() -> Duration {
-    if cfg!(test) {
-        Duration::from_secs(2)
-    } else {
-        Duration::from_secs(15)
-    }
+    crate::flow::routed_reopen::existing_pane_ready_timeout(cfg!(test))
 }
 
 fn format_busy_existing_pane_error(
@@ -5414,16 +5348,12 @@ fn busy_existing_pane_auto_fix_outcome(
     supervisor_health: Option<SupervisorHealth>,
     restarted_supervisor: bool,
 ) -> BusyPaneAutoFixOutcome {
-    if restarted_supervisor {
-        return BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart;
-    }
-    if test_hook_changed || fix_made_changes {
-        return BusyPaneAutoFixOutcome::RetryRoute;
-    }
-    match supervisor_health {
-        Some(SupervisorHealth::Healthy) => BusyPaneAutoFixOutcome::RetryRouteAfterFreshRestart,
-        _ => BusyPaneAutoFixOutcome::FailClosed,
-    }
+    flow_busy_existing_pane_auto_fix_outcome(BusyPaneAutoFixFacts {
+        test_hook_changed,
+        fix_made_changes,
+        supervisor_healthy: matches!(supervisor_health, Some(SupervisorHealth::Healthy)),
+        restarted_supervisor,
+    })
 }
 
 fn attempt_busy_existing_pane_interrupt_recovery(
@@ -5873,25 +5803,11 @@ fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
 }
 
 fn fresh_route_start_ack_timeout() -> Duration {
-    if cfg!(test) {
-        Duration::from_secs(2)
-    } else {
-        Duration::from_secs(30)
-    }
+    crate::flow::routed_reopen::fresh_route_start_ack_timeout(cfg!(test))
 }
 
 fn routed_cycle_ack_timeout(live_child_for_file: bool) -> Duration {
-    if cfg!(test) {
-        if live_child_for_file {
-            Duration::from_secs(2)
-        } else {
-            Duration::from_secs(1)
-        }
-    } else if live_child_for_file {
-        Duration::from_secs(30)
-    } else {
-        Duration::from_secs(15)
-    }
+    crate::flow::routed_reopen::routed_cycle_ack_timeout(live_child_for_file, cfg!(test))
 }
 
 fn should_require_routed_cycle_ack(

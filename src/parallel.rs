@@ -98,13 +98,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
     // tmux_session frontmatter field is deprecated — use current tmux session
     let session_name = {
         let tmux = Tmux::default_server();
-        tmux.cmd()
-            .args(["display-message", "-p", "#{session_name}"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .filter(|s| !s.is_empty())
+        tmux.current_session()
             .unwrap_or_else(|| "claude".to_string())
     };
 

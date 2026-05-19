@@ -6066,21 +6066,9 @@ fn recent_lines_contain_wrapped_trigger(recent_lines_rev: &[String], trigger: &s
     false
 }
 
-/// Get the current tmux session name (the session the caller is attached to).
+/// Get the tmux session that owns the caller pane.
 fn current_tmux_session(tmux: &Tmux) -> Option<String> {
-    // If we're inside tmux, query the current session name
-    let output = tmux
-        .cmd()
-        .args(["display-message", "-p", "#{session_name}"])
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !name.is_empty() {
-            return Some(name);
-        }
-    }
-    None
+    tmux.current_session()
 }
 
 pub(crate) fn resolve_preferred_session(
@@ -6351,8 +6339,8 @@ fn registry_base_dir_for_file(file: &Path, fallback: &Path) -> std::path::PathBu
 ///
 /// `context_session` is an optional session override from the calling context
 /// (e.g., the sync target session). Used when frontmatter has no `tmux_session`
-/// to avoid falling back to `current_tmux_session()`, which returns whichever
-/// session the user's terminal is viewing — not necessarily the correct one.
+/// and sync has already resolved a more specific session from editor/window
+/// context.
 #[allow(dead_code)]
 pub fn auto_start(
     tmux: &Tmux,

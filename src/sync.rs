@@ -2486,13 +2486,7 @@ fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
 }
 
 fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
-    tmux.cmd()
-        .args(["display-message", "-p", "#{session_name}"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|name| !name.is_empty())
+    tmux.current_session()
 }
 
 fn session_name_for_target_window(tmux: &Tmux, window: &str) -> Option<String> {

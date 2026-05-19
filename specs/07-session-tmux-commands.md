@@ -382,7 +382,10 @@ The session-targeting precedence is shared across start/route/sync/session-aware
 3. Current tmux session
 4. Harness fallback only for start/route when no live tmux session exists
 
-Windowless sync must prefer the live project pin over the caller's currently attached tmux session.
+Current tmux session resolution must target the caller's `TMUX_PANE` owner pane
+when it is available. Bare `display-message -p "#{session_name}"` may follow
+another attached client's selected session and must only be used as a fallback.
+Windowless sync must prefer the live project pin over the caller pane's tmux session.
 
 ## controller
 

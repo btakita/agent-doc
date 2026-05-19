@@ -562,15 +562,7 @@ fn clear_base_index_repair_counter(file: &std::path::Path) {
 }
 
 fn current_tmux_session_name() -> Option<String> {
-    let out = Command::new("tmux")
-        .args(["display-message", "-p", "#{session_name}"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!name.is_empty()).then_some(name)
+    sessions::Tmux::default_server().current_session()
 }
 
 fn maybe_auto_repair_base_index(file: &std::path::Path, layout_issues: &[String]) -> bool {
@@ -636,13 +628,10 @@ pub fn check_layout() -> Vec<String> {
 
     let mut issues = Vec::new();
 
-    // Get current session name.
-    let session_name = match Command::new("tmux")
-        .args(["display-message", "-p", "#{session_name}"])
-        .output()
-    {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
-        _ => return issues, // Can't determine session — skip silently.
+    // Get the owning pane's current session name. Bare display-message can
+    // follow another attached client and report the wrong session.
+    let Some(session_name) = sessions::Tmux::default_server().current_session() else {
+        return issues;
     };
 
     if session_name.is_empty() {

@@ -158,16 +158,13 @@ I would keep the name if these remain true:
 The main risk is only naming perception: people may assume `skill-harness` is test-only. That is fixable with a crisp README, command names, and crate description. It is less costly than forcing a premature rename to a weaker available name.
 
 So my revised recommendation is stronger: keep `skill-harness` as the crate/package name for now. Rename later only if usage proves the name is actively misleading, or if a clean extraction emerges with a much sharper name like `agent-skill-compose` for the composition-only layer.
-
-<!-- agent:boundary:2a200f2d -->
+<!-- agent:boundary:949d3d63 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:pending -->
-- [ ] [#cdvx] [recommended] Check crates.io availability for candidate public crate names before renaming skill-harness
-- [ ] [#25k6] [recommended] Keep skill-harness as the current Rust crate/package boundary, or rename only to an available precise crate name such as agent-skillkit/agent-skill-tools after checking registry availability; do not target the taken agent-skills crate name
 - [ ] [#e92b] [recommended] Move compose-skills toward skill-harness/agent-skills with Rust validation and Claude/Codex installer coverage
 - [ ] [#bx57] Disable unused MCP servers — currently managed via Claude Code UI, not settings.json
 - [ ] [#wr52] Run litellm proxy pointing at vllm
@@ -180,4 +177,6 @@ So my revised recommendation is stronger: keep `skill-harness` as the crate/pack
 - 2026-05-11 [#aaj9] Transfer snapshot GC feature to agent-doc-feat.md
 - 2026-05-11 [#bamc] Evaluate graphify as graph layer for code RAG (extend extractors with tree-sitter code parsing)
 - 2026-05-19 [#0b3x] [recommended] Create a composable-skill-design skill or extend skill-creator with a composability audit workflow, backed by examples and validation checks
+- 2026-05-19 [#cdvx] [recommended] Check crates.io availability for candidate public crate names before renaming skill-harness
+- 2026-05-19 [#25k6] [recommended] Keep skill-harness as the current Rust crate/package boundary, or rename only to an available precise crate name such as agent-skillkit/agent-skill-tools after checking registry availability; do not target the taken agent-skills crate name
 <!-- /agent:done -->

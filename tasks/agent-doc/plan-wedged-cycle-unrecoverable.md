@@ -1,6 +1,7 @@
 # Plan — Wedged Cycle Unrecoverable Without Destructive Compact
 
-**Status:** plan only — DO NOT IMPLEMENT
+**Status:** implemented for the immediate wedged-cycle regression; broader
+cycle-state extraction remains tracked by `#mut2`
 **Filed:** 2026-05-19
 **Source:** incident on `src/session-share/tasks/planning-agent-pipeline.md`
 
@@ -77,7 +78,21 @@ in cycle-state management:
 5. Add deterministic / SimWorld regression coverage for: failed-finalize-then-retry,
    wedged-cycle `repair`, and the `#### #next-steps` heading class.
 
+## Implementation update — 2026-05-19
+
+- `finalize` / `write --commit` no longer run the commit closeout when the
+  response write path returns a pre-write guard error. A failed
+  `pending_capture_guard` check now leaves the active cycle open and retryable
+  instead of marking it `committed` without a response.
+- Added an integration regression for failed strict pre-write closeout followed
+  by a successful retry with backlog capture.
+- Added committed-historical repair coverage for an h4 response sub-heading
+  named `#### #next-steps`, so prompt-preset-looking response headings do not
+  block snapshot repair.
+- The larger FlowCore/cycle-state extraction and compact reversal work remains
+  intentionally outside this item and is tracked by `#mut2`.
+
 ## Scope
 
-Plan only. **DO NOT IMPLEMENT.** Tracked as a backlog item in
-`tasks/agent-doc/agent-doc-bugs2.md`.
+Immediate wedge fix and regression coverage completed. Follow-on architectural
+extraction remains tracked in `tasks/agent-doc/agent-doc-bugs2.md`.

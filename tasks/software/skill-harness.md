@@ -31,23 +31,51 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): compose-skills next steps
 - Prior summary/context: ❯ Add #next-steps re: composable skills...which was recently added via agent-loop.md
-<!-- agent:boundary:d18fb979 -->
+### Re: compose-skills skill harness — gpt-5
+Completed the queued skill-harness work.
+
+Implemented `check-dir` and made `install-dir` a true directory sync for full skills. `compose-skills` now defaults to the bundled `skills/compose-skills` tree as its canonical source, so Claude, Codex, OpenCode, and generic installs can be installed and verified without repeating `--source`. Directory checks compare every file and report missing, changed, and extra installed files; sync removes stale files inside the target skill directory so checks converge.
+
+Added compose-skills validation fixtures for malformed plans, an ambiguous one-skill-vs-many split, and an agent-doc workflow decomposition example. Added install/check coverage for OpenCode and generic `.agent/skills` layouts, plus docs/spec updates for the new commands and canonical source behavior.
+
+Committed and pushed:
+- `btakita/skill-harness` `c72c3fe` (`feat: sync bundled compose skill directories`)
+- parent `btakita/agent-loop` `a4d7116dd` (`chore: update skill-harness submodule`)
+
+Verification passed:
+- `cargo test --locked` in `src/skill-harness` (25 tests)
+- `cargo build --locked` in `src/skill-harness`
+- `cargo install --path . --locked`
+- installed binary `skill-harness check-dir compose-skills --harness opencode --root /tmp/tmp.fGcoAoGRna`
+- full repo `make check`
+
+GitHub Actions run `26077466584` failed with empty-step `check` and `tmux-ci` jobs, matching an external CI-start/runner allocation blocker rather than a code or tmux regression. Local verification above is clean.
+<!-- agent:boundary:57ef84d3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+dispatch #spec-test-build-install-commit-push
+- do [#b4ps]
+- do [#jw8x]
+- do [#nztw]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#b4ps] [recommended] Make src/skill-harness/skills/compose-skills the canonical source and add a directory-aware check/sync path so Claude and Codex installs can be verified against the bundled skill tree.
-- [ ] [#jw8x] [recommended] Add compose-skills validation fixtures that cover malformed plans, ambiguous one-skill-vs-many splits, and a real agent-doc workflow decomposition example.
-- [ ] [#nztw] [recommended] Extend skill-harness install coverage beyond Claude/Codex for compose-skills, prioritizing OpenCode and the generic .agent/skills layout.
 <!-- /agent:backlog -->
 
 ## Icebox
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-05-19 [#b4ps] [recommended] Make src/skill-harness/skills/compose-skills the canonical source and add a directory-aware check/sync path so Claude and Codex installs can be verified against the bundled skill tree.
+- 2026-05-19 [#jw8x] [recommended] Add compose-skills validation fixtures that cover malformed plans, ambiguous one-skill-vs-many splits, and a real agent-doc workflow decomposition example.
+- 2026-05-19 [#nztw] [recommended] Extend skill-harness install coverage beyond Claude/Codex for compose-skills, prioritizing OpenCode and the generic .agent/skills layout.
+<!-- /agent:done -->

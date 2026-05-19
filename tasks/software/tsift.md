@@ -35,7 +35,14 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): tsift and recurring agent-doc fixes; Graphify-style tsift next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:7ec1fe87 -->
+synchronous orchestra
+dispatch #spec-test-build-install-commit-push
+- do [#kgnv]
+- do [#fidx]
+- do [#98qd]
+- do [#atvp]
+- do [#g6kf]
+<!-- agent:boundary:69e87c97 -->
 <!-- /agent:exchange -->
 ###
 <!--

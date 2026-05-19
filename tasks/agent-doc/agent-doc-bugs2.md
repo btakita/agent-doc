@@ -34,11 +34,13 @@ Reviewed recent agent-doc logs; top backlog item: #rtbr.
 Compacted content:
 - Archived 2 response topic(s): log review / next steps; rtbr
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:da4de5f0 -->
+do [#scaf2]. #spec-test-build-install-commit-push
+<!-- agent:boundary:f1725bb2 -->
 <!-- /agent:exchange -->
 ###
 <!--
-Use TEST_THREADS=8. spec-test-build-install-commit-push
+Re [#scaf2]: Why is there a duplicate CRDT operation happening in the first place? No turn is running so why does agent-doc attempt to corrupt the document? Note the corruption happened as I replaced content in the html comment under agent:exchange in this document? Why is content being written into the document as the user types?
+spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->
@@ -47,7 +49,6 @@ Use TEST_THREADS=8. spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#scaf2] [recommended] Ship and verify the CRDT duplicate-scaffold closeout guard for live exchange typing: observed `tasks/software/agent-loop.md` duplicated `<!-- /agent:exchange -->`, copied pending/done scaffold into the exchange tail, and split live `agent-skill` / `agent-skills is` text after a 0.33.16 CRDT closeout. Plan: tasks/agent-doc/plan-crdt-duplicate-scaffold-closeout.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

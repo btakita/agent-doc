@@ -377,6 +377,28 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> 
                 protected_clear_refusal_message(&ctx.canonical_file, &evidence, &reason)
             );
         }
+        if let Some(reason) = active_clear_refusal_reason(ctx, tmux, &evidence) {
+            crate::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "session_clear_active_pane_refused file={} pane={} source={} reason={} current_command={} prompt_ready={} tail={:?}",
+                    ctx.canonical_file.display(),
+                    evidence.pane_id.as_deref().unwrap_or("unknown"),
+                    evidence.source,
+                    reason.replace(char::is_whitespace, "_"),
+                    evidence.current_command.as_deref().unwrap_or("unknown"),
+                    evidence
+                        .prompt_ready
+                        .map(|ready| ready.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    evidence.tail.as_deref().unwrap_or("unknown")
+                ),
+            );
+            anyhow::bail!(
+                "{}",
+                active_clear_refusal_message(&ctx.canonical_file, &evidence, &reason)
+            );
+        }
         crate::ops_log::log_op(
             &ctx.canonical_file,
             &format!(
@@ -557,6 +579,29 @@ fn pane_shows_clean_exit_prompt(
     harness.dispatch_blocker_reason(&captured).as_deref() == Some("clean-exit restart prompt")
 }
 
+fn active_clear_refusal_reason(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    evidence: &LivePaneEvidence,
+) -> Option<String> {
+    if evidence.state != LivePaneState::AliveBusy {
+        return None;
+    }
+    let command = evidence.current_command.as_deref().unwrap_or_default();
+    if Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command)
+        != "agent-doc"
+    {
+        return None;
+    }
+    if pane_shows_clean_exit_prompt(ctx, tmux, evidence) {
+        return None;
+    }
+    Some("active agent-doc pane has not reached an idle prompt or clean-exit state".to_string())
+}
+
 fn harness_for_evidence(
     ctx: &SessionContext,
     evidence: &LivePaneEvidence,
@@ -583,6 +628,27 @@ fn protected_clear_refusal_message(
         reason,
         evidence.source,
         command,
+        tail,
+        file.display()
+    )
+}
+
+fn active_clear_refusal_message(file: &Path, evidence: &LivePaneEvidence, reason: &str) -> String {
+    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
+    let command = evidence.current_command.as_deref().unwrap_or("unknown");
+    let prompt_ready = evidence
+        .prompt_ready
+        .map(|ready| ready.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let tail = evidence.tail.as_deref().unwrap_or("unknown");
+    format!(
+        "session_clear refused for {} because pane {} is still active (reason={}, source={}, current_command={}, prompt_ready={}, tail={:?}). Wait for an idle prompt or clean-exit restart prompt, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the pane and clear context.",
+        file.display(),
+        pane,
+        reason,
+        evidence.source,
+        command,
+        prompt_ready,
         tail,
         file.display()
     )
@@ -1888,6 +1954,35 @@ mod tests {
         assert!(message.contains("session_clear refused"));
         assert!(message.contains("pane %7 contains protected prompt input"));
         assert!(message.contains("reason=drafted prompt input"));
+        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    #[test]
+    fn active_agent_doc_clear_refusal_requires_idle_or_clean_exit_state() {
+        let ctx = test_session_context(
+            test_actor_record(ActorState::Busy),
+            test_supervisor_runtime(Some(ActorState::Busy)),
+            Some("busy"),
+        );
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("reverse-i-search: bugs".to_string()),
+        };
+        let tmux = Tmux::default_server();
+
+        let reason = active_clear_refusal_reason(&ctx, &tmux, &evidence)
+            .expect("busy agent-doc pane should require idle/clean-exit proof");
+        assert!(reason.contains("idle prompt"));
+
+        let message = active_clear_refusal_message(Path::new("/tmp/doc.md"), &evidence, &reason);
+        assert!(message.contains("session_clear refused"));
+        assert!(message.contains("current_command=agent-doc"));
+        assert!(message.contains("prompt_ready=false"));
+        assert!(message.contains("idle prompt or clean-exit restart prompt"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
     }
 

@@ -2611,6 +2611,50 @@ fn dispatch_only_can_use_degraded_authoritative_actor(
     registered == Some(pane) || live_owner == Some(pane)
 }
 
+fn degraded_authoritative_actor_refusal(
+    file: &Path,
+    actor: &AuthoritativeActorDispatchTarget,
+    harness: &HarnessConfig,
+    reason: &str,
+) -> String {
+    format!(
+        "dispatch-only {} reroute for {} refused before input because authoritative actor generation {} on pane {} has degraded supervisor state ({}, runtime_actor_state={}). Restart or rebind the owner with `agent-doc start {}` and rerun the route after dispatch-start proof is available.",
+        harness.binary,
+        file.display(),
+        actor.record.generation,
+        actor.record.pane_id,
+        reason,
+        runtime_actor_state_label(&actor.runtime),
+        file.display()
+    )
+}
+
+fn degraded_authoritative_actor_requires_restart_before_dispatch(
+    tmux: &Tmux,
+    file: &Path,
+    actor: &AuthoritativeActorDispatchTarget,
+    harness: &HarnessConfig,
+    prompt_bearing_marker: Option<&str>,
+) -> Result<bool> {
+    if !matches!(
+        actor.runtime.health,
+        SupervisorHealth::Unreachable | SupervisorHealth::NoSocket
+    ) {
+        return Ok(false);
+    }
+    match ensure_existing_pane_ready_for_dispatch(
+        tmux,
+        file,
+        &actor.record.pane_id,
+        harness,
+        prompt_bearing_marker,
+    )? {
+        ExistingPaneDispatchReadiness::Ready => Ok(true),
+        ExistingPaneDispatchReadiness::BusyAlreadyRunning
+        | ExistingPaneDispatchReadiness::BusyNeedsAutoFix { .. } => Ok(false),
+    }
+}
+
 fn authoritative_actor_start_wait_terminal_state(state: crate::session_actor::ActorState) -> bool {
     matches!(
         state,
@@ -3144,11 +3188,19 @@ fn resolve_or_create_pane_dispatch_only(
             actor,
             registered.as_deref(),
             live_owner.as_deref(),
-        ) {
+        ) && degraded_authoritative_actor_requires_restart_before_dispatch(
+            tmux,
+            file,
+            actor,
+            harness,
+            pending_prompt_context
+                .as_ref()
+                .map(|context| context.marker.as_str()),
+        )? {
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "route_dispatch_only_authoritative_fallback file={} pane={} harness={} generation={} record_state={} supervisor_health={} runtime_actor_state={} reason={}",
+                    "route_dispatch_only_authoritative_fallback_refused file={} pane={} harness={} generation={} record_state={} supervisor_health={} runtime_actor_state={} reason={}",
                     file.display(),
                     actor.record.pane_id,
                     harness.binary,
@@ -3159,44 +3211,9 @@ fn resolve_or_create_pane_dispatch_only(
                     reason
                 ),
             );
-            eprintln!(
-                "[route] dispatch-only {} reroute for {} is using authoritative pane {} without supervisor state because {}",
-                harness.binary,
-                file.display(),
-                actor.record.pane_id,
-                reason
-            );
-            rescue_target(&actor.record.pane_id);
-            let _authorization = authorize_controller_dispatch(
-                file,
-                session_id,
-                file_path,
-                actor,
-                "dispatch_only_reopen",
-                &format!(
-                    "submit=direct_pane_degraded supervisor_reason={} harness={}",
-                    reason, harness.binary
-                ),
-            )?;
-            return dispatch_only_reopen_existing_pane(
-                tmux,
-                file,
-                pane,
-                col_args,
-                session_id,
-                file_path,
-                target_session,
-                harness,
-                created_panes,
-                pending_prompt_context
-                    .as_ref()
-                    .map(|context| context.marker.as_str()),
-                true,
-                true,
-                false,
-                &actor.record.pane_id,
-                DispatchOnlyReopenDelivery::DirectPaneSubmit,
-                true,
+            anyhow::bail!(
+                "{}",
+                degraded_authoritative_actor_refusal(file, actor, harness, &reason)
             );
         }
 
@@ -12171,7 +12188,7 @@ Body\n\
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_or_create_pane_dispatch_only_falls_back_to_registered_authoritative_actor_pane_when_supervisor_state_is_missing()
+    fn resolve_or_create_pane_dispatch_only_refuses_registered_authoritative_actor_pane_when_supervisor_state_is_missing()
      {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -12211,7 +12228,7 @@ Body\n\
         )
         .unwrap();
 
-        let resolved = resolve_or_create_pane_dispatch_only(
+        let err = resolve_or_create_pane_dispatch_only(
             &iso,
             &doc,
             None,
@@ -12222,29 +12239,28 @@ Body\n\
             &HarnessConfig::claude(),
             &mut Vec::new(),
         )
-        .expect("dispatch-only reroute should fall back to the authoritative pane when supervisor state is missing");
-        assert_eq!(resolved, actor_pane);
-
-        let actor_after = wait_for_pane_contains(
-            &iso,
-            &actor_pane,
-            &HarnessConfig::claude().trigger_command(&file_path),
-            std::time::Duration::from_secs(3),
+        .expect_err("dispatch-only reroute must fail closed when supervisor state is missing");
+        let message = err.to_string();
+        assert!(
+            message.contains("refused before input"),
+            "degraded authoritative refusal should fail before submit: {message}"
         );
         assert!(
-            actor_after.contains(&HarnessConfig::claude().trigger_command(&file_path)),
-            "dispatch-only fallback should still submit the Claude reopen in the authoritative pane: {actor_after}"
+            !sessions::capture_pane(&iso, &actor_pane)
+                .unwrap_or_default()
+                .contains(&HarnessConfig::claude().trigger_command(&file_path)),
+            "degraded authoritative actor must not receive the reopen"
         );
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .expect("dispatch-only fallback should write an ops log entry");
+            .expect("dispatch-only refusal should write an ops log entry");
         assert!(
-            ops_log.contains("route_dispatch_only_authoritative_fallback"),
+            ops_log.contains("route_dispatch_only_authoritative_fallback_refused"),
             "expected authoritative fallback logging, got: {ops_log}"
         );
         assert!(
             ops_log.contains("supervisor_health=no_socket"),
-            "fallback logging should explain the degraded supervisor state: {ops_log}"
+            "refusal logging should explain the degraded supervisor state: {ops_log}"
         );
     }
 
@@ -16389,6 +16405,22 @@ Body\n\
         assert!(!dispatch_only_can_use_degraded_authoritative_actor(
             &actor, None, None,
         ));
+    }
+
+    #[test]
+    fn degraded_authoritative_actor_refusal_names_proof_recovery_before_input() {
+        let actor = test_degraded_actor("%42");
+        let message = degraded_authoritative_actor_refusal(
+            Path::new("/tmp/doc.md"),
+            &actor,
+            &HarnessConfig::codex(),
+            "supervisor health is no_socket",
+        );
+
+        assert!(message.contains("refused before input"));
+        assert!(message.contains("runtime_actor_state=missing"));
+        assert!(message.contains("agent-doc start /tmp/doc.md"));
+        assert!(message.contains("dispatch-start proof"));
     }
 
     #[test]

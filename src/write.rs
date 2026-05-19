@@ -6591,6 +6591,24 @@ pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
     let project_root = resolve_ipc_project_root(&canonical);
     let before_content = std::fs::read_to_string(file).ok();
 
+    if let Some(ref cycle_id) = cycle_already_committed(file) {
+        eprintln!(
+            "[write] full-content IPC skipped: cycle {} already committed for {}",
+            cycle_id,
+            file.display()
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "late_fallback_patch_rejected file={} cycle_id={} patch_id=full_content reason=already_committed transport=full_content",
+                file.display(),
+                cycle_id
+            ),
+        );
+        cleanup_fallback_patch_files(file);
+        return Ok(false);
+    }
+
     // Try socket IPC first
     if crate::ipc_socket::is_listener_active(&project_root) {
         let socket_payload = serde_json::json!({
@@ -6774,6 +6792,23 @@ fn write_ipc_and_poll(
     let start = std::time::Instant::now();
 
     while start.elapsed() < timeout {
+        if let Some(ref cycle_id) = cycle_already_committed(doc_file) {
+            eprintln!(
+                "[write] IPC poll skipped: cycle {} already committed for {}",
+                cycle_id,
+                doc_file.display()
+            );
+            crate::ops_log::log_op(
+                doc_file,
+                &format!(
+                    "file_ipc_poll_skip file={} cycle_id={} reason=already_committed",
+                    doc_file.display(),
+                    cycle_id
+                ),
+            );
+            cleanup_fallback_patch_files(doc_file);
+            return Ok(false);
+        }
         if !patch_file.exists() {
             // Plugin consumed the patch — poll for ack-content sidecar (authoritative
             // post-apply snapshot). Falls back to file read after timeout.
@@ -13357,7 +13392,9 @@ mod pending_patch_normalization_tests {
 
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
-    use super::{cleanup_fallback_patch_files, cycle_already_committed, try_ipc};
+    use super::{
+        cleanup_fallback_patch_files, cycle_already_committed, try_ipc, try_ipc_full_content,
+    };
     use std::fs;
     use tempfile::TempDir;
 
@@ -13525,6 +13562,64 @@ mod late_fallback_patch_guard_tests {
         assert!(
             !ops_log.contains("ipc_write_consumed"),
             "terminal skip must not be logged as an IPC consume"
+        );
+    }
+
+    #[test]
+    fn full_content_ipc_skips_committed_cycle_before_socket_or_file_fallback() {
+        let tmp = TempDir::new().unwrap();
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
+        let doc = doc_in_agent_doc_project(&tmp, content);
+
+        crate::cycle_state::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_response_captured(
+            &doc,
+            "test",
+            Some(content),
+            Some(content),
+            "fake-sha",
+            None,
+        )
+        .unwrap();
+        crate::cycle_state::mark_write_applied(&doc, "test", Some(content), Some(content)).unwrap();
+        crate::cycle_state::mark_committed(&doc, "test", Some(content), Some(content)).unwrap();
+
+        let hash = crate::snapshot::doc_hash(&doc).unwrap();
+        let stale_patch_path = tmp
+            .path()
+            .join(".agent-doc/patches")
+            .join(format!("{hash}.json"));
+        fs::write(
+            &stale_patch_path,
+            serde_json::json!({"patch_id": "full-content-stale"}).to_string(),
+        )
+        .unwrap();
+
+        let result = try_ipc_full_content(&doc, "stale full-content repair").unwrap();
+
+        assert!(!result, "committed-cycle full-content IPC must be skipped");
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            content,
+            "full-content IPC must not dirty an already committed cycle"
+        );
+        assert!(
+            !stale_patch_path.exists(),
+            "stale full-content fallback patch should be removed"
+        );
+        assert!(
+            tmp.path()
+                .join(".agent-doc/claimed-patches/full-content-stale")
+                .exists(),
+            "removed full-content fallback patch should be claimed"
+        );
+
+        let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("late_fallback_patch_rejected"));
+        assert!(ops_log.contains("patch_id=full_content"));
+        assert!(
+            !ops_log.contains("socket_full_content"),
+            "full-content socket diagnostic must not be emitted after committed-cycle skip"
         );
     }
 }

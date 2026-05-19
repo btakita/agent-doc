@@ -29,23 +29,12 @@ Added route-focused FlowCore refactor next steps. Top backlog item: #rte2.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-215452.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260519-222544.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #873y wedged-cycle recovery
+- Archived 1 response topic(s): #873y stale queue head
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: #873y stale queue head — gpt-5
-
-`#873y` was already implemented and pushed before this queued rerun reached me, so I treated the live queue head as stale rather than changing the source again.
-
-Evidence checked this cycle:
-
-- `src/agent-doc` is already at `c11a120a4` (`fix: keep failed prewrite closeouts retryable`).
-- The parent repo already contains `5bd4af744` (`agent-doc: keep failed prewrite closeouts retryable`) for `src/agent-doc` plus `tasks/agent-doc/plan-wedged-cycle-unrecoverable.md`.
-- The plan file records the immediate wedged-cycle fix as implemented and leaves the broader FlowCore / cycle-state extraction under `#mut2`.
-
-I did not rerun the suite or make another code commit because no source/spec/test file changed in this cycle. The stale `#873y` queue item is consumed; `#mut2` remains the next queued item.
-<!-- agent:boundary:1c95f818 -->
+<!-- agent:boundary:7cfef9cb -->
 <!-- /agent:exchange -->
 ###
 <!--

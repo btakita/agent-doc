@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Added route-focused FlowCore refactor next steps. Top backlog item: #rte2.
+Added prioritized FlowCore refactor next steps. Top backlog item: #rte4.
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,7 +34,19 @@ Added route-focused FlowCore refactor next steps. Top backlog item: #rte2.
 Compacted content:
 - Archived 1 response topic(s): #mut2
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5b1b1248 -->
+❯ What are the #next-steps in the flow core refactoring?
+### Re: FlowCore next steps — gpt-5
+
+The FlowCore refactor is past the inventory and mirror-mode starting point: `src/agent-doc/src/flow` exists, routed reopen already has typed decisions, and the flow map says the remaining work should move one pure decision boundary at a time before deleting legacy branches.
+
+I added the next FlowCore backlog slice in priority order. Top backlog item: #rte4.
+
+1. #rte4: finish the routed-reopen extraction by moving the remaining authoritative actor readiness, retry budget, delivery-mode, and dispatch-proof classification out of `route.rs` into `flow::routed_reopen`.
+2. #mut3: make `document_mutation` the single pre-visible-write gate for patchback parsing, prompt ownership normalization, and duplicate scaffold/prompt-prefix repair.
+3. #clo3: make `closeout` the shared terminal-state transaction for IPC, stream, direct finalize, `write --commit`, and repair.
+4. #cyc2: promote `session_cycle` from mirror vocabulary to the owner of preflight, plan, response capture, pending-capture, finalize, and session-check outcomes.
+5. #ops2: after route and closeout are stable, move Clear Session Context and orchestration batch behavior onto typed FlowCore outcomes.
+<!-- agent:boundary:cf09b867 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,6 +58,11 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#rte4] Extract the next routed-reopen slice into FlowCore: move the remaining authoritative actor readiness, retry budget, delivery-mode, and dispatch-proof classification out of route.rs into flow::routed_reopen pure helpers and ports; leave route.rs as tmux/supervisor I/O only. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
+- [ ] [#mut3] Extract document_mutation as the single pre-visible-write gate for patchback shape parsing, prompt ownership normalization, duplicate scaffold/prompt-prefix repair, and malformed plain-response rejection across write, repair, and orchestrate. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
+- [ ] [#clo3] Extract closeout as the shared terminal-state transaction for IPC, stream, direct finalize, write --commit, and repair so pre-write failures stay recoverable and late fallback writers cannot mutate a committed cycle. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
+- [ ] [#cyc2] Promote session_cycle from mirror vocabulary to the owner of preflight -> plan -> response capture -> pending-capture -> finalize/session-check outcomes, including prompt-target parsing and pending mutation requirements. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
+- [ ] [#ops2] [recommended] Move operator_clear and orchestration_batch onto FlowCore typed outcomes after route and closeout extraction; cover active-pane clear refusal, queue freeze/mid-run mutation, and child patchback normalization. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

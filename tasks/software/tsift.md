@@ -49,7 +49,18 @@ I ran the installed `tsift 0.1.42` against the bug doc. `tsift session-review --
 There is one important caveat: `tsift status --json` says the workspace index is stale, with 2629 stale files and missing generated instructions. So I would not trust tsift search/explain/graph output here without reindexing. If an agent had used stale tsift search as authoritative source localization, that could have wasted time. But in this document, the visible recurrence is not explained by tsift injecting bad code direction. It is explained by agents repeatedly fixing symptoms in a large, distributed lifecycle without a single typed owner for route proof, document mutation, closeout state, and prompt ownership.
 
 My conclusion: tsift did not materially disrupt the bug fixing. It also did not yet solve the disruption it was meant to solve. The right sequencing is to keep `#mut2`/FlowCore first: make route and closeout state explicit in agent-doc itself. Then bring tsift in as a bounded evidence generator only after fresh-index gating, stable JSON contracts, and explicit missing/stale fallback behavior are implemented. Otherwise tsift remains a helpful mirror of churn, not a guardrail against it.
-<!-- agent:boundary:38a2456a -->
+❯ Add #next-steps to make tsift more effective in bug fixes and code navigation.
+
+❯ Read transcript in https://youtu.be/HQEm4rBKdec?si=rDH3qwVl6ndKliem
+❯ Note how Graphify can navigate nodes of a code graph. Add #next-steps in making tsift more effective in code and knowledge graph traversal.
+### Re: Graphify-style tsift next steps — gpt-5
+
+I read the YouTube transcript for "Graphify Solves Claude's Biggest Limitation (Finally)." The relevant pattern for tsift is not just "make a graph"; it is making the graph directly navigable by agents: build graph artifacts from code and docs, keep raw JSON plus an inspectable HTML view, support shortest-path queries between two nodes, explain concepts from graph neighborhoods, and update only changed files instead of rebuilding or rereading everything.
+
+I added two backlog items at the top. The top item is `#kgnv`: add Graphify-style tsift traversal primitives with stable graph node handles, graph HTML/JSON outputs, shortest-path and neighborhood explain APIs, and next-node recommendations for bug-fix navigation. The second is `#fidx`: gate agent-doc use of tsift on fresh incremental indexes so stale graph/search evidence cannot silently steer a bug fix.
+
+That keeps `#98qd` as the broader agent-doc context-shaping work, but puts the concrete traversal/freshness pieces ahead of it so tsift can become useful as a code and knowledge graph navigation layer rather than only a diagnostic mirror.
+<!-- agent:boundary:2b311982 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,6 +69,8 @@ My conclusion: tsift did not materially disrupt the bug fixing. It also did not 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#kgnv] Add Graphify-style tsift traversal primitives: stable graph node handles for files/symbols/backlog/session artifacts, graph HTML/JSON outputs, shortest-path and neighborhood explain APIs, and next-node recommendations for bug-fix navigation.
+- [ ] [#fidx] Gate tsift agent-doc use on fresh incremental indexes: update only changed files before search/graph packets, emit stale/missing diagnostics, and fall back to raw source when graph evidence is stale.
 - [ ] [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.

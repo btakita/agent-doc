@@ -30,37 +30,22 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-205717.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-210422.md`*
 
 Compacted content:
-- Archived 2 response topic(s): graph DB API next steps; graph DB hardening implementation
+- Archived 1 response topic(s): graph DB behavior next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are #next-steps for graph db behavior?
-### Re: graph DB behavior next steps — gpt-5
-
-Top backlog item after this cycle: `#gval`.
-
-The previous queued graph DB batch already moved the substrate from API support into working SQLite/Convex behavior: reusable Convex app package, paged/filterable reads, agent-doc/context-pack graph rows, and operator examples are complete. The next work should protect that behavior as a contract rather than widening the surface again.
-
-I added these follow-ups in priority order:
-
-1. `#gval` — add a compiled CLI conformance suite shared across SQLite and Convex snapshots, covering fail-closed schema/freshness behavior, transactional refresh visibility, tombstone order, missing-node edge rejection, pagination/filter parity, and deterministic ordering.
-2. `#gobs` — add `graph-db` validation/doctor diagnostics so operators can detect stale metadata, missing Convex indexes, orphan edges, duplicate ids, schema drift, and get concise repair commands with fail-closed exit codes.
-3. `#gfed` — add an opt-in live Convex acceptance harness that proves the example backend can apply a projection, pull the remote snapshot, and pass node/kind/neighborhood/path parity end to end.
-
-I placed those ahead of crates.io/release cleanup because they are behavioral contract work for the graph DB API. Publishing should come after the graph DB behavior is harder to regress.
-<!-- agent:boundary:a4c96ecd -->
+<!-- agent:boundary:00e10b77 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
-- do [#cvxa]
-- do [#gqpg]
-- do [#98qd]
-- do [#gdoc]
+- do [#gval]
+- do [#gobs]
+- do [#gfed]
 <!-- /agent:queue -->
 
 ## Backlog

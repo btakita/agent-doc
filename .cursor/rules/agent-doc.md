@@ -49,11 +49,12 @@ Detect subcommands before the normal workflow:
 - `compact <FILE>` → run `agent-doc compact <FILE> --commit` and stop.
 - `compact exchange <FILE>` → follow [runbooks/compact-exchange.md](runbooks/compact-exchange.md) and stop.
 
-**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness claude --reload compact`; on `SKILL_RELOAD=compact`, ask the user to run `/compact` and re-invoke, then stop. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Claude skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).
+**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness claude --reload restart` unless `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`. On `SKILL_RELOAD=restart`, ask the user to restart Claude Code and re-invoke `/agent-doc <FILE>`, then stop. Use `--reload compact` and ask for `/compact` only when that explicit opt-in exists. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Claude skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).
 
-Run `agent-doc preflight <FILE>`. Preflight owns recovery before diffing and prints the cycle contract: `baseline_file`, `no_changes`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
+Run `agent-doc preflight <FILE>`. Preflight owns recovery before diffing and prints the cycle contract: `baseline_file`, `no_changes`, `warnings`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
 
 - If `no_changes: true` → tell the user nothing changed and stop.
+- Surface any `warnings`; for `harness_mismatch`, note that the document-declared agent differs from the active harness and continue with the active harness attribution/closeout path.
 - Print any `claims` to the console as a record.
 - Use `baseline_file` as `--baseline-file` for every subsequent response-persistence command. Do NOT save your own baseline — preflight's copy is taken at a stable post-commit point.
 - First cycle only: if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content. Do NOT read the snapshot file directly.

@@ -33,7 +33,17 @@ Completed stale visible-closeout write guard and added the IPC editor-side proof
 Compacted content:
 - Archived 1 response topic(s): live typing corruption and fan-out orchestration
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3a6d945c -->
+❯ do [#ewzz]. #spec-test-build-install-commit-push
+### Re: editor IPC apply proof — gpt-5
+
+Completed `#ewzz`.
+
+Implemented editor-side apply proof for both plugins. VS Code now captures the exact buffer text plus `TextDocument.version` after debounce and re-checks it before full-content, component-patch, and boundary-reposition mutations. JetBrains now captures the exact document text plus `Document.modificationStamp` and re-checks before each visible `setText` path. Stale proof mismatches reject the patch without ACK, and socket IPC `status:error` ACKs now fail the send path so the CLI can retry or fall back instead of treating a rejected editor mutation as delivered.
+
+Updated the shared editor specs, bumped local plugin builds to JetBrains `0.2.125` and VS Code `0.2.19`, and added focused VS Code, JetBrains, and socket-ACK regressions. Committed the submodule change as `a0e4dcde fix: guard editor IPC apply generation` and the parent gitlink as `d174cc13b agent-doc: guard editor IPC apply generation`; the push follows this closeout boundary.
+
+Verification: `cargo test socket_error_ack_is_error`; `npm test -- --test-name-pattern patchGuard`; `npm test`; `./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest`; `./gradlew test buildPlugin`; `make check`; `make install`; installed `agent-doc 0.33.16`. Latest checked CI tmux evidence was run `26178914295`, where `Run make tmux-ci` succeeded. I left unrelated pre-existing local edits in `src/agent-doc` unstaged.
+<!-- agent:boundary:0eeed238 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +56,6 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ewzz] #ipcw [recommended] Add editor-side IPC apply proof that rejects stale buffer or generation mismatches before applying exchange append patches while user typing; cover file IPC, socket IPC, and full-content repair paths. Plan: tasks/agent-doc/plan-live-typing-duplicate-insertion.md
 - [ ] [#nh3j] [recommended] Clarify audit-docs --root behavior for submodule-local managed skill artifacts; the no-override release path audits the superproject install root, while an explicit submodule root can still see stale tracked .claude/skills/agent-doc/SKILL.md artifacts.
 - [ ] [#ops2] [recommended] Move operator_clear and orchestration_batch onto FlowCore typed outcomes after route and closeout extraction; cover active-pane clear refusal, queue freeze/mid-run mutation, and child patchback normalization. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

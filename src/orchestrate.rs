@@ -1024,7 +1024,8 @@ fn orchestrate_finalize_text_for_template(response: String) -> String {
     };
     if patches.is_empty()
         && !unmatched.trim().is_empty()
-        && orchestrate_plain_response_is_clean(unmatched.trim())
+        && crate::flow::document_mutation::classify_orchestrate_plain_response(unmatched.trim())
+            .is_accepted()
     {
         return format!(
             "<!-- patch:exchange -->\n{}\n<!-- /patch:exchange -->\n",
@@ -1032,36 +1033,6 @@ fn orchestrate_finalize_text_for_template(response: String) -> String {
         );
     }
     response
-}
-
-fn orchestrate_plain_response_is_clean(trimmed: &str) -> bool {
-    if trimmed.contains("<!-- agent:")
-        || trimmed.contains("<!-- /agent:")
-        || trimmed.contains("&lt;!-- agent:")
-        || trimmed.contains("&lt;!-- /agent:")
-    {
-        return false;
-    }
-    if trimmed
-        .lines()
-        .any(|line| line.trim_start().starts_with('❯'))
-    {
-        return false;
-    }
-    if trimmed.lines().any(|line| {
-        let line = line.trim();
-        line == "## User"
-            || line.starts_with("## User ")
-            || line == "## Assistant"
-            || line.starts_with("## Assistant ")
-    }) {
-        return false;
-    }
-    trimmed
-        .lines()
-        .filter(|line| line.trim_start().starts_with("### Re:"))
-        .count()
-        <= 1
 }
 
 fn should_stream_exchange_patch(response: &str) -> bool {

@@ -6,6 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **FlowCore owns the next closeout, mutation, and session-cycle slices.**
+  `flow::document_mutation` now parses and classifies template patchback shapes
+  before visible writes across template, stream, IPC, and repair replay paths,
+  including orchestrate-origin plain-response rejection. `flow::closeout` owns
+  the strict terminal transaction for commit, snapshot convergence, parent
+  gitlink verification, session-check, and fallback-patch cleanup. `preflight`
+  and `plan` now share `flow::session_cycle` prompt-target and finalize-command
+  helpers so pending `--done` / cross-document add requirements come from one
+  typed cycle contract.
+
 - **Routed-reopen FlowCore owns the authoritative actor action slice.** The
   authoritative actor ready-wait facts, retry budgets, recovery hints,
   delivery-action classifier, and dispatch-start proof typing now live in

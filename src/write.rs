@@ -1087,152 +1087,7 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
 }
 
 pub(crate) fn complete_required_closeout(file: &Path) -> Result<bool> {
-    let mut timer = CloseoutTimer::start(file);
-
-    let mut did_commit = crate::git::commit(file)?;
-    timer.mark("git_commit");
-    ensure_cycle_committed(file)?;
-    timer.mark("cycle_state");
-    // Verify the snapshot is actually committed in the owning git root.
-    // If it isn't (e.g., post-commit mutation dirtied the file, or the commit
-    // staged wrong content), retry once before handing off to session-check.
-    if let crate::git::SnapshotCommitStatus::SnapshotDiffersFromHead { .. } =
-        crate::git::verify_snapshot_committed(file)?
-    {
-        eprintln!("[commit] snapshot differs from HEAD after commit — retrying");
-        log_closeout_guard(
-            file,
-            crate::flow::types::FlowStage::SnapshotConvergence,
-            crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::SnapshotDiffersFromHead,
-        );
-        did_commit |= crate::git::commit(file)?;
-        timer.mark("git_commit_retry_snapshot");
-        ensure_cycle_committed(file)?;
-        timer.mark("cycle_state_retry_snapshot");
-    }
-    if crate::git::submodule_pointer_drift(file)?.is_some() {
-        eprintln!("[commit] parent submodule pointer still stale after commit — retrying");
-        did_commit |= crate::git::commit(file)?;
-        timer.mark("git_commit_retry_parent_pointer");
-        ensure_cycle_committed(file)?;
-        timer.mark("cycle_state_retry_parent_pointer");
-    }
-    if let Some(drift) = crate::git::submodule_pointer_drift(file)? {
-        timer.mark("parent_pointer_verify_failed");
-        let parent_head = drift.parent_head.as_deref().unwrap_or("<missing>");
-        timer.finish();
-        log_closeout_guard(
-            file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::FailedClosed,
-            crate::flow::closeout::CloseoutGuardReason::ParentPointerStale,
-        );
-        anyhow::bail!(
-            "parent submodule pointer is not committed for {} after strict closeout: parent HEAD:{}={} but submodule HEAD={}. Run `agent-doc commit {}` to retry the idempotent parent-pointer closeout.",
-            file.display(),
-            drift.relative_path,
-            parent_head,
-            drift.submodule_head,
-            file.display()
-        );
-    }
-    if let Err(err) = crate::session_check::enforce_clean_closeout(file) {
-        log_closeout_guard(
-            file,
-            crate::flow::types::FlowStage::SessionCheck,
-            crate::flow::types::FlowOutcome::FailedClosed,
-            crate::flow::closeout::CloseoutGuardReason::SessionCheckInterrupted,
-        );
-        return Err(err);
-    }
-    timer.mark("session_check");
-    cleanup_fallback_patch_files(file);
-    timer.mark("fallback_cleanup");
-    timer.finish();
-    Ok(did_commit)
-}
-
-#[derive(Debug)]
-struct CloseoutTimer<'a> {
-    file: &'a Path,
-    started: std::time::Instant,
-    last_mark: std::time::Instant,
-    phases: Vec<(String, u128)>,
-}
-
-impl<'a> CloseoutTimer<'a> {
-    const REPORT_THRESHOLD_MS: u128 = 250;
-
-    fn start(file: &'a Path) -> Self {
-        let now = std::time::Instant::now();
-        Self {
-            file,
-            started: now,
-            last_mark: now,
-            phases: Vec::new(),
-        }
-    }
-
-    fn mark(&mut self, phase: &str) {
-        let now = std::time::Instant::now();
-        self.phases.push((
-            phase.to_string(),
-            now.duration_since(self.last_mark).as_millis(),
-        ));
-        self.last_mark = now;
-    }
-
-    fn finish(&self) {
-        let total_ms = self.started.elapsed().as_millis();
-        if total_ms < Self::REPORT_THRESHOLD_MS {
-            return;
-        }
-        let message = closeout_latency_message(self.file, total_ms, &self.phases);
-        eprintln!("[perf] {message}");
-        crate::ops_log::log_op(self.file, &message);
-    }
-}
-
-fn closeout_latency_message(file: &Path, total_ms: u128, phases: &[(String, u128)]) -> String {
-    let phase_text = phases
-        .iter()
-        .map(|(phase, elapsed)| format!("{phase}:{elapsed}ms"))
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "closeout_latency file={} total_ms={} phases={}",
-        file.display(),
-        total_ms,
-        phase_text
-    )
-}
-
-fn ensure_cycle_committed(file: &Path) -> Result<()> {
-    let Some(state) = crate::cycle_state::load(file)? else {
-        log_closeout_guard(
-            file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::FailedClosed,
-            crate::flow::closeout::CloseoutGuardReason::MissingCycleState,
-        );
-        anyhow::bail!("finalize did not persist cycle state");
-    };
-    if state.is_open() {
-        log_closeout_guard(
-            file,
-            crate::flow::types::FlowStage::TerminalGuard,
-            crate::flow::types::FlowOutcome::Blocked,
-            crate::flow::closeout::CloseoutGuardReason::OpenCycle,
-        );
-        anyhow::bail!(
-            "finalize left cycle `{}` open at `{}` ({})",
-            state.cycle_id,
-            cycle_phase_name(state.phase),
-            state.last_event
-        );
-    }
-    Ok(())
+    crate::flow::closeout::complete_required_closeout(file)
 }
 
 fn log_closeout_guard(
@@ -2015,16 +1870,6 @@ fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFl
     );
 }
 
-fn cycle_phase_name(phase: crate::cycle_state::CyclePhase) -> &'static str {
-    match phase {
-        crate::cycle_state::CyclePhase::PreflightStarted => "preflight_started",
-        crate::cycle_state::CyclePhase::ResponseCaptured => "response_captured",
-        crate::cycle_state::CyclePhase::WriteApplied => "write_applied",
-        crate::cycle_state::CyclePhase::Committed => "committed",
-        crate::cycle_state::CyclePhase::Abandoned => "abandoned",
-    }
-}
-
 fn run_closeout_pending_maintenance(file: &Path, commit_mode: CommitMode) -> Result<()> {
     if commit_mode != CommitMode::Required {
         return Ok(());
@@ -2630,93 +2475,7 @@ fn sanitize_template_patchback_response_for_write(response: &mut String) -> Resu
 }
 
 fn patchback_marker_count_outside_code(response: &str) -> usize {
-    let code_ranges = crate::component::find_code_ranges(response);
-    let markers = [
-        "<!-- patch:",
-        "<!-- /patch:",
-        "<!-- replace:",
-        "<!-- /replace:",
-    ];
-    let mut count = 0usize;
-    for marker in markers {
-        let mut search_from = 0usize;
-        while let Some(rel) = response[search_from..].find(marker) {
-            let pos = search_from + rel;
-            if !code_ranges
-                .iter()
-                .any(|&(start, end)| pos >= start && pos < end)
-            {
-                count += 1;
-            }
-            search_from = pos + marker.len();
-        }
-    }
-    count
-}
-
-fn validate_template_patchback_parse_shape(
-    file: &Path,
-    response: &str,
-    patches: &[template::PatchBlock],
-    unmatched: &str,
-    source: &str,
-) -> Result<()> {
-    let marker_count = patchback_marker_count_outside_code(response);
-    if marker_count == 0 {
-        return Ok(());
-    }
-    let exchange_patches = patches
-        .iter()
-        .filter(|patch| patch.name == "exchange")
-        .count();
-    let shape = crate::flow::document_mutation::classify_patchback_shape(
-        crate::flow::document_mutation::PatchbackShapeFacts {
-            marker_count,
-            patch_count: patches.len(),
-            exchange_patch_count: exchange_patches,
-            unmatched_len: unmatched.trim().len(),
-            has_transcript_markers: response.contains("## User")
-                || response.contains("## Assistant"),
-        },
-    );
-    let parse_outcome = if patches.is_empty() && !unmatched.trim().is_empty() {
-        crate::flow::types::FlowOutcome::FailedClosed
-    } else {
-        crate::flow::types::FlowOutcome::Completed
-    };
-    crate::flow::document_mutation::log_patchback_parse_event(file, shape, parse_outcome);
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "template_patchback_parse_shape file={} source={} response_hash={} markers={} patches={} exchange_patches={} unmatched_len={}",
-            file.display(),
-            source,
-            crate::ops_log::content_hash(response),
-            marker_count,
-            patches.len(),
-            exchange_patches,
-            unmatched.trim().len()
-        ),
-    );
-
-    if patches.is_empty() && !unmatched.trim().is_empty() {
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "template_patchback_malformed_rejected file={} source={} response_hash={} markers={} unmatched_len={} reason=patch_markers_without_closed_blocks",
-                file.display(),
-                source,
-                crate::ops_log::content_hash(response),
-                marker_count,
-                unmatched.trim().len()
-            ),
-        );
-        anyhow::bail!(
-            "malformed template patchback: found patch/replace markers but no closed patch blocks parsed; refusing to append unmatched content"
-        );
-    }
-
-    Ok(())
+    crate::flow::document_mutation::patchback_marker_count_outside_code(response)
 }
 
 /// Resolve the IPC project root for `canonical` (an already-canonicalized file
@@ -3848,76 +3607,9 @@ fn enforce_orchestrate_template_patch_contract(
     patches: &[crate::template::PatchBlock],
     unmatched: &str,
 ) -> Result<()> {
-    if origin != Some("orchestrate") {
-        return Ok(());
-    }
-
-    if patches.is_empty() {
-        enforce_orchestrate_plain_response_contract(unmatched)?;
-        return Ok(());
-    }
-
-    if !patches.iter().any(|patch| patch.name == "exchange") {
-        anyhow::bail!(
-            "orchestrate template-mode responses must include a <!-- patch:exchange --> block"
-        );
-    }
-    if !unmatched.trim().is_empty() {
-        anyhow::bail!(
-            "orchestrate template-mode responses must not include raw unmatched content outside patch blocks"
-        );
-    }
-    Ok(())
-}
-
-fn enforce_orchestrate_plain_response_contract(unmatched: &str) -> Result<()> {
-    let trimmed = unmatched.trim();
-    if trimmed.is_empty() {
-        return Ok(());
-    }
-
-    if trimmed.contains("<!-- agent:")
-        || trimmed.contains("<!-- /agent:")
-        || trimmed.contains("&lt;!-- agent:")
-        || trimmed.contains("&lt;!-- /agent:")
-    {
-        anyhow::bail!(
-            "orchestrate template-mode plain responses must not include full document component markers"
-        );
-    }
-
-    if trimmed
-        .lines()
-        .any(|line| line.trim_start().starts_with('❯'))
-    {
-        anyhow::bail!(
-            "orchestrate template-mode plain responses must not include transcript prompt lines"
-        );
-    }
-
-    if trimmed.lines().any(|line| {
-        let line = line.trim();
-        line == "## User"
-            || line.starts_with("## User ")
-            || line == "## Assistant"
-            || line.starts_with("## Assistant ")
-    }) {
-        anyhow::bail!(
-            "orchestrate template-mode plain responses must not include transcript headings"
-        );
-    }
-
-    let response_headings = trimmed
-        .lines()
-        .filter(|line| line.trim_start().starts_with("### Re:"))
-        .count();
-    if response_headings > 1 {
-        anyhow::bail!(
-            "orchestrate template-mode plain responses must contain only one assistant response"
-        );
-    }
-
-    Ok(())
+    crate::flow::document_mutation::enforce_orchestrate_patchback_contract(
+        origin, patches, unmatched,
+    )
 }
 
 /// Lift `agent:pending` out of `agent:exchange` if nested.
@@ -4882,10 +4574,11 @@ pub fn run_template(
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
-    // Parse patch blocks from response
-    let (mut patches, mut unmatched) =
-        template::parse_patches(&response).context("failed to parse patch blocks from response")?;
-    validate_template_patchback_parse_shape(file, &response, &patches, &unmatched, "run_template")?;
+    // Parse and validate patchback shape before any visible document mutation.
+    let parsed =
+        crate::flow::document_mutation::parse_template_patchback(file, &response, "run_template")?;
+    let mut patches = parsed.patches;
+    let mut unmatched = parsed.unmatched;
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
@@ -5113,10 +4806,11 @@ pub fn run_stream(
     // Lint: warn if response contains future-work signals without --pending-add
     check_future_work_signals(&response, flags.has_pending_add);
 
-    // Parse patch blocks from response
-    let (mut patches, mut unmatched) =
-        template::parse_patches(&response).context("failed to parse patch blocks from response")?;
-    validate_template_patchback_parse_shape(file, &response, &patches, &unmatched, "run_stream")?;
+    // Parse and validate patchback shape before any visible document mutation.
+    let parsed =
+        crate::flow::document_mutation::parse_template_patchback(file, &response, "run_stream")?;
+    let mut patches = parsed.patches;
+    let mut unmatched = parsed.unmatched;
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
@@ -5800,11 +5494,11 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     sanitize_template_patchback_response_for_write(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
-    // Save response to pending store (survives context compaction)
-    // Parse patch blocks from response
-    let (mut patches, mut unmatched) =
-        template::parse_patches(&response).context("failed to parse patch blocks from response")?;
-    validate_template_patchback_parse_shape(file, &response, &patches, &unmatched, "run_ipc")?;
+    // Parse and validate patchback shape before any visible document mutation.
+    let parsed =
+        crate::flow::document_mutation::parse_template_patchback(file, &response, "run_ipc")?;
+    let mut patches = parsed.patches;
+    let mut unmatched = parsed.unmatched;
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
@@ -6091,15 +5785,13 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
     let mut response = response.to_string();
     sanitize_template_patchback_response_for_write(&mut response)?;
 
-    let (mut patches, mut unmatched) =
-        template::parse_patches(&response).context("failed to parse patch blocks from response")?;
-    validate_template_patchback_parse_shape(
+    let parsed = crate::flow::document_mutation::parse_template_patchback(
         file,
         &response,
-        &patches,
-        &unmatched,
         "apply_template_from_string",
     )?;
+    let mut patches = parsed.patches;
+    let mut unmatched = parsed.unmatched;
 
     // Sanitize component tags in patch content and unmatched text to prevent
     // parser corruption and duplicate exchange blocks (#dupeexchangeblock).
@@ -6440,66 +6132,17 @@ pub struct IpcResult {
 /// Prevents late file-watcher or plugin recovery from re-applying a stale patch
 /// to an already-committed document.
 pub(crate) fn cleanup_fallback_patch_files(file: &Path) {
-    let Ok(canonical) = file.canonicalize() else {
-        return;
-    };
-    let project_root = resolve_ipc_project_root(&canonical);
-    let patches_dir = project_root.join(".agent-doc/patches");
-    if !patches_dir.exists() {
-        return;
-    }
-    let Ok(hash) = snapshot::doc_hash(file) else {
-        return;
-    };
-    let patch_file = patches_dir.join(format!("{hash}.json"));
-    if patch_file.exists() {
-        if let Ok(stale_content) = std::fs::read_to_string(&patch_file)
-            && let Ok(stale_json) = serde_json::from_str::<serde_json::Value>(&stale_content)
-            && let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str())
-        {
-            write_claimed_patch_sentinel(&project_root, patch_id);
-        }
-        match std::fs::remove_file(&patch_file) {
-            Ok(()) => eprintln!(
-                "[write] cleaned up fallback patch file after closeout: {}",
-                patch_file.display()
-            ),
-            Err(e) => eprintln!(
-                "[write] WARNING: failed to clean up fallback patch file after closeout: {e}"
-            ),
-        }
-    }
+    crate::flow::closeout::cleanup_fallback_patch_files(file);
 }
 
 /// Check if the current cycle for `file` is already in Committed phase.
 /// Returns `Some(cycle_id)` if committed, `None` if no cycle or cycle is open.
 fn cycle_already_committed(file: &Path) -> Option<String> {
-    match crate::cycle_state::load(file) {
-        Ok(Some(state)) if state.phase == crate::cycle_state::CyclePhase::Committed => {
-            Some(state.cycle_id)
-        }
-        _ => None,
-    }
+    crate::flow::closeout::cycle_already_committed(file)
 }
 
 fn write_claimed_patch_sentinel(project_root: &Path, patch_id: &str) {
-    let claimed_dir = project_root.join(".agent-doc/claimed-patches");
-    match std::fs::create_dir_all(&claimed_dir) {
-        Err(e) => {
-            eprintln!("[write] WARNING: failed to create claimed-patches dir: {e}");
-        }
-        Ok(_) => {
-            let sentinel = claimed_dir.join(patch_id);
-            if let Err(e) = std::fs::write(&sentinel, "") {
-                eprintln!("[write] WARNING: failed to write patch sentinel: {e}");
-            } else {
-                eprintln!(
-                    "[write] patch_id {} claimed (sentinel written)",
-                    &patch_id[..patch_id.len().min(8)]
-                );
-            }
-        }
-    }
+    crate::flow::closeout::write_claimed_patch_sentinel(project_root, patch_id);
 }
 
 /// Attempt to write via IPC (socket-first, file-based fallback).
@@ -12314,20 +11957,6 @@ mod submodule_patch_routing_tests {
             crate::git::submodule_pointer_drift(&doc).unwrap().is_some(),
             "parent gitlink should remain stale when parent commit fails"
         );
-    }
-
-    #[test]
-    fn closeout_latency_message_names_phase_timings() {
-        let doc = PathBuf::from("/tmp/session.md");
-        let phases = vec![
-            ("git_commit".to_string(), 140),
-            ("session_check".to_string(), 90),
-        ];
-
-        let message = super::closeout_latency_message(&doc, 230, &phases);
-
-        assert!(message.contains("closeout_latency file=/tmp/session.md total_ms=230"));
-        assert!(message.contains("phases=git_commit:140ms,session_check:90ms"));
     }
 
     // Note: a "not in git repo" fallback test is intentionally omitted because

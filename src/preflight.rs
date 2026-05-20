@@ -1401,11 +1401,8 @@ pub fn run(file: &Path) -> Result<()> {
             diff::classify_prompt_bearing_changes(harness_only_diff),
         );
     }
-    let prompt_targets = prompt_bearing_changes
-        .iter()
-        .filter(|change| change.kind == diff::PromptBearingChangeKind::PromptTarget)
-        .map(|change| change.text.clone())
-        .collect::<Vec<_>>();
+    let prompt_targets =
+        crate::flow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
     let mut added_diff_lines = diff_result
         .as_ref()
         .map(|d| crate::prompt_contract::collect_added_diff_lines(d))

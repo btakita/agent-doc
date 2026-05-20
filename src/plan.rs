@@ -141,11 +141,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     };
 
     let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&diff_text);
-    let prompt_targets = prompt_bearing_changes
-        .iter()
-        .filter(|change| change.kind == diff::PromptBearingChangeKind::PromptTarget)
-        .map(|change| change.text.clone())
-        .collect::<Vec<_>>();
+    let prompt_targets =
+        crate::flow::session_cycle::prompt_targets_from_changes(&prompt_bearing_changes);
     let added_diff_lines = crate::prompt_contract::collect_added_diff_lines(&diff_text);
 
     let execution_scope = execution_scope_for_prompt_targets(
@@ -275,20 +272,16 @@ fn execution_scope_for_prompt_targets(
     harness_prompt_only: bool,
     prompt_presets: &indexmap::IndexMap<String, String>,
 ) -> ExecutionScope {
-    let agent_doc_bug_requested = crate::prompt_contract::prompt_targets_reference_preset(
+    match crate::flow::session_cycle::classify_execution_scope(
         prompt_targets,
+        added_diff_lines,
+        harness_prompt_only,
         prompt_presets,
-        "#agent-doc-bug",
-    ) || harness_prompt_only
-        && crate::prompt_contract::prompt_targets_reference_preset(
-            added_diff_lines,
-            prompt_presets,
-            "#agent-doc-bug",
-        );
-    if agent_doc_bug_requested {
-        ExecutionScope::PlanBacklogOnly
-    } else {
-        ExecutionScope::Normal
+    ) {
+        crate::flow::session_cycle::SessionExecutionScope::PlanBacklogOnly => {
+            ExecutionScope::PlanBacklogOnly
+        }
+        crate::flow::session_cycle::SessionExecutionScope::Normal => ExecutionScope::Normal,
     }
 }
 
@@ -297,34 +290,28 @@ fn finalize_placeholder_commands(
     fm: &frontmatter::Frontmatter,
     pending_mutations: &[PendingMutationPlan],
 ) -> Vec<String> {
-    let mut finalize = format!(
-        "agent-doc finalize {} --baseline-file <preflight.baseline_file> --origin skill",
-        file.display()
-    );
-    for mutation in pending_mutations
+    let pending = pending_mutations
         .iter()
-        .filter(|mutation| mutation.kind == PendingMutationKind::ResolveExisting)
-    {
-        finalize.push_str(" --done ");
-        finalize.push_str(&mutation.id);
-    }
-    for mutation in pending_mutations
-        .iter()
-        .filter(|mutation| mutation.kind == PendingMutationKind::ExpectAdd)
-    {
-        for target in &mutation.target_files {
-            finalize.push_str(" --pending-add-to ");
-            finalize.push_str(target);
-            finalize.push_str(" \"<item>\"");
-        }
-    }
-    if fm.resolve_mode().is_crdt() {
-        finalize.push_str(" --stream");
-    } else if fm.resolve_mode().is_template() {
-        finalize.push_str(" --template");
-    }
-
-    vec![finalize]
+        .map(
+            |mutation| crate::flow::session_cycle::FinalizePendingMutation {
+                kind: match mutation.kind {
+                    PendingMutationKind::ResolveExisting => {
+                        crate::flow::session_cycle::FinalizePendingMutationKind::ResolveExisting
+                    }
+                    PendingMutationKind::ExpectAdd => {
+                        crate::flow::session_cycle::FinalizePendingMutationKind::ExpectAdd
+                    }
+                },
+                id: &mutation.id,
+                target_files: &mutation.target_files,
+            },
+        )
+        .collect::<Vec<_>>();
+    vec![crate::flow::session_cycle::finalize_command(
+        file,
+        fm.resolve_mode(),
+        &pending,
+    )]
 }
 
 fn pending_mutations_for_doc(
@@ -508,6 +495,17 @@ mod tests {
                 _lock: lock,
             }
         }
+
+        fn unset(key: &'static str) -> Self {
+            let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+            let prev = std::env::var(key).ok();
+            unsafe { std::env::remove_var(key) };
+            Self {
+                key,
+                prev,
+                _lock: lock,
+            }
+        }
     }
 
     impl Drop for EnvGuard {
@@ -660,6 +658,7 @@ What changed?
 
     #[test]
     fn build_plan_uses_active_queue_prompt_when_document_has_no_diff() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
         let dir = setup_project();
         let doc = dir.path().join("plan.md");
         let content = r#"---

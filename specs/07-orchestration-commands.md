@@ -139,4 +139,5 @@ Before emitting queue state, preflight may:
 - After a successful response closeout, required closeouts mark the first prompt complete in the queue in the same locked read/parse/write cycle.
 - Completed prompts remain visible as `- ~prompt text~` while later prompts remain queued.
 - The first prompt must be completable or drainable from both the live document and the snapshot in a provably identical way; otherwise strict closeouts fail before commit.
+- Direct `agent-doc run` / bare-path invocations with `queue_active: true` and no document diff synthesize the active queue head as the prompt diff, consume exactly one queued prompt on successful closeout, and report that an `auto` queue with remaining prompts is single-step resumable.
 - If the queue drains, the queue body is cleared, `auto` is removed, and `queue_active` is cleared.

@@ -218,6 +218,10 @@ fn template_doc_with_model() -> String {
     "---\nagent_doc_format: template\nagent_doc_write: crdt\nmodel: gpt-5\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ Please reply\n<!-- /agent:exchange -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
 }
 
+fn active_auto_queue_doc() -> String {
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+}
+
 #[test]
 fn run_template_mode_writes_inside_exchange_and_commits() {
     let tmp = TempDir::new().unwrap();
@@ -288,6 +292,95 @@ fn bare_path_alias_uses_same_template_safe_path() {
     assert!(
         response_pos < exchange_end,
         "bare path should stay inside exchange"
+    );
+}
+
+#[test]
+fn run_resumes_active_queue_head_and_reports_single_step_auto_remaining() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, active_auto_queue_doc()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+
+    let script = write_mock_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: queue item — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n",
+    );
+    let config_root = write_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "[run] active queue head synthesized as prompt diff",
+        ))
+        .stderr(predicate::str::contains(
+            "[queue] auto queue is single-step resumable: 1 prompt(s) remain",
+        ));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("### Re: queue item — gpt-5"),
+        "queue response should be written"
+    );
+    assert!(
+        content.contains("- ~do #fix1~"),
+        "first active queue prompt should be marked complete"
+    );
+    assert!(
+        content.contains("- do #fix2"),
+        "later queue prompt should remain open for the next invocation"
+    );
+    assert!(
+        content.contains("queue_active: true"),
+        "queue should stay active while prompts remain"
+    );
+}
+
+#[test]
+fn run_repeated_active_queue_invocation_drains_last_prompt() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(&doc, active_auto_queue_doc()).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
+
+    let script = write_mock_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: queue item — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n",
+    );
+    let config_root = write_config(tmp.path(), &script);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("[queue] drained"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("queue_active: false"),
+        "queue should clear active state after the last prompt"
+    );
+    assert!(
+        !content.contains("agent:queue auto"),
+        "drained queue should strip auto"
+    );
+    assert!(
+        !content.contains("do #fix1") && !content.contains("do #fix2"),
+        "drained queue should remove consumed prompt residue"
     );
 }
 

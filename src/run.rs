@@ -113,7 +113,9 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::{agent, config::Config, diff, frontmatter, git, merge, snapshot, template, write};
+use crate::{
+    agent, component, config::Config, diff, frontmatter, git, merge, snapshot, template, write,
+};
 
 const AGENT_DOC_RUN_HEARTBEAT_SECS_ENV: &str = "AGENT_DOC_RUN_HEARTBEAT_SECS";
 const DEFAULT_RUN_HEARTBEAT_SECS: u64 = 30;
@@ -150,18 +152,12 @@ pub fn run(
     eprintln!("[run] starting for {}", file.display());
 
     // Compute diff
-    let the_diff = match diff::compute(file)? {
-        Some(d) => {
-            eprintln!("[run] diff computed ({} bytes)", d.len());
-            d
-        }
-        None => {
-            eprintln!(
-                "[run] Nothing changed since last run for {}",
-                file.display()
-            );
-            return Ok(());
-        }
+    let Some((the_diff, queue_synthetic_diff)) = compute_run_diff(file)? else {
+        eprintln!(
+            "[run] Nothing changed since last run for {}",
+            file.display()
+        );
+        return Ok(());
     };
     write::guard_no_exchange_compaction_request_for_diff(file, &the_diff)?;
 
@@ -224,7 +220,7 @@ pub fn run(
     // This lets the editor show agent additions as diff gutters
     if !no_git {
         let did_commit = git::commit(file)?;
-        if !did_commit && diff::compute(file)?.is_none() {
+        if !did_commit && !queue_synthetic_diff && diff::compute(file)?.is_none() {
             anyhow::bail!(
                 "no child-agent dispatch: the pre-commit repair closed {} as already committed and no new assistant response body was supplied. If you need to recover a missed response patchback, pipe the response through `agent-doc write --commit {}`.",
                 file.display(),
@@ -302,11 +298,68 @@ pub fn run(
 
     if !no_git {
         let _heartbeat = RunHeartbeat::start(file, "commit_closeout", agent_name, None);
+        write::consume_queue_prompt(file)?;
         write::complete_required_closeout(file)?;
     }
 
     eprintln!("Response written to {}", file.display());
     Ok(())
+}
+
+fn compute_run_diff(file: &Path) -> Result<Option<(String, bool)>> {
+    if let Some(d) = diff::compute(file)? {
+        eprintln!("[run] diff computed ({} bytes)", d.len());
+        return Ok(Some((d, false)));
+    }
+
+    if let Some(d) = active_queue_prompt_diff(file)? {
+        eprintln!("[run] active queue head synthesized as prompt diff");
+        return Ok(Some((d, true)));
+    }
+
+    Ok(None)
+}
+
+fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let (fm, _) = frontmatter::parse_for_file(&content, file)?;
+    if fm.queue_active != Some(true) {
+        return Ok(None);
+    }
+
+    let components = component::parse(&content)?;
+    let Some(queue_component) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(None);
+    };
+    let body = &content[queue_component.open_end..queue_component.close_start];
+    let entries =
+        crate::queue::parse(body).context("run queue resume: failed to parse document queue")?;
+    let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
+    let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
+    if !activation.active {
+        return Ok(None);
+    }
+    if crate::queue::has_stop_fence_at_head(&activation.entries_after) {
+        eprintln!("[run] active queue halted by stop fence at head");
+        return Ok(None);
+    }
+    if let Some(start_at) = crate::queue::time_gate_at_head(&activation.entries_after) {
+        eprintln!("[run] active queue deferred by time gate at head: {start_at}");
+        return Ok(None);
+    }
+
+    let prompts = crate::queue::prompts(&activation.entries_after);
+    let Some(prompt) = prompts.first() else {
+        return Ok(None);
+    };
+    Ok(Some(diff::synthetic_added_lines_diff(
+        &prompt.text,
+        "queue",
+    )))
 }
 
 struct RunHeartbeat {

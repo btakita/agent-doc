@@ -1890,12 +1890,13 @@ struct QueueConsumptionPlan {
     consumed_text: String,
     remaining: usize,
     drained: bool,
+    auto: bool,
     new_document: String,
     new_snapshot: String,
     save_snapshot: bool,
 }
 
-fn consume_queue_prompt(file: &Path) -> Result<bool> {
+pub(crate) fn consume_queue_prompt(file: &Path) -> Result<bool> {
     // Hold the document lock for the entire read-parse-write cycle to prevent
     // concurrent edits from invalidating parsed offsets (TOCTOU fix).
     let _lock = acquire_doc_lock(file)?;
@@ -1917,6 +1918,12 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
     );
     if plan.drained {
         eprintln!("[queue] drained — cleared queue_active");
+    } else if plan.auto {
+        eprintln!(
+            "[queue] auto queue is single-step resumable: {} prompt(s) remain; re-run `agent-doc {}` after this closeout to continue.",
+            plan.remaining,
+            file.display()
+        );
     }
 
     Ok(true)
@@ -2052,6 +2059,7 @@ fn plan_queue_prompt_consumption(
             consumed_text,
             remaining,
             drained,
+            auto: has_auto,
             new_document: current,
             new_snapshot: new_snap,
             save_snapshot: true,
@@ -2062,6 +2070,7 @@ fn plan_queue_prompt_consumption(
         consumed_text,
         remaining,
         drained,
+        auto: has_auto,
         new_document: current,
         new_snapshot: new_snap,
         save_snapshot: false,

@@ -13,6 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue_active: true
 ---
 
 ## Status
@@ -35,7 +36,26 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): graph DB behavior next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:00e10b77 -->
+### Re: graph DB conformance — gpt-5
+
+Completed `#gval`.
+
+Implemented a compiled `tsift` CLI conformance suite for graph DB behavior in `tests/graph_db_conformance.rs`. It runs the built binary against both the local SQLite graph store and a generated Convex snapshot, then locks schema, kind, neighborhood, and path query parity, deterministic pagination/filter results, newer SQLite schema fail-closed behavior, failed-refresh rollback visibility, edge-before-node tombstone reconciliation, Convex freshness failures, and missing-node edge rejection.
+
+Runtime behavior now validates Convex snapshot edges before graph reads or snapshot-backed handoffs, so an edge whose `fromExternalId` or `toExternalId` is absent fails closed instead of being trusted. `SPEC.md` now documents the compiled CLI conformance suite and the Convex orphan-edge guard.
+
+Verification passed:
+- `cargo test --test graph_db_conformance`
+- `make check`
+- `make ci-full`
+- `cargo build`
+- `cargo install --path .`
+- tsift GitHub CI latest `CI` run: success, run `26188672412`
+
+Agent Doc CI/tmux review: the latest root `Agent Doc` run `26188872503` is red, but both `tmux-ci` and `check` jobs have empty step lists, so this is classified as an external CI-start blocker rather than a local tmux regression. Local full verification is green.
+
+Committed the tsift repo change as `6517093 test: lock graph db cli conformance`. Push follows after this document closeout.
+<!-- agent:boundary:2d45cef7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -43,7 +63,7 @@ Compacted content:
 
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
-- do [#gval]
+- ~do [#gval]~
 - do [#gobs]
 - do [#gfed]
 <!-- /agent:queue -->
@@ -51,7 +71,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gval] Lock graph DB behavior with a compiled CLI conformance suite shared across SQLite and Convex snapshots: schema-version fail-closed checks, transactional refresh visibility, tombstone reconciliation order, missing-node edge rejection, freshness failures, pagination/filter parity, and deterministic ordering.
 - [ ] [#gobs] Add graph-db validation/doctor diagnostics for SQLite graph.db and Convex snapshots: stale projection metadata, missing required Convex indexes, orphan edges, duplicate ids, schema drift, and concise repair commands with fail-closed exit codes.
 - [ ] [#gfed] Add an optional live Convex graph backend acceptance harness: deploy or target the example backend, apply a small projection, pull the remote snapshot, and run graph-db node/kind/neighborhood/path parity end-to-end with credentials documented as opt-in.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.

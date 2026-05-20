@@ -641,6 +641,11 @@ fn run_ordered_tasks_internal(
 ) -> Result<()> {
     let mut effective_model: Option<String> = options.model_override.map(String::from);
     let dispatch_ctx = build_dispatch_context(file);
+    crate::flow::orchestration_batch::log_queue_freeze_event(
+        file,
+        tasks.len(),
+        options.exchange_source.is_some(),
+    );
 
     for (idx, task) in tasks.iter().enumerate() {
         eprintln!(
@@ -660,7 +665,7 @@ fn run_ordered_tasks_internal(
                 }
             }
             QueueItemKind::Prompt => {
-                run_ordered_task_step(
+                let child_result = match run_ordered_task_step(
                     file,
                     &task.prompt,
                     options.agent_override,
@@ -668,13 +673,32 @@ fn run_ordered_tasks_internal(
                     global_config,
                     lifecycle,
                     agent_runner,
-                )?;
+                ) {
+                    Ok(()) => crate::flow::orchestration_batch::BatchChildResult {
+                        label: task.label.clone(),
+                        outcome: crate::flow::types::FlowOutcome::Completed,
+                        proof: Some("finalize_session_check".to_string()),
+                    },
+                    Err(err) => {
+                        let child = crate::flow::orchestration_batch::BatchChildResult {
+                            label: task.label.clone(),
+                            outcome: crate::flow::types::FlowOutcome::FailedClosed,
+                            proof: Some("child_step_error".to_string()),
+                        };
+                        crate::flow::orchestration_batch::log_child_closeout_event(file, &child);
+                        return Err(err);
+                    }
+                };
+                crate::flow::orchestration_batch::log_child_closeout_event(file, &child_result);
                 if idx + 1 < tasks.len()
-                    && options
-                        .exchange_source
-                        .map(|source| exchange_task_source_changed(file, source))
-                        .transpose()?
-                        .unwrap_or(false)
+                    && !crate::flow::orchestration_batch::batch_should_continue(
+                        options
+                            .exchange_source
+                            .map(|source| exchange_task_source_changed(file, source))
+                            .transpose()?
+                            .unwrap_or(false),
+                        &child_result,
+                    )
                 {
                     finalize_orchestration_batch_changed(file, idx + 1, tasks.len(), lifecycle)?;
                 }
@@ -872,7 +896,13 @@ fn run_ordered_task_step(
         write::strip_assistant_heading(&response)
     };
     let finalize_text = if mode.is_template() {
-        orchestrate_finalize_text_for_template(finalize_response)
+        let normalization =
+            crate::flow::orchestration_batch::normalize_child_template_response(finalize_response);
+        crate::flow::orchestration_batch::log_child_patchback_normalization_event(
+            file,
+            &normalization,
+        );
+        normalization.response
     } else {
         write::strip_assistant_heading(&finalize_response)
     };
@@ -1021,21 +1051,9 @@ fn stream_step_response(
     })
 }
 
+#[cfg(test)]
 fn orchestrate_finalize_text_for_template(response: String) -> String {
-    let Ok((patches, unmatched)) = crate::template::parse_patches(&response) else {
-        return response;
-    };
-    if patches.is_empty()
-        && !unmatched.trim().is_empty()
-        && crate::flow::document_mutation::classify_orchestrate_plain_response(unmatched.trim())
-            .is_accepted()
-    {
-        return format!(
-            "<!-- patch:exchange -->\n{}\n<!-- /patch:exchange -->\n",
-            unmatched.trim_end()
-        );
-    }
-    response
+    crate::flow::orchestration_batch::normalize_child_template_response(response).response
 }
 
 fn should_stream_exchange_patch(response: &str) -> bool {
@@ -1490,6 +1508,7 @@ fn finalize_orchestration_batch_changed(
     total_steps: usize,
     lifecycle: &impl LifecycleOps,
 ) -> Result<()> {
+    crate::flow::orchestration_batch::log_source_changed_event(file, completed_steps, total_steps);
     eprintln!(
         "[orchestrate] source task list changed after step {}/{}; stopping before next step",
         completed_steps, total_steps

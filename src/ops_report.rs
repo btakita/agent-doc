@@ -186,6 +186,7 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
         "session_clear_protected_input_guard_refused" => "expected protected-input clear refusal",
         "session_clear_live_busy_guard_bypassed" => "busy clear bypassed",
         "session_clear_live_busy_guard_refused" => "busy clear refused",
+        "session_clear_live_busy_guard_blocked" => "busy clear blocked",
         "route_authoritative_actor_starting_not_ready" => "starting actor not ready",
         "route_dispatch_start_unproven_but_accepted" => "accepted-only route proof",
         "route_dispatch_only_sent" if field_eq(&fields, "proof_scope", "accepted_only") => {
@@ -246,6 +247,9 @@ fn classify_flow_event(fields: &BTreeMap<String, String>) -> &'static str {
             Some("child_closeout"),
             Some("blocked" | "failed_closed"),
         ) => "flow orchestration child closeout failures",
+        (Some("orchestration_batch"), Some("queue_freeze"), Some("blocked" | "failed_closed")) => {
+            "flow orchestration batch freeze blocked"
+        }
         (Some("operator_clear"), Some("operator_guard"), Some("blocked" | "failed_closed")) => {
             "flow operator clear guard failures"
         }

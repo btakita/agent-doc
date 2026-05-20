@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::flow::operator_clear::OperatorClearInputState;
 use crate::session_actor::{ActorRecord, ActorState};
 use crate::sessions::{SessionEntry, SessionRegistry, Tmux};
 use crate::startup_miss::{SessionLogStatus, StartupMiss};
@@ -354,42 +355,111 @@ pub fn clear(file: &Path) -> Result<()> {
 }
 
 fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> Result<()> {
-    let evidence = live_pane_evidence(ctx, tmux);
-    if evidence.state == LivePaneState::AliveIdle {
-        reconcile_idle_projection_from_evidence(ctx, &evidence)?;
-    } else if evidence.state == LivePaneState::AliveBusy {
-        if let Some(reason) = protected_clear_input_reason(ctx, tmux, &evidence) {
-            let log_reason = reason.replace(char::is_whitespace, "_");
+    let evidence = resolve_direct_submit_pane(ctx, tmux)
+        .map(|(pane, source)| live_pane_evidence_for_pane(ctx, tmux, pane, source.as_str()))
+        .unwrap_or_else(|| live_pane_evidence(ctx, tmux));
+    let protected_reason = if evidence.state == LivePaneState::AliveBusy {
+        protected_clear_input_reason(ctx, tmux, &evidence)
+    } else {
+        None
+    };
+    let clean_exit_prompt = evidence.state == LivePaneState::AliveBusy
+        && pane_shows_clean_exit_prompt(ctx, tmux, &evidence);
+    let clear_state = operator_clear_input_state_for_evidence(
+        &evidence,
+        protected_reason.is_some(),
+        clean_exit_prompt,
+    );
+    crate::flow::operator_clear::log_clear_guard_event(&ctx.canonical_file, clear_state);
+
+    match clear_state {
+        OperatorClearInputState::IdlePrompt => {
+            reconcile_idle_projection_from_evidence(ctx, &evidence)?;
+        }
+        OperatorClearInputState::CleanExit | OperatorClearInputState::NoLivePane => {}
+        OperatorClearInputState::ProtectedInput => {
+            if let Some(reason) = protected_reason {
+                let log_reason = reason.replace(char::is_whitespace, "_");
+                crate::ops_log::log_op(
+                    &ctx.canonical_file,
+                    &format!(
+                        "session_clear_protected_input_guard_refused file={} pane={} source={} reason={} current_command={} tail={:?}",
+                        ctx.canonical_file.display(),
+                        evidence.pane_id.as_deref().unwrap_or("unknown"),
+                        evidence.source,
+                        log_reason,
+                        evidence.current_command.as_deref().unwrap_or("unknown"),
+                        evidence.tail.as_deref().unwrap_or("unknown")
+                    ),
+                );
+                anyhow::bail!(
+                    "{}",
+                    protected_clear_refusal_message(&ctx.canonical_file, &evidence, &reason)
+                );
+            }
+        }
+        OperatorClearInputState::ActiveAgentDoc | OperatorClearInputState::Busy => {
+            let log_event = if clear_state == OperatorClearInputState::ActiveAgentDoc {
+                "session_clear_live_busy_guard_refused"
+            } else {
+                "session_clear_live_busy_guard_blocked"
+            };
             crate::ops_log::log_op(
                 &ctx.canonical_file,
                 &format!(
-                    "session_clear_protected_input_guard_refused file={} pane={} source={} reason={} current_command={} tail={:?}",
+                    "{} file={} pane={} source={} state={} current_command={} tail={:?}",
+                    log_event,
                     ctx.canonical_file.display(),
                     evidence.pane_id.as_deref().unwrap_or("unknown"),
                     evidence.source,
-                    log_reason,
+                    clear_state.as_str(),
                     evidence.current_command.as_deref().unwrap_or("unknown"),
                     evidence.tail.as_deref().unwrap_or("unknown")
                 ),
             );
             anyhow::bail!(
                 "{}",
-                protected_clear_refusal_message(&ctx.canonical_file, &evidence, &reason)
+                active_clear_refusal_message(&ctx.canonical_file, &evidence, clear_state)
             );
         }
-        crate::ops_log::log_op(
-            &ctx.canonical_file,
-            &format!(
-                "session_clear_active_pane_allowed file={} pane={} source={} current_command={} tail={:?}",
-                ctx.canonical_file.display(),
-                evidence.pane_id.as_deref().unwrap_or("unknown"),
-                evidence.source,
-                evidence.current_command.as_deref().unwrap_or("unknown"),
-                evidence.tail.as_deref().unwrap_or("unknown")
-            ),
-        );
     }
     Ok(())
+}
+
+fn operator_clear_input_state_for_evidence(
+    evidence: &LivePaneEvidence,
+    protected_input: bool,
+    clean_exit_prompt: bool,
+) -> OperatorClearInputState {
+    match evidence.state {
+        LivePaneState::AliveIdle => OperatorClearInputState::IdlePrompt,
+        LivePaneState::ClosedClean | LivePaneState::ProjectionStale | LivePaneState::Unknown => {
+            OperatorClearInputState::NoLivePane
+        }
+        LivePaneState::AliveBusy if protected_input => OperatorClearInputState::ProtectedInput,
+        LivePaneState::AliveBusy if clean_exit_prompt => OperatorClearInputState::CleanExit,
+        LivePaneState::AliveBusy
+            if evidence
+                .current_command
+                .as_deref()
+                .is_some_and(active_agent_command) =>
+        {
+            OperatorClearInputState::ActiveAgentDoc
+        }
+        LivePaneState::AliveBusy => OperatorClearInputState::Busy,
+    }
+}
+
+fn active_agent_command(command: &str) -> bool {
+    let name = Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command)
+        .trim();
+    matches!(
+        name,
+        "agent-doc" | "claude" | "codex" | "opencode" | "bun" | "node"
+    )
 }
 
 fn guard_starting_actor_operator_command(
@@ -581,6 +651,26 @@ fn protected_clear_refusal_message(
         file.display(),
         pane,
         reason,
+        evidence.source,
+        command,
+        tail,
+        file.display()
+    )
+}
+
+fn active_clear_refusal_message(
+    file: &Path,
+    evidence: &LivePaneEvidence,
+    state: OperatorClearInputState,
+) -> String {
+    let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
+    let command = evidence.current_command.as_deref().unwrap_or("unknown");
+    let tail = evidence.tail.as_deref().unwrap_or("unknown");
+    format!(
+        "session_clear refused for {} because pane {} is {} (source={}, current_command={}, tail={:?}). Wait for an idle prompt, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the pane and clear context.",
+        file.display(),
+        pane,
+        state.as_str(),
         evidence.source,
         command,
         tail,
@@ -1274,6 +1364,15 @@ fn live_pane_evidence(ctx: &SessionContext, tmux: &Tmux) -> LivePaneEvidence {
         };
     };
 
+    live_pane_evidence_for_pane(ctx, tmux, pane_id, source)
+}
+
+fn live_pane_evidence_for_pane(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    pane_id: String,
+    source: &'static str,
+) -> LivePaneEvidence {
     if !tmux.pane_alive(&pane_id) {
         let projected_live = ctx.actor_record.is_some() || ctx.registry_entry.is_some();
         return LivePaneEvidence {
@@ -1992,6 +2091,50 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(message.contains("pane %7 contains protected prompt input"));
         assert!(message.contains("reason=drafted prompt input"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    #[test]
+    fn operator_clear_refuses_active_agent_doc_pane() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("Working...".to_string()),
+        };
+
+        let state = operator_clear_input_state_for_evidence(&evidence, false, false);
+
+        assert_eq!(state, OperatorClearInputState::ActiveAgentDoc);
+        assert_eq!(
+            crate::flow::operator_clear::clear_guard_outcome(state),
+            crate::flow::types::FlowOutcome::FailedClosed
+        );
+        let message = active_clear_refusal_message(Path::new("/tmp/doc.md"), &evidence, state);
+        assert!(message.contains("session_clear refused"));
+        assert!(message.contains("pane %7 is active_agent_doc"));
+        assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
+    }
+
+    #[test]
+    fn operator_clear_allows_clean_exit_prompt() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("Press Enter to restart...".to_string()),
+        };
+
+        let state = operator_clear_input_state_for_evidence(&evidence, false, true);
+
+        assert_eq!(state, OperatorClearInputState::CleanExit);
+        assert_eq!(
+            crate::flow::operator_clear::clear_guard_outcome(state),
+            crate::flow::types::FlowOutcome::Completed
+        );
     }
 
     #[test]

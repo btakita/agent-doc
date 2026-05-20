@@ -58,7 +58,10 @@ Commits:
 ### Re: semantic similarity queue catchup — gpt-5
 
 `#gsim` was completed in the prior implementation cycle and is already reaped from the backlog. The shipped surface is `tsift semantic "<query>" --path .`, backed by semantic GraphStore rows and persisted local `tsift-local-hash-v1` embeddings, with no API call on the query path.
-<!-- agent:boundary:d0928c27 -->
+### Re: semantic graph extraction queue catchup — gpt-5
+
+`#gsem` was completed in the prior implementation cycle and is already reaped from the backlog. Cached `summarize --extract` entities, relationships, and concept labels now project into GraphStore semantic nodes and edges with provenance/freshness, and compiled tests cover the projection.
+<!-- agent:boundary:8e217096 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +71,7 @@ Commits:
 preset #spec-test-build-install-commit-push
 - ~do [#gvis]~
 - ~do [#gsim]~
-- do [#gsem]
+- ~do [#gsem]~
 - Can the graphify icebox items be removed?
 <!-- /agent:queue -->
 

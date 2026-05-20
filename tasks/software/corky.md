@@ -114,10 +114,43 @@ Corky has a Sheets write path in the installed CLI: `corky sheets write` updates
 I could not complete the live write test for the requested account yet. The cached Corky token for `brian@dreamable.com` only has `spreadsheets.readonly`, so a Sheets write requires re-authorizing Corky with the read/write `spreadsheets` scope. I started `corky auth --scope sheets --email brian@dreamable.com`; it opened the Google OAuth flow and waited on the localhost callback, but it timed out after 300 seconds with `Timed out waiting for OAuth callback (300s)`.
 
 Because auth did not complete, I did not create a temporary sheet and there was nothing to delete. Once the account grants the `spreadsheets` scope, the intended test is to use `corky sheets push` against a uniquely named temporary tab, verify the create/write succeeds, then clean up the tab. One limitation I found: Corky currently exposes tab creation through `sheets push`, but it does not expose a `sheets delete-tab` command, so deletion would need a direct Sheets API cleanup unless we add that Corky subcommand.
-<!-- agent:boundary:9f0bd177 -->
+❯ try again please. Make sure the cross-platform notify-desktop triggers when during oauth.
+❯ #spec-test-build-install-commit-push
+### Re: Sheets OAuth retry and cleanup support — gpt-5
+
+Implemented and pushed Corky changes to `btakita/corky` `main` as `6c66014` (`fix: make Sheets OAuth test cleanup reliable`).
+
+What changed:
+- Linux OAuth notifications now prefer `notify-desktop` but fall back to `notify-send` when `notify-desktop` is not installed. On this host, `notify-desktop` is absent and `/usr/bin/notify-send` is present, so the retried OAuth flow exercised the fallback path.
+- Added `corky sheets delete-tab <SHEET> <TAB> [--account EMAIL]`, which resolves the tab title to its numeric Sheets `sheetId` and deletes it via `batchUpdate`. This lets Corky create/write a temporary tab with `sheets push` and clean it up with Corky rather than a separate API script.
+- Updated SPEC/README/guide docs, instruction runbooks, version notes, and CLI tests.
+
+Verification completed:
+- `cargo test doc::sheets::tests -- --nocapture`
+- `cargo test desktop_notify -- --nocapture`
+- `make precommit` (clippy, full tests, `corky audit-docs`)
+- `make release`
+- `make install` (installed with `transcribe-cuda`)
+- `corky sheets delete-tab --help`
+
+CI/tmux note: Corky still has no `tmux-ci` target and no tmux-test workflow in `Makefile` or `.github/workflows`, so there was no tmux CI leg to inspect.
+
+I retried the live Sheets authorization with `corky auth --scope sheets --email brian@dreamable.com`. The flow opened the browser URL and waited on `http://127.0.0.1:8484/callback`, but it timed out after 300 seconds with `Timed out waiting for OAuth callback (300s)`. The cached token for `gmail:brian@dreamable.com` is still only `spreadsheets.readonly`.
+
+Because the read/write OAuth grant did not complete, I did not create the temporary tab and there was nothing to delete. The remaining blocker for the live write test is completing the Google browser consent callback for the `spreadsheets` scope.
+<!-- agent:boundary:cc4fca34 -->
 <!-- /agent:exchange -->
 ###
 <!--
+I need to add brian@dreamable.com as an approved email for the Google development account.
+```
+Access blocked: correspondence has not completed the Google verification process
+
+brian@dreamable.com
+correspondence has not completed the Google verification process. The app is currently being tested, and can only be accessed by developer-approved testers. If you think you should have access, contact the developer.
+If you are a developer o f correspondence, see error details.
+Error 403: access_denied
+```
 -->
 
 ## Backlog

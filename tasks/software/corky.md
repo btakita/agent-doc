@@ -92,7 +92,20 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): Ensure CI passes / release + publish
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:165be65e -->
+❯ do [#75d8]
+### Re: PyPI 0.28.2 wheels — gpt-5
+
+Completed `#75d8`.
+
+The missing Corky PyPI 0.28.2 wheels are now published:
+
+- `corky-0.28.2-py3-none-manylinux_2_39_x86_64.whl`
+- `corky-0.28.2-py3-none-macosx_10_15_x86_64.whl`
+
+I used the successful wheel artifacts from GitHub Actions run `25724471526` at `a3925b0`, which is the workflow-only fix after `v0.28.2`. That run had already proven the Linux host build and Intel macOS deployment target fixes; its publish job failed only on trusted publishing configuration. I checked both wheels with `twine check`, uploaded only those two files with `twine upload --skip-existing`, and verified PyPI now lists the full 0.28.2 file set: Intel macOS, ARM macOS, Linux x86_64, Windows x86_64, and the sdist.
+
+No Corky repo files were changed.
+<!-- agent:boundary:86b4c4e3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,7 +114,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#75d8] [recommended] Add the missing Corky PyPI 0.28.2 Linux x86_64 and macOS x86_64 wheels after fixing the tag workflow build failures (OpenSSL/manylinux Linux and MACOSX_DEPLOYMENT_TARGET macOS).
 - [ ] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi, rerun the PyPI workflow, and verify the PyPI latest version matches the released crate.
 - [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
@@ -117,4 +129,5 @@ Compacted content:
 - 2026-05-20 [#google-workspace-doc-types] Implement broad Google Workspace document type support beyond Sheets: detect Drive MIME types and route Google Docs, Sheets, Slides, Forms/Drawings, PDFs, and common Office files through appropriate read/export/write/upload behavior, with spec updates, docs, tests, build/install, commit, and push.
 - 2026-05-20 [#enable-drive-api-corky-oauth] Enable Google Drive API for Corky's configured Gmail OAuth project 873280095295, then rerun the live Google Workspace Drive CRUD matrix for brian.takita@gmail.com.
 - 2026-05-20 [#enable-docs-api-corky-oauth] Enable Google Docs API for Corky's configured Gmail OAuth project 873280095295, then rerun Google Docs read/write live tests for brian.takita@gmail.com.
+- 2026-05-20 [#75d8] [recommended] Add the missing Corky PyPI 0.28.2 Linux x86_64 and macOS x86_64 wheels after fixing the tag workflow build failures (OpenSSL/manylinux Linux and MACOSX_DEPLOYMENT_TARGET macOS).
 <!-- /agent:done -->

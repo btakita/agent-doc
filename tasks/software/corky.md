@@ -138,11 +138,7 @@ CI/tmux note: Corky still has no `tmux-ci` target and no tmux-test workflow in `
 I retried the live Sheets authorization with `corky auth --scope sheets --email brian@dreamable.com`. The flow opened the browser URL and waited on `http://127.0.0.1:8484/callback`, but it timed out after 300 seconds with `Timed out waiting for OAuth callback (300s)`. The cached token for `gmail:brian@dreamable.com` is still only `spreadsheets.readonly`.
 
 Because the read/write OAuth grant did not complete, I did not create the temporary tab and there was nothing to delete. The remaining blocker for the live write test is completing the Google browser consent callback for the `spreadsheets` scope.
-<!-- agent:boundary:cc4fca34 -->
-<!-- /agent:exchange -->
-###
-<!--
-I need to add brian@dreamable.com as an approved email for the Google development account.
+❯ I need to add brian@dreamable.com as an approved email for the Google development account.
 ```
 Access blocked: correspondence has not completed the Google verification process
 
@@ -151,6 +147,32 @@ correspondence has not completed the Google verification process. The app is cur
 If you are a developer o f correspondence, see error details.
 Error 403: access_denied
 ```
+### Re: Google OAuth test user — gpt-5
+
+This is an OAuth consent-screen tester issue for the Google Cloud project that owns the `correspondence` OAuth client, not a Corky code failure.
+
+I could not add `brian@dreamable.com` directly from this machine: `gcloud` is not installed here, and adding external test users is controlled in the Google Cloud Console for the app's Google Auth platform configuration.
+
+Add the account here:
+
+1. Open Google Cloud Console for the project that owns the `correspondence` OAuth client.
+2. Go to **Google Auth platform -> Audience**.
+3. Under **Test users**, choose **Add users**.
+4. Add `brian@dreamable.com` and save.
+
+In the older Console navigation, the same setting may appear under **APIs & Services -> OAuth consent screen -> Test users**. Google's current Workspace OAuth docs describe the current flow as **Google Auth platform -> Audience -> Test users -> Add users**: https://developers.google.com/workspace/guides/configure-oauth-consent
+
+Once that tester entry is saved, the next retry should be:
+
+```bash
+corky auth --scope sheets --email brian@dreamable.com
+```
+
+After the read/write `spreadsheets` grant completes, Corky should be able to run the temporary Sheets create/write/delete test against the target spreadsheet. I did not change code or run the build/test suite in this cycle because this blocker is outside the repo.
+<!-- agent:boundary:9cec1bf7 -->
+<!-- /agent:exchange -->
+###
+<!--
 -->
 
 ## Backlog

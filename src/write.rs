@@ -3878,6 +3878,38 @@ fn guard_visible_write_idle_with_budget(
     )
 }
 
+fn guard_visible_write_idle_and_current(
+    file: &Path,
+    source: &str,
+    expected_current: &str,
+) -> Result<()> {
+    guard_visible_write_idle(file, source)?;
+    let actual_current = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to re-read {}", file.display()))?;
+    if actual_current == expected_current {
+        return Ok(());
+    }
+
+    crate::flow::proof::log_flow_event(
+        file,
+        crate::flow::document_mutation::visible_write_current_changed_event(source),
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "visible_write_deferred_current_changed file={} source={} expected_hash={} current_hash={}",
+            file.display(),
+            source,
+            crate::ops_log::content_hash(expected_current),
+            crate::ops_log::content_hash(&actual_current)
+        ),
+    );
+    anyhow::bail!(
+        "visible document write for {} deferred: document changed after the response merge was computed; retry after typing stops",
+        file.display()
+    )
+}
+
 fn stale_snapshot_reset_drift(snapshot_doc: &str, current_doc: &str) -> Option<(usize, usize)> {
     let snapshot_clean = strip_boundary_for_dedup(snapshot_doc);
     let current_clean = strip_boundary_for_dedup(current_doc);
@@ -4555,7 +4587,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         &[],
         "",
     );
-    guard_visible_write_idle(file, "write_inline")?;
+    guard_visible_write_idle_and_current(file, "write_inline", &content_current)?;
     snapshot::save(file, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
@@ -4770,7 +4802,7 @@ pub fn run_template(
         &patches,
         &unmatched,
     );
-    guard_visible_write_idle(file, "run_template")?;
+    guard_visible_write_idle_and_current(file, "run_template", &content_current)?;
     snapshot::save(file, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
@@ -5243,7 +5275,11 @@ pub fn run_stream(
                 }
             };
             // Snapshot saved BEFORE document write (#wcf5).
-            if let Err(e) = guard_visible_write_idle(file, "run_stream_ipc_timeout") {
+            if let Err(e) = guard_visible_write_idle_and_current(
+                file,
+                "run_stream_ipc_timeout",
+                &content_current,
+            ) {
                 eprintln!(
                     "[write] WARNING: visible write deferred before exit(75): {}",
                     e
@@ -5475,7 +5511,7 @@ pub fn run_stream(
         &patches,
         &unmatched,
     );
-    guard_visible_write_idle(file, "run_stream")?;
+    guard_visible_write_idle_and_current(file, "run_stream", &content_current)?;
     snapshot::save(file, snapshot_content)?;
     snapshot::save_crdt(file, &snapshot_crdt_state)?;
 
@@ -5794,7 +5830,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         &patches,
         &unmatched,
     );
-    guard_visible_write_idle(file, "run_ipc_timeout_fallback")?;
+    guard_visible_write_idle_and_current(file, "run_ipc_timeout_fallback", &content_current)?;
     atomic_write(file, &final_content)?;
     snapshot::save(file, &final_content)?;
     snapshot::save_crdt(file, &crdt_state)?;
@@ -5837,7 +5873,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
         merge::merge_contents(&content, &content_ours, &content_current)?
     };
 
-    guard_visible_write_idle(file, "apply_append_from_string")?;
+    guard_visible_write_idle_and_current(file, "apply_append_from_string", &content_current)?;
     atomic_write(file, &final_content)?;
     // Save snapshot as content_ours, not final_content
     snapshot::save(file, &content_ours)?;
@@ -5917,7 +5953,7 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
         Some(response.as_str()),
     )?;
 
-    guard_visible_write_idle(file, "apply_template_from_string")?;
+    guard_visible_write_idle_and_current(file, "apply_template_from_string", &content_current)?;
     atomic_write(file, &final_content)?;
     // Save snapshot as the repaired/merged final content.
     snapshot::save(file, &final_content)?;
@@ -8075,6 +8111,39 @@ mod tests {
         assert!(log.contains("flow=document_mutation"));
         assert!(log.contains("reason=visible_write_typing_defer_active_typing:test_visible_write"));
         assert!(log.contains("visible_write_deferred_active_typing"));
+    }
+
+    #[test]
+    fn visible_write_guard_blocks_when_current_changed_after_merge() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let expected = "\
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+<!--
+scratch
+-->
+";
+        fs::write(&doc, expected).unwrap();
+        fs::write(
+            &doc,
+            expected.replace("scratch", "scratch\nstill typing this line"),
+        )
+        .unwrap();
+
+        let err = guard_visible_write_idle_and_current(&doc, "test_current_changed", expected)
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("document changed after the response merge was computed")
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("flow=document_mutation"));
+        assert!(log.contains("reason=visible_write_current_changed:test_current_changed"));
+        assert!(log.contains("visible_write_deferred_current_changed"));
     }
 
     #[test]

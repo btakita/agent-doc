@@ -220,6 +220,15 @@ pub(crate) fn visible_write_guard_event(decision: VisibleWriteDecision, source: 
     ))
 }
 
+pub(crate) fn visible_write_current_changed_event(source: &str) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::DocumentMutation,
+        FlowStage::PreWriteGuard,
+        FlowOutcome::Blocked,
+    )
+    .with_reason(format!("visible_write_current_changed:{source}"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OrchestratePatchbackRejectReason {
     MissingExchangePatch,

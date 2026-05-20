@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Visible writes now prove the merged current document is still current.**
+  Template/CRDT disk writes, IPC timeout fallbacks, and repair replays now
+  re-read the session markdown after the active-typing guard and fail closed if
+  the file changed after the response merge was computed. This keeps late
+  scratch-comment or live exchange typing visible for the next cycle instead of
+  committing a stale merge that can reintroduce duplicate/corrupted content.
+
 - **FlowCore active-typing guard now blocks visible document writes.** Direct
   disk write paths consult `flow::document_mutation` before snapshot/document
   mutation and fail closed when the shared typing indicator never reaches idle.

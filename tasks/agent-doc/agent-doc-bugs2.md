@@ -20,8 +20,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Added prioritized FlowCore refactor next steps. Top backlog item: #rte4.
+Completed stale visible-closeout write guard and added the IPC editor-side proof follow-up. Top backlog item: #ipcw.
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,7 +33,40 @@ Added prioritized FlowCore refactor next steps. Top backlog item: #rte4.
 Compacted content:
 - Archived 3 response topic(s): #gp9d audit-docs freshness decision; #gp9d audit-docs content freshness; commit-push src/agent-doc instructions
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:601f3d95 -->
+❯ The content-based implementation still does not fix the duplicate content corrupted document & duplicate typing line issues. As I was typing into the comment below agent:exchange in this document, the issues surfaced.
+❯ #spec-test-build-install-commit-push
+❯ ---
+❯ How does this Claude code tip reconcile with our orchestration implementation?
+```
+  ⎿  Tip: Say "fan out subagents" and Claude sends a team. Each one digs deep so nothing gets missed.
+```
+❯ #next-steps
+### Re: live typing corruption and fan-out orchestration — gpt-5
+
+Implemented the stale visible-write guard for the remaining live-typing race.
+
+The content-based repairs were catching some already-corrupted shapes, but the write path still trusted a merge that had been computed against `content_current` even if the visible markdown changed again before snapshot/document mutation. That is exactly the danger window when a user is typing in an exchange-adjacent scratch comment or exchange tail. The fix is now fail-closed: template/CRDT disk writes, IPC timeout disk fallbacks, and repair replays re-read the document after the active-typing guard and refuse to write if it no longer matches the content used for the merge. The refusal logs `visible_write_current_changed:<source>` and leaves the new user edit visible for the next cycle instead of committing a stale merge.
+
+Changed and pushed in `src/agent-doc`:
+- `6677f821` `fix: block stale visible closeout writes`
+
+Parent repo pushed:
+- `93bf9440d` `agent-doc: block stale visible closeout writes`
+
+Verification passed:
+- `cargo test visible_write_guard`
+- `make check`
+- latest GitHub CI run `26176939086` was green, including `Run make tmux-ci`
+- `cargo build --release`
+- `cargo install --path . --force`
+- `cargo build --release --lib`
+- `agent-doc lib-install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+On the Claude Code tip: it is a product-level natural-language affordance, not a closeout contract. In agent-doc terms, "fan out subagents" should reconcile to an explicit orchestration plan: bounded jobs, declared write scopes, dispatch proof, result collection, and one binary-owned parent closeout. Agent-doc should not let hidden harness-native fanout write the session document independently, because that would bypass the same finalize/session-check boundary this workflow depends on. The existing lower-agent orchestration backlog is the right direction for token-saving fanout; the new top follow-up is narrower and more urgent for this bug family: add editor-side IPC apply proof so stale editor buffers cannot apply append/full-content patches after the binary has already protected the disk path.
+
+Top backlog item: `#ipcw`.
+<!-- agent:boundary:e6541873 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,6 +79,7 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ewzz] #ipcw [recommended] Add editor-side IPC apply proof that rejects stale buffer or generation mismatches before applying exchange append patches while user typing; cover file IPC, socket IPC, and full-content repair paths. Plan: tasks/agent-doc/plan-live-typing-duplicate-insertion.md
 - [ ] [#nh3j] [recommended] Clarify audit-docs --root behavior for submodule-local managed skill artifacts; the no-override release path audits the superproject install root, while an explicit submodule root can still see stale tracked .claude/skills/agent-doc/SKILL.md artifacts.
 - [ ] [#ops2] [recommended] Move operator_clear and orchestration_batch onto FlowCore typed outcomes after route and closeout extraction; cover active-pane clear refusal, queue freeze/mid-run mutation, and child patchback normalization. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

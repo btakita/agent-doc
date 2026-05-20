@@ -106,7 +106,15 @@ Verification completed:
 - `make install` (installed with `transcribe-cuda`)
 
 CI/tmux note: Corky has no `tmux-ci` target and no tmux-test workflow in `Makefile` or `.github/workflows`, so there was no tmux CI leg to inspect. The implementation is based on the official Google Docs `documents.get`, Drive `files.export`, and Sheets `spreadsheets.values.get` scope references.
-<!-- agent:boundary:1a5b5abb -->
+❯ Is corky able to handle writes to https://docs.google.com/spreadsheets/d/1k52arliMCqbe40_CHWUCinV59EACIoYTG1gVMvnlKrA/edit?gid=1675400873#gid=1675400873 using brian@dreamable.com? To test, create a temporary new sheet then delete immediately.
+### Re: Corky Sheets write access — gpt-5
+
+Corky has a Sheets write path in the installed CLI: `corky sheets write` updates a range, and `corky sheets push` can create a missing tab, clear it, and write CSV data from `A1`.
+
+I could not complete the live write test for the requested account yet. The cached Corky token for `brian@dreamable.com` only has `spreadsheets.readonly`, so a Sheets write requires re-authorizing Corky with the read/write `spreadsheets` scope. I started `corky auth --scope sheets --email brian@dreamable.com`; it opened the Google OAuth flow and waited on the localhost callback, but it timed out after 300 seconds with `Timed out waiting for OAuth callback (300s)`.
+
+Because auth did not complete, I did not create a temporary sheet and there was nothing to delete. Once the account grants the `spreadsheets` scope, the intended test is to use `corky sheets push` against a uniquely named temporary tab, verify the create/write succeeds, then clean up the tab. One limitation I found: Corky currently exposes tab creation through `sheets push`, but it does not expose a `sheets delete-tab` command, so deletion would need a direct Sheets API cleanup unless we add that Corky subcommand.
+<!-- agent:boundary:9f0bd177 -->
 <!-- /agent:exchange -->
 ###
 <!--

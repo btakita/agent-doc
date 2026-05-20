@@ -34,7 +34,26 @@ FlowCore refactor is complete enough to leave broad extraction mode; next top ba
 Compacted content:
 - Archived 1 response topic(s): duplicate scaffold repair
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:fe6512d2 -->
+❯ do [#pdgd]. #spec-test-build-install-commit-push
+### Re: pending_done_guard completion detection — gpt-5
+
+Implemented `#pdgd`.
+
+The pending-done guard now records same-cycle pending IDs that were explicitly kept open by `--pending-edit`, `--pending-gate`, `--pending-ungate`, `--pending-reorder`, and gate-type edits, then excludes those IDs from missing-`--done` warnings. It still scans response-body completion evidence, including `### Re: do [#id]` headings with later commit/push/verification signals, so completed `do #id` batches are detected even when IDs only appear in the heading.
+
+Updated the closeout spec and release notes, added regressions for edited-open, gated-open, prewrite/precommit kept-open handling, and the `do [#id]` false-negative shape.
+
+Verification:
+- `cargo test pending_done -- --test-threads=2`
+- `make check`
+- `make install`
+- `agent-doc --version`
+- Latest GitHub CI run `26194740504` was green, including `Run make tmux-ci`.
+
+Commits:
+- `95e8920f` in `src/agent-doc`: `fix: refine pending done guard` (pushed to `origin/20260422/codex-agent-backend`)
+- `76da15687` in parent: `chore: update agent-doc submodule`
+<!-- agent:boundary:70e1c9c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +66,6 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#pdgd] pending_done_guard misclassifies modify-vs-complete: (a) flags items rescoped via --pending-edit/--pending-gate as needing --done (false positive), (b) misses items that are genuinely executed when their IDs only appear in response body section headers (false negative). Observed 2026-05-20 on session-share/tasks/root.md cycle 'do [#arsq] [#axid] [#rprd]' — guard warned on #fvtg/#qew8/#p635 (just rescoped) but said nothing about the three actually-completed items. Plan: tasks/agent-doc/plan-pending-done-guard-completion-detection.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

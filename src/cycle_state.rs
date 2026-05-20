@@ -93,6 +93,8 @@ pub struct CycleState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_done_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_kept_open_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reaped_pending_ids: Vec<String>,
 }
 
@@ -139,6 +141,7 @@ pub fn start_preflight(
         required_explicit_backlog_item_count: 0,
         required_plan_reference_count: 0,
         pending_done_ids: Vec::new(),
+        pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
     };
     save(file, &state)?;
@@ -226,6 +229,34 @@ pub fn record_pending_done_ids(file: &Path, ids: &[String]) -> Result<Option<Cyc
             .any(|existing| existing == &id)
         {
             state.pending_done_ids.push(id);
+            changed = true;
+        }
+    }
+
+    if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+pub fn record_pending_kept_open_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+
+    let mut changed = false;
+    for id in ids
+        .iter()
+        .map(|id| normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+    {
+        if !state
+            .pending_kept_open_ids
+            .iter()
+            .any(|existing| existing == &id)
+        {
+            state.pending_kept_open_ids.push(id);
             changed = true;
         }
     }
@@ -507,6 +538,7 @@ fn synthetic_state_with_id(
         required_explicit_backlog_item_count: 0,
         required_plan_reference_count: 0,
         pending_done_ids: Vec::new(),
+        pending_kept_open_ids: Vec::new(),
         reaped_pending_ids: Vec::new(),
     }
 }
@@ -656,6 +688,30 @@ mod tests {
         );
         assert_eq!(
             load(&doc).unwrap().unwrap().pending_done_ids,
+            vec!["abc1".to_string(), "z9".to_string()]
+        );
+    }
+
+    #[test]
+    fn record_pending_kept_open_ids_persists_normalized_ids() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        let state = record_pending_kept_open_ids(
+            &doc,
+            &["#AbC1".to_string(), "abc1".to_string(), "z9".to_string()],
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            state.pending_kept_open_ids,
+            vec!["abc1".to_string(), "z9".to_string()]
+        );
+        assert_eq!(
+            load(&doc).unwrap().unwrap().pending_kept_open_ids,
             vec!["abc1".to_string(), "z9".to_string()]
         );
     }

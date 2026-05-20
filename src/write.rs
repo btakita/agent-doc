@@ -262,6 +262,7 @@ pub struct WriteFlags {
     pub has_pending_done: bool,
     pub has_pending_mutation: bool,
     pub pending_done_ids: Vec<String>,
+    pub pending_kept_open_ids: Vec<String>,
     pub strict_closeout: bool,
     pub rerun_command_base: Option<String>,
 }
@@ -813,6 +814,33 @@ fn compact_command_hint(file: &Path) -> String {
     format!("agent-doc compact {} --commit", file.display())
 }
 
+fn pending_kept_open_ids_from_options(options: &CommandOptions) -> Vec<String> {
+    let mut ids = Vec::new();
+
+    for pair in &options.pending_edit {
+        if let Some((id, _)) = pair.split_once('=') {
+            ids.push(id.to_string());
+        }
+    }
+    ids.extend(options.pending_gate.iter().cloned());
+    ids.extend(options.pending_ungate.iter().cloned());
+    for pair in &options.pending_set_gate_type {
+        if let Some((id, _)) = pair.split_once('=') {
+            ids.push(id.to_string());
+        }
+    }
+    if let Some(order) = &options.pending_reorder {
+        ids.extend(
+            order
+                .split(',')
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty()),
+        );
+    }
+
+    ids
+}
+
 pub fn guard_no_exchange_compaction_request_for_diff(file: &Path, diff_text: &str) -> Result<()> {
     if crate::diff::detect_exchange_compaction_request(diff_text) {
         anyhow::bail!(
@@ -889,6 +917,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     }
 
     if has_pending_ops {
+        let pending_kept_open_ids = pending_kept_open_ids_from_options(&options);
         if options.pending_clear {
             crate::pending_cmd::clear(file)?;
         }
@@ -946,6 +975,10 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
                 .collect();
             crate::pending_cmd::reorder(file, &ids)?;
         }
+        if !pending_kept_open_ids.is_empty() {
+            crate::cycle_state::record_pending_kept_open_ids(file, &pending_kept_open_ids)?;
+        }
+        crate::cycle_state::mark_pending_mutations(file)?;
     }
 
     if let Some(ref status_text) = options.status {
@@ -965,6 +998,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         has_pending_done: !options.pending_done.is_empty(),
         has_pending_mutation: has_pending_ops,
         pending_done_ids: options.pending_done.clone(),
+        pending_kept_open_ids: pending_kept_open_ids_from_options(&options),
         strict_closeout: commit_mode == CommitMode::Required,
         rerun_command_base: build_rerun_command_base(&options, commit_mode),
     };
@@ -1758,6 +1792,7 @@ fn precommit_pending_done_check(file: &Path) -> Result<()> {
         file,
         &response_text,
         &state.pending_done_ids,
+        &state.pending_kept_open_ids,
     )?;
     if missing.is_empty() {
         return Ok(());
@@ -1801,9 +1836,17 @@ fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFl
         return Ok(());
     }
 
-    let recorded_done_ids = crate::cycle_state::load(file)?
-        .map(|state| state.pending_done_ids)
-        .unwrap_or_else(|| flags.pending_done_ids.clone());
+    let state = crate::cycle_state::load(file)?;
+    let mut recorded_done_ids = state
+        .as_ref()
+        .map(|state| state.pending_done_ids.clone())
+        .unwrap_or_default();
+    recorded_done_ids.extend(flags.pending_done_ids.clone());
+    let mut kept_open_ids = state
+        .as_ref()
+        .map(|state| state.pending_kept_open_ids.clone())
+        .unwrap_or_default();
+    kept_open_ids.extend(flags.pending_kept_open_ids.clone());
     if response_body.contains("<!-- no-pending-done-guard -->") {
         return Ok(());
     }
@@ -1826,6 +1869,7 @@ fn prewrite_pending_done_check(file: &Path, response_body: &str, flags: &WriteFl
         file,
         &response_text,
         &recorded_done_ids,
+        &kept_open_ids,
     )?;
     if missing.is_empty() {
         return Ok(());
@@ -13978,6 +14022,47 @@ mod precommit_pending_capture_tests {
 
         super::precommit_pending_done_check(&doc)
             .expect("should pass when matching pending-done was recorded");
+    }
+
+    #[test]
+    fn precommit_pending_done_passes_when_id_was_kept_open() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            "### Re: #fvtg rescope — gpt-5\n\nUpdated #fvtg to keep the rollout validation item open.\nVerification:\n- cargo test\n",
+            "- [ ] [#fvtg] Rollout validation item\n",
+            &[],
+        );
+        crate::cycle_state::record_pending_kept_open_ids(&doc, &["fvtg".to_string()])
+            .unwrap()
+            .unwrap();
+
+        super::precommit_pending_done_check(&doc)
+            .expect("kept-open pending ids should not require --done");
+    }
+
+    #[test]
+    fn prewrite_pending_done_uses_kept_open_flag_ids() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_precommit_with_pending(
+            tmp.path(),
+            "---\nagent_doc_session: test\n---\n\n",
+            "placeholder response",
+            "- [ ] [#fvtg] Rollout validation item\n",
+            &[],
+        );
+
+        super::prewrite_pending_done_check(
+            &doc,
+            "### Re: #fvtg rescope — gpt-5\n\nUpdated #fvtg to keep the rollout validation item open.\nVerification:\n- cargo test\n",
+            &super::WriteFlags {
+                pending_kept_open_ids: vec!["#FVTG".to_string()],
+                strict_closeout: true,
+                ..Default::default()
+            },
+        )
+        .expect("pre-write kept-open ids should not require --done");
     }
 
     #[test]

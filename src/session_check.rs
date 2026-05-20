@@ -1044,7 +1044,12 @@ fn check_pending_done_guard(file: &Path) -> Result<GuardResult> {
     }
 
     let response_text = response_text_for_guards(&capture.response_body);
-    let missing = detect_missing_pending_done_ids(file, &response_text, &state.pending_done_ids)?;
+    let missing = detect_missing_pending_done_ids(
+        file,
+        &response_text,
+        &state.pending_done_ids,
+        &state.pending_kept_open_ids,
+    )?;
     if missing.is_empty() {
         return Ok(GuardResult::None);
     }
@@ -1085,6 +1090,7 @@ pub(crate) fn detect_missing_pending_done_ids(
     file: &Path,
     response_text: &str,
     recorded_done_ids: &[String],
+    kept_open_ids: &[String],
 ) -> Result<Vec<String>> {
     if response_text.trim().is_empty() {
         return Ok(Vec::new());
@@ -1095,10 +1101,22 @@ pub(crate) fn detect_missing_pending_done_ids(
         return Ok(Vec::new());
     }
 
+    let recorded_done: std::collections::HashSet<String> = recorded_done_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+    let kept_open: std::collections::HashSet<String> = kept_open_ids
+        .iter()
+        .map(|id| crate::pending::normalize_pending_id(id))
+        .filter(|id| !id.is_empty())
+        .collect();
+
     Ok(open_ids
         .into_iter()
+        .filter(|id| !kept_open.contains(id))
         .filter(|id| response_clearly_completes_pending_id(response_text, id))
-        .filter(|id| !recorded_done_ids.iter().any(|done| done == id))
+        .filter(|id| !recorded_done.contains(id))
         .collect())
 }
 
@@ -1162,6 +1180,15 @@ fn response_clearly_completes_pending_id(response_text: &str, id: &str) -> bool 
     }
 
     let needle = format!("#{}", id.to_ascii_lowercase());
+    let all_text = lines.join("\n");
+    if contains_completion_marker(&all_text)
+        && lines
+            .iter()
+            .any(|line| response_do_heading_mentions_pending_id(line, &needle))
+    {
+        return true;
+    }
+
     for idx in 0..lines.len() {
         if !lines[idx].contains(&needle) {
             continue;
@@ -1173,6 +1200,16 @@ fn response_clearly_completes_pending_id(response_text: &str, id: &str) -> bool 
         }
     }
     false
+}
+
+fn response_do_heading_mentions_pending_id(line: &str, needle: &str) -> bool {
+    let Some(stripped) = line.strip_prefix('#') else {
+        return false;
+    };
+    let heading = stripped.trim_start_matches('#').trim_start();
+    heading.starts_with("re:")
+        && heading.contains(needle)
+        && (heading.contains("do ") || heading.contains("do [") || heading.contains("do #"))
 }
 
 fn contains_completion_marker(text: &str) -> bool {
@@ -4100,6 +4137,84 @@ Body\n\
         let report = inspect_with_warnings(&doc).unwrap();
         assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
         assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_skips_pending_done_warning_when_id_was_kept_open_by_edit() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: #fvtg rescope — gpt-5\n\nUpdated the tracked work item to keep the release validation follow-up open.\nVerification:\n- cargo test\n",
+            false,
+            Some("- [ ] [#fvtg] Release validation follow-up\n"),
+            &[],
+        );
+        crate::cycle_state::record_pending_kept_open_ids(&doc, &["fvtg".to_string()])
+            .unwrap()
+            .unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_skips_pending_done_warning_when_id_was_gated() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            "### Re: #qew8 external gate — gpt-5\n\nImplemented the guarded path and left #qew8 gated for rollout verification.\nVerification:\n- cargo test\n",
+            false,
+            Some("- [/] [#qew8] Await rollout verification\n"),
+            &[],
+        );
+        crate::cycle_state::record_pending_kept_open_ids(&doc, &["#QEW8".to_string()])
+            .unwrap()
+            .unwrap();
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        assert!(matches!(report.status, SessionCheckStatus::Ok(_)));
+        assert!(report.warnings.is_empty());
+    }
+
+    #[test]
+    fn session_check_pending_done_detects_do_heading_with_later_completion_evidence() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = setup_committed_capture_with_pending(
+            tmp.path(),
+            None,
+            concat!(
+                "### Re: do [#arsq] [#axid] [#rprd] — gpt-5\n\n",
+                "Handled the requested docs batch.\n",
+                "\n",
+                "Changed files:\n",
+                "- docs/orbit.md\n",
+                "- specs/database.md\n",
+                "- prds/livekit.md\n",
+                "\n",
+                "Commit: abc1234\n",
+                "Pushed to origin/dev.\n"
+            ),
+            false,
+            Some(
+                "- [ ] [#arsq] Orbit agent tool discriminator\n- [ ] [#axid] Database discriminator section\n- [ ] [#rprd] Relationship PRDs\n",
+            ),
+            &[],
+        );
+
+        let report = inspect_with_warnings(&doc).unwrap();
+        match report.status {
+            SessionCheckStatus::Interrupted(message) => {
+                assert!(message.contains("--done arsq"));
+                assert!(message.contains("--done axid"));
+                assert!(message.contains("--done rprd"));
+            }
+            other => {
+                panic!("expected strict-mode failure for do-heading completions, got {other:?}")
+            }
+        }
     }
 
     #[test]

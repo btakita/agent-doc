@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Pending-done guard now distinguishes kept-open pending mutations from completion.**
+  Same-cycle `--pending-edit`, `--pending-gate`, `--pending-ungate`,
+  `--pending-reorder`, and gate-type edits record a kept-open id ledger that
+  suppresses missing-`--done` warnings for items intentionally left active or
+  gated. The guard still scans response text for real completion signals,
+  including `### Re: do [#id]` headings with later commit/push/verification
+  evidence, so completed `do #id` batches no longer slip through just because
+  ids only appeared in the response heading.
+
 - **Mixed duplicate-scaffold closeouts now preserve safe prompt text.**
   When a duplicated template scaffold lands between two `agent:exchange` close
   markers and strands live prompt text in that duplicated segment, the

@@ -4228,6 +4228,7 @@ mod tests {
             required_explicit_backlog_item_count: 0,
             required_plan_reference_count: 0,
             pending_done_ids: Vec::new(),
+            pending_kept_open_ids: Vec::new(),
             reaped_pending_ids: Vec::new(),
         }
     }

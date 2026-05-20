@@ -141,6 +141,29 @@ enum SyncOutcome {
     AttachedAroundProtected(usize),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FullContentReplacementSource {
+    CompactExchange,
+    FullContentRepair,
+    IpcTimeoutRecovery,
+}
+
+impl FullContentReplacementSource {
+    const ALL: [FullContentReplacementSource; 3] = [
+        FullContentReplacementSource::CompactExchange,
+        FullContentReplacementSource::FullContentRepair,
+        FullContentReplacementSource::IpcTimeoutRecovery,
+    ];
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::CompactExchange => "compact_exchange",
+            Self::FullContentRepair => "full_content_repair",
+            Self::IpcTimeoutRecovery => "ipc_timeout_recovery",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct SyncProjection {
     visible: Vec<String>,
@@ -734,6 +757,28 @@ impl SimWorld {
             self.coverage.prompt_duplicate_repairs += 1;
         }
         Ok(())
+    }
+
+    fn stale_full_content_visible_replacement(
+        &mut self,
+        source: FullContentReplacementSource,
+    ) -> crate::flow::document_mutation::FullContentVisibleReplacementDecision {
+        let proof = crate::flow::document_mutation::FullContentSourceProof::from_content(&self.doc);
+        let replacement = template_doc(&format!(
+            "### Re: replacement from {} — gpt-5\n\nDone.\n",
+            source.as_str()
+        ));
+        self.append_to_exchange("❯ live prompt typed before full-content apply\n")
+            .expect("template doc should keep an exchange component");
+        let decision = crate::flow::document_mutation::decide_full_content_visible_replacement(
+            &self.doc,
+            Some(&proof),
+        );
+        if decision == crate::flow::document_mutation::FullContentVisibleReplacementDecision::Apply
+        {
+            self.doc = replacement;
+        }
+        decision
     }
 
     fn transition_supervisor(
@@ -1640,6 +1685,38 @@ fn jetbrains_clear_session_sim_keeps_starting_route_guard_and_repairs_prompt_dup
     world.apply(SimCommand::Commit).unwrap();
     assert_eq!(world.phase, CyclePhase::Committed);
     assert_eq!(world.snapshot, world.doc);
+}
+
+#[test]
+fn full_content_source_proof_sim_rejects_stale_editor_buffers() {
+    for source in FullContentReplacementSource::ALL {
+        let mut world = SimWorld::new(2_010);
+        let original = world.doc.clone();
+
+        let decision = world.stale_full_content_visible_replacement(source);
+
+        assert_eq!(
+            decision,
+            crate::flow::document_mutation::FullContentVisibleReplacementDecision::RejectStaleSourceBuffer,
+            "{source:?} must reject full-content replacement when the editor buffer drifted"
+        );
+        assert!(
+            world
+                .doc
+                .contains("❯ live prompt typed before full-content apply"),
+            "{source:?} must preserve live editor text on stale proof rejection"
+        );
+        assert_ne!(
+            world.doc, original,
+            "{source:?} should model live prompt drift before the full-content apply attempt"
+        );
+        assert!(
+            !world
+                .doc
+                .contains(&format!("replacement from {}", source.as_str())),
+            "{source:?} must not apply stale compact/repair/timeout replacement content"
+        );
+    }
 }
 
 #[test]

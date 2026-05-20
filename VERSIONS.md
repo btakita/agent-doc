@@ -13,7 +13,9 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   longer matches that source, so compact/repair/full-content retries cannot
   clobber prompt text typed after the payload was computed. The file-IPC poller
   also refuses to save a snapshot when a consumed full-content patch did not
-  leave the exact requested document. Bumped local plugin builds to JetBrains
+  leave the exact requested document. The source-buffer proof is now built and
+  evaluated through `flow::document_mutation` as the shared visible-replacement
+  contract. Bumped local plugin builds to JetBrains
   `0.2.127` and VS Code `0.2.20`.
 
 - **FlowCore now has an executable guard/proof regression gate.**

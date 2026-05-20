@@ -6865,11 +6865,10 @@ fn attach_full_content_source_proof(payload: &mut serde_json::Value, before_cont
     {
         return;
     }
-    if let Some(before) = before_content {
-        payload["expected_content_hash"] =
-            serde_json::Value::String(crate::ops_log::content_hash(before));
+    if let Some(proof) = crate::flow::document_mutation::full_content_source_proof(before_content) {
+        payload["expected_content_hash"] = serde_json::Value::String(proof.expected_content_hash);
         payload["expected_content_len"] =
-            serde_json::Value::Number(serde_json::Number::from(before.len()));
+            serde_json::Value::Number(serde_json::Number::from(proof.expected_content_len));
     }
 }
 

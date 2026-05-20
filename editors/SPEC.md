@@ -108,6 +108,8 @@ Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that
 
 **Editor apply proof:** After the debounce succeeds and before computing a visible mutation, plugins must capture an editor-local apply proof for the target buffer: the exact text plus the editor's generation signal (`Document.modificationStamp` in JetBrains, `TextDocument.version` in VS Code). Immediately before `Document.setText`, `WorkspaceEdit`, or full-content replacement, the plugin must re-check that both the text and generation still match that proof. If either changed, the patch is stale relative to live typing and must be rejected without acknowledgement. This applies to file IPC, socket IPC, exchange append patches, and full-content repair payloads.
 
+**Full-content source-buffer proof:** Full-content IPC payloads must carry the `flow::document_mutation` visible-replacement proof for the source buffer the binary read before emitting the replacement: `expected_content_hash` is the SHA-256 hex digest of that UTF-8 text and `expected_content_len` is its byte length. Before applying `fullContent`, plugins must verify the current editor buffer still matches that proof. Compact Exchange, full-content repair/redelivery, and IPC-timeout recovery replacements must reject stale editor buffers without acknowledgement so live user text is preserved and the binary can retry or fall back through the normal closeout path.
+
 ## 10. CLI Dependency
 
 - Plugins resolve `agent-doc` from: `~/bin/`, `~/.local/bin/`, `~/.cargo/bin/`, `/usr/local/bin/`, or `$PATH`.

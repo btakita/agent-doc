@@ -224,7 +224,9 @@ Three states must be reconciled:
   ],
   "unmatched": "Content that didn't match any component",
   "frontmatter": "key: value\nanother_key: value",
-  "fullContent": "Complete document replacement (mutually exclusive with patches)"
+  "fullContent": "Complete document replacement (mutually exclusive with patches)",
+  "expected_content_hash": "SHA-256 hex of the editor buffer the binary read before fullContent",
+  "expected_content_len": 123
 }
 ```
 
@@ -233,6 +235,7 @@ Three states must be reconciled:
 - `unmatched` (required): Content that didn't match a named component. Falls back to `exchange` then `output`.
 - `frontmatter` (optional): YAML key/value pairs to merge into the document's frontmatter.
 - `fullContent` (optional): If non-empty, replaces the entire document content. Used for inline-mode documents without component markers.
+- `expected_content_hash` / `expected_content_len` (optional for legacy payloads, required for new `fullContent` payloads): the `flow::document_mutation` source-buffer proof for the text the binary read before building `fullContent`. Plugins must compare the current editor buffer's UTF-8 SHA-256 and byte length to these fields before applying a full-document replacement; mismatches reject the patch without acknowledgement.
 
 ### 4.2 Future: CRDT State Exchange
 

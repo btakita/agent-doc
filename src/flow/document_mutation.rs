@@ -229,6 +229,81 @@ pub(crate) fn visible_write_current_changed_event(source: &str) -> FlowEvent {
     .with_reason(format!("visible_write_current_changed:{source}"))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FullContentSourceProof {
+    pub(crate) expected_content_hash: String,
+    pub(crate) expected_content_len: usize,
+}
+
+impl FullContentSourceProof {
+    pub(crate) fn from_content(content: &str) -> Self {
+        Self {
+            expected_content_hash: crate::ops_log::content_hash(content),
+            expected_content_len: content.len(),
+        }
+    }
+
+    pub(crate) fn matches_current(&self, current_content: &str) -> bool {
+        current_content.len() == self.expected_content_len
+            && crate::ops_log::content_hash(current_content) == self.expected_content_hash
+    }
+}
+
+pub(crate) fn full_content_source_proof(
+    before_content: Option<&str>,
+) -> Option<FullContentSourceProof> {
+    before_content.map(FullContentSourceProof::from_content)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FullContentVisibleReplacementDecision {
+    Apply,
+    RejectStaleSourceBuffer,
+}
+
+impl FullContentVisibleReplacementDecision {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Apply => "apply",
+            Self::RejectStaleSourceBuffer => "reject_stale_source_buffer",
+        }
+    }
+
+    pub(crate) const fn outcome(self) -> FlowOutcome {
+        match self {
+            Self::Apply => FlowOutcome::Completed,
+            Self::RejectStaleSourceBuffer => FlowOutcome::Blocked,
+        }
+    }
+}
+
+pub(crate) fn decide_full_content_visible_replacement(
+    current_content: &str,
+    proof: Option<&FullContentSourceProof>,
+) -> FullContentVisibleReplacementDecision {
+    match proof {
+        Some(proof) if !proof.matches_current(current_content) => {
+            FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
+        }
+        _ => FullContentVisibleReplacementDecision::Apply,
+    }
+}
+
+pub(crate) fn full_content_visible_replacement_event(
+    decision: FullContentVisibleReplacementDecision,
+    source: &str,
+) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::DocumentMutation,
+        FlowStage::PreWriteGuard,
+        decision.outcome(),
+    )
+    .with_reason(format!(
+        "full_content_source_buffer_{}:{source}",
+        decision.as_str()
+    ))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OrchestratePatchbackRejectReason {
     MissingExchangePatch,
@@ -452,6 +527,37 @@ mod tests {
         });
 
         assert_eq!(decision, VisibleWriteDecision::Apply);
+    }
+
+    #[test]
+    fn full_content_source_proof_matches_original_buffer_only() {
+        let proof = FullContentSourceProof::from_content("before");
+        let utf8_proof = FullContentSourceProof::from_content("before ❯");
+
+        assert!(proof.matches_current("before"));
+        assert!(!proof.matches_current("before\nlive prompt"));
+        assert!(!proof.matches_current("beforE"));
+        assert_eq!(utf8_proof.expected_content_len, "before ❯".len());
+        assert!(utf8_proof.expected_content_len > "before ❯".chars().count());
+    }
+
+    #[test]
+    fn full_content_visible_replacement_blocks_stale_source_buffer() {
+        let proof = FullContentSourceProof::from_content("before");
+        let decision = decide_full_content_visible_replacement("before\nlive prompt", Some(&proof));
+        let event = full_content_visible_replacement_event(decision, "compact_exchange");
+
+        assert_eq!(
+            decision,
+            FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
+        );
+        assert_eq!(event.flow, FlowName::DocumentMutation);
+        assert_eq!(event.stage, FlowStage::PreWriteGuard);
+        assert_eq!(event.outcome, FlowOutcome::Blocked);
+        assert_eq!(
+            event.reason.as_deref(),
+            Some("full_content_source_buffer_reject_stale_source_buffer:compact_exchange")
+        );
     }
 
     #[test]

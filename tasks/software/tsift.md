@@ -30,49 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-202137.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-205717.md`*
 
 Compacted content:
-- Archived 2 response topic(s): graph DB API next steps; graph DB API implementation
+- Archived 2 response topic(s): graph DB API next steps; graph DB hardening implementation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are #next-steps in support graph db api over sqlite and convex?
-### Re: graph DB API next steps — gpt-5
-
-Top backlog item after this cycle: `#cvxa`.
-
-The core support is already in place: `GraphStore` is the stable substrate, SQLite is the local correctness store, `tsift graph-db` reads SQLite and Convex snapshots, `convex-sync --apply` has a transport path, and conformance/freshness coverage exists. The next work should move from internal API support to operational Convex consumption and scale hardening.
-
-I added three prioritized follow-ups:
-
-1. `#cvxa` — ship the reusable Convex app-side backend package: schema, indexes, mutations/actions that accept the `convex-sync` payload, plus a smoke test proving `--apply` round-trips against the documented endpoint.
-2. `#gqpg` — harden graph-db reads for large graphs with pagination, property filtering, deterministic backend ordering, cap diagnostics, and parity tests over larger SQLite/Convex snapshot fixtures.
-3. `#gdoc` — add operator-facing examples and fixtures that show SQLite `graph-db` queries, Convex dry-run/apply payloads, stale snapshot failures, and `context-pack`/`traverse` handle reuse.
-
-I kept `#98qd` immediately after those because agent-doc context shaping should consume the stable graph DB API once the Convex backend contract and large-query behavior are explicit.
-### Re: graph DB hardening implementation — gpt-5
-
-Completed the queued `#cvxa`, `#gqpg`, `#98qd`, and `#gdoc` batch.
-
-Implemented:
-
-1. `#cvxa` — added `examples/convex-graph`, a reusable Convex app-side schema/mutation/HTTP-action package for `tsift convex-sync --remote-snapshot --apply`, and added a local HTTP smoke test proving `--apply` chunks round-trip through the documented transport.
-2. `#gqpg` — added `graph-db kind` / `graph-db neighborhood` node-id cursor pagination, repeatable `--property KEY=VALUE` filters, page diagnostics, deterministic ordering, and SQLite/Convex snapshot parity coverage.
-3. `#98qd` — materialized agent-doc queue entries as `job_packet` graph nodes, linked queued jobs to backlog targets, and extended `context-pack` exploration with bounded `worker_context` nodes linked to source handles.
-4. `#gdoc` — added `fixtures/graph-db-operator-examples` with SQLite graph-db commands, Convex dry-run/apply examples, a stale snapshot fixture, and handle-reuse guidance. Updated `SPEC.md`, `README.md`, `CLAUDE.md`, and `VERSIONS.md`.
-
-Commits and push:
-
-- tsift submodule: `44b5ec8` (`feat: harden graph db convex handoffs`) pushed to `btakita/tsift main`.
-- parent repo: `32f7f2f20` (`chore: update tsift submodule`) pushed to `btakita/agent-loop main`.
-
-Verification:
-
-- `cargo check` passed.
-- Focused graph-db, Convex transport, traversal, and context-pack tests passed.
-- `make check` passed: clippy plus `cargo test` with 631 unit tests passed, 1 ignored, and 107 integration tests passed.
-- `cargo install --path .` completed; installed `tsift --version` reports `tsift 0.1.42`.
-- GitHub Actions `CI` run `26188672412` passed on the pushed tsift commit (`clippy + test`, 2m14s). The repo has no `tmux-test` workflow and the CI run has no tmux job to remediate.
-<!-- agent:boundary:458579eb -->
+<!-- agent:boundary:fabac8d5 -->
 <!-- /agent:exchange -->
 ###
 <!--

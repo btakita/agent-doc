@@ -80,10 +80,37 @@ Commits pushed:
 - outer `agent-loop`: `7d3d421bb` — `chore: update agent-doc submodule`
 
 I left the pre-existing dirty `CLAUDE.md` typechange and untracked `AGENTS.md` inside `src/agent-doc` untouched.
-<!-- agent:boundary:5fbb042c -->
+❯ #commit-push all uncommitted files in src/agent-doc
+### Re: commit-push src/agent-doc instructions — gpt-5
+Committed and pushed the remaining uncommitted files in `src/agent-doc`.
+
+Nested repo commit:
+
+- `d816433a docs: add AGENTS instruction mirror`
+- Pushed to `origin/20260422/codex-agent-backend`
+- Contents: added `AGENTS.md` as the existing instruction text and changed `CLAUDE.md` to a symlink pointing at `AGENTS.md`
+
+Outer repo submodule pointer:
+
+- `89746b11d chore: update agent-doc submodule`
+- Pushed to `origin/main`
+
+
+- `agent-doc audit-docs` passed; only the existing mtime advisories were reported
+- `make check` passed locally in `src/agent-doc`
+- GitHub CI run `26176939086` passed, including `Run make check` and `Run make tmux-ci`
+
+`src/agent-doc` is clean and aligned with its pushed branch. I left unrelated dirty outer-repo files and unrelated later local outer commits untouched.
+<!-- agent:boundary:831d50cd -->
 <!-- /agent:exchange -->
 ###
 <!--
+The content-based implementation still does not fix the duplicate content corrupted document & duplicate typing line issues. As I was typing into the comment below agent:exchange in this document, the issues surfaced.
+---
+How does this Claude code tip reconcile with our orchestration implementation?
+```
+  ⎿  Tip: Say "fan out subagents" and Claude sends a team. Each one digs deep so nothing gets missed.
+```
 -->
 
 <!-- agent:queue -->

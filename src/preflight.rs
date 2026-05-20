@@ -444,8 +444,15 @@ fn short_model_name(model_id: &str) -> &str {
 ///
 /// Full model IDs are shortened via `short_model_name`; already-short names
 /// like `gpt-5` pass through unchanged.
-fn resolve_agent_model(frontmatter_model: Option<&str>) -> Option<String> {
-    frontmatter_model.map(|m| short_model_name(m).to_string())
+fn resolve_agent_model(
+    frontmatter_model: Option<&str>,
+    harness: &str,
+    model_config: &agent_doc::model_tier::ModelConfig,
+) -> Option<String> {
+    frontmatter_model.map(|m| {
+        let canonical = agent_doc::model_tier::canonical_model_name(m, harness, model_config);
+        short_model_name(&canonical).to_string()
+    })
 }
 
 fn canonical_harness_name(value: &str) -> Option<String> {
@@ -1626,7 +1633,8 @@ pub fn run(file: &Path) -> Result<()> {
         );
     }
 
-    let agent_model = resolve_agent_model(frontmatter_model.as_deref());
+    let agent_model =
+        resolve_agent_model(frontmatter_model.as_deref(), &harness, &global_config.model);
     let session_accretion = crate::session_accretion::inspect(file)
         .ok()
         .filter(|report| !report.is_healthy());
@@ -5702,26 +5710,37 @@ mod tests {
     #[test]
     fn resolve_agent_model_uses_frontmatter_only() {
         // ANTHROPIC_MODEL env var is deliberately ignored — only frontmatter matters.
-        let result = resolve_agent_model(Some("claude-opus-4"));
+        let cfg = agent_doc::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(Some("claude-opus-4"), "claude-code", &cfg);
         assert_eq!(result, Some("opus-4".to_string()));
     }
 
     #[test]
     fn resolve_agent_model_strips_claude_prefix_from_frontmatter() {
-        let result = resolve_agent_model(Some("claude-haiku-4-5"));
+        let cfg = agent_doc::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(Some("claude-haiku-4-5"), "claude-code", &cfg);
         assert_eq!(result, Some("haiku-4-5".to_string()));
     }
 
     #[test]
+    fn resolve_agent_model_expands_claude_code_opus_alias() {
+        let cfg = agent_doc::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(Some("opus"), "claude-code", &cfg);
+        assert_eq!(result, Some("opus-4-7".to_string()));
+    }
+
+    #[test]
     fn resolve_agent_model_preserves_short_openai_style_name() {
-        let result = resolve_agent_model(Some("gpt-5"));
+        let cfg = agent_doc::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(Some("gpt-5"), "codex", &cfg);
         assert_eq!(result, Some("gpt-5".to_string()));
     }
 
     #[test]
     fn resolve_agent_model_none_when_no_frontmatter() {
         // No frontmatter → None, regardless of env var state.
-        let result = resolve_agent_model(None);
+        let cfg = agent_doc::model_tier::ModelConfig::default();
+        let result = resolve_agent_model(None, "claude-code", &cfg);
         assert_eq!(result, None);
     }
 }

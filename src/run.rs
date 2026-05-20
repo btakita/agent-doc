@@ -244,8 +244,10 @@ pub fn run(
 
     // Send to agent — use `resume` for agent conversation tracking
     let fork = fm.resume.is_none();
-    let harness = agent_doc::model_tier::detect_harness();
-    let model = model.or(fm.resolve_harness_model(&harness));
+    let harness = agent_doc::model_tier::harness_key_for_agent_name(agent_name);
+    let resolved_model = model
+        .or(fm.resolve_harness_model(&harness))
+        .map(|m| agent_doc::model_tier::canonical_model_name(m, &harness, &config.model));
     let response_result = {
         let _heartbeat = RunHeartbeat::start(
             file,
@@ -253,7 +255,12 @@ pub fn run(
             agent_name,
             Some(crate::agent::run_agent_timeout()),
         );
-        backend.send(&prompt, fm.resume.as_deref(), fork, model)
+        backend.send(
+            &prompt,
+            fm.resume.as_deref(),
+            fork,
+            resolved_model.as_deref(),
+        )
     };
     let response = match response_result {
         Ok(response) => response,

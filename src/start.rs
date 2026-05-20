@@ -2569,10 +2569,10 @@ pub(crate) fn run_with_reap_policy(
     );
 
     // Fire document-level session_start hooks
-    let harness_name = agent_doc::model_tier::detect_harness();
-    let resolved_model = fm
-        .resolve_harness_model(&harness_name)
-        .map(|s| s.to_string());
+    let harness_name = agent_doc::model_tier::harness_key_for_agent_name(&harness.binary);
+    let resolved_model = fm.resolve_harness_model(&harness_name).map(|s| {
+        agent_doc::model_tier::canonical_model_name(s, &harness_name, &global_config.model)
+    });
     crate::hooks::fire_doc_hooks(
         &fm.hooks,
         "session_start",
@@ -2630,13 +2630,14 @@ pub(crate) fn run_with_reap_policy(
     }
     // Inject --model from harness-specific model frontmatter when not already in args.
     if !base_args.iter().any(|a| a == "--model") {
-        let harness_key = match harness.binary.as_str() {
-            "claude" => "claude-code",
-            other => other,
-        };
-        if let Some(model) = fm.resolve_harness_model(harness_key) {
+        let harness_key = agent_doc::model_tier::harness_key_for_agent_name(&harness.binary);
+        if let Some(model) = fm.resolve_harness_model(&harness_key) {
             base_args.push("--model".into());
-            base_args.push(model.to_string());
+            base_args.push(agent_doc::model_tier::canonical_model_name(
+                model,
+                &harness_key,
+                &global_config.model,
+            ));
         }
     }
     crate::agent::append_workspace_access_args(&harness.binary, &mut base_args, &canonical);
@@ -3708,13 +3709,14 @@ mod tests {
             base_args.extend(args.split_whitespace().map(String::from));
         }
         if !base_args.iter().any(|a| a == "--model") {
-            let harness_key = match harness.binary.as_str() {
-                "claude" => "claude-code",
-                other => other,
-            };
-            if let Some(model) = fm.resolve_harness_model(harness_key) {
+            let harness_key = agent_doc::model_tier::harness_key_for_agent_name(&harness.binary);
+            if let Some(model) = fm.resolve_harness_model(&harness_key) {
                 base_args.push("--model".into());
-                base_args.push(model.to_string());
+                base_args.push(agent_doc::model_tier::canonical_model_name(
+                    model,
+                    &harness_key,
+                    &cfg.model,
+                ));
             }
         }
         base_args
@@ -3724,13 +3726,13 @@ mod tests {
     fn model_injected_from_claude_model_frontmatter() {
         let fm = Frontmatter {
             claude_args: Some("--dangerously-skip-permissions".into()),
-            claude_model: Some("claude-opus-4-6".into()),
+            claude_model: Some("opus".into()),
             ..Default::default()
         };
         let harness = crate::harness::HarnessConfig::claude();
         let args = build_base_args_for_test(&fm, &harness);
         assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"claude-opus-4-6".to_string()));
+        assert!(args.contains(&"claude-opus-4-7".to_string()));
         assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
     }
 
@@ -3746,6 +3748,7 @@ mod tests {
         // Should use the explicit --model from claude_args, not inject from claude_model
         assert!(args.contains(&"sonnet".to_string()));
         assert!(!args.contains(&"claude-opus-4-6".to_string()));
+        assert!(!args.contains(&"claude-opus-4-7".to_string()));
     }
 
     #[test]

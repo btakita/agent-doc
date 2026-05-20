@@ -782,8 +782,11 @@ fn run_ordered_task_step(
         .or(fm.agent.as_deref())
         .or(global_config.default_agent.as_deref())
         .unwrap_or("claude");
-    let harness = agent_doc::model_tier::detect_harness();
-    let model = model_override.or(fm.resolve_harness_model(&harness));
+    let harness = agent_doc::model_tier::harness_key_for_agent_name(agent_name);
+    let resolved_model = model_override
+        .or(fm.resolve_harness_model(&harness))
+        .map(|m| agent_doc::model_tier::canonical_model_name(m, &harness, &global_config.model));
+    let model = resolved_model.as_deref();
     let session_accretion = crate::session_accretion::inspect(file).ok();
     let prompt = build_agent_prompt(
         file,

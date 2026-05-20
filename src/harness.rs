@@ -342,20 +342,21 @@ impl HarnessConfig {
         })
     }
 
-    /// Return a reason when the latest Codex pane output shows live user input
-    /// or another interactive composer state that must block replacement.
+    /// Return a reason when the latest pane output shows live user input or
+    /// another interactive composer state that must block replacement.
     pub fn protected_prompt_input_reason(&self, output: &str) -> Option<String> {
-        if self.binary != "codex" {
-            return None;
-        }
-
         if let Some(reason) = self.dispatch_blocker_reason(output) {
             match reason.as_str() {
+                "active permission prompt" => return Some(reason),
                 "queued draft in composer"
                 | "interactive shell reverse-i-search"
                 | "interactive shell history search" => return Some(reason),
                 _ => {}
             }
+        }
+
+        if self.binary != "codex" {
+            return None;
         }
 
         let candidate = self.last_prompt_candidate(output)?;
@@ -1377,6 +1378,22 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used
     }
 
     #[test]
+    fn protected_prompt_input_reason_ignores_active_codex_turn() {
+        let h = HarnessConfig::codex();
+        let output = "\
+• Working (1m 34s • esc to interrupt)
+
+› Write tests for @filename
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(output).as_deref(),
+            Some("active codex turn")
+        );
+        assert_eq!(h.protected_prompt_input_reason(output), None);
+    }
+
+    #[test]
     fn protected_prompt_input_reason_ignores_idle_placeholder() {
         let h = HarnessConfig::codex();
         let output = "\
@@ -1474,6 +1491,10 @@ Press Enter to restart, or 'q' to exit.
  Esc to cancel · ctrl+e to explain
 "#;
         assert!(h.has_busy_cue(output));
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
+            Some("active permission prompt")
+        );
     }
 
     #[test]
@@ -1490,6 +1511,10 @@ Press Enter to restart, or 'q' to exit.
 "#;
         assert_eq!(
             h.dispatch_blocker_reason(output).as_deref(),
+            Some("active permission prompt")
+        );
+        assert_eq!(
+            h.protected_prompt_input_reason(output).as_deref(),
             Some("active permission prompt")
         );
     }

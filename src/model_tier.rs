@@ -36,7 +36,7 @@
 //! - `tier_from_str_invalid`: unknown strings return `Err`.
 //! - `harness_detection_default`: with no env vars set, `detect_harness()` returns `"default"`.
 //! - `resolve_builtin_claude_code`: `resolve_tier_to_model(Tier::High, "claude-code", &Config::default())`
-//!   returns `Some("opus")`.
+//!   returns `Some("claude-opus-4-7")`.
 //! - `resolve_unknown_harness_uses_default`: an unknown harness falls through to the
 //!   `"default"` built-in map.
 //! - `tier_from_model_name_roundtrip`: `tier_from_model_name("opus", "claude-code", ...)`
@@ -46,6 +46,8 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::str::FromStr;
+
+const CLAUDE_CODE_OPUS_MODEL: &str = "claude-opus-4-7";
 
 /// Harness-agnostic model complexity tier.
 ///
@@ -154,7 +156,7 @@ fn builtin_claude_code() -> TierMap {
     TierMap {
         low: Some("haiku".to_string()),
         med: Some("sonnet".to_string()),
-        high: Some("opus".to_string()),
+        high: Some(CLAUDE_CODE_OPUS_MODEL.to_string()),
     }
 }
 
@@ -206,6 +208,20 @@ pub fn detect_harness() -> String {
     }
 }
 
+pub fn harness_key_for_agent_name(agent_name: &str) -> String {
+    let normalized = agent_name
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['_', ' '], "-");
+    match normalized.as_str() {
+        "claude" | "claude-code" | "claudecode" | "claude-code-cli" => "claude-code".to_string(),
+        "codex" | "codex-cli" | "openai-codex" => "codex".to_string(),
+        "opencode" | "open-code" | "opencode-ai" => "opencode".to_string(),
+        "" => "default".to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// Resolve a `Tier` to a concrete model name for the given harness.
 ///
 /// Tries the user's `[model.tiers.<harness>]` config first, then falls back to the
@@ -226,6 +242,30 @@ pub fn resolve_tier_to_model(
     builtin_for(harness).get(tier).map(|s| s.to_string())
 }
 
+fn claude_code_model_alias(model_name: &str) -> Option<&'static str> {
+    match model_name.trim() {
+        "opus" => Some(CLAUDE_CODE_OPUS_MODEL),
+        _ => None,
+    }
+}
+
+/// Resolve harness-owned model aliases to the concrete model id agent-doc should
+/// launch and stamp in attribution. The Claude Code `opus` alias is intentionally
+/// versioned here so `claude_model: opus`, `/model opus`, and high-tier fallback
+/// all follow the same current Claude Code definition.
+pub fn canonical_model_name(
+    model_name: &str,
+    harness: &str,
+    _model_config: &ModelConfig,
+) -> String {
+    if harness == "claude-code"
+        && let Some(canonical) = claude_code_model_alias(model_name)
+    {
+        return canonical.to_string();
+    }
+    model_name.to_string()
+}
+
 /// Reverse lookup: given a concrete model name, find its tier in the harness's mapping.
 ///
 /// Tries the user's config first, then falls back to the built-in map. Returns `None`
@@ -240,7 +280,13 @@ pub fn tier_from_model_name(
     {
         return Some(t);
     }
-    builtin_for(harness).tier_of(model_name)
+    builtin_for(harness).tier_of(model_name).or_else(|| {
+        if harness == "claude-code" && claude_code_model_alias(model_name).is_some() {
+            Some(Tier::High)
+        } else {
+            None
+        }
+    })
 }
 
 /// Extract the value inside a `<!-- agent:model -->...<!-- /agent:model -->` component.
@@ -476,9 +522,9 @@ pub fn compose_effective_tier(
 /// Parse a `/model <arg>` argument: either a tier name (`low|med|high`) or a concrete
 /// model name (`opus|sonnet|...`).
 ///
-/// Returns the resolved `Tier` and the concrete model name (the original arg if it
-/// was already a concrete name; the resolved name from config/built-ins if it was a
-/// tier name).
+/// Returns the resolved `Tier` and the concrete model name. Tier names resolve
+/// through config/built-ins, and harness-owned aliases such as Claude Code
+/// `opus` resolve to their current concrete model id.
 pub fn parse_model_arg(
     arg: &str,
     harness: &str,
@@ -496,7 +542,7 @@ pub fn parse_model_arg(
     }
     // Otherwise treat as a concrete model name and reverse-lookup the tier.
     if let Some(tier) = tier_from_model_name(trimmed, harness, model_config) {
-        return Some((tier, trimmed.to_string()));
+        return Some((tier, canonical_model_name(trimmed, harness, model_config)));
     }
     // Unknown — accept the name but leave tier as Auto so it doesn't gate.
     None
@@ -603,6 +649,14 @@ mod tests {
     }
 
     #[test]
+    fn harness_key_for_agent_name_maps_cli_aliases() {
+        assert_eq!(harness_key_for_agent_name("claude"), "claude-code");
+        assert_eq!(harness_key_for_agent_name("claude_code"), "claude-code");
+        assert_eq!(harness_key_for_agent_name("codex"), "codex");
+        assert_eq!(harness_key_for_agent_name("opencode"), "opencode");
+    }
+
+    #[test]
     fn harness_detection_recognizes_cli_environment_aliases() {
         let _env_lock = ENV_LOCK
             .lock()
@@ -631,7 +685,7 @@ mod tests {
         let cfg = ModelConfig::default();
         assert_eq!(
             resolve_tier_to_model(Tier::High, "claude-code", &cfg).as_deref(),
-            Some("opus")
+            Some("claude-opus-4-7")
         );
         assert_eq!(
             resolve_tier_to_model(Tier::Med, "claude-code", &cfg).as_deref(),
@@ -694,6 +748,10 @@ mod tests {
             Some(Tier::High)
         );
         assert_eq!(
+            tier_from_model_name("claude-opus-4-7", "claude-code", &cfg),
+            Some(Tier::High)
+        );
+        assert_eq!(
             tier_from_model_name("sonnet", "claude-code", &cfg),
             Some(Tier::Med)
         );
@@ -709,7 +767,7 @@ mod tests {
         let cfg = ModelConfig::default();
         let (tier, name) = parse_model_arg("high", "claude-code", &cfg).unwrap();
         assert_eq!(tier, Tier::High);
-        assert_eq!(name, "opus");
+        assert_eq!(name, "claude-opus-4-7");
     }
 
     #[test]
@@ -717,7 +775,17 @@ mod tests {
         let cfg = ModelConfig::default();
         let (tier, name) = parse_model_arg("opus", "claude-code", &cfg).unwrap();
         assert_eq!(tier, Tier::High);
-        assert_eq!(name, "opus");
+        assert_eq!(name, "claude-opus-4-7");
+    }
+
+    #[test]
+    fn canonical_model_name_expands_claude_code_opus_alias() {
+        let cfg = ModelConfig::default();
+        assert_eq!(
+            canonical_model_name("opus", "claude-code", &cfg),
+            "claude-opus-4-7"
+        );
+        assert_eq!(canonical_model_name("opus", "codex", &cfg), "opus");
     }
 
     #[test]
@@ -861,7 +929,7 @@ mod tests {
         let cfg = ModelConfig::default();
         let diff = "@@ -1,3 +1,4 @@\n context\n+/model opus\n+real edit\n";
         let result = scan_model_switch(diff, "claude-code", &cfg);
-        assert_eq!(result.model_switch.as_deref(), Some("opus"));
+        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-7"));
         assert_eq!(result.model_switch_tier, Some(Tier::High));
         assert!(!result.stripped_diff.contains("/model opus"));
         assert!(result.stripped_diff.contains("real edit"));
@@ -873,7 +941,7 @@ mod tests {
         let diff = "+/model high\n+other line\n";
         let result = scan_model_switch(diff, "claude-code", &cfg);
         assert_eq!(result.model_switch_tier, Some(Tier::High));
-        assert_eq!(result.model_switch.as_deref(), Some("opus"));
+        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-7"));
         assert!(!result.stripped_diff.contains("/model high"));
     }
 
@@ -939,7 +1007,7 @@ mod tests {
         let cfg = ModelConfig::default();
         let diff = "+/model opus\n+/model haiku\n";
         let result = scan_model_switch(diff, "claude-code", &cfg);
-        assert_eq!(result.model_switch.as_deref(), Some("opus"));
+        assert_eq!(result.model_switch.as_deref(), Some("claude-opus-4-7"));
         // Both lines stripped.
         assert!(!result.stripped_diff.contains("/model"));
     }

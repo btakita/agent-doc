@@ -24,10 +24,6 @@ object TerminalUtil {
         """session_clear refused for (.+?) because pane (\S+) is alive-busy""",
         RegexOption.DOT_MATCHES_ALL,
     )
-    private val ACTIVE_CLEAR_REFUSAL_HEADER_REGEX = Regex(
-        """session_clear refused for (.+?) because pane (\S+) is still active""",
-        RegexOption.DOT_MATCHES_ALL,
-    )
     private val PROTECTED_CLEAR_REFUSAL_HEADER_REGEX = Regex(
         """session_clear refused for (.+?) because pane (\S+) contains protected prompt input""",
         RegexOption.DOT_MATCHES_ALL,
@@ -651,9 +647,7 @@ object TerminalUtil {
                 protectedReason = reason.ifBlank { "protected prompt input" },
             )
         }
-        val match = BUSY_CLEAR_REFUSAL_HEADER_REGEX.find(output)
-            ?: ACTIVE_CLEAR_REFUSAL_HEADER_REGEX.find(output)
-            ?: return null
+        val match = BUSY_CLEAR_REFUSAL_HEADER_REGEX.find(output) ?: return null
         val detail = output.substring(match.range.last + 1)
         val source = BUSY_CLEAR_SOURCE_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()
         val currentCommand = BUSY_CLEAR_COMMAND_REGEX.find(detail)?.groupValues?.getOrNull(1).orEmpty()

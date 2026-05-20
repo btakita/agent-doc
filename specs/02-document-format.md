@@ -11,7 +11,7 @@ Frontmatter fields:
 - `agent_doc_mode`: **Deprecated.** Single field mapping: `append` → format=append, `template` → format=template, `stream` → format=template+write=crdt. Explicit `agent_doc_format`/`agent_doc_write` take precedence. Legacy aliases: `mode`, `response_mode`.
 - `agent`: Agent backend name (overrides config default)
 - `model`: Model override (passed to agent backend). Overridden by harness-specific fields when present.
-- `claude_model`: Per-harness model override for Claude Code sessions. Takes precedence over `model` when running under Claude Code.
+- `claude_model`: Per-harness model override for Claude Code sessions. Takes precedence over `model` when running under Claude Code. The short alias `opus` resolves to the current Claude Code opus id (`claude-opus-4-7`) before launch and response attribution.
 - `codex_model`: Per-harness model override for Codex sessions. Takes precedence over `model` when running under Codex.
 - `opencode_model`: Per-harness model override for OpenCode sessions. Takes precedence over `model` when running under OpenCode.
 - `branch`: Reserved for branch tracking

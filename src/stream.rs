@@ -190,9 +190,16 @@ pub fn run(
 
     // Send to streaming agent
     let fork = fm.resume.is_none();
-    let harness = agent_doc::model_tier::detect_harness();
-    let model = model.or(fm.resolve_harness_model(&harness));
-    let chunks = streaming_agent.send_streaming(&prompt, fm.resume.as_deref(), fork, model)?;
+    let harness = agent_doc::model_tier::harness_key_for_agent_name(agent_name);
+    let resolved_model = model
+        .or(fm.resolve_harness_model(&harness))
+        .map(|m| agent_doc::model_tier::canonical_model_name(m, &harness, &config.model));
+    let chunks = streaming_agent.send_streaming(
+        &prompt,
+        fm.resume.as_deref(),
+        fork,
+        resolved_model.as_deref(),
+    )?;
 
     // Build thinking config
     let thinking_cfg = if thinking_enabled {

@@ -143,6 +143,17 @@ Already applied.
     }
 
     @Test
+    fun `full content source buffer proof rejects live editor drift`() {
+        val before = "before"
+        val hash = sha256HexUtf8(before)
+        val len = before.toByteArray(Charsets.UTF_8).size
+
+        assertTrue(fullContentExpectedBufferMatchesUtil(before, hash, len))
+        assertFalse(fullContentExpectedBufferMatchesUtil("before\nlive prompt", hash, len))
+        assertFalse(fullContentExpectedBufferMatchesUtil(before, hash, len + 1))
+    }
+
+    @Test
     fun `handles line at very start of user region`() {
         // First line of the user region (no leading newline before it)
         val doc = "<!-- agent:exchange patch=append -->\nFirst line.\nSecond line.\n<!-- /agent:exchange -->\n"

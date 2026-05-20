@@ -6,6 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Full-content editor IPC now proves the source buffer before replacement.**
+  The binary stamps every `fullContent` socket/file IPC payload with a
+  `patch_id`, expected source-buffer hash, and byte length. JetBrains and VS
+  Code reject the whole-document replacement when the live editor/VFS buffer no
+  longer matches that source, so compact/repair/full-content retries cannot
+  clobber prompt text typed after the payload was computed. The file-IPC poller
+  also refuses to save a snapshot when a consumed full-content patch did not
+  leave the exact requested document. Bumped local plugin builds to JetBrains
+  `0.2.127` and VS Code `0.2.20`.
+
 - **FlowCore now has an executable guard/proof regression gate.**
   Routed-reopen prompt-ready and dispatch-proof failure reasons now pass through
   `RoutedReopenGuardReason` instead of free-form strings from `route.rs`, and a

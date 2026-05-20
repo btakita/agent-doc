@@ -5,9 +5,11 @@ import * as os from 'os';
 import * as path from 'path';
 import {
     consumeClaimedPatch,
+    contentSha256Hex,
     createEditorApplyProof,
     docHash,
     isEditorApplyProofCurrent,
+    isFullContentExpectedBufferCurrent,
     isPatchAlreadyApplied,
     resolveAgentDocRootForFile,
 } from './patchGuard';
@@ -87,14 +89,25 @@ describe('patchGuard', () => {
         assert.strictEqual(isEditorApplyProofCurrent(proof, 'before', 8), false);
     });
 
+    it('rejects full-content source buffer drift by hash and byte length', () => {
+        const expectedHash = contentSha256Hex('before');
+        const expectedLen = Buffer.byteLength('before', 'utf8');
+
+        assert.strictEqual(isFullContentExpectedBufferCurrent('before', expectedHash, expectedLen), true);
+        assert.strictEqual(isFullContentExpectedBufferCurrent('before\nlive prompt', expectedHash, expectedLen), false);
+        assert.strictEqual(isFullContentExpectedBufferCurrent('before', expectedHash, expectedLen + 1), false);
+    });
+
     it('checks the apply proof before component and full-content visible writes', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const fullContentIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'full content'");
+        const fullContentSourceProofIdx = source.indexOf('isFullContentExpectedBufferCurrent(content, patch.expected_content_hash, patch.expected_content_len)');
         const fullEditIdx = source.indexOf('edit.replace(fileUri, fullRange, patch.fullContent)');
         const componentProofIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'component patch'");
         const componentEditIdx = source.indexOf('edit.replace(fileUri, fullRange, content)');
 
         assert.ok(fullContentIdx >= 0 && fullContentIdx < fullEditIdx);
+        assert.ok(fullContentSourceProofIdx >= 0 && fullContentSourceProofIdx < fullEditIdx);
         assert.ok(componentProofIdx >= 0 && componentProofIdx < componentEditIdx);
     });
 });

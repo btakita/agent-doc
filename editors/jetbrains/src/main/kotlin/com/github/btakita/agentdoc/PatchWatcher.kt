@@ -608,6 +608,10 @@ class PatchWatcher(private val project: Project) : Disposable {
             if (!applyProofStillCurrent(proof, document, patch.file, "full content")) {
                 return false
             }
+            if (!fullContentExpectedBufferMatchesUtil(content, patch.expectedContentHash, patch.expectedContentLen)) {
+                LOG.warn("[patch-watcher] full content source buffer proof mismatch for ${patch.file}; rejecting")
+                return false
+            }
             if (patch.fullContent == content) {
                 LOG.warn("Patch produced no changes for ${patch.file}")
                 writeAckContent(patch.patchId, document.text, patch.file)
@@ -733,6 +737,10 @@ class PatchWatcher(private val project: Project) : Disposable {
             // Full content replacement — only for append-mode documents without component patches.
             // Same guard as the Document path: skip fullContent when patches are present.
             if (!patch.fullContent.isNullOrEmpty() && patch.patches.isEmpty()) {
+                if (!fullContentExpectedBufferMatchesUtil(content, patch.expectedContentHash, patch.expectedContentLen)) {
+                    LOG.warn("[patch-watcher] VFS full content source buffer proof mismatch for ${patch.file}; rejecting")
+                    return false
+                }
                 if (patch.fullContent != content) {
                     ApplicationManager.getApplication().runWriteAction {
                         targetFile.setBinaryContent(patch.fullContent.toByteArray(targetFile.charset))
@@ -1203,6 +1211,9 @@ data class IpcPatch(
     val normalizePrefixLines: List<String> = emptyList(),
     /** UUID identifying this patch — used for ack-content sidecar and claimed-patches sentinel. */
     val patchId: String? = null,
+    /** Source-buffer proof from the binary for fullContent replacements. */
+    val expectedContentHash: String? = null,
+    val expectedContentLen: Int? = null,
 )
 
 data class ComponentPatch(
@@ -1223,6 +1234,23 @@ internal fun editorApplyProofStillCurrentUtil(
     currentModificationStamp: Long,
 ): Boolean =
     proof.modificationStamp == currentModificationStamp && proof.content == currentContent
+
+internal fun sha256HexUtf8(content: String): String =
+    MessageDigest.getInstance("SHA-256")
+        .digest(content.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+internal fun fullContentExpectedBufferMatchesUtil(
+    currentContent: String,
+    expectedHash: String?,
+    expectedLen: Int?,
+): Boolean {
+    if (expectedHash.isNullOrBlank()) return true
+    if (expectedLen != null && currentContent.toByteArray(Charsets.UTF_8).size != expectedLen) {
+        return false
+    }
+    return sha256HexUtf8(currentContent) == expectedHash
+}
 
 internal fun findCodeBlockRangesUtil(doc: String): List<Pair<Int, Int>> {
     val ranges = mutableListOf<Pair<Int, Int>>()
@@ -1570,6 +1598,8 @@ fun parsePatchJson(json: String): IpcPatch? {
         val normalizePrefixLines = root.getAsJsonArray("normalize_prefix_lines")
             ?.mapNotNull { it.asString } ?: emptyList()
         val patchId = root.get("patch_id")?.asString
+        val expectedContentHash = root.get("expected_content_hash")?.asString
+        val expectedContentLen = root.get("expected_content_len")?.asInt
         return IpcPatch(
             file,
             patches,
@@ -1580,6 +1610,8 @@ fun parsePatchJson(json: String): IpcPatch? {
             repositionBoundaryId,
             normalizePrefixLines,
             patchId,
+            expectedContentHash,
+            expectedContentLen,
         )
     } catch (e: Exception) {
         return null

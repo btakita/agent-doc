@@ -6427,6 +6427,10 @@ pub fn try_ipc(
                 && let Some(ours) = content_ours
             {
                 socket_payload["fullContent"] = serde_json::Value::String(ours.to_string());
+                attach_full_content_source_proof(
+                    &mut socket_payload,
+                    ipc_before_content.as_deref(),
+                );
             }
         }
         crate::ops_log::log_op(
@@ -6752,6 +6756,7 @@ pub fn try_ipc(
             && let Some(ours) = content_ours
         {
             ipc_payload["fullContent"] = serde_json::Value::String(ours.to_string());
+            attach_full_content_source_proof(&mut ipc_payload, ipc_before_content.as_deref());
         }
     }
 
@@ -6831,6 +6836,43 @@ pub fn try_ipc_full_content_operator_mutation(file: &Path, content: &str) -> Res
     try_ipc_full_content_with_mode(file, content, FullContentIpcMode::OperatorMutation)
 }
 
+fn build_full_content_ipc_payload(
+    canonical: &Path,
+    content: &str,
+    patch_id: &str,
+    before_content: Option<&str>,
+    include_type: bool,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "file": canonical.to_string_lossy(),
+        "patches": [],
+        "unmatched": "",
+        "fullContent": content,
+        "patch_id": patch_id,
+    });
+    if include_type {
+        payload["type"] = serde_json::Value::String("patch".to_string());
+    }
+    attach_full_content_source_proof(&mut payload, before_content);
+    payload
+}
+
+fn attach_full_content_source_proof(payload: &mut serde_json::Value, before_content: Option<&str>) {
+    if payload
+        .get("fullContent")
+        .and_then(|value| value.as_str())
+        .is_none_or(|value| value.is_empty())
+    {
+        return;
+    }
+    if let Some(before) = before_content {
+        payload["expected_content_hash"] =
+            serde_json::Value::String(crate::ops_log::content_hash(before));
+        payload["expected_content_len"] =
+            serde_json::Value::Number(serde_json::Number::from(before.len()));
+    }
+}
+
 fn try_ipc_full_content_with_mode(
     file: &Path,
     content: &str,
@@ -6839,6 +6881,7 @@ fn try_ipc_full_content_with_mode(
     let canonical = file.canonicalize()?;
     let project_root = resolve_ipc_project_root(&canonical);
     let before_content = std::fs::read_to_string(file).ok();
+    let patch_id = uuid::Uuid::new_v4().to_string();
 
     if mode == FullContentIpcMode::ResponseFallback
         && let Some(ref cycle_id) = cycle_already_committed(file)
@@ -6868,31 +6911,40 @@ fn try_ipc_full_content_with_mode(
 
     // Try socket IPC first
     if crate::ipc_socket::is_listener_active(&project_root) {
-        let socket_payload = serde_json::json!({
-            "type": "patch",
-            "file": canonical.to_string_lossy(),
-            "patches": [],
-            "unmatched": "",
-            "fullContent": content,
-        });
+        let socket_payload = build_full_content_ipc_payload(
+            &canonical,
+            content,
+            &patch_id,
+            before_content.as_deref(),
+            true,
+        );
         match crate::ipc_socket::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC full content delivered");
+                let snap_content = match poll_ack_content_sidecar(
+                    &project_root,
+                    &patch_id,
+                    std::time::Duration::from_millis(200),
+                    std::time::Duration::from_millis(25),
+                ) {
+                    Ok(Some(content)) => content,
+                    _ => content.to_string(),
+                };
                 if let Some(before) = before_content.as_deref() {
                     log_exchange_write_diagnostic(
                         file,
                         "try_ipc_full_content_socket",
                         "socket_full_content",
-                        None,
+                        Some(&patch_id),
                         None,
                         before,
-                        content,
+                        &snap_content,
                         &[],
                         "",
                     );
                 }
-                snapshot::save(file, content)?;
-                let crdt_doc = crate::crdt::CrdtDoc::from_text(content);
+                snapshot::save(file, &snap_content)?;
+                let crdt_doc = crate::crdt::CrdtDoc::from_text(&snap_content);
                 snapshot::save_crdt(file, &crdt_doc.encode_state())?;
                 return Ok(true);
             }
@@ -6920,13 +6972,14 @@ fn try_ipc_full_content_with_mode(
 
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
-    let ipc_payload = serde_json::json!({
-        "file": canonical.to_string_lossy(),
-        "patches": [],
-        "unmatched": "",
-        "baseline": "",
-        "fullContent": content,
-    });
+    let mut ipc_payload = build_full_content_ipc_payload(
+        &canonical,
+        content,
+        &patch_id,
+        before_content.as_deref(),
+        false,
+    );
+    ipc_payload["baseline"] = serde_json::Value::String(String::new());
 
     write_ipc_and_poll(
         &patch_file,
@@ -7160,6 +7213,27 @@ fn write_ipc_and_poll(
                 // Don't save snapshot with content that was never applied.
                 eprintln!(
                     "[write] IPC patch consumed but file unchanged on disk — plugin may have failed to apply. Falling back to disk write."
+                );
+                return Ok(false);
+            }
+
+            if let Some(full_content) = payload
+                .get("fullContent")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty())
+                && current_on_disk != full_content
+            {
+                eprintln!(
+                    "[write] IPC full-content patch consumed but final content does not match payload — falling back to disk write."
+                );
+                crate::ops_log::log_op(
+                    doc_file,
+                    &format!(
+                        "full_content_ipc_post_apply_mismatch file={} expected_len={} actual_len={}",
+                        doc_file.display(),
+                        full_content.len(),
+                        current_on_disk.len()
+                    ),
                 );
                 return Ok(false);
             }
@@ -14208,9 +14282,11 @@ mod pending_patch_normalization_tests {
 #[cfg(test)]
 mod late_fallback_patch_guard_tests {
     use super::{
-        cleanup_fallback_patch_files, cycle_already_committed, try_ipc, try_ipc_full_content,
+        build_full_content_ipc_payload, cleanup_fallback_patch_files, cycle_already_committed,
+        try_ipc, try_ipc_full_content,
     };
     use std::fs;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn doc_in_agent_doc_project(tmp: &TempDir, content: &str) -> std::path::PathBuf {
@@ -14441,6 +14517,31 @@ mod late_fallback_patch_guard_tests {
         assert!(
             !ops_log.contains("socket_full_content"),
             "full-content socket diagnostic must not be emitted after committed-cycle skip"
+        );
+    }
+
+    #[test]
+    fn full_content_ipc_payload_carries_source_buffer_identity() {
+        let payload = build_full_content_ipc_payload(
+            Path::new("/tmp/session.md"),
+            "after",
+            "patch-123",
+            Some("before"),
+            true,
+        );
+
+        assert_eq!(payload["type"], "patch");
+        assert_eq!(payload["file"], "/tmp/session.md");
+        assert_eq!(payload["fullContent"], "after");
+        assert_eq!(payload["patch_id"], "patch-123");
+        let expected_hash = crate::ops_log::content_hash("before");
+        assert_eq!(
+            payload["expected_content_hash"].as_str(),
+            Some(expected_hash.as_str())
+        );
+        assert_eq!(
+            payload["expected_content_len"].as_u64(),
+            Some("before".len() as u64)
         );
     }
 }

@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
 import * as native from './native';
-import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
+import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isFullContentExpectedBufferCurrent, isPatchAlreadyApplied } from './patchGuard';
 import { appendPatchAlreadyPresent, isPureRepositionSignal } from './patchPlan';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
@@ -1224,6 +1224,8 @@ interface IpcPatch {
     preserve_head?: boolean;
     normalize_prefix_lines?: string[];
     patch_id?: string;
+    expected_content_hash?: string;
+    expected_content_len?: number;
 }
 
 class PatchWatcher implements vscode.Disposable {
@@ -1527,6 +1529,13 @@ class PatchWatcher implements vscode.Disposable {
         if (patch.fullContent != null && patch.fullContent !== '' && patch.patches.length === 0) {
             const content = baselineContent;
             if (!this.verifyApplyProof(document, proof, patch.file, 'full content', patchFilePath)) {
+                return false;
+            }
+            if (!isFullContentExpectedBufferCurrent(content, patch.expected_content_hash, patch.expected_content_len)) {
+                this.outputChannel.appendLine(`PatchWatcher: full content source buffer proof mismatch for ${patch.file}; rejecting patch`);
+                if (patchFilePath) {
+                    this.schedulePatchRetry(patchFilePath);
+                }
                 return false;
             }
             if (patch.fullContent !== content) {

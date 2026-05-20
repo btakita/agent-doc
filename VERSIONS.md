@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Template closeout uses one prompt reconciliation pass before visible writes.**
+  Direct template/CRDT disk writes, IPC timeout fallbacks, and repair replays
+  now run the same duplicate-prompt reconciliation that IPC snapshots use,
+  before saving snapshots or replacing the document. The scanner is
+  response-block aware, so prompt text quoted in assistant prose is preserved
+  while duplicate live prompt copies are removed before closeout.
+
 - **Editor IPC patches now prove the live buffer generation before mutation.**
   JetBrains and VS Code capture the editor buffer text plus generation after
   typing debounce and re-check that proof immediately before component append,

@@ -4042,6 +4042,7 @@ fn normalized_prompt_text(line: &str) -> Option<String> {
         || trimmed.starts_with("### Re:")
         || trimmed.starts_with("## Assistant")
         || trimmed.starts_with("## User")
+        || is_markdown_heading_line(trimmed)
     {
         return None;
     }
@@ -4052,6 +4053,11 @@ fn normalized_prompt_text(line: &str) -> Option<String> {
             .trim()
             .to_string(),
     )
+}
+
+fn is_markdown_heading_line(trimmed: &str) -> bool {
+    let hashes = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    (1..=6).contains(&hashes) && trimmed.as_bytes().get(hashes) == Some(&b' ')
 }
 
 fn normalized_prompt_counts(exchange: &str) -> HashMap<String, usize> {
@@ -4112,6 +4118,68 @@ fn split_line_segment(segment: &str) -> (&str, &str) {
         .strip_suffix('\n')
         .map(|line| (line, "\n"))
         .unwrap_or((segment, ""))
+}
+
+fn exchange_prompt_reconciliation_infos(
+    exchange: &str,
+    target_counts: Option<&HashMap<String, usize>>,
+) -> Vec<PromptLineInfo> {
+    let boundary_prefix = "<!-- agent:boundary:";
+    let mut in_response_block = false;
+    let mut response_heading_was_prefixed = false;
+    let mut infos = Vec::new();
+
+    for segment in exchange.split_inclusive('\n') {
+        let (line, _) = split_line_segment(segment);
+        let trimmed = line.trim();
+        let mut eligible = true;
+        if trimmed.starts_with(boundary_prefix) {
+            in_response_block = false;
+            response_heading_was_prefixed = false;
+            eligible = false;
+        } else if is_exchange_response_heading_for_prefix_repair(trimmed) {
+            in_response_block = true;
+            response_heading_was_prefixed =
+                is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
+            eligible = false;
+        } else if in_response_block {
+            let is_target =
+                target_counts.is_some_and(|counts| normalization_target_matches_line(line, counts));
+            if starts_targeted_or_prefixed_prompt_repair_after_response(
+                trimmed,
+                is_target && !response_heading_was_prefixed,
+            ) {
+                in_response_block = false;
+                response_heading_was_prefixed = false;
+            } else {
+                eligible = false;
+            }
+        }
+
+        let normalized = if eligible {
+            normalized_prompt_text(line)
+        } else {
+            None
+        };
+        infos.push(PromptLineInfo {
+            segment: segment.to_string(),
+            normalized,
+            prefixed: trimmed.starts_with("❯ "),
+            remove: false,
+        });
+    }
+
+    infos
+}
+
+fn prompt_reconciliation_counts(exchange: &str) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for info in exchange_prompt_reconciliation_infos(exchange, None) {
+        if let Some(text) = info.normalized {
+            *counts.entry(text).or_default() += 1;
+        }
+    }
+    counts
 }
 
 fn last_exchange_boundary_tail_start(exchange: &str) -> Option<usize> {
@@ -4269,20 +4337,12 @@ fn dedupe_prompt_lines_against_before(before: &str, after: &str, file: &Path) ->
         return (after.to_string(), false);
     };
 
-    let before_counts = normalized_prompt_counts(before_exchange);
-    let mut lines: Vec<PromptLineInfo> = after_exchange
-        .content(after)
-        .split_inclusive('\n')
-        .map(|segment| {
-            let trimmed = segment.trim();
-            PromptLineInfo {
-                segment: segment.to_string(),
-                normalized: normalized_prompt_text(segment),
-                prefixed: trimmed.starts_with("❯ "),
-                remove: false,
-            }
-        })
-        .collect();
+    let before_counts = prompt_reconciliation_counts(before_exchange);
+    if before_counts.is_empty() {
+        return (after.to_string(), false);
+    }
+    let mut lines: Vec<PromptLineInfo> =
+        exchange_prompt_reconciliation_infos(after_exchange.content(after), Some(&before_counts));
 
     let mut by_text: HashMap<String, Vec<usize>> = HashMap::new();
     for (idx, line) in lines.iter().enumerate() {
@@ -4745,6 +4805,7 @@ pub fn run_template(
         file,
         base,
         snapshot_doc.as_deref(),
+        Some(&content_current),
         &final_content,
         Some(&response),
     )?;
@@ -5256,6 +5317,7 @@ pub fn run_stream(
                 file,
                 base,
                 snapshot_doc.as_deref(),
+                Some(&content_current),
                 &final_content,
                 Some(&response),
             )?;
@@ -5443,6 +5505,7 @@ pub fn run_stream(
         file,
         base,
         snapshot_doc.as_deref(),
+        Some(&content_current),
         &final_content,
         Some(&response),
     )?;
@@ -5816,6 +5879,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         file,
         base,
         snapshot_doc.as_deref(),
+        Some(&content_current),
         &final_content,
         Some(&response),
     )?;
@@ -5949,6 +6013,7 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
         file,
         &content,
         snapshot_doc.as_deref(),
+        Some(&content_current),
         &final_content,
         Some(response.as_str()),
     )?;
@@ -7640,6 +7705,7 @@ fn normalize_final_template_content(
     file: &Path,
     base: &str,
     snapshot: Option<&str>,
+    before_current: Option<&str>,
     content: &str,
     response: Option<&str>,
 ) -> Result<String> {
@@ -7648,6 +7714,12 @@ fn normalize_final_template_content(
         normalized = normalize_user_prompts_in_exchange_safe(&normalized, base, snapshot_doc, file);
     }
     normalized = normalize_template_structure_or_fail(&normalized, file)?;
+    if let Some(before) = before_current {
+        let (deduped, changed) = dedupe_prompt_lines_against_before(before, &normalized, file);
+        if changed {
+            normalized = normalize_template_structure_or_fail(&deduped, file)?;
+        }
+    }
     if let Some(repaired) =
         repair_response_precedes_prompt_in_exchange(&normalized, response, file, Some(base))?
     {
@@ -9427,6 +9499,90 @@ scratch
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("ipc_prompt_duplicate_repaired"));
         assert!(log.contains("ipc_snapshot_deduped"));
+    }
+
+    #[test]
+    fn prompt_dedupe_skips_assistant_response_quotes() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let before = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:old -->\n",
+            "quote this exact line\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let after = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ quote this exact line\n",
+            "### Re: response — gpt-5\n\n",
+            "quote this exact line\n",
+            "Done.\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, before).unwrap();
+
+        let (repaired, changed) =
+            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc");
+
+        assert!(
+            !changed,
+            "assistant response quotes must not be treated as duplicate prompt text"
+        );
+        assert_eq!(repaired.matches("quote this exact line").count(), 2);
+    }
+
+    #[test]
+    fn normalize_final_template_content_dedupes_direct_merge_prompt_copy() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "Old content.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let before = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "Old content.\n",
+            "<!-- agent:boundary:old -->\n",
+            "live prompt\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let merged = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "Old content.\n",
+            "❯ live prompt\n",
+            "live prompt\n",
+            "### Re: response — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, before).unwrap();
+
+        let repaired = normalize_final_template_content(
+            &doc,
+            before,
+            Some(snapshot),
+            Some(before),
+            merged,
+            Some("### Re: response — gpt-5\n\nDone.\n"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            normalized_prompt_counts(exchange_content(&repaired).unwrap())
+                .get("live prompt")
+                .copied(),
+            Some(1)
+        );
+        assert!(repaired.contains("❯ live prompt\n### Re: response"));
+        assert!(repaired.contains("Done."));
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("ipc_prompt_duplicate_repaired"));
     }
 
     #[test]
@@ -12519,7 +12675,8 @@ Implemented.
 
         std::fs::write(&doc, merged).unwrap();
         let repaired =
-            normalize_final_template_content(&doc, base, Some(snapshot), merged, None).unwrap();
+            normalize_final_template_content(&doc, base, Some(snapshot), None, merged, None)
+                .unwrap();
 
         assert!(repaired.contains("❯ do #dupfx. spec-test-build-install-commit-push"));
         assert!(!repaired.contains("\ndo #dupfx. spec-test-build-install-commit-push\n"));
@@ -12553,9 +12710,15 @@ Verification:
 <!-- /agent:exchange -->
 ";
 
-        let repaired =
-            normalize_final_template_content(&doc, baseline, Some(baseline), duplicated, None)
-                .expect("duplicate response repair should succeed");
+        let repaired = normalize_final_template_content(
+            &doc,
+            baseline,
+            Some(baseline),
+            None,
+            duplicated,
+            None,
+        )
+        .expect("duplicate response repair should succeed");
 
         assert_eq!(
             repaired.matches("### Re: #duppb — gpt-5").count(),
@@ -12597,7 +12760,8 @@ Implemented.
 
         std::fs::write(&doc, merged).unwrap();
         let repaired =
-            normalize_final_template_content(&doc, base, Some(snapshot), merged, None).unwrap();
+            normalize_final_template_content(&doc, base, Some(snapshot), None, merged, None)
+                .unwrap();
 
         let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
         let response = repaired.find("### Re: #xguard — gpt-5").unwrap();
@@ -12643,9 +12807,15 @@ Can you preserve the second paragraph too?
 ";
         let response = "### Re: timeout fallback — gpt-5\n\nDone.\n";
 
-        let repaired =
-            normalize_final_template_content(&doc, base, Some(snapshot), merged, Some(response))
-                .unwrap();
+        let repaired = normalize_final_template_content(
+            &doc,
+            base,
+            Some(snapshot),
+            None,
+            merged,
+            Some(response),
+        )
+        .unwrap();
 
         let prompt_tail = repaired
             .find("Can you preserve the second paragraph too?")

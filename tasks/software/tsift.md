@@ -31,26 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-223256.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-223719.md`*
 
 Compacted content:
-- Archived 1 response topic(s): graph-db projection coverage
+- Archived 1 response topic(s): graphdb next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are the #next-steps for graphdb functionality?
-### Re: graphdb next steps — gpt-5
-
-The next graphdb work should move from substrate coverage to operational usability.
-
-Top backlog item: `#gref`.
-
-Three ordered follow-ups are now in the backlog:
-
-1. `#gref`: explicit `graph-db` refresh/status workflow so operators can materialize and inspect `.tsift/graph.db` directly, then get concrete `doctor`, `drift`, and `convex-sync` next commands.
-2. `#guse`: agent-facing graph-db evidence packets for queued/backlog work, built around `worker_context`, `source_handle`, shortest paths, and recommended commands.
-3. `#gliv`: promote the live Convex graph backend acceptance path into a documented release or CI gate once a dedicated deployment and secrets are available.
-
-I would keep the graphify semantic and visualization items in icebox until `#gref` and `#guse` are implemented. The graph DB first needs a reliable operator path and a first-class agent handoff surface.
-<!-- agent:boundary:c32391b1 -->
+<!-- agent:boundary:5b37be04 -->
 <!-- /agent:exchange -->
 ###
 <!--

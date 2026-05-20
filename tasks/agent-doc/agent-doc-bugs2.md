@@ -29,37 +29,12 @@ FlowCore refactor is complete enough to leave broad extraction mode; next top ba
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-211949.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-214535.md`*
 
 Compacted content:
-- Archived 1 response topic(s): full-content IPC guard and FlowCore next step
+- Archived 1 response topic(s): FlowCore full-content source-buffer proof
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#bqn4]. #spec-test-build-install-commit-push
-### Re: FlowCore full-content source-buffer proof — gpt-5
-
-Done. I moved the full-content source-buffer proof into `flow::document_mutation` and kept `write.rs` as a caller that serializes that shared contract into IPC payloads. The proof now has typed source hash/byte-length construction, stale-buffer replacement decisions, and a FlowCore event for rejected full-content visible writes.
-
-Spec/tests updated:
-
-- `src/agent-doc/SPEC.md`, `src/agent-doc/editors/SPEC.md`, `src/agent-doc/editors/PLUGIN-SPEC.md`, and `src/agent-doc/VERSIONS.md` now describe the FlowCore-owned full-content visible-replacement contract.
-- Added pure FlowCore tests for proof matching/rejection.
-- Added a deterministic SimWorld regression covering stale editor buffers for Compact Exchange, full-content repair, and IPC-timeout recovery.
-
-Verification/build/install:
-
-- `cargo test full_content_source_proof`
-- `cargo test full_content_ipc_payload_carries_source_buffer_identity`
-- `make check`
-- `make install`
-- GitHub CI run `26191058253` passed on pushed agent-doc commit `c6ff6e18`, including `Run make check` and `Run make tmux-ci`.
-
-Commit/push evidence:
-
-- `src/agent-doc`: `c6ff6e18 fix: move full-content proof into FlowCore`, pushed to `origin/20260422/codex-agent-backend`.
-- Parent gitlink: `256953fd2 chore: update agent-doc submodule`, pushed to `origin/main`.
-
-I staged only the intended `src/agent-doc` implementation files inside the submodule and the parent `src/agent-doc` gitlink. The parent worktree still has unrelated local dirty paths and later unrelated local `src/session-share` gitlink commits that I did not push.
-<!-- agent:boundary:20df6296 -->
+<!-- agent:boundary:257c21ac -->
 <!-- /agent:exchange -->
 ###
 <!--

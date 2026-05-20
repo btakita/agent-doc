@@ -30,68 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260519-224753.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-144729.md`*
 
 Compacted content:
-- Archived 2 response topic(s): tsift and recurring agent-doc fixes; Graphify-style tsift next steps
+- Archived 2 response topic(s): #kgnv Graphify-style traversal; #fidx fresh index gate
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-
-❯ do [#kgnv]
-❯ synchronous orchestra
-❯ dispatch #spec-test-build-install-commit-push
-❯ - do [#kgnv]
-❯ - do [#fidx]
-❯ - do [#98qd]
-❯ - do [#atvp]
-❯ - do [#g6kf]
-### Re: #kgnv Graphify-style traversal — gpt-5
-
-Implemented `#kgnv` in `src/tsift`.
-
-What changed:
-- Added `tsift traverse` for Graphify-style traversal over indexed files, indexed symbols, agent-doc session documents, and backlog items.
-- Added stable graph node handles by family: `gfil-*` files, `gsym-*` symbols, `gses-*` session artifacts, and `gbak-*` backlog items.
-- Added JSON and HTML graph outputs, neighborhood reports, shortest-path traversal between graph nodes, and ranked next-node recommendations for bug-fix navigation.
-- Added read helpers for all indexed symbols and stored call edges, plus regression coverage for handle stability, backlog-to-code links, shortest paths, recommendations, HTML/JSON command output, and CLI parsing.
-- Updated `SPEC.md` and `VERSIONS.md` with the traversal contract.
-
-Verification completed:
-- `cargo fmt --check`
-- `cargo clippy --all-targets -- -D warnings`
-- `cargo test` (`597 passed`, `1 ignored`; integration tests `107 passed`)
-- `cargo test -- --ignored` (`sim_world_medium_seed_corpus_runs_wider_deterministic_budget` passed)
-- `cargo build --release`
-- `cargo install --path . --force`
-- Installed binary smoke tests: `tsift --version`, `tsift traverse --path . --limit 3 --format html`, and `tsift traverse main --path . --limit 5 --format json`
-
-CI/tmux evidence:
-- Latest `btakita/tsift` GitHub Actions `CI` run inspected: `25886528744`, success; its `Full CI suite` step passed. The tsift workflow has no separate `tmux-ci` or `tmux-test` leg.
-- Latest parent `btakita/agent-loop` `Agent Doc` run inspected: `26129829228`. Its `tmux-ci` and `check` jobs failed with empty step lists and `gh run view --log-failed` returned `log not found`, so this is an external CI-start/runner allocation blocker rather than a red tmux test after runner startup.
-
-Commits:
-- `btakita/tsift@b163b54` (`feat: add traversal graph handles`) pushed to `origin/main`.
-- Parent repo commit `9c84e9d16` (`chore: update tsift traversal graph`) created with only the `src/tsift` gitlink; it will be pushed after this agent-doc closeout so the session response commit is included.
-
-❯ do [#fidx]
-### Re: #fidx fresh index gate — gpt-5
-
-Implemented `#fidx` in `src/tsift`.
-
-- Added a freshness gate for agent-facing graph/context packets before they read indexed symbols or call edges.
-- `tsift traverse` now checks the matching root/scoped index, incrementally refreshes missing or changed files, and reports a concise refresh diagnostic in graph warnings.
-- If the index cannot be refreshed, for example because another writer holds the index lock, traversal now skips stale symbol/call evidence and falls back to live raw source file nodes with `tsift source-read` expansion commands.
-- `context-pack` now runs the same freshness preparation before handoff status/context is assembled and carries refresh or stale/missing diagnostics in `status_reminders`.
-- Updated `SPEC.md` plus regression tests for traversal refresh, raw-source fallback under blocked refresh, and context-pack refresh before handoff.
-
-- `cargo test` (`600 passed`, `1 ignored`; integration tests `107 passed`)
-- Installed smoke checks: `tsift --version`, `tsift traverse --path . --limit 3 --format json`, and `tsift --envelope context-pack ../../tasks/software/tsift.md --budget small --json`
-
-- Latest `btakita/tsift` CI run inspected: `26130630285`, success; job `clippy + test` completed and its `Full CI suite` step passed.
-- Latest parent `btakita/agent-loop` Agent Doc run inspected: `26130674026`, failure with empty `tmux-ci`/`check` step lists and `gh run view --log-failed` returned `log not found`, so this remains an external CI-start/runner allocation blocker rather than a red tmux regression after runner startup.
-
-- `btakita/tsift@3aebc7e` (`feat: gate graph packets on fresh indexes`) pushed to `origin/main`.
-- Parent repo commit `370643c85` (`chore: update tsift freshness gate`) created with only the `src/tsift` gitlink; I will push it after this agent-doc closeout so the session response commit is included.
-<!-- agent:boundary:44c9ef50 -->
+<!-- agent:boundary:18ea518f -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -20,7 +20,8 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed stale visible-closeout write guard and added the IPC editor-side proof follow-up. Top backlog item: #ipcw.
+
+FlowCore next steps captured; top backlog item: #flowaudit.
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,7 +34,19 @@ Completed stale visible-closeout write guard and added the IPC editor-side proof
 Compacted content:
 - Archived 1 response topic(s): #ops2 FlowCore clear and orchestration
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:5df190a6 -->
+❯ What are the #next-steps for flow core?
+### Re: #next-steps for FlowCore — gpt-5
+
+FlowCore has crossed the planned extraction line: Phase 0/1 mirror events, routed reopen, document mutation, closeout, session cycle, operator clear, and orchestration batch all have shipped entries in the completed archive. The next useful work is not another tactical bug fix; it is consolidation so future fixes stay on FlowCore instead of drifting back into route/write/git/session-check branches.
+
+I captured the next FlowCore backlog items in this priority order:
+
+1. `#flowaudit` - audit remaining route/write/session/clear/orchestrate guard strings and prove they map to typed FlowCore events.
+2. `#flowadapters` - thin the command adapters now that FlowCore owns the decisions, without changing behavior.
+3. `#flowe2e` - add cross-flow regression coverage for route -> document mutation -> closeout -> session-check under live typing/IPC and queue child patchback scenarios.
+
+Top backlog item: `#flowaudit`.
+<!-- agent:boundary:a86aa118 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,6 +59,9 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#flowaudit] [recommended] FlowCore consolidation audit: map remaining route/write/session/clear/orchestrate guard strings to typed flow events, update ops summary/spec if any bypass remains. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
+- [ ] [#flowadapters] [recommended] Thin the remaining command adapters now that FlowCore owns decisions: reduce route.rs/write.rs/preflight.rs/session_check.rs hot-path branches by moving pure checks behind flow ports without behavior changes. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
+- [ ] [#flowe2e] [recommended] Add cross-flow regression coverage for route -> document_mutation -> closeout -> session_check under live typing/IPC and queue child patchback scenarios. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

@@ -134,6 +134,15 @@ Already applied.
     }
 
     @Test
+    fun `editor apply proof rejects content or generation drift`() {
+        val proof = EditorApplyProof("before", 7L)
+
+        assertTrue(editorApplyProofStillCurrentUtil(proof, "before", 7L))
+        assertFalse(editorApplyProofStillCurrentUtil(proof, "after", 7L))
+        assertFalse(editorApplyProofStillCurrentUtil(proof, "before", 8L))
+    }
+
+    @Test
     fun `handles line at very start of user region`() {
         // First line of the user region (no leading newline before it)
         val doc = "<!-- agent:exchange patch=append -->\nFirst line.\nSecond line.\n<!-- /agent:exchange -->\n"

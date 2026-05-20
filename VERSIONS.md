@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Editor IPC patches now prove the live buffer generation before mutation.**
+  JetBrains and VS Code capture the editor buffer text plus generation after
+  typing debounce and re-check that proof immediately before component append,
+  socket IPC, and full-content repair writes. Stale generation mismatches now
+  reject the editor mutation without ACK, and socket `status:error` acks are no
+  longer treated as successful delivery. Bumped local plugin builds to JetBrains
+  `0.2.125` and VS Code `0.2.19`.
+
 - **Visible writes now prove the merged current document is still current.**
   Template/CRDT disk writes, IPC timeout fallbacks, and repair replays now
   re-read the session markdown after the active-typing guard and fail closed if

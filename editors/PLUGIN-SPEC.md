@@ -29,13 +29,14 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 1. Read and parse patch JSON file.
 2. Open the target document via editor API (`FileDocumentManager` for JB, `workspace.openTextDocument` for VSCode).
 3. Wait for the shared typing debounce before computing or applying an editor-visible mutation. If the bounded wait times out, do not mutate the document; leave file-watch patches for retry and let socket delivery fail closed.
-4. If `fullContent` is non-empty: replace entire document content (inline-mode documents).
-5. Otherwise, apply structured patches:
+4. Capture an editor apply proof from the exact buffer content and editor generation (`Document.modificationStamp` / `TextDocument.version`). Re-check the proof immediately before every visible mutation. If the buffer text or generation changed, reject the patch without ACK so live typing cannot be overwritten by a stale IPC apply.
+5. If `fullContent` is non-empty: replace entire document content (inline-mode documents).
+6. Otherwise, apply structured patches:
    a. Apply `frontmatter` field: merge YAML key/value pairs into existing frontmatter block (`---\n...\n---\n`). Preserve key order; append new keys.
    b. Apply `patches[]` array: for each `{component, content}`, find the matching component markers and apply content according to mode.
    c. Apply `unmatched` content: try `exchange` component first, fall back to `output` component.
-6. Write changes atomically via editor's write-command API (`WriteCommandAction` for JB, `WorkspaceEdit` for VSCode).
-7. Save the document to disk.
+7. Write changes atomically via editor's write-command API (`WriteCommandAction` for JB, `WorkspaceEdit` for VSCode).
+8. Save the document to disk.
 
 **Component matching:**
 - Open tag regex: `<!-- agent:NAME(\s[^>]*)? -->`  (supports inline attributes)

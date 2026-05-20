@@ -378,6 +378,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
                 WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
                     val content = document.text
+                    val proof = EditorApplyProof(content, document.modificationStamp)
                     val sourceContent =
                         if (preserveHead && shouldPreferCommittedDiskContentForRepositionUtil(content, diskContent)) {
                             diskContent
@@ -391,8 +392,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                         NativePatching.repositionBoundaryToEnd(sourceContent, boundaryId)
                             ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId)
                     } ?: return@runWriteCommandAction
-                    if (result != content && document.text == content) {
+                    if (result != content && editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
                         document.setText(result)
+                    } else if (result != content) {
+                        LOG.warn("[patch-watcher] stale editor generation before reposition for $filePath; retrying")
+                        scheduleRepositionRetry(filePath, boundaryId, preserveHead)
                     }
                 })
                 FileDocumentManager.getInstance().saveDocument(document)
@@ -592,6 +596,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         // blocking the EDT for no-op patches. Only acquire the write lock
         // if the content actually changed.
         val content = document.text
+        val proof = EditorApplyProof(content, document.modificationStamp)
 
         // Full content replacement — only for append-mode documents without component patches.
         // When component patches are present, use the patch path instead: it applies
@@ -600,15 +605,27 @@ class PatchWatcher(private val project: Project) : Disposable {
         // replace the document with a version that may not include the new response,
         // leading to duplicates on the next cycle.
         if (!patch.fullContent.isNullOrEmpty() && patch.patches.isEmpty()) {
+            if (!applyProofStillCurrent(proof, document, patch.file, "full content")) {
+                return false
+            }
             if (patch.fullContent == content) {
                 LOG.warn("Patch produced no changes for ${patch.file}")
                 writeAckContent(patch.patchId, document.text, patch.file)
                 return true
             }
+            var wrote = false
             WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
+                if (!editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
+                    LOG.warn("[patch-watcher] stale editor generation during full content patch for ${patch.file}; rejecting")
+                    return@runWriteCommandAction
+                }
                 document.setText(patch.fullContent)
+                wrote = true
                 LOG.info("Patch applied (full content) to ${patch.file}")
             })
+            if (!wrote) {
+                return false
+            }
             FileDocumentManager.getInstance().saveDocument(document)
             writeAckContent(patch.patchId, document.text, patch.file)
             return true
@@ -663,10 +680,22 @@ class PatchWatcher(private val project: Project) : Disposable {
             return true
         }
 
+        if (!applyProofStillCurrent(proof, document, patch.file, "component patch")) {
+            return false
+        }
+        var wrote = false
         WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
+            if (!editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
+                LOG.warn("[patch-watcher] stale editor generation during component patch for ${patch.file}; rejecting")
+                return@runWriteCommandAction
+            }
             document.setText(result)
+            wrote = true
             LOG.info("Patch applied to ${patch.file} (${result.length - content.length} chars changed)")
         })
+        if (!wrote) {
+            return false
+        }
 
         // Save the document to disk (so snapshot can read it)
         FileDocumentManager.getInstance().saveDocument(document)
@@ -677,6 +706,19 @@ class PatchWatcher(private val project: Project) : Disposable {
         // markers and HEAD repositioning; the FFI commit skips all of that. The preflight
         // sweep (Fix 5) handles missed commits as a backstop for interrupted sessions.
         return true
+    }
+
+    private fun applyProofStillCurrent(
+        proof: EditorApplyProof,
+        document: com.intellij.openapi.editor.Document,
+        filePath: String,
+        operation: String,
+    ): Boolean {
+        if (editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
+            return true
+        }
+        LOG.warn("[patch-watcher] stale editor generation before $operation for $filePath; rejecting patch")
+        return false
     }
 
     /**
@@ -1169,6 +1211,18 @@ data class ComponentPatch(
     val boundaryId: String? = null,
     val ensureBoundary: Boolean = false,
 )
+
+internal data class EditorApplyProof(
+    val content: String,
+    val modificationStamp: Long,
+)
+
+internal fun editorApplyProofStillCurrentUtil(
+    proof: EditorApplyProof,
+    currentContent: String,
+    currentModificationStamp: Long,
+): Boolean =
+    proof.modificationStamp == currentModificationStamp && proof.content == currentContent
 
 internal fun findCodeBlockRangesUtil(doc: String): List<Pair<Int, Int>> {
     val ranges = mutableListOf<Pair<Int, Int>>()

@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
 import * as native from './native';
-import { consumeClaimedPatch, isPatchAlreadyApplied } from './patchGuard';
+import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
 import { appendPatchAlreadyPresent, isPureRepositionSignal } from './patchPlan';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
@@ -1373,7 +1373,7 @@ class PatchWatcher implements vscode.Disposable {
                 return;
             }
 
-            const applied = await this.applyPatch(patch);
+            const applied = await this.applyPatch(patch, uri.fsPath);
 
             if (applied) {
                 // ACK: delete the patch file
@@ -1441,7 +1441,13 @@ class PatchWatcher implements vscode.Disposable {
                     ?? this.repositionBoundaryToEndPreserveHeadTs(content, 'exchange', boundaryId))
                 : (native.repositionBoundaryToEnd(content, projectRoot, boundaryId)
                     ?? this.repositionBoundaryToEndTs(content, 'exchange', boundaryId));
-            if (repositioned && repositioned !== content && document.getText() === content) {
+            const proof = createEditorApplyProof(content, document.version);
+            if (repositioned && repositioned !== content) {
+                if (!isEditorApplyProofCurrent(proof, document.getText(), document.version)) {
+                    this.outputChannel.appendLine(`PatchWatcher: stale editor generation before reposition for ${filePath}; retrying`);
+                    this.schedulePatchRetry(patchFilePath);
+                    return;
+                }
                 const fullRange = new vscode.Range(
                     document.positionAt(0),
                     document.positionAt(content.length),
@@ -1495,7 +1501,7 @@ class PatchWatcher implements vscode.Disposable {
         }, 500);
     }
 
-    private async applyPatch(patch: IpcPatch): Promise<boolean> {
+    private async applyPatch(patch: IpcPatch, patchFilePath?: string): Promise<boolean> {
         const fileUri = vscode.Uri.file(patch.file);
 
         // Find or open the target document
@@ -1508,6 +1514,7 @@ class PatchWatcher implements vscode.Disposable {
         }
 
         const baselineContent = document.getText();
+        const proof = createEditorApplyProof(baselineContent, document.version);
         const fullRange = new vscode.Range(
             document.positionAt(0),
             document.positionAt(baselineContent.length),
@@ -1519,6 +1526,9 @@ class PatchWatcher implements vscode.Disposable {
         // document before patches run, causing the response to be lost or duplicated.
         if (patch.fullContent != null && patch.fullContent !== '' && patch.patches.length === 0) {
             const content = baselineContent;
+            if (!this.verifyApplyProof(document, proof, patch.file, 'full content', patchFilePath)) {
+                return false;
+            }
             if (patch.fullContent !== content) {
                 const edit = new vscode.WorkspaceEdit();
                 edit.replace(fileUri, fullRange, patch.fullContent);
@@ -1578,6 +1588,9 @@ class PatchWatcher implements vscode.Disposable {
 
         // Apply the combined edit
         if (content !== baselineContent) {
+            if (!this.verifyApplyProof(document, proof, patch.file, 'component patch', patchFilePath)) {
+                return false;
+            }
             const edit = new vscode.WorkspaceEdit();
             edit.replace(fileUri, fullRange, content);
             const ok = await vscode.workspace.applyEdit(edit);
@@ -1589,6 +1602,23 @@ class PatchWatcher implements vscode.Disposable {
 
         await document.save();
         return true;
+    }
+
+    private verifyApplyProof(
+        document: vscode.TextDocument,
+        proof: ReturnType<typeof createEditorApplyProof>,
+        filePath: string,
+        operation: string,
+        patchFilePath?: string,
+    ): boolean {
+        if (isEditorApplyProofCurrent(proof, document.getText(), document.version)) {
+            return true;
+        }
+        this.outputChannel.appendLine(`PatchWatcher: stale editor generation before ${operation} for ${filePath}; rejecting patch`);
+        if (patchFilePath) {
+            this.schedulePatchRetry(patchFilePath);
+        }
+        return false;
     }
 
     /**

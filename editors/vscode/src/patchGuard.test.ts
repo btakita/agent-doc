@@ -3,7 +3,14 @@ import assert from 'node:assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { consumeClaimedPatch, docHash, isPatchAlreadyApplied, resolveAgentDocRootForFile } from './patchGuard';
+import {
+    consumeClaimedPatch,
+    createEditorApplyProof,
+    docHash,
+    isEditorApplyProofCurrent,
+    isPatchAlreadyApplied,
+    resolveAgentDocRootForFile,
+} from './patchGuard';
 
 function makeTempDir(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-doc-patch-guard-'));
@@ -64,11 +71,30 @@ describe('patchGuard', () => {
     it('keeps active-typing patch timeouts as retry states', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const guardIdx = source.indexOf("awaitIdleBeforeDocumentMutation(patch.file, 'file patch', uri.fsPath)");
-        const applyIdx = source.indexOf('const applied = await this.applyPatch(patch)');
+        const applyIdx = source.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');
 
         assert.ok(guardIdx >= 0, 'patch watcher should guard visible writes with typing idle');
         assert.ok(applyIdx > guardIdx, 'patch watcher should guard before applyPatch');
         assert.ok(source.includes('this.schedulePatchRetry(patchFilePath)'));
         assert.ok(source.includes('typing debounce timed out before reposition'));
+    });
+
+    it('rejects stale editor apply proofs when content or version changed', () => {
+        const proof = createEditorApplyProof('before', 7);
+
+        assert.strictEqual(isEditorApplyProofCurrent(proof, 'before', 7), true);
+        assert.strictEqual(isEditorApplyProofCurrent(proof, 'after', 7), false);
+        assert.strictEqual(isEditorApplyProofCurrent(proof, 'before', 8), false);
+    });
+
+    it('checks the apply proof before component and full-content visible writes', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const fullContentIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'full content'");
+        const fullEditIdx = source.indexOf('edit.replace(fileUri, fullRange, patch.fullContent)');
+        const componentProofIdx = source.indexOf("this.verifyApplyProof(document, proof, patch.file, 'component patch'");
+        const componentEditIdx = source.indexOf('edit.replace(fileUri, fullRange, content)');
+
+        assert.ok(fullContentIdx >= 0 && fullContentIdx < fullEditIdx);
+        assert.ok(componentProofIdx >= 0 && componentProofIdx < componentEditIdx);
     });
 });

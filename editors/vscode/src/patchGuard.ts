@@ -46,3 +46,20 @@ export function consumeClaimedPatch(patchId: string | undefined, filePath: strin
         return false;
     }
 }
+
+export interface EditorApplyProof {
+    readonly content: string;
+    readonly version: number;
+}
+
+export function createEditorApplyProof(content: string, version: number): EditorApplyProof {
+    return { content, version };
+}
+
+export function isEditorApplyProofCurrent(
+    proof: EditorApplyProof,
+    currentContent: string,
+    currentVersion: number,
+): boolean {
+    return proof.version === currentVersion && proof.content === currentContent;
+}

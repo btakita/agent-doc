@@ -96,7 +96,14 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
         Ok((Ok(0), _)) => Err(anyhow::anyhow!(
             "IPC ack: plugin closed connection without responding"
         )),
-        Ok((Ok(_), line)) => Ok(Some(line.trim().to_string())),
+        Ok((Ok(_), line)) => {
+            let ack = line.trim().to_string();
+            if ack_reports_error(&ack) {
+                Err(anyhow::anyhow!("IPC ack status error: {}", ack))
+            } else {
+                Ok(Some(ack))
+            }
+        }
         Ok((Err(e), _)) => Err(anyhow::anyhow!("IPC ack read error: {}", e)),
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
             Err(anyhow::anyhow!("IPC ack timeout (2s)"))
@@ -105,6 +112,18 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
             Err(anyhow::anyhow!("IPC reader thread disconnected"))
         }
     }
+}
+
+fn ack_reports_error(ack: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(ack)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("status")
+                .and_then(|status| status.as_str())
+                .map(|status| status.eq_ignore_ascii_case("error"))
+        })
+        .unwrap_or(false)
 }
 
 /// Send a patch message to the plugin.
@@ -257,6 +276,33 @@ mod tests {
         assert_eq!(ack["id"], "vcs_refresh");
 
         // Clean up — remove socket to stop listener
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
+    fn socket_error_ack_is_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, |_msg| {
+                Some(serde_json::json!({"type": "ack", "status": "error"}).to_string())
+            })
+            .ok();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let msg = serde_json::json!({"type": "patch"});
+        let err = send_message(&root, &msg).unwrap_err().to_string();
+        assert!(
+            err.contains("IPC ack status error"),
+            "error ack should fail the socket IPC send, got: {err}"
+        );
+
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
     }

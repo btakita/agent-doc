@@ -106,6 +106,8 @@ Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that
 
 **Active-typing visible-write guard:** Before any editor-visible document mutation, including socket patches, file-watch patches, full-content patches, and boundary reposition, plugins must wait for the shared typing debounce. If the bounded wait times out, the plugin must not call `Document.setText`, `WorkspaceEdit`, or VFS binary-content replacement. File-watch patches stay on disk for retry; socket writes fail closed so the CLI can take its normal retry/fallback path.
 
+**Editor apply proof:** After the debounce succeeds and before computing a visible mutation, plugins must capture an editor-local apply proof for the target buffer: the exact text plus the editor's generation signal (`Document.modificationStamp` in JetBrains, `TextDocument.version` in VS Code). Immediately before `Document.setText`, `WorkspaceEdit`, or full-content replacement, the plugin must re-check that both the text and generation still match that proof. If either changed, the patch is stale relative to live typing and must be rejected without acknowledgement. This applies to file IPC, socket IPC, exchange append patches, and full-content repair payloads.
+
 ## 10. CLI Dependency
 
 - Plugins resolve `agent-doc` from: `~/bin/`, `~/.local/bin/`, `~/.cargo/bin/`, `/usr/local/bin/`, or `$PATH`.

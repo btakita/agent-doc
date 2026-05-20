@@ -31,31 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-210422.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-214623.md`*
 
 Compacted content:
-- Archived 1 response topic(s): graph DB behavior next steps
+- Archived 1 response topic(s): graph DB conformance
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: graph DB conformance — gpt-5
-
-Completed `#gval`.
-
-Implemented a compiled `tsift` CLI conformance suite for graph DB behavior in `tests/graph_db_conformance.rs`. It runs the built binary against both the local SQLite graph store and a generated Convex snapshot, then locks schema, kind, neighborhood, and path query parity, deterministic pagination/filter results, newer SQLite schema fail-closed behavior, failed-refresh rollback visibility, edge-before-node tombstone reconciliation, Convex freshness failures, and missing-node edge rejection.
-
-Runtime behavior now validates Convex snapshot edges before graph reads or snapshot-backed handoffs, so an edge whose `fromExternalId` or `toExternalId` is absent fails closed instead of being trusted. `SPEC.md` now documents the compiled CLI conformance suite and the Convex orphan-edge guard.
-
-Verification passed:
-- `cargo test --test graph_db_conformance`
-- `make check`
-- `make ci-full`
-- `cargo build`
-- `cargo install --path .`
-- tsift GitHub CI latest `CI` run: success, run `26188672412`
-
-Agent Doc CI/tmux review: the latest root `Agent Doc` run `26188872503` is red, but both `tmux-ci` and `check` jobs have empty step lists, so this is classified as an external CI-start blocker rather than a local tmux regression. Local full verification is green.
-
-Committed the tsift repo change as `6517093 test: lock graph db cli conformance`. Push follows after this document closeout.
-<!-- agent:boundary:0b87ff2a -->
+<!-- agent:boundary:2ec29ffe -->
 <!-- /agent:exchange -->
 ###
 <!--

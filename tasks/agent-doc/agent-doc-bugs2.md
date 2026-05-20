@@ -58,10 +58,49 @@ I extracted the next FlowCore slices: `flow::document_mutation` now owns templat
 Updated the closeout/core/diff specs and Unreleased notes. Verification passed: `cargo check`, focused FlowCore/write/orchestrate/plan/preflight tests, `make check`, `cargo build`, and `cargo install --path .`. Latest GitHub CI run `26131409609` was green, including `Run make tmux-ci`.
 
 Submodule commit `b6c0fa59` is pushed to `btakita/agent-doc` branch `20260422/codex-agent-backend`; parent gitlink commit `9ea21ba89` is committed and will be pushed with this closeout commit.
-<!-- agent:boundary:b8873c8b -->
+❯ When I was typing in this prompt, the duplicate content corruption of this document occurred. This bug is reoccurring. Please fix this issue using FlowCore architecture.
+❯ #spec-test-build-install-commit-push
+### Re: duplicate content corruption during typing — gpt-5.5
+
+Fixed the reoccurring duplicate-content corruption by moving the active-typing decision into `flow::document_mutation` and enforcing it at visible-write boundaries.
+
+The binary now runs a FlowCore pre-write guard before direct markdown mutations across template, stream, IPC-timeout fallback, repair replay, queue consumption, pending normalization, and direct `agent-doc run` paths. If the shared typing indicator does not reach idle within the bounded wait, the write fails closed before snapshot or document replacement and logs `flow=document_mutation stage=pre_write_guard reason=visible_write_typing_defer_active_typing:<source>`.
+
+The editor plugins now match that policy. JetBrains socket patches fail closed on typing timeout, file patches stay on disk for retry, boundary reposition retries instead of applying after timeout, and `Run Agent Doc` no longer saves/routes when typing never settles. VS Code patch and reposition paths now also treat typing timeouts as retry states instead of permission to mutate the buffer.
+
+Verification completed:
+
+- `cargo test visible_write_guard`
+- `npm test` in `editors/vscode`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` in `editors/jetbrains`
+- `cargo check`
+- `cargo test --all-targets -- --test-threads=2`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Installed JetBrains plugin `0.2.123` locally to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`
+
+CI/tmux evidence: latest GitHub Actions CI run `26168143324` is successful, and its `Run make tmux-ci` step is also successful.
+
+Commits created:
+
+- `src/agent-doc`: `84710f36 fix: defer visible writes during active typing` (pushed to `20260422/codex-agent-backend`)
+- parent repo: `dd5704af3 agent-doc: defer visible writes during active typing` (push follows this session-document finalize)
+<!-- agent:boundary:e7b21192 -->
 <!-- /agent:exchange -->
 ###
 <!--
+`claude_model: opus` should default to the Claude Code definition of opus...which is currently `claude-opus-4-7`.
+
+JB `Clear Session Context` on tsift.md had an error:
+```
+Session is still running for tasks/software/tsift.md. Pane %37 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn. Latest pane output: gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 59% used
+```
+
+The session should not be "still running". There seems to be a deadlock. This is a real bug. Please take this bug seriously. I have asked >10 times and you have refused to consider this a bug. You think this in correct behavior but you are dead wrong. This keeping the session open in perpetuity is a real critical bug. Please update whatever spec you need to update to understand this.
+
+#spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->

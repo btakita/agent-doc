@@ -87,27 +87,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-221546.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-222227.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Google Drive tests and OAuth caching
+- Archived 1 response topic(s): Google Docs live tests
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ I enabled https://console.cloud.google.com/apis/api/docs.googleapis.com/metrics?project=unop-d3871
-❯ Try tests again
-### Re: Google Docs live tests — gpt-5
-
-Reran the previously skipped live Google Docs API checks for `brian.takita@gmail.com`; they pass now.
-
-Evidence:
-- Created a fresh converted Google Doc with `corky doc upload /tmp/corky-drive-live4.6p9ESv/google-doc.md --convert --account brian.takita@gmail.com`.
-- `corky docs read 1aHNRsVfSsTPYRheGFIBCjUqMZK9mDSPTd_f40OobBZA --account brian.takita@gmail.com` succeeded and returned the initial document text.
-- `corky docs write 1aHNRsVfSsTPYRheGFIBCjUqMZK9mDSPTd_f40OobBZA /tmp/corky-drive-live4.6p9ESv/google-doc-update.md --account brian.takita@gmail.com` succeeded.
-- A follow-up `corky docs read ...` returned the updated markdown body.
-- `corky doc export ... --format txt -o /tmp/corky-docs-retry-export.txt --account brian.takita@gmail.com` also showed the updated content through Drive export.
-- Deleted the temporary Google Doc through Drive API; delete returned HTTP `204`.
-
-No Corky code changed, so I did not rerun the local Rust suite. The Corky repo itself is clean. I marked `#enable-docs-api-corky-oauth` done.
-<!-- agent:boundary:7c717663 -->
+<!-- agent:boundary:d9d20cda -->
 <!-- /agent:exchange -->
 ###
 <!--

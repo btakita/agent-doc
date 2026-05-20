@@ -30,44 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-194635.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-202137.md`*
 
 Compacted content:
-- Archived 2 response topic(s): graph extension next steps; graph extension implementation
+- Archived 2 response topic(s): graph DB API next steps; graph DB API implementation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are #next-steps in support graph db api over sqlite and convex?
-### Re: graph DB API next steps — gpt-5
-
-Top backlog item after this cycle: `#gapi`.
-
-The substrate work is past the prototype boundary now: `GraphStore` exists, SQLite materializes `.tsift/graph.db`, `traverse` and `context-pack` read through the store, and Convex has row projection plus snapshot freshness checks. The next step is to make that an explicit graph DB API contract instead of an implementation detail inside traversal.
-
-I added four prioritized backlog items:
-
-1. `#gapi` — promote the provider-neutral graph substrate into a stable graph DB API surface over SQLite and Convex: backend selection, node lookup, kind scans, neighborhood/subgraph reads, shortest paths, JSON schemas, and fail-closed freshness semantics.
-2. `#gcon` — add a backend conformance suite so SQLite and Convex prove the same behavior over the same projection fixtures, including ordering, missing-node failures, and stale projection errors.
-3. `#cxlv` — add the live Convex transport beyond dry-run planning: auth/config, remote snapshot pull, chunked idempotent upserts, tombstones, retries, resume diagnostics, and schema/index guidance.
-4. `#gidx` — harden the SQLite correctness store for incremental projections: version rows, source watermarks, row-level tombstones, migrations, and reader-safe refresh behavior.
-
-I would keep `#98qd` immediately after those. Agent-doc context shaping should consume the stable graph DB API once it exists, rather than binding directly to today’s traversal projection internals.
-### Re: graph DB API implementation — gpt-5
-
-Implemented and committed the four queued graph DB items.
-
-- `#gapi`: added a stable provider-neutral graph DB API surface through the expanded `GraphStore` contract and new `tsift graph-db` CLI for schema, node lookup, kind scans, neighborhoods, shortest paths, SQLite reads, and Convex snapshot reads.
-- `#gcon`: extended backend conformance coverage across SQLite and Convex row stores for CRUD, ordering, neighborhoods, missing-edge safety, shortest paths, and freshness-gated graph reads.
-- `#cxlv`: extended `convex-sync` beyond dry-run planning with `--remote-snapshot`, `--apply`, `--endpoint`, `TSIFT_CONVEX_GRAPH_URL`, bearer-token env support, ordered idempotent chunks, retry receipts, and apply-mode diagnostics.
-- `#gidx`: added SQLite graph projection version rows, content/source watermarks, row-level tombstones, schema version checks, and transactional reader-safe projection refreshes.
-
-Spec updates are in `src/tsift/SPEC.md`. Implementation is committed in the tsift submodule as `128d1cd` (`feat: add graph db api and convex sync transport`), and the parent repo submodule pointer is committed as `f42c8c643` (`chore: update tsift submodule`).
-
-Verification:
-- `make check` passed (`cargo clippy --all-targets -- -D warnings` plus `cargo test`: 628 unit tests passed, 1 ignored; 107 integration tests passed).
-- `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/tsift`; `tsift --version` reports `tsift 0.1.42`.
-- Latest GitHub Actions run for `btakita/tsift` was successful: run `26184524562`, job `clippy + test`. That workflow has no tmux-test job listed, so there was no tmux CI leg to remediate.
-
-Push is intentionally after this finalize step per the session closeout ordering.
-<!-- agent:boundary:1d8872e3 -->
+<!-- agent:boundary:3c880857 -->
 <!-- /agent:exchange -->
 ###
 <!--

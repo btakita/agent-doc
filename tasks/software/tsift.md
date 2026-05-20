@@ -87,7 +87,35 @@ Recommended shape:
 The quality bar is: stable IDs, idempotent upserts, provenance/freshness on every derived record, typed edge kinds, parity tests, and fail-closed behavior when a projection is stale. If we do that, Convex `nodes` + `edges` is a reasonable current store and still leaves a clean swap path to FalkorDB or another vendor later.
 
 I added a recommended backlog item for the concrete `tsift` implementation step: Convex projection backend behind the provider-neutral substrate, with SQLite preserved as the correctness store and parity tests.
-<!-- agent:boundary:3c67f5b8 -->
+❯ do [#d2k2]. #spec-test-build-install-commit-push
+### Re: Convex graph projection backend — gpt-5
+
+Completed [#d2k2].
+
+
+- Added a shared `GraphProjection::upsert_into` path so stores apply projection nodes before edges.
+- Added Convex projection row types for `nodes` and `edges`: stable `externalId` node keys, deterministic `edgeKey` values from `(from_id, kind, to_id)`, and preservation of properties, provenance, and freshness.
+- Added a generic `ConvexGraphStore<C>` adapter over a `ConvexGraphClient` contract, including fail-closed edge upserts when either endpoint node is missing.
+- Reused the same shortest-path traversal helper for SQLite and Convex-backed stores.
+- Updated `SPEC.md` with the Convex `nodes`/`edges` table shape, required indexes, and parity-test expectation.
+- Added backend-agnostic projection parity tests proving the same projection round-trips through SQLite and the Convex adapter, plus stable-key and missing-node tests.
+
+Verification:
+
+- `cargo test substrate` passed (`7 passed`).
+- `make check` passed (`616 passed`, `107 passed`, `1 ignored`).
+- `make ci-full` passed, including the ignored deterministic SimWorld leg.
+- `cargo build --release` passed.
+- `cargo install --path . --force` completed and replaced the local `tsift` binary.
+- Installed smoke check: `tsift --version` returned `tsift 0.1.42`.
+- `tsift status --fix` refreshed the local tsift index after the source changes.
+- GitHub Actions `CI` run `26178840495` for `btakita/tsift` completed successfully in `2m2s`; the only annotation is GitHub's Node.js 20 action deprecation notice.
+- This repo has `CI` and `Release` workflows and no `tmux-ci` make target, so there was no tmux-specific CI leg to inspect.
+
+
+- `src/tsift`: `48e2630 feat: add convex graph projection adapter`
+- root repo submodule pointer: `70087658b chore: update tsift submodule`
+<!-- agent:boundary:14a57713 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -100,7 +128,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#d2k2] [recommended] Add a Convex projection backend for tsift's provider-neutral graph substrate, mapping GraphProjection nodes/edges to Convex nodes/edges while preserving SQLite as the local correctness store and proving parity with backend-agnostic tests.
 - [ ] [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.

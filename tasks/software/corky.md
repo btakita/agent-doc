@@ -105,15 +105,44 @@ Implemented and pushed `#google-workspace-doc-types`.
 - Verification: `make check`, `cargo run --quiet -- audit-docs`, `make release`, `make install` with GPU `transcribe-cuda`, `corky --version` (`0.28.2`), and GitHub CI run `26190445577` passed. This repo has no tmux-test CI leg; the pushed CI `check` job ran clippy and tests with vendored OpenSSL and passed.
 
 I left the outer agent-loop `src/corky` gitlink unstaged; it was already dirty before this cycle and the Corky repo itself is clean after the push.
-<!-- agent:boundary:0d25098d -->
+❯ Please test the different document types by creating, editing, reading, deleting the documents in the brian.takita@gmail.com google drive.
+### Re: Google Drive live document tests — gpt-5
+
+I attempted the live Google Drive document CRUD matrix for `brian.takita@gmail.com`, but the run is externally blocked before any Drive file can be created.
+
+What I exercised:
+- Re-authorized `brian.takita@gmail.com` for Drive upload, Drive read/export, Docs, and Sheets scopes.
+- First tried the built-in/default OAuth client project `718955483040`.
+- Then pinned `CORKY_DATA=/home/brian/work/btakita/agent-loop/mail` so Corky used the configured `[gmail]` client from `mail/.corky.toml`, project `873280095295`.
+- Built the live test matrix fixtures for Google Docs, Sheets, Slides, text, PDF, SVG image, generic binary, DOCX, XLSX, PPTX, plus direct Drive create attempts for Drawing and Form coverage.
+
+Both OAuth projects returned the same Google API blocker on Drive operations:
+
+```text
+Drive API error (HTTP 403): Google Drive API has not been used in project ... before or it is disabled.
+reason: SERVICE_DISABLED
+service: drive.googleapis.com
+```
+
+No Drive files were created. The cleanup pass reported `created=0`, so there were no temporary Drive IDs to delete.
+
+Next blocker: enable Google Drive API for Corky's configured Gmail OAuth project `873280095295`, then rerun the matrix. The activation URL reported by Google is:
+
+`https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=873280095295`
+
+I added backlog item `#enable-drive-api-corky-oauth` for that follow-up. No Corky repo files were changed.
+<!-- agent:boundary:0feae0ae -->
 <!-- /agent:exchange -->
 ###
 <!--
+During the google drive tests, I was prompted for oauth 4 times. Is there an issues with oauth token caching?
+#spec-test-build-install-commit-push
 -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#enable-drive-api-corky-oauth] Enable Google Drive API for Corky's configured Gmail OAuth project 873280095295, then rerun the live Google Workspace Drive CRUD matrix for brian.takita@gmail.com.
 - [ ] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi, rerun the PyPI workflow, and verify the PyPI latest version matches the released crate.
 - [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.

@@ -42,7 +42,30 @@ The FlowCore refactor is at the point where the broad extraction queue can stay 
 The next step is a maintenance gate, not another large rewrite: for the next hot-path bugfix, verify the touched branch does not add new free-form guard/proof strings outside FlowCore, promote any new branch into the owning enum/event, and add the smallest regression at the right level: pure flow test first, SimWorld when interleavings matter, tmux only for external boundary proof.
 
 I added that as the new top backlog item: #fcrg. The previous lower-agent orchestration sequence should stay immediately behind it, starting with #y9kk.
-<!-- agent:boundary:34a26a28 -->
+❯ do [#fcrg]. #spec-test-build-install-commit-push
+### Re: FlowCore regression gate — gpt-5
+
+Implemented `#fcrg`.
+
+I tightened the touched routed-reopen branch so route prompt-ready and dispatch-proof failures now use `RoutedReopenGuardReason` instead of passing free-form reason strings from `route.rs` into FlowCore events. I also added the executable regression gate in `tests/test_cli.rs`: it budgets existing hot-path `guard_`, `proof=`, `proof_scope=`, `reason=`, `flow_reason=`, and `accepted_only` tokens across route/write/preflight/session-check/orchestrate/git/repair, so future additions have to be audited and promoted through the owning FlowCore enum/event before the budget changes.
+
+Spec/docs updated:
+- `SPEC.md`
+- `docs/reference/flow-map.md`
+- `VERSIONS.md`
+
+Commits created:
+- `src/agent-doc`: `9a331a1c test: add flowcore regression gate`
+- parent repo: `273874a91 agent-doc: update flowcore regression gate`
+
+Verification:
+- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
+- `cargo test route_failure_events_are_owned_by_routed_reopen_flow`
+- `cargo test typed_flow_events_cover_route_write_closeout_session_check_and_child_patchback`
+- `make check`
+- `make install`
+- Latest GitHub CI run on `20260422/codex-agent-backend` was green, including the `Run make tmux-ci` step.
+<!-- agent:boundary:04599849 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,7 +77,6 @@ I added that as the new top backlog item: #fcrg. The previous lower-agent orches
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#fcrg] [recommended] FlowCore regression gate: after the next agent-doc hot-path bugfix, audit the touched route/write/preflight/session_check/orchestrate branch for new free-form proof or guard strings, promote any new branch into the owning FlowCore enum/event, and add the smallest pure-flow, SimWorld, or tmux regression before closeout. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

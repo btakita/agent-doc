@@ -87,51 +87,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-205756.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-214719.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Google Workspace document coverage
+- Archived 2 response topic(s): Google Workspace document types; Google Drive live document tests
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ do [#google-workspace-doc-types]. #spec-test-build-install-commit-push
-### Re: Google Workspace document types — gpt-5
-
-Implemented and pushed `#google-workspace-doc-types`.
-
-- Corky commit: `b0a1d97 feat: expand Google Workspace document handling`, pushed to `origin/main`.
-- Added Drive-aware document handling: `corky doc info`, `corky doc export`, broader `corky doc read`, and Drive binary replacement through `corky doc write`.
-- Added Drive MIME detection/routing for Google Docs, Sheets, Slides, Forms, Drawings, PDFs, Office/OpenDocument files, text, images, and other Drive binaries.
-- Added `drive-readonly` auth scope and preserved incremental Google OAuth behavior so additional Drive/Docs/Sheets scopes can extend an existing grant.
-- Updated `SPEC.md`, README, command docs, privacy scope docs, and Google Workspace integration notes.
-- Verification: `make check`, `cargo run --quiet -- audit-docs`, `make release`, `make install` with GPU `transcribe-cuda`, `corky --version` (`0.28.2`), and GitHub CI run `26190445577` passed. This repo has no tmux-test CI leg; the pushed CI `check` job ran clippy and tests with vendored OpenSSL and passed.
-
-I left the outer agent-loop `src/corky` gitlink unstaged; it was already dirty before this cycle and the Corky repo itself is clean after the push.
-❯ Please test the different document types by creating, editing, reading, deleting the documents in the brian.takita@gmail.com google drive.
-### Re: Google Drive live document tests — gpt-5
-
-I attempted the live Google Drive document CRUD matrix for `brian.takita@gmail.com`, but the run is externally blocked before any Drive file can be created.
-
-What I exercised:
-- Re-authorized `brian.takita@gmail.com` for Drive upload, Drive read/export, Docs, and Sheets scopes.
-- First tried the built-in/default OAuth client project `718955483040`.
-- Then pinned `CORKY_DATA=/home/brian/work/btakita/agent-loop/mail` so Corky used the configured `[gmail]` client from `mail/.corky.toml`, project `873280095295`.
-- Built the live test matrix fixtures for Google Docs, Sheets, Slides, text, PDF, SVG image, generic binary, DOCX, XLSX, PPTX, plus direct Drive create attempts for Drawing and Form coverage.
-
-Both OAuth projects returned the same Google API blocker on Drive operations:
-
-```text
-Drive API error (HTTP 403): Google Drive API has not been used in project ... before or it is disabled.
-reason: SERVICE_DISABLED
-service: drive.googleapis.com
-```
-
-No Drive files were created. The cleanup pass reported `created=0`, so there were no temporary Drive IDs to delete.
-
-Next blocker: enable Google Drive API for Corky's configured Gmail OAuth project `873280095295`, then rerun the matrix. The activation URL reported by Google is:
-
-`https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=873280095295`
-
-I added backlog item `#enable-drive-api-corky-oauth` for that follow-up. No Corky repo files were changed.
-<!-- agent:boundary:0feae0ae -->
+<!-- agent:boundary:e5bb0504 -->
 <!-- /agent:exchange -->
 ###
 <!--

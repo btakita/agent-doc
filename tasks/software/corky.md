@@ -87,12 +87,11 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-230401.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-232100.md`*
 
 Compacted content:
-- Archived 1 response topic(s): PyPI 0.28.2 wheels
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:0b3948d1 -->
+<!-- agent:boundary:526ff9c5 -->
 <!-- /agent:exchange -->
 ###
 <!--

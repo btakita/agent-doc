@@ -29,24 +29,12 @@ FlowCore next steps captured; top backlog item: #flowaudit.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-185020.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-190430.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #ops2 FlowCore clear and orchestration
+- Archived 1 response topic(s): #next-steps for FlowCore
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ What are the #next-steps for flow core?
-### Re: #next-steps for FlowCore — gpt-5
-
-FlowCore has crossed the planned extraction line: Phase 0/1 mirror events, routed reopen, document mutation, closeout, session cycle, operator clear, and orchestration batch all have shipped entries in the completed archive. The next useful work is not another tactical bug fix; it is consolidation so future fixes stay on FlowCore instead of drifting back into route/write/git/session-check branches.
-
-I captured the next FlowCore backlog items in this priority order:
-
-1. `#flowaudit` - audit remaining route/write/session/clear/orchestrate guard strings and prove they map to typed FlowCore events.
-2. `#flowadapters` - thin the command adapters now that FlowCore owns the decisions, without changing behavior.
-3. `#flowe2e` - add cross-flow regression coverage for route -> document mutation -> closeout -> session-check under live typing/IPC and queue child patchback scenarios.
-
-Top backlog item: `#flowaudit`.
-<!-- agent:boundary:a86aa118 -->
+<!-- agent:boundary:6855c923 -->
 <!-- /agent:exchange -->
 ###
 <!--

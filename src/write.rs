@@ -3733,6 +3733,18 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
                 return Ok(dedupe_consecutive_response_blocks(&repaired, file));
             }
             if let Some(repaired) =
+                crate::template::repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?
+            {
+                crate::template::guard_no_conversation_tail_outside_exchange(&repaired)
+                    .with_context(|| {
+                        format!(
+                            "template structure guard failed for {} after mixed duplicate-scaffold repair",
+                            file.display()
+                        )
+                    })?;
+                return Ok(dedupe_consecutive_response_blocks(&repaired, file));
+            }
+            if let Some(repaired) =
                 crate::template::repair_duplicate_exchange_close_tail(&normalized)?
             {
                 crate::template::guard_no_conversation_tail_outside_exchange(&repaired)
@@ -12945,7 +12957,10 @@ Can you preserve the second paragraph too?
             "## Pending / Not Built\n\n",
             "<!-- agent:backlog -->\n",
             "- [ ] [#aaaa] keep me\n",
-            "<!-- /agent:backlog -->\n"
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n"
         );
 
         let repaired = normalize_template_structure_or_fail(content, &doc_path)
@@ -12958,7 +12973,7 @@ Can you preserve the second paragraph too?
     }
 
     #[test]
-    fn normalize_template_structure_rejects_duplicate_scaffold_with_user_text() {
+    fn normalize_template_structure_repairs_duplicate_scaffold_with_user_text() {
         let dir = TempDir::new().unwrap();
         let doc_path = dir.path().join("doc.md");
         let content = concat!(
@@ -12991,15 +13006,28 @@ Can you preserve the second paragraph too?
             "## Pending / Not Built\n\n",
             "<!-- agent:backlog -->\n",
             "- [ ] [#aaaa] keep me\n",
-            "<!-- /agent:backlog -->\n"
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n"
         );
 
-        let err = normalize_template_structure_or_fail(content, &doc_path).unwrap_err();
+        let repaired = normalize_template_structure_or_fail(content, &doc_path)
+            .expect("safe prompt text in duplicate scaffold should be repaired");
 
+        assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:backlog -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:done -->").count(), 1);
         assert!(
-            err.to_string()
-                .contains("duplicate close repair suffix is ambiguous"),
-            "mixed duplicate scaffold should fail closed, got: {err:#}"
+            repaired.contains("corky.md The arrow"),
+            "safe prompt text from duplicate scaffold should be preserved:\n{repaired}"
+        );
+        let prompt = repaired.find("corky.md The arrow").unwrap();
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        assert!(
+            prompt < exchange_close,
+            "safe prompt text should move back inside exchange:\n{repaired}"
         );
     }
 }

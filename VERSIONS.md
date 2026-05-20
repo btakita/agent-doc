@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Mixed duplicate-scaffold closeouts now preserve safe prompt text.**
+  When a duplicated template scaffold lands between two `agent:exchange` close
+  markers and strands live prompt text in that duplicated segment, the
+  template normalizer now drops the duplicate scaffold, moves the safe prompt
+  text back inside `agent:exchange`, and keeps ambiguous suffixes fail-closed.
+  The repair is shared by binary closeout normalization, editor IPC
+  normalization, and the FFI path.
+
 - **Full-content editor IPC now proves the source buffer before replacement.**
   The binary stamps every `fullContent` socket/file IPC payload with a
   `patch_id`, expected source-buffer hash, and byte length. JetBrains and VS

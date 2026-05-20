@@ -836,6 +836,123 @@ pub fn repair_duplicate_exchange_close_scaffold(doc: &str) -> Result<Option<Stri
     Ok(Some(repaired))
 }
 
+/// Repair the malformed-template case where a duplicated scaffold contains
+/// safe live conversation text before the stray second exchange close marker.
+///
+/// This is the mixed form of `repair_duplicate_exchange_close_scaffold`: the
+/// duplicated queue/backlog/done scaffold should be dropped, but any ordinary
+/// prompt text stranded in that duplicate segment still belongs in the live
+/// exchange.
+pub fn repair_duplicate_exchange_close_mixed_scaffold_tail(doc: &str) -> Result<Option<String>> {
+    let open_tag = "<!-- agent:exchange";
+    let close_tag = "<!-- /agent:exchange -->";
+
+    let Some(open_start) = doc.find(open_tag) else {
+        return Ok(None);
+    };
+    let Some(open_end) = doc[open_start..]
+        .find("-->")
+        .map(|idx| open_start + idx + 3)
+    else {
+        return Ok(None);
+    };
+    let Some(first_close_start) = doc[open_end..].find(close_tag).map(|idx| open_end + idx) else {
+        return Ok(None);
+    };
+    let first_close_end = first_close_start + close_tag.len();
+    let Some(second_close_start) = doc[first_close_end..]
+        .find(close_tag)
+        .map(|idx| first_close_end + idx)
+    else {
+        return Ok(None);
+    };
+    let second_close_end = second_close_start + close_tag.len();
+
+    let duplicate_segment = &doc[first_close_end..second_close_start];
+    let Some(exchange_tail) = safe_exchange_tail_from_duplicate_scaffold(duplicate_segment)? else {
+        return Ok(None);
+    };
+
+    let prefix = &doc[..first_close_end];
+    let mut repaired = append_tail_to_exchange_end(prefix, &exchange_tail)?;
+    repaired.push_str(&doc[second_close_end..]);
+    Ok(Some(repaired))
+}
+
+fn safe_exchange_tail_from_duplicate_scaffold(segment: &str) -> Result<Option<String>> {
+    let has_scaffold_component = segment.contains("<!-- agent:queue -->")
+        || segment.contains("<!-- agent:backlog")
+        || segment.contains("<!-- agent:pending")
+        || segment.contains("<!-- agent:done");
+    if !has_scaffold_component {
+        return Ok(None);
+    }
+
+    let mut residue = segment.to_string();
+    if let Ok(components) = component::parse(segment) {
+        let mut ranges: Vec<(usize, usize)> = components
+            .iter()
+            .filter(|component| {
+                matches!(
+                    component.name.as_str(),
+                    "queue" | "backlog" | "pending" | "icebox" | "done"
+                )
+            })
+            .map(|component| (component.open_start, component.close_end))
+            .collect();
+        ranges.sort_by_key(|range| std::cmp::Reverse(range.0));
+        for (start, end) in ranges {
+            residue.replace_range(start..end, "");
+        }
+    }
+
+    let residue = strip_html_comments(&residue);
+    let tail = residue
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                None
+            } else {
+                Some(line.trim_end())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tail = tail.trim();
+    if tail.is_empty() {
+        return Ok(None);
+    }
+    if !tail_is_safe_exchange_content(tail) {
+        anyhow::bail!(
+            "conversation content escaped `agent:exchange`, but the duplicate scaffold repair suffix is ambiguous"
+        );
+    }
+    Ok(Some(tail.to_string()))
+}
+
+fn append_tail_to_exchange_end(prefix: &str, tail: &str) -> Result<String> {
+    let prefix_without_boundaries = remove_all_boundaries(prefix);
+    let components =
+        component::parse(&prefix_without_boundaries).context("failed to parse repair prefix")?;
+    let exchange = components
+        .iter()
+        .find(|c| c.name == "exchange")
+        .context("exchange component disappeared during mixed duplicate-scaffold repair")?;
+
+    let existing = exchange.content(&prefix_without_boundaries).trim_end();
+    let mut new_content = String::new();
+    if !existing.is_empty() {
+        new_content.push_str(existing);
+        new_content.push('\n');
+    }
+    new_content.push_str(tail.trim_end());
+    new_content.push('\n');
+    new_content.push_str(&crate::format_boundary_marker(&crate::new_boundary_id()));
+    new_content.push('\n');
+    Ok(exchange.replace_content(&prefix_without_boundaries, &new_content))
+}
+
 /// Normalize the structural template invariants required before an editor IPC
 /// client mutates the visible document.
 ///
@@ -861,6 +978,14 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
             if let Some(repaired) = repair_duplicate_exchange_close_scaffold(&normalized)? {
                 guard_no_conversation_tail_outside_exchange(&repaired).with_context(
                     || "template structure guard failed after duplicate-scaffold repair",
+                )?;
+                return Ok(repaired);
+            }
+            if let Some(repaired) =
+                repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?
+            {
+                guard_no_conversation_tail_outside_exchange(&repaired).with_context(
+                    || "template structure guard failed after mixed duplicate-scaffold repair",
                 )?;
                 return Ok(repaired);
             }
@@ -4381,7 +4506,7 @@ Existing answer.
     }
 
     #[test]
-    fn normalize_editor_visible_template_structure_rejects_mixed_duplicate_scaffold() {
+    fn normalize_editor_visible_template_structure_repairs_mixed_duplicate_scaffold() {
         let doc = concat!(
             "<!-- agent:exchange patch=append -->\n",
             "### Session Summary\n",
@@ -4396,15 +4521,20 @@ Existing answer.
             "<!-- /agent:queue -->\n"
         );
 
-        let err = normalize_editor_visible_template_structure(doc).unwrap_err();
+        let repaired = normalize_editor_visible_template_structure(doc)
+            .expect("safe mixed duplicate scaffold should repair before editor write");
 
+        assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
         assert!(
-            err.to_string()
-                .contains("duplicate close repair suffix is ambiguous")
-                || err
-                    .to_string()
-                    .contains("closing marker <!-- /agent:exchange -->"),
-            "ambiguous duplicate scaffold must fail closed, got: {err:#}"
+            repaired.contains("user typed into duplicated shell"),
+            "safe user text from duplicate scaffold should be preserved:\n{repaired}"
+        );
+        let prompt = repaired.find("user typed into duplicated shell").unwrap();
+        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
+        assert!(
+            prompt < exchange_close,
+            "safe user text should move back inside exchange:\n{repaired}"
         );
     }
 

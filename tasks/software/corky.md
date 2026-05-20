@@ -122,7 +122,35 @@ Current package state:
 - PyPI `0.28.2` has the sdist plus Linux x86_64, macOS x86_64, macOS arm64, and Windows wheels.
 
 I gated `#pypi-trusted-publisher` because the repo side is done, but PyPI project settings still need a trusted publisher matching the claims above before the workflow can publish successfully.
-<!-- agent:boundary:6693de27 -->
+❯ How do I make corky a trusted publisher?
+### Re: PyPI trusted publisher setup — gpt-5
+
+Do this on PyPI, not in GitHub. The Corky workflow is already emitting the right OIDC claims; PyPI just does not yet have a matching publisher entry for the `corky` project.
+
+1. Log in to PyPI as an owner or maintainer for `corky`.
+2. Open `Your projects` → `corky` → `Manage` → `Publishing`.
+3. Add a new `GitHub Actions` trusted publisher.
+4. Enter these values:
+
+| Field | Value |
+|---|---|
+| Owner | `btakita` |
+| Repository name | `corky` |
+| Workflow name / filename | `pypi.yml` |
+| Environment name | `pypi` |
+
+PyPI’s UI usually asks for the workflow filename, so use `pypi.yml`, not the full path. The matching GitHub claim is still `.github/workflows/pypi.yml`, which is what the failed run showed as `workflow_ref=btakita/corky/.github/workflows/pypi.yml@refs/heads/main`.
+
+After adding it, rerun:
+
+```bash
+gh workflow run PyPI --ref main
+```
+
+The workflow has `skip-existing: true`, so rerunning should skip the already-uploaded `0.28.2` files instead of treating them as duplicate-upload failures. If it still fails, compare the error’s rendered claims against the table above; PyPI’s own troubleshooting says `invalid-publisher` means the token is valid but does not match a configured publisher, commonly because of owner/repo/workflow/environment mismatch.
+
+References: [PyPI: Adding a Trusted Publisher](https://docs.pypi.org/trusted-publishers/adding-a-publisher/) and [PyPI: Trusted Publisher troubleshooting](https://docs.pypi.org/trusted-publishers/troubleshooting/).
+<!-- agent:boundary:3f96eb6d -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -29,88 +29,15 @@ Added prioritized FlowCore refactor next steps. Top backlog item: #rte4.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-154344.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-171724.md`*
 
 Compacted content:
-- Archived 4 response topic(s): routed-reopen FlowCore slice; FlowCore closeout, mutation, and session-cycle slices; duplicate content corruption during typing; 1 more
+- Archived 3 response topic(s): #gp9d audit-docs freshness decision; #gp9d audit-docs content freshness; commit-push src/agent-doc instructions
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Please elaborate on the decision in [#gp9d].
-### Re: #gp9d audit-docs freshness decision — gpt-5.5
-
-[#gp9d] is about separating two different kinds of doc-audit guarantees that currently look like one failure.
-
-The useful guarantee is content freshness for managed instruction surfaces: generated agent-doc surfaces such as root `AGENTS.md`, `.codex/AGENTS.md`, `.claude/skills/agent-doc/SKILL.md`, and OpenCode/Cursor mirrors should match what the running binary would render. That is deterministic and worth keeping fail-closed because a stale harness instruction can make every later agent-doc cycle unsafe.
-
-The questionable guarantee is broad mtime freshness for local prose docs. In the last cycle, `make check`, build, install, the JetBrains plugin build, and CI/tmux all passed, but `cargo run --quiet -- audit-docs` stayed red because several instruction/doc files were older than `src/stream.rs`. That does not prove those files contain stale content; it proves only that the source file has a newer filesystem timestamp. After source-only changes, that can create a release-blocking audit failure even when no human-facing instruction text needed to change.
-
-The decision in [#gp9d] is therefore whether `audit-docs` should continue treating mtime as a hard correctness signal, or whether it should switch the managed instruction-surface check to content-based comparison and reserve mtime checks for narrower cases.
-
-My recommendation is content-based for generated/managed surfaces, with optional advisory mtime output for broad docs. The managed-surface path already has a clear expected rendering from the binary, so it can fail on real content drift. For README/SPEC/custom instruction files, mtime is too indirect as a hard gate; a better gate is either explicit required-reference coverage, changed-file-aware checks, or targeted assertions that a spec section was updated when a known code area changed.
-
-I would keep [#gp9d] open until that policy is made explicit in `SPEC.md` and covered with tests. The important invariant is not "every doc must be newer than every touched source file"; it is "agent-facing instructions and required specs must not drift from the binary behavior they claim to describe."
-❯ do [#gp9d] with the recommended content based strategy. I am still questioning why the document itself is still being watched long after a turn ends. Could you both improve the content-based reconciliation logic and tell me why agent-doc still manages a document after the turn is complete. Is this useful for realtime documents?
-### Re: #gp9d audit-docs content freshness — gpt-5
-
-Implemented and shipped the content-based audit-docs strategy.
-
-What changed:
-
-- `src/audit_docs.rs` now keeps generated agent-doc instruction surfaces release-blocking through rendered-content comparison, then runs the rest of the agent-doc audit locally so generic mtime staleness is converted into non-blocking `Mtime advisory` rows.
-- Blocking audit-docs failures remain content/structure based: managed surface content mismatch, tree path issues, actionable-content issues, context-invariant issues, and line budget failures.
-- `tests/test_cli.rs` now covers the source-newer-than-doc case and asserts that it succeeds with advisory output instead of failing.
-- `SPEC.md`, `README.md`, and `specs/07-core-commands.md` now state the policy explicitly: filesystem mtime freshness is advisory for agent-doc audits; generated instruction surfaces fail only when rendered content differs.
-
-Why the document is still managed after a turn:
-
-The document is not only a prompt payload; it is the durable session UI. After a response commits, agent-doc still keeps enough state around to support later edits, route/sync ownership, CRDT sidecars, snapshots, repair, and optional watch/reactive workflows. That is useful for realtime documents because the next user edit can be detected and reconciled against the last committed boundary without starting from scratch or losing editor state.
-
-The important distinction is that this post-turn management should be lightweight ownership/sync state, not an open response cycle. A completed turn should be `committed`; later watches or syncs exist so the document remains a live collaboration surface. They should not imply that the previous turn is still active.
-
-Verification:
-
-- `cargo test audit_docs --test test_cli` passed.
-- `make check` passed after the final source change.
-- `agent-doc audit-docs` now passes with mtime-only drift reported as advisory output.
-- `make install` completed, and the installed binary reports `agent-doc 0.33.16`.
-- Latest GitHub Actions `ci.yml` run on `20260422/codex-agent-backend` is green, including the `Run make tmux-ci` step.
-
-Commits pushed:
-
-- `src/agent-doc`: `1a0aa26d` — `fix: make audit-docs mtime advisory`
-- outer `agent-loop`: `7d3d421bb` — `chore: update agent-doc submodule`
-
-I left the pre-existing dirty `CLAUDE.md` typechange and untracked `AGENTS.md` inside `src/agent-doc` untouched.
-❯ #commit-push all uncommitted files in src/agent-doc
-### Re: commit-push src/agent-doc instructions — gpt-5
-Committed and pushed the remaining uncommitted files in `src/agent-doc`.
-
-Nested repo commit:
-
-- `d816433a docs: add AGENTS instruction mirror`
-- Pushed to `origin/20260422/codex-agent-backend`
-- Contents: added `AGENTS.md` as the existing instruction text and changed `CLAUDE.md` to a symlink pointing at `AGENTS.md`
-
-Outer repo submodule pointer:
-
-- `89746b11d chore: update agent-doc submodule`
-- Pushed to `origin/main`
-
-
-- `agent-doc audit-docs` passed; only the existing mtime advisories were reported
-- `make check` passed locally in `src/agent-doc`
-- GitHub CI run `26176939086` passed, including `Run make check` and `Run make tmux-ci`
-
-`src/agent-doc` is clean and aligned with its pushed branch. I left unrelated dirty outer-repo files and unrelated later local outer commits untouched.
-<!-- agent:boundary:831d50cd -->
+<!-- agent:boundary:601f3d95 -->
 <!-- /agent:exchange -->
 ###
 <!--
-The content-based implementation still does not fix the duplicate content corrupted document & duplicate typing line issues. As I was typing into the comment below agent:exchange in this document, the issues surfaced.
----
-How does this Claude code tip reconcile with our orchestration implementation?
-```
-  ⎿  Tip: Say "fan out subagents" and Claude sends a team. Each one digs deep so nothing gets missed.
-```
 -->
 
 <!-- agent:queue -->

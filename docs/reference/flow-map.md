@@ -61,10 +61,11 @@ named buckets for common failures, and falls back to a generic
 FlowCore emitter cannot disappear into an undifferentiated tactical-log bucket.
 The mirror-mode emitters now cover routed reopen prompt-ready and dispatch-proof
 failures, document-mutation patchback parse and visible-write guard outcomes,
-strict closeout guard blocks, committed-cycle late-fallback rejection, repair
-recovery boundaries, orchestration child patchback normalization, operator clear
-guards, and closeout commit completion. Later phases should replace tactical log
-parsing with flow events rather than adding more free-form log strings.
+document-mutation template-structure repair/fail-closed outcomes, strict
+closeout guard blocks, committed-cycle late-fallback rejection, repair recovery
+boundaries, orchestration child patchback normalization, operator clear guards,
+and closeout commit completion. Later phases should replace tactical log parsing
+with flow events rather than adding more free-form log strings.
 
 ## Regression Gate
 

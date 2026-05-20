@@ -229,6 +229,10 @@ use crate::{
     component, component::is_backlog_component, frontmatter, merge, repair, sessions, snapshot,
     template,
 };
+use crate::{
+    flow::document_mutation::{TemplateStructureGuardReason, log_template_structure_guard_event},
+    flow::types::FlowOutcome,
+};
 
 #[derive(Clone, Debug)]
 pub struct CommandOptions {
@@ -3767,37 +3771,46 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
             if let Some(repaired) =
                 crate::template::repair_duplicate_exchange_close_scaffold(&normalized)?
             {
-                crate::template::guard_no_conversation_tail_outside_exchange(&repaired)
-                    .with_context(|| {
-                        format!(
-                            "template structure guard failed for {} after duplicate-scaffold repair",
-                            file.display()
-                        )
-                    })?;
+                log_template_structure_guard_event(
+                    file,
+                    TemplateStructureGuardReason::DuplicateScaffoldDropped,
+                    FlowOutcome::Completed,
+                );
+                crate::template::guard_no_conversation_tail_outside_exchange(&repaired).context(
+                    format!(
+                        "template structure guard failed for {} after duplicate-scaffold repair",
+                        file.display()
+                    ),
+                )?;
                 return Ok(dedupe_consecutive_response_blocks(&repaired, file));
             }
-            if let Some(repaired) =
-                crate::template::repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?
+            if crate::template::repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?
+                .is_some()
             {
-                crate::template::guard_no_conversation_tail_outside_exchange(&repaired)
-                    .with_context(|| {
-                        format!(
-                            "template structure guard failed for {} after mixed duplicate-scaffold repair",
-                            file.display()
-                        )
-                    })?;
-                return Ok(dedupe_consecutive_response_blocks(&repaired, file));
+                log_template_structure_guard_event(
+                    file,
+                    TemplateStructureGuardReason::MixedDuplicateScaffoldTail,
+                    FlowOutcome::FailedClosed,
+                );
+                anyhow::bail!(
+                    "mixed duplicate scaffold tail for {}: live conversation text is interleaved with duplicated template scaffold; refusing automatic closeout repair",
+                    file.display()
+                );
             }
             if let Some(repaired) =
                 crate::template::repair_duplicate_exchange_close_tail(&normalized)?
             {
-                crate::template::guard_no_conversation_tail_outside_exchange(&repaired)
-                    .with_context(|| {
-                        format!(
-                            "template structure guard failed for {} after duplicate-close repair",
-                            file.display()
-                        )
-                    })?;
+                log_template_structure_guard_event(
+                    file,
+                    TemplateStructureGuardReason::DuplicateCloseTailMoved,
+                    FlowOutcome::Completed,
+                );
+                crate::template::guard_no_conversation_tail_outside_exchange(&repaired).context(
+                    format!(
+                        "template structure guard failed for {} after duplicate-close repair",
+                        file.display()
+                    ),
+                )?;
                 return Ok(dedupe_consecutive_response_blocks(&repaired, file));
             }
             Err(err)
@@ -9744,6 +9757,39 @@ scratch
     }
 
     #[test]
+    fn normalize_template_structure_rejects_mixed_duplicate_scaffold_prompt_prefix_variant() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "<!-- agent:boundary:613974fd -->\n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + re \n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+            "agent-doc on corky.md running opencode, the arrow key functionality works at first. But once a turn starts, the arrow keys are corrupted. Is there a way to log the key that is sent + received \n",
+            "<!-- /agent:exchange -->\n",
+            "###\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, content).unwrap();
+
+        let err = normalize_template_structure_or_fail(content, &doc).unwrap_err();
+
+        assert!(
+            err.to_string().contains("mixed duplicate scaffold"),
+            "unexpected error: {err}"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("flow=document_mutation"));
+        assert!(log.contains("reason=mixed_duplicate_scaffold_tail"));
+    }
+
+    #[test]
     fn normalize_template_structure_keeps_prefix_variant_inside_response_body() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("diag.md");
@@ -12240,6 +12286,7 @@ do #verfpfx. spec-test-build-install-commit-push
 #[cfg(test)]
 mod submodule_patch_routing_tests {
     use super::*;
+    use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -13017,9 +13064,10 @@ Can you preserve the second paragraph too?
     }
 
     #[test]
-    fn normalize_template_structure_repairs_duplicate_scaffold_with_user_text() {
+    fn normalize_template_structure_rejects_duplicate_scaffold_with_user_text() {
         let dir = TempDir::new().unwrap();
         let doc_path = dir.path().join("doc.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let content = concat!(
             "<!-- agent:exchange patch=append -->\n",
             "### Session Summary\n\n",
@@ -13055,24 +13103,17 @@ Can you preserve the second paragraph too?
             "<!-- agent:done -->\n",
             "<!-- /agent:done -->\n"
         );
+        fs::write(&doc_path, content).unwrap();
 
-        let repaired = normalize_template_structure_or_fail(content, &doc_path)
-            .expect("safe prompt text in duplicate scaffold should be repaired");
+        let err = normalize_template_structure_or_fail(content, &doc_path).unwrap_err();
 
-        assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
-        assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
-        assert_eq!(repaired.matches("<!-- agent:backlog -->").count(), 1);
-        assert_eq!(repaired.matches("<!-- agent:done -->").count(), 1);
         assert!(
-            repaired.contains("corky.md The arrow"),
-            "safe prompt text from duplicate scaffold should be preserved:\n{repaired}"
+            err.to_string().contains("mixed duplicate scaffold"),
+            "unexpected error: {err}"
         );
-        let prompt = repaired.find("corky.md The arrow").unwrap();
-        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
-        assert!(
-            prompt < exchange_close,
-            "safe prompt text should move back inside exchange:\n{repaired}"
-        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("flow=document_mutation"));
+        assert!(log.contains("reason=mixed_duplicate_scaffold_tail"));
     }
 }
 

@@ -981,13 +981,10 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
                 )?;
                 return Ok(repaired);
             }
-            if let Some(repaired) =
-                repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?
-            {
-                guard_no_conversation_tail_outside_exchange(&repaired).with_context(
-                    || "template structure guard failed after mixed duplicate-scaffold repair",
-                )?;
-                return Ok(repaired);
+            if repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?.is_some() {
+                anyhow::bail!(
+                    "mixed duplicate scaffold tail: live conversation text is interleaved with duplicated template scaffold; refusing automatic visible-document repair"
+                );
             }
             if let Some(repaired) = repair_duplicate_exchange_close_tail(&normalized)? {
                 guard_no_conversation_tail_outside_exchange(&repaired).with_context(
@@ -4506,7 +4503,7 @@ Existing answer.
     }
 
     #[test]
-    fn normalize_editor_visible_template_structure_repairs_mixed_duplicate_scaffold() {
+    fn normalize_editor_visible_template_structure_rejects_mixed_duplicate_scaffold() {
         let doc = concat!(
             "<!-- agent:exchange patch=append -->\n",
             "### Session Summary\n",
@@ -4521,20 +4518,10 @@ Existing answer.
             "<!-- /agent:queue -->\n"
         );
 
-        let repaired = normalize_editor_visible_template_structure(doc)
-            .expect("safe mixed duplicate scaffold should repair before editor write");
-
-        assert_eq!(repaired.matches("<!-- /agent:exchange -->").count(), 1);
-        assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
+        let err = normalize_editor_visible_template_structure(doc).unwrap_err();
         assert!(
-            repaired.contains("user typed into duplicated shell"),
-            "safe user text from duplicate scaffold should be preserved:\n{repaired}"
-        );
-        let prompt = repaired.find("user typed into duplicated shell").unwrap();
-        let exchange_close = repaired.find("<!-- /agent:exchange -->").unwrap();
-        assert!(
-            prompt < exchange_close,
-            "safe user text should move back inside exchange:\n{repaired}"
+            err.to_string().contains("mixed duplicate scaffold"),
+            "unexpected error: {err}"
         );
     }
 

@@ -15,13 +15,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   evidence, so completed `do #id` batches no longer slip through just because
   ids only appeared in the response heading.
 
-- **Mixed duplicate-scaffold closeouts now preserve safe prompt text.**
+- **Mixed duplicate-scaffold closeouts now fail closed.**
   When a duplicated template scaffold lands between two `agent:exchange` close
   markers and strands live prompt text in that duplicated segment, the
-  template normalizer now drops the duplicate scaffold, moves the safe prompt
-  text back inside `agent:exchange`, and keeps ambiguous suffixes fail-closed.
-  The repair is shared by binary closeout normalization, editor IPC
-  normalization, and the FFI path.
+  closeout normalizer now refuses automatic repair and logs a typed
+  `flow::document_mutation` event with `reason=mixed_duplicate_scaffold_tail`;
+  editor/FFI normalization also rejects the shape. Pure duplicated scaffold
+  with no live text is still dropped automatically, but mixed live-typing
+  content is preserved for explicit recovery instead of being reordered or
+  duplicated during closeout.
 
 - **Full-content editor IPC now proves the source buffer before replacement.**
   The binary stamps every `fullContent` socket/file IPC payload with a

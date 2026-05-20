@@ -1481,7 +1481,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_template_structure_ffi_repairs_mixed_duplicate_scaffold() {
+    fn normalize_template_structure_ffi_rejects_mixed_duplicate_scaffold() {
         let doc = concat!(
             "<!-- agent:exchange patch=append -->\n",
             "### Session Summary\n",
@@ -1499,22 +1499,14 @@ mod tests {
 
         let result = unsafe { agent_doc_normalize_template_structure(c_doc.as_ptr()) };
 
-        assert!(result.error.is_null());
-        assert!(!result.text.is_null());
-        let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
-        assert_eq!(text.matches("<!-- /agent:exchange -->").count(), 1);
-        assert_eq!(text.matches("<!-- agent:queue -->").count(), 1);
+        assert!(result.text.is_null());
+        assert!(!result.error.is_null());
+        let error = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
         assert!(
-            text.contains("user typed into duplicated shell"),
-            "safe user text from duplicate scaffold should be preserved:\n{text}"
+            error.contains("mixed duplicate scaffold"),
+            "unexpected error: {error}"
         );
-        let prompt = text.find("user typed into duplicated shell").unwrap();
-        let exchange_close = text.find("<!-- /agent:exchange -->").unwrap();
-        assert!(
-            prompt < exchange_close,
-            "safe user text should move back inside exchange:\n{text}"
-        );
-        unsafe { agent_doc_free_string(result.text) };
+        unsafe { agent_doc_free_string(result.error) };
     }
 
     #[test]

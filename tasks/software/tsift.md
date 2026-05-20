@@ -35,7 +35,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): graph DB API next steps; graph DB hardening implementation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:fabac8d5 -->
+❯ What are #next-steps for graph db behavior?
+### Re: graph DB behavior next steps — gpt-5
+
+Top backlog item after this cycle: `#gval`.
+
+The previous queued graph DB batch already moved the substrate from API support into working SQLite/Convex behavior: reusable Convex app package, paged/filterable reads, agent-doc/context-pack graph rows, and operator examples are complete. The next work should protect that behavior as a contract rather than widening the surface again.
+
+I added these follow-ups in priority order:
+
+1. `#gval` — add a compiled CLI conformance suite shared across SQLite and Convex snapshots, covering fail-closed schema/freshness behavior, transactional refresh visibility, tombstone order, missing-node edge rejection, pagination/filter parity, and deterministic ordering.
+2. `#gobs` — add `graph-db` validation/doctor diagnostics so operators can detect stale metadata, missing Convex indexes, orphan edges, duplicate ids, schema drift, and get concise repair commands with fail-closed exit codes.
+3. `#gfed` — add an opt-in live Convex acceptance harness that proves the example backend can apply a projection, pull the remote snapshot, and pass node/kind/neighborhood/path parity end to end.
+
+I placed those ahead of crates.io/release cleanup because they are behavioral contract work for the graph DB API. Publishing should come after the graph DB behavior is harder to regress.
+<!-- agent:boundary:a4c96ecd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,6 +66,9 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gval] Lock graph DB behavior with a compiled CLI conformance suite shared across SQLite and Convex snapshots: schema-version fail-closed checks, transactional refresh visibility, tombstone reconciliation order, missing-node edge rejection, freshness failures, pagination/filter parity, and deterministic ordering.
+- [ ] [#gobs] Add graph-db validation/doctor diagnostics for SQLite graph.db and Convex snapshots: stale projection metadata, missing required Convex indexes, orphan edges, duplicate ids, schema drift, and concise repair commands with fail-closed exit codes.
+- [ ] [#gfed] Add an optional live Convex graph backend acceptance harness: deploy or target the example backend, apply a small projection, pull the remote snapshot, and run graph-db node/kind/neighborhood/path parity end-to-end with credentials documented as opt-in.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
 <!-- /agent:backlog -->

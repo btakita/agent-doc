@@ -79,9 +79,9 @@ prompt_presets:
 - [x] CLAUDE.md fallback in contact push — v0.22.1
 - [x] Gmail API body decode (attachment + base64 padding) — v0.22.2
 - [x] `corky sync refetch` — v0.23.0
+- [x] Google Docs/Sheets integration — main 9e67e35
 - [ ] crates.io publish — needs token refresh
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
-- [ ] Google Docs/Sheets integration — read/write Google Docs, read Google Sheets (extends Gmail OAuth scopes)
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -92,7 +92,21 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): Corky log review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:0da0abe7 -->
+❯ do [#google-docs-sheets-integration]. #spec-test-build-install-commit-push
+### Re: Google Docs/Sheets integration — gpt-5
+
+Implemented `#google-docs-sheets-integration` in Corky and pushed it to `btakita/corky` `main` as `9e67e35` (`fix: use Docs API for Google Docs reads`).
+
+The main correction was making `corky docs read` use the Google Docs API `documents.get` payload instead of Drive `files.export`, so the documented `documents` OAuth scope is sufficient for Docs reads. I also added paragraph/table extraction coverage, CLI help coverage for `docs` and `sheets read`, updated SPEC/README/guide/privacy docs, and refreshed the installed Corky skill copy.
+
+Verification completed:
+- `cargo test doc::gdocs::tests`
+- `make precommit` (clippy, full tests, `corky audit-docs`)
+- `make release`
+- `make install` (installed with `transcribe-cuda`)
+
+CI/tmux note: Corky has no `tmux-ci` target and no tmux-test workflow in `Makefile` or `.github/workflows`, so there was no tmux CI leg to inspect. The implementation is based on the official Google Docs `documents.get`, Drive `files.export`, and Sheets `spreadsheets.values.get` scope references.
+<!-- agent:boundary:1a5b5abb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -104,7 +118,6 @@ Compacted content:
 - [ ] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi, rerun the PyPI workflow, and verify the PyPI latest version matches the released crate.
 - [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
-- [ ] [#google-docs-sheets-integration] Add Google Docs/Sheets integration for Corky: required OAuth scopes, read/write Google Docs, read Google Sheets, docs, and tests.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped
@@ -113,4 +126,5 @@ Compacted content:
 - 2026-05-12 [#tokenstore-delete-preservation] [recommended] Make TokenStore saves deletion-safe so stale writers cannot restore tokens cleared by another process
 - 2026-05-12 [#watch-gmail-history-notify] [recommended] Teach watch to count Gmail API last_history_id movement and fire mailbox sync and desktop notifications for gmail-api accounts
 - 2026-05-12 [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange
+- 2026-05-20 [#google-docs-sheets-integration] Add Google Docs/Sheets integration for Corky: required OAuth scopes, read/write Google Docs, read Google Sheets, docs, and tests.
 <!-- /agent:done -->

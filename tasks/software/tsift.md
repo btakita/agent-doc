@@ -55,7 +55,7 @@ Verification passed:
 Agent Doc CI/tmux review: the latest root `Agent Doc` run `26188872503` is red, but both `tmux-ci` and `check` jobs have empty step lists, so this is classified as an external CI-start blocker rather than a local tmux regression. Local full verification is green.
 
 Committed the tsift repo change as `6517093 test: lock graph db cli conformance`. Push follows after this document closeout.
-<!-- agent:boundary:2d45cef7 -->
+<!-- agent:boundary:0b87ff2a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,14 +64,13 @@ Committed the tsift repo change as `6517093 test: lock graph db cli conformance`
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
 - ~do [#gval]~
-- do [#gobs]
+- ~do [#gobs]~
 - do [#gfed]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gobs] Add graph-db validation/doctor diagnostics for SQLite graph.db and Convex snapshots: stale projection metadata, missing required Convex indexes, orphan edges, duplicate ids, schema drift, and concise repair commands with fail-closed exit codes.
 - [ ] [#gfed] Add an optional live Convex graph backend acceptance harness: deploy or target the example backend, apply a small projection, pull the remote snapshot, and run graph-db node/kind/neighborhood/path parity end-to-end with credentials documented as opt-in.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.

@@ -58,7 +58,17 @@ Less useful for tsift:
 - FTS5 over symbol metadata is worth noting, but I would not prioritize it until `sift` plus exact `rg -F` leaves a demonstrated retrieval gap.
 
 I added three recommended backlog items for the parts that look actionable: adaptive exploration packets, framework/route graph nodes, and affected-test/impact analysis.
-<!-- agent:boundary:417d8778 -->
+❯ Would tsift benefit from using a true local graph database over sqlite?
+### Re: local graph database for tsift — gpt-5
+
+Short answer: not yet. I would keep SQLite as tsift's authoritative store and add graph-database-like query surfaces over it before introducing a second embedded graph backend.
+
+The current tsift graph workload is still a good fit for SQLite: symbol rows, indexed `call_edges`, caller/callee lookups, distinct edge scans, BFS, community detection, traversal slices, and bounded agent packets. The harder parts of tsift are freshness, per-submodule isolation, transactionality, WAL behavior, sidecar writer locks, snapshot fallback, and predictable local packaging. A true local graph database would mostly add another operational boundary before tsift has proven that SQLite plus in-memory traversal is the bottleneck.
+
+A graph DB becomes worth reconsidering only if tsift starts needing persistent multi-hop pattern matching over richer typed edges at scale, for example constrained route-to-handler-to-symbol-to-test traversals across very large monorepos, and measurements show SQL plus in-memory traversal is too slow or too awkward. Even then, I would prototype it as a derived read-only cache rebuilt from SQLite, not as the source of truth.
+
+For now, the better direction is to keep the reliability model and make the SQLite graph model more graph-shaped when needed: typed node/edge tables, indexes around source/destination/kind, and possibly materialized paths or closure tables for the handful of traversals agents ask for repeatedly. That should cover most graph-product ergonomics without giving up the concurrency and recovery behavior tsift already has. I would treat this as guidance for the existing graph/route/adaptive-packet backlog items rather than adding a separate database-migration item.
+<!-- agent:boundary:74a28476 -->
 <!-- /agent:exchange -->
 ###
 <!--

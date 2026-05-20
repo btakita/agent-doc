@@ -153,6 +153,67 @@ fn process_global_test_mutations_share_session_check_lock() {
 }
 
 #[test]
+fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let hot_paths = [
+        "src/git.rs",
+        "src/orchestrate.rs",
+        "src/preflight.rs",
+        "src/repair.rs",
+        "src/route.rs",
+        "src/session_check.rs",
+        "src/write.rs",
+    ];
+    let tokens = [
+        "guard_",
+        "proof=",
+        "proof_scope=",
+        "reason=",
+        "flow_reason=",
+        "accepted_only",
+    ];
+    let mut violations = Vec::new();
+
+    for source in hot_paths {
+        let content = fs::read_to_string(manifest_dir.join(source)).unwrap();
+        for token in tokens {
+            let actual = content.matches(token).count();
+            let expected = flowcore_hot_path_token_budget(source, token);
+            if actual != expected {
+                violations.push(format!(
+                    "{source} token `{token}`: expected {expected}, got {actual}"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "FlowCore regression gate failed. New hot-path guard/proof/reason tokens must be audited and routed through the owning flow enum/event before this budget changes:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
+    match (source, token) {
+        ("src/git.rs", "guard_") => 18,
+        ("src/git.rs", "reason=") => 4,
+        ("src/preflight.rs", "reason=") => 2,
+        ("src/repair.rs", "guard_") => 9,
+        ("src/repair.rs", "reason=") => 5,
+        ("src/route.rs", "accepted_only") => 4,
+        ("src/route.rs", "flow_reason=") => 2,
+        ("src/route.rs", "guard_") => 6,
+        ("src/route.rs", "proof=") => 2,
+        ("src/route.rs", "reason=") => 11,
+        ("src/session_check.rs", "guard_") => 13,
+        ("src/write.rs", "guard_") => 55,
+        ("src/write.rs", "reason=") => 15,
+        _ => 0,
+    }
+}
+
+#[test]
 fn test_cli_help() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("--help");

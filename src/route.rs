@@ -155,9 +155,9 @@ use crate::flow::routed_reopen::{
     DirectPaneSubmitStatus as CommandDispatchStatus, DispatchOnlyProofOutcomeFacts,
     DispatchOnlyProofPolicyFacts, DispatchOnlyReopenDelivery, DispatchStartProofDecision,
     DispatchStartProofFacts, PromptReadyBarrierDecision, ReopenMode, RoutedDispatchStartProof,
-    RoutedReopenFacts, StartingActorLogFacts, accepted_only_dispatch_start_log_message,
-    accepted_only_dispatch_start_refusal_message, actor_dispatch_blocker_reason,
-    actor_recovery_hint,
+    RoutedReopenFacts, RoutedReopenGuardReason, StartingActorLogFacts,
+    accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
+    actor_dispatch_blocker_reason, actor_recovery_hint,
     authoritative_actor_dispatch_guard_reason as flow_authoritative_actor_dispatch_guard_reason,
     authoritative_actor_ready_retry_budget,
     busy_existing_pane_auto_fix_outcome as flow_busy_existing_pane_auto_fix_outcome,
@@ -1858,7 +1858,10 @@ fn require_dispatch_only_dispatch_start_proof(
         dispatch_start,
         timeout_secs: timeout,
     };
-    log_dispatch_proof_failed(file, "accepted_only_dispatch_start_proof");
+    log_dispatch_proof_failed(
+        file,
+        RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof,
+    );
     crate::ops_log::log_op(file, &accepted_only_dispatch_start_log_message(facts));
     anyhow::bail!(accepted_only_dispatch_start_refusal_message(facts));
 }
@@ -2736,7 +2739,7 @@ fn wait_for_authoritative_actor_ready(
     match record_starting_actor_timeout(file_path, &last_facts, &log_line) {
         Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
             crate::ops_log::log_op(file, &log_line);
-            log_prompt_ready_barrier_failed(file, "starting_actor_not_ready");
+            log_prompt_ready_barrier_failed(file, RoutedReopenGuardReason::StartingActorNotReady);
         }
         Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
             let file_display = file.display().to_string();
@@ -2757,7 +2760,10 @@ fn wait_for_authoritative_actor_ready(
                 err
             );
             crate::ops_log::log_op(file, &log_line);
-            log_prompt_ready_barrier_failed(file, "starting_actor_not_ready_unpersisted");
+            log_prompt_ready_barrier_failed(
+                file,
+                RoutedReopenGuardReason::StartingActorNotReadyUnpersisted,
+            );
         }
     }
     Ok(None)
@@ -2911,7 +2917,10 @@ fn route_via_authoritative_actor(
                     reopen_outcome.reason
                 ),
             );
-            log_prompt_ready_barrier_failed(file, "dispatch_only_busy_actor_not_ready");
+            log_prompt_ready_barrier_failed(
+                file,
+                RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
+            );
             anyhow::bail!(
                 "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",
                 actor.record.generation,

@@ -791,29 +791,48 @@ pub(crate) fn degraded_authoritative_actor_refusal_message(
     )
 }
 
-pub(crate) fn prompt_ready_barrier_failed_event(reason: impl Into<String>) -> FlowEvent {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RoutedReopenGuardReason {
+    AcceptedOnlyDispatchStartProof,
+    StartingActorNotReady,
+    StartingActorNotReadyUnpersisted,
+    DispatchOnlyBusyActorNotReady,
+}
+
+impl RoutedReopenGuardReason {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::AcceptedOnlyDispatchStartProof => "accepted_only_dispatch_start_proof",
+            Self::StartingActorNotReady => "starting_actor_not_ready",
+            Self::StartingActorNotReadyUnpersisted => "starting_actor_not_ready_unpersisted",
+            Self::DispatchOnlyBusyActorNotReady => "dispatch_only_busy_actor_not_ready",
+        }
+    }
+}
+
+pub(crate) fn prompt_ready_barrier_failed_event(reason: RoutedReopenGuardReason) -> FlowEvent {
     FlowEvent::new(
         FlowName::RoutedReopen,
         FlowStage::PromptReadyBarrier,
         FlowOutcome::FailedClosed,
     )
-    .with_reason(reason)
+    .with_reason(reason.as_str())
 }
 
-pub(crate) fn dispatch_proof_failed_event(reason: impl Into<String>) -> FlowEvent {
+pub(crate) fn dispatch_proof_failed_event(reason: RoutedReopenGuardReason) -> FlowEvent {
     FlowEvent::new(
         FlowName::RoutedReopen,
         FlowStage::DispatchProof,
         FlowOutcome::FailedClosed,
     )
-    .with_reason(reason)
+    .with_reason(reason.as_str())
 }
 
-pub(crate) fn log_prompt_ready_barrier_failed(file: &Path, reason: impl Into<String>) {
+pub(crate) fn log_prompt_ready_barrier_failed(file: &Path, reason: RoutedReopenGuardReason) {
     super::proof::log_flow_event(file, prompt_ready_barrier_failed_event(reason));
 }
 
-pub(crate) fn log_dispatch_proof_failed(file: &Path, reason: impl Into<String>) {
+pub(crate) fn log_dispatch_proof_failed(file: &Path, reason: RoutedReopenGuardReason) {
     super::proof::log_flow_event(file, dispatch_proof_failed_event(reason));
 }
 
@@ -1242,7 +1261,8 @@ mod tests {
 
     #[test]
     fn route_failure_events_are_owned_by_routed_reopen_flow() {
-        let prompt_event = prompt_ready_barrier_failed_event("starting_actor_not_ready");
+        let prompt_event =
+            prompt_ready_barrier_failed_event(RoutedReopenGuardReason::StartingActorNotReady);
         assert_eq!(prompt_event.flow, FlowName::RoutedReopen);
         assert_eq!(prompt_event.stage, FlowStage::PromptReadyBarrier);
         assert_eq!(prompt_event.outcome, FlowOutcome::FailedClosed);
@@ -1251,7 +1271,8 @@ mod tests {
             Some("starting_actor_not_ready")
         );
 
-        let proof_event = dispatch_proof_failed_event("accepted_only_dispatch_start_proof");
+        let proof_event =
+            dispatch_proof_failed_event(RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof);
         assert_eq!(proof_event.flow, FlowName::RoutedReopen);
         assert_eq!(proof_event.stage, FlowStage::DispatchProof);
         assert_eq!(proof_event.outcome, FlowOutcome::FailedClosed);

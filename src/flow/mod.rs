@@ -22,8 +22,9 @@ mod tests {
 
     #[test]
     fn typed_flow_events_cover_route_write_closeout_session_check_and_child_patchback() {
-        let route_event =
-            routed_reopen::dispatch_proof_failed_event("accepted_only_dispatch_start_proof");
+        let route_event = routed_reopen::dispatch_proof_failed_event(
+            routed_reopen::RoutedReopenGuardReason::AcceptedOnlyDispatchStartProof,
+        );
         assert_eq!(route_event.flow, FlowName::RoutedReopen);
         assert_eq!(route_event.stage, FlowStage::DispatchProof);
         assert_eq!(route_event.outcome, FlowOutcome::FailedClosed);

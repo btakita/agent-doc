@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **FlowCore now has an executable guard/proof regression gate.**
+  Routed-reopen prompt-ready and dispatch-proof failure reasons now pass through
+  `RoutedReopenGuardReason` instead of free-form strings from `route.rs`, and a
+  source-token budget test flags unaudited new hot-path guard/proof/reason
+  tokens before they can bypass the owning FlowCore enum/event.
+
 - **Clear Session Context no longer treats the `agent-doc` wrapper process as
   blocking evidence by itself.** File-scoped `session clear` now blocks on
   protected prompt input or explicit busy cues such as an active Codex turn,

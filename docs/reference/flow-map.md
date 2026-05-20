@@ -39,6 +39,7 @@ enums as extraction proceeds:
 | Field | Proposed enum |
 |---|---|
 | `proof`, `proof_scope` | `DispatchProof` |
+| routed reopen prompt-ready / dispatch-start failure reasons | `RoutedReopenGuardReason` |
 | `actor_state`, `runtime_state`, `supervisor_health` | routed reopen actor facts |
 | `drift_kind`, `basis`, `reason=already_current`, pre-write/pre-commit guard names | `CloseoutGuardReason` and closeout terminal-state reason |
 | `markers`, `patches`, `exchange_patches`, `unmatched_len` | `PatchbackShape` and document-mutation parse event |
@@ -64,6 +65,20 @@ strict closeout guard blocks, committed-cycle late-fallback rejection, repair
 recovery boundaries, orchestration child patchback normalization, operator clear
 guards, and closeout commit completion. Later phases should replace tactical log
 parsing with flow events rather than adding more free-form log strings.
+
+## Regression Gate
+
+The hot-path regression gate has two parts:
+
+- Routed-reopen prompt-ready and dispatch-proof failures use
+  `RoutedReopenGuardReason`, so `route.rs` cannot pass arbitrary failure reason
+  strings into FlowCore events.
+- `tests/test_cli.rs::flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
+  budgets existing `guard_`, `proof=`, `proof_scope=`, `reason=`,
+  `flow_reason=`, and `accepted_only` tokens in route/write/preflight/
+  session-check/orchestrate/git/repair files. A budget change is the audit
+  point: new tactical guard/proof tokens must first move into the owning FlowCore
+  enum/event, or the test expectation must be updated with that audit complete.
 
 ## Phase Boundaries
 

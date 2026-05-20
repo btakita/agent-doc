@@ -169,7 +169,30 @@ corky auth --scope sheets --email brian@dreamable.com
 ```
 
 After the read/write `spreadsheets` grant completes, Corky should be able to run the temporary Sheets create/write/delete test against the target spreadsheet. I did not change code or run the build/test suite in this cycle because this blocker is outside the repo.
-<!-- agent:boundary:9cec1bf7 -->
+❯ I don't see "Test Users" in https://console.cloud.google.com/auth/clients/718955483040-0aru4vvij1ug85ga8o3tjsqpk7gtb7tj.apps.googleusercontent.com?project=corky-490604. Use chromium-bridge on the open Chromium browser to add
+### Re: Google OAuth test user added — gpt-5
+
+Added `brian@dreamable.com` as a Google Auth Platform test user for the OAuth app Corky is actually using.
+
+The client URL you opened was for project `corky-490604` / app `corky`, and that app is already `In production`, so it does not show the old `Test users` table. Corky's mailbox config points at a different OAuth client: `873280095295-...apps.googleusercontent.com`, which belongs to project `unop-d3871` / app `agent-loop`. That app is still in `Testing`, and its Audience page has the tester list.
+
+Using `chromium-bridge`, I opened `https://console.cloud.google.com/auth/audience?project=unop-d3871`, opened **Add users**, entered `brian@dreamable.com`, saved it, and verified the Audience page now shows:
+
+```text
+3 users (3 test, 0 other) / 100 user cap
+brian.takita@gmail.com
+brian@dreamable.com
+btak.dev@gmail.com
+```
+
+This matches Google's Testing-mode rule: only accounts listed as test users can access a testing OAuth app. Source: https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification
+
+I did not change code or run the build/test suite in this cycle. The next Corky auth retry is:
+
+```bash
+corky auth --scope sheets --email brian@dreamable.com
+```
+<!-- agent:boundary:cc433dab -->
 <!-- /agent:exchange -->
 ###
 <!--

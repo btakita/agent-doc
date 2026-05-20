@@ -36,21 +36,45 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): graph DB behavior next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:92f58d93 -->
+### Re: graph-db projection coverage — gpt-5
+
+Implemented the queued graph-db work and pushed it.
+
+Completed items:
+- `#grwp`: `tsift traverse` now materializes deterministic `source_handle` and `worker_context` rows into `.tsift/graph.db`, including links from backlog/job packets to bounded source windows. Added compiled CLI coverage that refreshes a workspace-style fixture and proves session, backlog, source_handle, worker_context, neighborhood, and path queries through `tsift graph-db`.
+- `#gdrf`: added `tsift graph-db ... drift --json` for SQLite-vs-Convex projection diff reports with node/edge upserts, tombstones, stale projection metadata, duplicate/orphan failures, required-index gaps, and next commands.
+- `#gcap`: added large synthetic graph-db regression coverage for full cursor pagination, property-filter selectivity, bounded neighborhood/path caps via `--max-hops`, doctor runtime, and SQLite query-plan index assertions.
+
+Updated `src/tsift/SPEC.md`, `src/tsift/src/main.rs`, and `src/tsift/tests/graph_db_conformance.rs`.
+
+Verification:
+- `cargo fmt --check`
+- `cargo test --test graph_db_conformance`
+- `make ci-full` (`clippy`, full tests, ignored tests)
+- `cargo build`
+- `cargo install --path .`
+
+CI/tmux evidence: latest root GitHub Actions `Agent Doc` run `26193364811` for `chore: update tsift graph-db coverage` still failed before runner steps started; both `check` and `tmux-ci` jobs have empty step lists and `gh run view --log-failed` reports `log not found`. I’m classifying that as the existing external CI-start blocker, not a code or tmux regression.
+
+Commits pushed:
+- `src/tsift`: `26e9396 feat: expand graph-db projection coverage`
+- parent `agent-loop`: `5fcea49d7 chore: update tsift graph-db coverage`
+<!-- agent:boundary:5b6bea54 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- do [#grwp]
+- do [#gdrf]
+- do [#gcap]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#grwp] Prove graph-db behavior on a real agent-loop/tsift workspace fixture: refresh .tsift/graph.db, capture stable node/kind/neighborhood/path examples for session, backlog, source_handle, and worker_context rows, and lock them in compiled CLI or fixture coverage so the substrate is validated beyond toy projects.
-- [ ] [#gdrf] Add a graph projection drift/diff report for SQLite vs Convex snapshots that summarizes node/edge upserts, tombstones, stale projection metadata, orphan/duplicate failures, and operator next commands before --apply or graph-db reads.
-- [ ] [#gcap] Add graph-db scale/cap regression coverage over a large synthetic traversal projection: deterministic pagination through all pages, property filter selectivity, bounded neighborhood/path limits, doctor runtime, and SQLite index/query-plan assertions.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
 <!-- /agent:backlog -->

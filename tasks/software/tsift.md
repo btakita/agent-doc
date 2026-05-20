@@ -89,7 +89,37 @@ So the clean layering is:
 4. **BuildParty / Orbit / Knowledge Navigator** — product agents and content modules that may import or project from the substrate, but are not enclosed by tsift.
 
 I would not extract immediately as a polished public package. First, define the graph schema/API inside tsift with an explicit `no code-domain concepts below this line` boundary. Once a second real consumer lands, probably agent-doc session graphs or an Orbit module pack, extract that layer into a standalone crate/package. That avoids designing an abstract graph library in the dark while still keeping the implementation ready to split.
-<!-- agent:boundary:42cadbaf -->
+❯ I want to make some notes:
+❯ - The Orbit agent will include looking at code bases for software logic + comment extraction if the codebase is available.
+❯ - FalkorDB will be considered but there are reservations on using FalkorDB. So for now, the logic from tsift and/or extracted library may serve as a prototype for graph behavior.
+
+❯ Please reread root.md as a turn has ended. Reassess.
+### Re: graph substrate reassessment after root.md — gpt-5
+
+After rereading `root.md`, I would revise the earlier answer slightly, not reverse it.
+
+The important change is that Orbit is not just a content/agent consumer. It may inspect codebases, extract software logic, and mine comments when source is available. That makes tsift a natural Orbit capability, but still not the enclosing abstraction. tsift should own code intelligence: AST extraction, symbol/call/route graphs, code comments, source windows, repo freshness, and agent-safe code packets. Orbit should call, import, or project from tsift for code-aware knowledge, not become a tsift subproduct.
+
+The graph substrate should be provider-neutral. SQLite is still the right first implementation because it gives local determinism, portable packs, rebuildable projections, CI fixtures, and the reliability behavior tsift already needs. But after `root.md`, I would explicitly design the substrate as a canonical graph model with projections:
+
+- SQLite: local/offline/dev/test graph store and the first implementation.
+- Convex: reactive product/app knowledge store, useful for Orbit UI sync, taxonomy/topic/question/answer/asset records, vector/full-text search, and session state.
+- Optional graph backend: derived read model for production multi-hop graph queries if Convex queries become awkward or slow.
+
+Convex should not be treated as a true graph database. Its official docs describe a document-relational reactive database plus full-text/vector search, not native graph traversal or pattern matching: [Database](https://docs.convex.dev/database), [AI & Search](https://docs.convex.dev/search), [Vector Search](https://docs.convex.dev/search/vector-search). So I would not build "a graph layer on top of Convex" as the core abstraction. I would store graph-shaped records in Convex when the product needs reactive state, but keep graph traversal semantics in the provider-neutral graph layer.
+
+If production Orbit needs fast multi-hop queries, add a graph backend as a replaceable projection, not as the source of truth. FalkorDB can still be evaluated, but the seed-stage/company-risk concern argues for avoiding hard coupling. The contract should be "generic graph model to projections" rather than "FalkorDB everywhere" or "Convex pretending to be a graph DB."
+
+So the updated layering is:
+
+1. Provider-neutral typed graph substrate: content-agnostic nodes, edges, labels/kinds, provenance, source refs, freshness, embeddings/FTS hooks, and traversal/query APIs.
+2. SQLite implementation: first-class local engine and prototype/test fixture.
+3. tsift adapter: codebase ingestion, AST symbols, comments, routes, call/import edges, source-read/context-pack/traverse.
+4. Orbit/Knowledge Navigator adapters: content, docs, LiveKit knowledge, questions/answers/assets, and optional codebase ingestion through tsift.
+5. Convex/FalkorDB projections: deployment choices for reactive product state or production graph reads.
+
+That means `#bahy` is still the right top backlog item, but it should name Convex and optional graph-backend projection explicitly. The risk to avoid is extracting too early into a generic "any content graph DB" package before tsift and Orbit have forced the schema through real adapters. I would keep the first implementation inside or next to tsift, draw the no-code-domain boundary now, and extract once the Orbit code/comment adapter or agent-doc session graph becomes the second real consumer.
+<!-- agent:boundary:72ce05d4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -98,7 +128,7 @@ I would not extract immediately as a polished public package. First, define the 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bahy] [recommended] Spike a standalone SQLite-backed typed property graph crate behind tsift: generic nodes/edges/provenance/freshness/query APIs, with tsift as the code-domain adapter and Orbit/BuildParty as separate consumers rather than tsift-owned products.
+- [ ] [#bahy] [recommended] Spike a provider-neutral typed property graph substrate behind tsift: SQLite as the local/offline prototype and test engine, generic nodes/edges/provenance/freshness/query APIs, tsift code/comment extraction as one adapter, Convex projection for Orbit's reactive knowledge store, and optional graph-backend projection such as FalkorDB as a replaceable derived read model rather than tsift owning Orbit/BuildParty.
 - [ ] [#7k0p] [recommended] Borrow CodeGraph-style adaptive exploration packets for tsift context/traverse surfaces: project-size-aware budgets, relationship maps, line-numbered clustered source windows, and no-reread guidance.
 - [ ] [#15vh] [recommended] Add framework/route nodes to the tsift graph, starting with narrow Rust/TypeScript/Python route extractors that emit route nodes and handler reference edges.
 - [ ] [#72v1] [recommended] Add a tsift affected-tests/impact query over changed files, imports, and call edges so closeout and CI loops can choose likely test targets without broad manual scanning.

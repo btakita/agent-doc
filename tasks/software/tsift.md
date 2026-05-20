@@ -36,7 +36,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): graphdb next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:5b37be04 -->
+### Re: graph-db operator workflows — gpt-5
+
+Implemented `#gref`, `#guse`, and `#gliv`.
+
+For `#gref`, I added explicit graph-db operator commands: `tsift graph-db --path . refresh --json` materializes `.tsift/graph.db` without a throwaway `traverse` call, and `tsift graph-db --path . status --json` inspects the current projection without refreshing. The reports include projection version, content hash, source watermark, node/edge counts, tombstone counts, and next commands for `doctor`, `drift`, and `convex-sync`.
+
+For `#guse`, I added `tsift graph-db --path . evidence <backlog-id-or-job-handle> --depth 3 --limit 8 --json`. It resolves backlog ids and job packet handles, returns reachable `worker_context` and `source_handle` rows, shortest paths, recommended next commands, and compiled fixture coverage. The graph-db conformance suite now locks backlog-id and job-handle evidence behavior.
+
+For `#gliv`, I promoted the live Convex graph acceptance path into CI. The new job exits as a documented skip until `TSIFT_LIVE_CONVEX_GRAPH_URL` is configured for a dedicated deployment; once present, it runs the ignored live acceptance test as a remote graph-db node/kind/neighborhood/path parity gate. README, SPEC, and operator examples now document the workflow.
+
+Graphify icebox answer: I did not remove those icebox items. They are not completed by this batch; LLM entity extraction, HTML visualization, and embedding similarity are distinct semantic/visual feature ideas. They can be deleted if we are explicitly descoping that Graphify layer, but they should not be reaped as done from these graph-db operator changes.
+
+Verification:
+- `cargo test --test graph_db_conformance graph_db_`
+- `make ci-full`
+- `cargo build`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.42`
+- Latest completed GitHub `btakita/tsift` CI run `26193348809` passed; the tsift workflow has no tmux CI leg.
+
+Commits prepared:
+- `src/tsift`: `cd3463c feat: add graph db operator workflows`
+- Superproject gitlink: `6e860392c chore: update tsift graph db workflows`
+
+Push follows after this document closeout, per agent-doc commit sequencing.
+
+<!-- agent:boundary:06909d3e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,17 +70,15 @@ Compacted content:
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#grwp]
-- do [#gdrf]
-- do [#gcap]
+- do [#gref]
+- do [#guse]
+- do [#gliv]
+- Can the graphify icebox items be removed?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gref] Add an explicit graph-db refresh/status operator workflow that materializes .tsift/graph.db without requiring a throwaway traverse call, reports projection version/content hash/source watermark/tombstone counts, and emits next commands for doctor, drift, and convex-sync.
-- [ ] [#guse] Add a graph-db evidence packet for queued or backlog work: start from a backlog id or job packet handle, return bounded worker_context and source_handle rows, shortest paths, recommended next commands, and compiled fixture coverage for agent handoffs.
-- [ ] [#gliv] Promote the live Convex graph backend acceptance path into a documented release or CI gate once a dedicated deployment and secrets exist, including graph-db node/kind/neighborhood/path parity evidence from the remote snapshot.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
 <!-- /agent:backlog -->

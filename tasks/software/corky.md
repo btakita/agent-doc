@@ -87,20 +87,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-203310.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-205756.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Corky OAuth token caching
+- Archived 1 response topic(s): Google Workspace document coverage
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ Please support all types of Google docs...not just Google sheets. #next-steps
-### Re: Google Workspace document coverage — gpt-5
-
-Outcome: Added a top-priority backlog item for broader Google Workspace document coverage beyond Sheets. It should make the future implementation MIME-type-aware instead of treating Sheets as the only structured Google document path.
-
-Execution boundary: this `#next-steps` cycle captured the follow-up in the session backlog; no Corky code was changed in this turn.
-
-Top backlog item: `#google-workspace-doc-types`.
-<!-- agent:boundary:75a0c61d -->
+<!-- agent:boundary:ece1fbef -->
 <!-- /agent:exchange -->
 ###
 <!--

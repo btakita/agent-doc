@@ -20,8 +20,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-
-FlowCore refactor is in maintenance mode; top backlog item: #fcmt.
+FlowCore refactor is in maintenance mode; top backlog item: #y9kk.
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,10 +33,32 @@ FlowCore refactor is in maintenance mode; top backlog item: #fcmt.
 Compacted content:
 - Archived 1 response topic(s): FlowCore next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3ef0952e -->
+❯ do [#fcmt]. #spec-test-build-install-commit-push
+### Re: do [#fcmt] — gpt-5
+
+Completed `#fcmt`.
+
+I reproduced the mixed duplicate-scaffold/live prompt failure with failing regressions first. The normalizers now only repair pure duplicated scaffold. When duplicated scaffold is mixed with live prompt text, the closeout write path logs a typed `flow=document_mutation` event with `reason=mixed_duplicate_scaffold_tail` and fails closed; editor/FFI normalization rejects the same shape instead of moving or duplicating that text.
+
+Updated specs, changelog, and the FlowCore map. Pushed commits:
+- agent-doc submodule: `c0c5a188` (`fix: fail closed on mixed duplicate scaffold`)
+- parent gitlink: `f674361c6` (`agent-doc: fail closed on mixed duplicate scaffold`)
+
+Verification:
+- failing regression first: `cargo test mixed_duplicate_scaffold --lib -- --test-threads=2` failed against the old auto-repair behavior
+- focused pass: `cargo test duplicate_scaffold --all-targets -- --test-threads=2`
+- full suite: `make check`
+- CI evidence: latest CI run `26195552731` was green; its `check` job includes both `make check` and `make tmux-ci`
+- local tmux sweep: `make tmux-ci`
+- install/build: `make install`
+- installed version: `agent-doc --version` -> `agent-doc 0.33.16`
+<!-- agent:boundary:22c09dbe -->
 <!-- /agent:exchange -->
 ###
 <!--
+JB `Interrupt and Clear Session Context` causes the Codex session to open nvim.
+#spec-test-build-install-commit-push
+---
 The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push 
 -->
 
@@ -47,7 +68,6 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#fcmt] [recommended] FlowCore maintenance gate: for the next closeout, routing, write, repair, or orchestration bug, keep the fix on the owning FlowCore enum/event path, add the smallest pure-flow or SimWorld regression for the reproduced failure, and update the guard/proof budget only after the audit is explicit. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

@@ -34,7 +34,21 @@ Added prioritized FlowCore refactor next steps. Top backlog item: #rte4.
 Compacted content:
 - Archived 4 response topic(s): routed-reopen FlowCore slice; FlowCore closeout, mutation, and session-cycle slices; duplicate content corruption during typing; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:6db8b264 -->
+❯ Please elaborate on the decision in [#gp9d].
+### Re: #gp9d audit-docs freshness decision — gpt-5.5
+
+[#gp9d] is about separating two different kinds of doc-audit guarantees that currently look like one failure.
+
+The useful guarantee is content freshness for managed instruction surfaces: generated agent-doc surfaces such as root `AGENTS.md`, `.codex/AGENTS.md`, `.claude/skills/agent-doc/SKILL.md`, and OpenCode/Cursor mirrors should match what the running binary would render. That is deterministic and worth keeping fail-closed because a stale harness instruction can make every later agent-doc cycle unsafe.
+
+The questionable guarantee is broad mtime freshness for local prose docs. In the last cycle, `make check`, build, install, the JetBrains plugin build, and CI/tmux all passed, but `cargo run --quiet -- audit-docs` stayed red because several instruction/doc files were older than `src/stream.rs`. That does not prove those files contain stale content; it proves only that the source file has a newer filesystem timestamp. After source-only changes, that can create a release-blocking audit failure even when no human-facing instruction text needed to change.
+
+The decision in [#gp9d] is therefore whether `audit-docs` should continue treating mtime as a hard correctness signal, or whether it should switch the managed instruction-surface check to content-based comparison and reserve mtime checks for narrower cases.
+
+My recommendation is content-based for generated/managed surfaces, with optional advisory mtime output for broad docs. The managed-surface path already has a clear expected rendering from the binary, so it can fail on real content drift. For README/SPEC/custom instruction files, mtime is too indirect as a hard gate; a better gate is either explicit required-reference coverage, changed-file-aware checks, or targeted assertions that a spec section was updated when a known code area changed.
+
+I would keep [#gp9d] open until that policy is made explicit in `SPEC.md` and covered with tests. The important invariant is not "every doc must be newer than every touched source file"; it is "agent-facing instructions and required specs must not drift from the binary behavior they claim to describe."
+<!-- agent:boundary:4294ba85 -->
 <!-- /agent:exchange -->
 ###
 <!--

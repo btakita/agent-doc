@@ -35,18 +35,48 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 5 response topic(s): codegraph assessment; local graph database for tsift; standalone SQLite graph substrate vs tsift boundary; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:0ea8e928 -->
+### Re: tsift graph navigation queue — gpt-5
+
+Completed `#7k0p`, `#15vh`, and `#72v1`.
+
+Implemented in `src/tsift`:
+
+- Route extraction for narrow Rust, TypeScript/JavaScript, and Python web patterns, stored in the SQLite index as `route_nodes` and surfaced in traversal as `route` nodes with `defines_route` and `handled_by` edges.
+- Adaptive exploration packets on `traverse` and `context-pack`: project-size-aware budgets, compact relationship maps, line-numbered `source-read` windows, and explicit no-reread guidance for follow-up agents.
+- `tsift impact`, an affected-test query over changed files, import lines, indexed call edges, and route handler references, with JSON/human output and runnable test command suggestions.
+- Spec and regression coverage for the new route, traversal, exploration, and impact behavior.
+
+Verification in `src/tsift`:
+
+- `cargo check`
+- `cargo test` (`613 passed`, `107 passed`, existing wider sim test ignored)
+- `make check` (clippy with `-D warnings` plus full test suite)
+- `cargo build --release`
+- `cargo install --path . --force`
+- Installed CLI smoke check: `tsift --version` and `tsift impact --help`
+
+Pushed commits:
+
+- `src/tsift`: `3262277 feat: add route graph and impact packets`
+- root repo submodule pointer: `90fd50309 chore: update tsift submodule`
+
+Remote CI: GitHub Actions `CI` for tsift run `26176145686` completed successfully in `2m12s`. There is no tmux-specific workflow or `make tmux-ci` target in the tsift repo; the available CI surface is the `CI` workflow running the full clippy/test suite.
+<!-- agent:boundary:f0458162 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
+<!-- agent:queue -->
+dispatch #spec-test-build-install-commit-push
+- do [#7k0p]
+- do [#15vh]
+- do [#72v1]
+<!-- /agent:queue -->
+
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#7k0p] [recommended] Borrow CodeGraph-style adaptive exploration packets for tsift context/traverse surfaces: project-size-aware budgets, relationship maps, line-numbered clustered source windows, and no-reread guidance.
-- [ ] [#15vh] [recommended] Add framework/route nodes to the tsift graph, starting with narrow Rust/TypeScript/Python route extractors that emit route nodes and handler reference edges.
-- [ ] [#72v1] [recommended] Add a tsift affected-tests/impact query over changed files, imports, and call edges so closeout and CI loops can choose likely test targets without broad manual scanning.
 - [ ] [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.

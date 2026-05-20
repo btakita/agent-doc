@@ -36,7 +36,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): graph DB conformance
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:44252712 -->
+❯ What are the #next-steps for graph db behavior?
+### Re: graph DB behavior next steps — gpt-5
+
+Top backlog item after this cycle: `#grwp`.
+
+The previous graph DB behavior batch is now complete: `#gval`, `#gobs`, and `#gfed` are all archived as done, and the spec now has SQLite/Convex conformance, doctor diagnostics, and opt-in live Convex acceptance coverage. The next step should be proving the behavior against realistic workspace graphs and operational drift, rather than adding a wider API surface.
+
+I added these follow-ups in priority order:
+
+1. `#grwp` — prove graph-db behavior on a real agent-loop/tsift workspace fixture, including stable `session`, `backlog`, `source_handle`, and `worker_context` rows.
+2. `#gdrf` — add a graph projection drift/diff report between SQLite and Convex snapshots so operators can see concrete upserts, tombstones, stale metadata, and fail-closed repair commands before apply/read paths.
+3. `#gcap` — add graph-db scale/cap regression coverage for deterministic pagination, property filters, bounded neighborhood/path limits, doctor runtime, and SQLite query-plan/index expectations.
+
+I placed them ahead of crates.io/release cleanup because they are still graph DB behavior hardening. `#atvp` and `#g6kf` remain below them as packaging/release follow-up work.
+<!-- agent:boundary:14c9649a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,6 +62,9 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#grwp] Prove graph-db behavior on a real agent-loop/tsift workspace fixture: refresh .tsift/graph.db, capture stable node/kind/neighborhood/path examples for session, backlog, source_handle, and worker_context rows, and lock them in compiled CLI or fixture coverage so the substrate is validated beyond toy projects.
+- [ ] [#gdrf] Add a graph projection drift/diff report for SQLite vs Convex snapshots that summarizes node/edge upserts, tombstones, stale projection metadata, orphan/duplicate failures, and operator next commands before --apply or graph-db reads.
+- [ ] [#gcap] Add graph-db scale/cap regression coverage over a large synthetic traversal projection: deterministic pagination through all pages, property filter selectivity, bounded neighborhood/path limits, doctor runtime, and SQLite index/query-plan assertions.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
 <!-- /agent:backlog -->

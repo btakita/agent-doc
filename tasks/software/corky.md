@@ -92,18 +92,54 @@ prompt_presets:
 Compacted content:
 - Archived 2 response topic(s): Google Workspace document types; Google Drive live document tests
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:e5bb0504 -->
+❯ During the google drive tests, I was prompted for oauth n times. Is there an issues with oauth token caching?
+❯ #spec-test-build-install-commit-push
+
+❯ I added the Google App permissions. Please rerun the Google Drive + Document tests.
+### Re: Google Drive tests and OAuth caching — gpt-5
+
+Implemented and pushed Corky commit `c3a578b fix: streamline Google Workspace auth`.
+
+OAuth token caching is working. I checked the token metadata without printing secrets: the Gmail account has a refresh token and the stored scope set now includes Drive file access, Drive readonly, Google Docs, Google Sheets, Gmail compose, Gmail settings, and Gmail labels. The final live Google Drive matrix did not open any browser consent prompts. The earlier repeated prompts were the first-time incremental OAuth grants for separate Drive, Docs, and Sheets scopes, not evidence that the token store was losing refresh tokens.
+
+I added `corky auth --email EMAIL --scope workspace` so a user can pre-authorize the broad document workflow in one consent flow. That scope covers Drive upload/update/export/download, Docs read/write, and Sheets read/write.
+
+I also fixed `corky doc read/write` bare Drive IDs. They now route through Drive metadata instead of assuming every bare ID is a Google Doc. That was necessary for the bare-ID Drive binary media update path to work correctly.
+
+Live Google rerun evidence:
+
+- Final log: `/tmp/corky-drive-live4.6p9ESv/live.log`
+- Result: `17` passed, `0` failed, `2` skipped
+- Passed: Drive-backed create/info/export for Docs, Sheets, and Slides; Sheets API read/write; text binary upload/info/update/export by bare Drive ID; Google Drawing and Google Form detection; cleanup deletion for all temporary Drive files
+- Skipped: direct `corky docs read` and `corky docs write`, because Google Docs API is still disabled for OAuth project `873280095295`
+
+Remaining external blocker: enable the Google Docs API at `https://console.developers.google.com/apis/api/docs.googleapis.com/overview?project=873280095295`, then rerun the two direct Docs API live tests. I marked the old Drive API blocker done and added a new backlog item for this Docs API enablement.
+
+Verification completed before closeout:
+
+- `cargo fmt --check`
+- `cargo test filter::gmail_auth`
+- `cargo test test_cli_auth_accepts_workspace_scope`
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` with `transcribe-cuda`
+- `corky --version` -> `corky 0.28.2`
+- `git diff --check`
+- Live Google Drive/Documents matrix above
+- GitHub CI, Book, and Pages runs after push all passed
+
+There is no tmux-test workflow configured for Corky, so there was no tmux CI leg to inspect. The Corky subrepo is clean and pushed; the outer `agent-loop` worktree still shows the `src/corky` gitlink update and this session document, with the session document now owned by finalize.
+<!-- agent:boundary:32b1a808 -->
 <!-- /agent:exchange -->
 ###
 <!--
-During the google drive tests, I was prompted for oauth 4 times. Is there an issues with oauth token caching?
-#spec-test-build-install-commit-push
 -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#enable-drive-api-corky-oauth] Enable Google Drive API for Corky's configured Gmail OAuth project 873280095295, then rerun the live Google Workspace Drive CRUD matrix for brian.takita@gmail.com.
+- [ ] [#enable-docs-api-corky-oauth] Enable Google Docs API for Corky's configured Gmail OAuth project 873280095295, then rerun Google Docs read/write live tests for brian.takita@gmail.com.
 - [ ] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi, rerun the PyPI workflow, and verify the PyPI latest version matches the released crate.
 - [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
@@ -117,4 +153,5 @@ During the google drive tests, I was prompted for oauth 4 times. Is there an iss
 - 2026-05-12 [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange
 - 2026-05-20 [#google-docs-sheets-integration] Add Google Docs/Sheets integration for Corky: required OAuth scopes, read/write Google Docs, read Google Sheets, docs, and tests.
 - 2026-05-20 [#google-workspace-doc-types] Implement broad Google Workspace document type support beyond Sheets: detect Drive MIME types and route Google Docs, Sheets, Slides, Forms/Drawings, PDFs, and common Office files through appropriate read/export/write/upload behavior, with spec updates, docs, tests, build/install, commit, and push.
+- 2026-05-20 [#enable-drive-api-corky-oauth] Enable Google Drive API for Corky's configured Gmail OAuth project 873280095295, then rerun the live Google Workspace Drive CRUD matrix for brian.takita@gmail.com.
 <!-- /agent:done -->

@@ -61,7 +61,33 @@ Pushed commits:
 - root repo submodule pointer: `90fd50309 chore: update tsift submodule`
 
 Remote CI: GitHub Actions `CI` for tsift run `26176145686` completed successfully in `2m12s`. There is no tmux-specific workflow or `make tmux-ci` target in the tsift repo; the available CI surface is the `CI` workflow running the full clippy/test suite.
-<!-- agent:boundary:f0458162 -->
+❯ Please review recent changes to root.md. Convex will store the graph data for now using `nodes` + `edges`. Can we abstract our implemnation to support Convex as the data store and maintain the same quality of implementation?
+### Re: Convex graph abstraction — gpt-5
+
+Reviewed the uncommitted `src/session-share/tasks/root.md` edits and the current `src/tsift` graph boundary.
+
+Short version: yes. In `tsift`, we can support Convex as a graph data store without lowering implementation quality if Convex is a projection/read model behind the existing provider-neutral graph substrate, not a replacement for local indexing correctness.
+
+What changed in `root.md`:
+
+- Lines 214-216 add business context: ArcadeDB is a hard no, FalkorDB is still possible, and there is an incomplete implementation-time note. The unfinished sentence should be repaired before that doc is used as a decision record.
+- Line 226 asks whether Realtime V2V should integrate with AG-UI and whether lower-priority later events can be suppressed. That is a product coordination rule, not graph storage; it belongs in the Orbit/AG-UI PRD.
+- Lines 236, 262, 299, and 311-312 add follow-ups: data-driven question count, Robert-facing news/analysis, Google Sheet Column C, and PRDs with Mermaid diagrams. Those are `session-share/root` action items, not `tsift` implementation requirements.
+
+For `tsift`, the good news is the abstraction already exists. The spec explicitly says `src/substrate.rs` is provider-neutral, stores typed nodes/edges/provenance/freshness, and names Convex/FalkorDB as projection targets in [SPEC.md](/home/brian/work/btakita/agent-loop/src/tsift/SPEC.md:12). The concrete model is in [substrate.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/substrate.rs:47): `GraphNode`, `GraphEdge`, `GraphProjection`, and a `GraphStore` trait. The code adapter is already not SQLite-specific: [graph.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/graph.rs:488) projects call edges and routes into generic `code_symbol`, `route`, `calls`, and `handled_by` records. Traversal currently still reads the SQLite index tables directly in [main.rs](/home/brian/work/btakita/agent-loop/src/tsift/src/main.rs:4727), so that is the one important boundary to clean up.
+
+Recommended shape:
+
+1. Keep SQLite as `tsift`'s local/offline/test correctness store. It owns AST extraction, incremental freshness, locks, and deterministic CLI behavior.
+2. Add a Convex projection writer/reader that maps the substrate contract onto Convex tables `nodes` and `edges`, with indexes by `kind`, `from_id + kind`, and `to_id + kind`.
+3. Keep domain records out of the substrate shape. Orbit topics/questions/answers/assets should become graph node kinds plus properties/provenance, not new Rust structs wired through traversal internals.
+4. Make tests backend-agnostic: the same fixture should pass against in-memory SQLite and a mocked Convex adapter using the `GraphStore` contract.
+5. Only move graph algorithms to Convex if the product needs reactive server-side queries. For `tsift`, shortest-path/traversal can stay local and deterministic; Convex can serve the app/runtime view.
+
+The quality bar is: stable IDs, idempotent upserts, provenance/freshness on every derived record, typed edge kinds, parity tests, and fail-closed behavior when a projection is stale. If we do that, Convex `nodes` + `edges` is a reasonable current store and still leaves a clean swap path to FalkorDB or another vendor later.
+
+I added a recommended backlog item for the concrete `tsift` implementation step: Convex projection backend behind the provider-neutral substrate, with SQLite preserved as the correctness store and parity tests.
+<!-- agent:boundary:3c67f5b8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,14 +95,12 @@ Remote CI: GitHub Actions `CI` for tsift run `26176145686` completed successfull
 
 <!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
-- do [#7k0p]
-- do [#15vh]
-- do [#72v1]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#d2k2] [recommended] Add a Convex projection backend for tsift's provider-neutral graph substrate, mapping GraphProjection nodes/edges to Convex nodes/edges while preserving SQLite as the local correctness store and proving parity with backend-agnostic tests.
 - [ ] [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.

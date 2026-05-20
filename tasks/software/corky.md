@@ -92,7 +92,20 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): Google Workspace document coverage
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:ece1fbef -->
+❯ do [#google-workspace-doc-types]. #spec-test-build-install-commit-push
+### Re: Google Workspace document types — gpt-5
+
+Implemented and pushed `#google-workspace-doc-types`.
+
+- Corky commit: `b0a1d97 feat: expand Google Workspace document handling`, pushed to `origin/main`.
+- Added Drive-aware document handling: `corky doc info`, `corky doc export`, broader `corky doc read`, and Drive binary replacement through `corky doc write`.
+- Added Drive MIME detection/routing for Google Docs, Sheets, Slides, Forms, Drawings, PDFs, Office/OpenDocument files, text, images, and other Drive binaries.
+- Added `drive-readonly` auth scope and preserved incremental Google OAuth behavior so additional Drive/Docs/Sheets scopes can extend an existing grant.
+- Updated `SPEC.md`, README, command docs, privacy scope docs, and Google Workspace integration notes.
+- Verification: `make check`, `cargo run --quiet -- audit-docs`, `make release`, `make install` with GPU `transcribe-cuda`, `corky --version` (`0.28.2`), and GitHub CI run `26190445577` passed. This repo has no tmux-test CI leg; the pushed CI `check` job ran clippy and tests with vendored OpenSSL and passed.
+
+I left the outer agent-loop `src/corky` gitlink unstaged; it was already dirty before this cycle and the Corky repo itself is clean after the push.
+<!-- agent:boundary:0d25098d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,7 +114,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#google-workspace-doc-types] Implement broad Google Workspace document type support beyond Sheets: detect Drive MIME types and route Google Docs, Sheets, Slides, Forms/Drawings, PDFs, and common Office files through appropriate read/export/write/upload behavior, with spec updates, docs, tests, build/install, commit, and push.
 - [ ] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi, rerun the PyPI workflow, and verify the PyPI latest version matches the released crate.
 - [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
@@ -114,4 +126,5 @@ Compacted content:
 - 2026-05-12 [#watch-gmail-history-notify] [recommended] Teach watch to count Gmail API last_history_id movement and fire mailbox sync and desktop notifications for gmail-api accounts
 - 2026-05-12 [#oauth-callback-url-decode] [recommended] URL-decode OAuth callback params before state comparison and token exchange
 - 2026-05-20 [#google-docs-sheets-integration] Add Google Docs/Sheets integration for Corky: required OAuth scopes, read/write Google Docs, read Google Sheets, docs, and tests.
+- 2026-05-20 [#google-workspace-doc-types] Implement broad Google Workspace document type support beyond Sheets: detect Drive MIME types and route Google Docs, Sheets, Slides, Forms/Drawings, PDFs, and common Office files through appropriate read/export/write/upload behavior, with spec updates, docs, tests, build/install, commit, and push.
 <!-- /agent:done -->

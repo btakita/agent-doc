@@ -53,7 +53,13 @@ A practical workflow would be:
 6. Before merge, run `tsift diff-digest --cached .` and `tsift impact .` to catch accidental overlap and shared test fallout.
 
 The important limit is that `tsift` can identify likely overlap from source structure and session/backlog graph evidence, but it cannot prove semantic independence. Two changes can touch different files and still conflict through generated code, public contracts, migrations, config, tests, or formatting churn. So the right planner rule is: use `tsift` to make parallel work explicit and auditable, then fail closed when the graph shows shared ownership or when the final diffs overlap.
-<!-- agent:boundary:93a38c16 -->
+❯ Add #next-steps
+### Re: next steps — gpt-5
+
+I added one follow-up item for parallel-agent planning: `#pwcm`, a conflict-matrix/report item that uses `graph-db evidence`, `context-pack`, `diff-digest --cached`, and `impact` to assign worker scopes and fail closed on overlap.
+
+Backlog priority is now: `#atvp`, `#g6kf`, `#pwcm`. The top backlog item is `#atvp`.
+<!-- agent:boundary:54eaec7b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -67,6 +73,7 @@ The important limit is that `tsift` can identify likely overlap from source stru
 <!-- agent:backlog -->
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
+- [ ] [#pwcm] Add a planner conflict-matrix report that consumes , , , and  outputs to rank candidate worker scopes, flag shared files/symbols/tests/config, and emit fail-closed worker prompt ownership blocks for parallel dispatch.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

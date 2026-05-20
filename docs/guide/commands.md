@@ -63,7 +63,7 @@ Squash all `agent-doc:` git commits for the file into a single commit. Useful fo
 ## audit-docs
 
 ```
-agent-doc audit-docs
+agent-doc audit-docs [--root DIR]
 ```
 
 Audit instruction files (CLAUDE.md, AGENTS.md, README.md, SKILL.md) against the codebase:
@@ -71,6 +71,7 @@ Audit instruction files (CLAUDE.md, AGENTS.md, README.md, SKILL.md) against the 
 - Combined line budget under 1000 lines
 - Staleness detection (docs older than source)
 - Actionable content checks
+- Generated agent-doc instruction surfaces match the running binary. From a submodule checkout, the default release audit checks the superproject install root; explicit `--root DIR` checks generated surfaces under that root exactly.
 
 ## route
 

@@ -10,8 +10,10 @@
 //!   running `agent-doc` crate checkout (for example `cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs`
 //!   from the monorepo root), prefers the nested crate root over the outer repo root.
 //! - Also audits generated agent-doc instruction surfaces in the explicit root or resolved install
-//!   root. Managed surfaces must match the running binary's rendered content; custom root
-//!   AGENTS.md files are ignored.
+//!   root. Without `--root`, submodule checkouts audit the superproject install root used by
+//!   release installs. With explicit `--root`, the given root is audited exactly, so
+//!   submodule-local managed artifacts can still be checked intentionally. Managed surfaces must
+//!   match the running binary's rendered content; custom root AGENTS.md files are ignored.
 //! - Filesystem mtime staleness is reported as advisory output only; managed instruction surfaces
 //!   are release-blocking through rendered-content comparison, not timestamp comparison.
 //!
@@ -29,6 +31,8 @@
 //!   path, audit scopes to that crate root instead of the outer repo
 //! - managed_instruction_surface_roots: running from a submodule audits the superproject install
 //!   root instead of ignored submodule-local install artifacts
+//! - explicit_managed_instruction_surface_root: `--root` audits the requested root exactly,
+//!   including submodule-local managed instruction artifacts
 //! - mtime_staleness_advisory: source-newer-than-doc output is non-blocking when content checks pass
 
 use anyhow::Result;
@@ -154,17 +158,34 @@ fn print_issue(issue: &instruction_files::Issue) {
 }
 
 fn managed_instruction_surface_roots(root_override: Option<&Path>) -> Vec<PathBuf> {
+    let superproject_root = root_override
+        .is_none()
+        .then(resolve_git_superproject_root)
+        .flatten();
+    let cwd = std::env::current_dir().ok();
+    managed_instruction_surface_roots_from(
+        root_override,
+        superproject_root.as_deref(),
+        cwd.as_deref(),
+    )
+}
+
+fn managed_instruction_surface_roots_from(
+    root_override: Option<&Path>,
+    superproject_root: Option<&Path>,
+    cwd: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(root) = root_override {
         push_unique_root(&mut roots, root);
         return roots;
     }
-    if let Some(root) = resolve_git_superproject_root() {
-        push_unique_root(&mut roots, &root);
+    if let Some(root) = superproject_root {
+        push_unique_root(&mut roots, root);
         return roots;
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        push_unique_root(&mut roots, &cwd);
+    if let Some(cwd) = cwd {
+        push_unique_root(&mut roots, cwd);
     }
     roots
 }
@@ -312,6 +333,35 @@ mod tests {
         let roots = managed_instruction_surface_roots(Some(&root));
 
         assert_eq!(roots, vec![root]);
+    }
+
+    #[test]
+    fn managed_instruction_surface_roots_prefers_superproject_without_override() {
+        let tmp = TempDir::new().unwrap();
+        let superproject = tmp.path().join("workspace");
+        let submodule = superproject.join("src/agent-doc");
+        std::fs::create_dir_all(&submodule).unwrap();
+
+        let roots =
+            managed_instruction_surface_roots_from(None, Some(&superproject), Some(&submodule));
+
+        assert_eq!(roots, vec![superproject.canonicalize().unwrap()]);
+    }
+
+    #[test]
+    fn managed_instruction_surface_roots_honors_explicit_submodule_root() {
+        let tmp = TempDir::new().unwrap();
+        let superproject = tmp.path().join("workspace");
+        let submodule = superproject.join("src/agent-doc");
+        std::fs::create_dir_all(&submodule).unwrap();
+
+        let roots = managed_instruction_surface_roots_from(
+            Some(&submodule),
+            Some(&superproject),
+            Some(&submodule),
+        );
+
+        assert_eq!(roots, vec![submodule.canonicalize().unwrap()]);
     }
 
     #[test]

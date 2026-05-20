@@ -29,43 +29,12 @@ FlowCore refactor is complete enough to leave broad extraction mode; next top ba
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-201705.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-205405.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Clear Session Context active-agent guard
+- Archived 2 response topic(s): FlowCore refactoring next steps; FlowCore regression gate
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ What are the #next-steps for the flow core refactoring?
-### Re: FlowCore refactoring next steps — gpt-5
-
-The FlowCore refactor is at the point where the broad extraction queue can stay closed. The current code has dedicated `flow` modules for routed reopen, document mutation, closeout, session cycle, operator clear, and orchestration batch, and the specs now identify those flows as the owners for the recurring bug classes.
-
-The next step is a maintenance gate, not another large rewrite: for the next hot-path bugfix, verify the touched branch does not add new free-form guard/proof strings outside FlowCore, promote any new branch into the owning enum/event, and add the smallest regression at the right level: pure flow test first, SimWorld when interleavings matter, tmux only for external boundary proof.
-
-I added that as the new top backlog item: #fcrg. The previous lower-agent orchestration sequence should stay immediately behind it, starting with #y9kk.
-❯ do [#fcrg]. #spec-test-build-install-commit-push
-### Re: FlowCore regression gate — gpt-5
-
-Implemented `#fcrg`.
-
-I tightened the touched routed-reopen branch so route prompt-ready and dispatch-proof failures now use `RoutedReopenGuardReason` instead of passing free-form reason strings from `route.rs` into FlowCore events. I also added the executable regression gate in `tests/test_cli.rs`: it budgets existing hot-path `guard_`, `proof=`, `proof_scope=`, `reason=`, `flow_reason=`, and `accepted_only` tokens across route/write/preflight/session-check/orchestrate/git/repair, so future additions have to be audited and promoted through the owning FlowCore enum/event before the budget changes.
-
-Spec/docs updated:
-- `SPEC.md`
-- `docs/reference/flow-map.md`
-- `VERSIONS.md`
-
-Commits created:
-- `src/agent-doc`: `9a331a1c test: add flowcore regression gate`
-- parent repo: `273874a91 agent-doc: update flowcore regression gate`
-
-Verification:
-- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
-- `cargo test route_failure_events_are_owned_by_routed_reopen_flow`
-- `cargo test typed_flow_events_cover_route_write_closeout_session_check_and_child_patchback`
-- `make check`
-- `make install`
-- Latest GitHub CI run on `20260422/codex-agent-backend` was green, including the `Run make tmux-ci` step.
-<!-- agent:boundary:04599849 -->
+<!-- agent:boundary:6698d90d -->
 <!-- /agent:exchange -->
 ###
 <!--

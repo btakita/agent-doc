@@ -29,20 +29,12 @@ FlowCore refactor is in maintenance mode; top backlog item: #fcmt.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-232754.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-233127.md`*
 
 Compacted content:
-- Archived 1 response topic(s): pending_done_guard completion detection
+- Archived 1 response topic(s): FlowCore next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ What are #next-steps for flow core?
-### Re: FlowCore next steps — gpt-5
-
-FlowCore should stay in maintenance mode, not broad extraction mode. The completed archive already has the routed-reopen, document-mutation, closeout, session-cycle, operator-clear, orchestration-batch, regression-gate, and full-content source-buffer proof work marked done.
-
-I added one narrow follow-up at the top of the backlog: `#fcmt`. It keeps future hot-path fixes on the owning FlowCore enum/event path, requires a small pure-flow or SimWorld regression for the reproduced failure, and only allows guard/proof budget changes after an explicit audit.
-
-Top backlog item: `#fcmt`. The lower-agent orchestration sequence should remain behind it, starting with `#y9kk`.
-<!-- agent:boundary:b33b9b80 -->
+<!-- agent:boundary:3ef0952e -->
 <!-- /agent:exchange -->
 ###
 <!--

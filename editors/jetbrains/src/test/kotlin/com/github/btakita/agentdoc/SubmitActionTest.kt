@@ -12,10 +12,13 @@ class SubmitActionTest {
         ).toFile().readText()
 
         val awaitIdx = source.indexOf("TypingTracker.awaitIdle(file.path)")
+        val deferIdx = source.indexOf("return@Thread")
         val saveIdx = source.indexOf("FileDocumentManager.getInstance().saveAllDocuments()")
         val routeIdx = source.indexOf("TerminalUtil.sendToTerminal(project, file)")
 
         assertTrue("SubmitAction should wait for typing idle", awaitIdx >= 0)
+        assertTrue("SubmitAction should defer routing when typing never settles", deferIdx > awaitIdx)
+        assertTrue("SubmitAction should defer before saving", saveIdx > deferIdx)
         assertTrue("SubmitAction should save after waiting for idle", saveIdx > awaitIdx)
         assertTrue("SubmitAction should route after saving", routeIdx > saveIdx)
     }

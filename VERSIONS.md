@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **FlowCore active-typing guard now blocks visible document writes.** Direct
+  disk write paths consult `flow::document_mutation` before snapshot/document
+  mutation and fail closed when the shared typing indicator never reaches idle.
+  JetBrains and VS Code patch watchers now treat typing-debounce timeouts as
+  no-mutation retry states instead of applying patches or boundary reposition
+  while the user is still typing. Bumped the JetBrains plugin build version to
+  `0.2.123`.
+
 - **FlowCore owns the next closeout, mutation, and session-cycle slices.**
   `flow::document_mutation` now parses and classifies template patchback shapes
   before visible writes across template, stream, IPC, and repair replay paths,

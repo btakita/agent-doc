@@ -1234,6 +1234,8 @@ class PatchWatcher implements vscode.Disposable {
     private outputChannel: vscode.OutputChannel;
     /** Track last typing time per file for debounce */
     private lastTypingTime = new Map<string, number>();
+    /** Patch files delayed because the target document is still being edited. */
+    private pendingPatchRetries = new Set<string>();
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('Agent Doc Patches');
@@ -1367,6 +1369,10 @@ class PatchWatcher implements vscode.Disposable {
                 return;
             }
 
+            if (!this.awaitIdleBeforeDocumentMutation(patch.file, 'file patch', uri.fsPath)) {
+                return;
+            }
+
             const applied = await this.applyPatch(patch);
 
             if (applied) {
@@ -1417,6 +1423,14 @@ class PatchWatcher implements vscode.Disposable {
             return;
         }
 
+        if (!idle) {
+            this.outputChannel.appendLine(`PatchWatcher: typing debounce timed out before reposition for ${filePath}; retrying`);
+            setTimeout(() => {
+                this.repositionBoundaryWithDebounce(filePath, patchFilePath, boundaryId, 0, preserveHead);
+            }, debounceMs);
+            return;
+        }
+
         // Apply reposition via WorkspaceEdit (cursor-safe)
         const fileUri = vscode.Uri.file(filePath);
         vscode.workspace.openTextDocument(fileUri).then(async (document) => {
@@ -1451,6 +1465,34 @@ class PatchWatcher implements vscode.Disposable {
 
     private repositionBoundaryToEndPreserveHeadTs(doc: string, component: string, boundaryId?: string): string | null {
         return repositionBoundaryToEndPreserveHead(doc, component, boundaryId);
+    }
+
+    private awaitIdleBeforeDocumentMutation(filePath: string, operation: string, patchFilePath?: string): boolean {
+        const debounceMs = 500;
+        const timeoutMs = 5000;
+        const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
+        const nativeIdle = native.awaitIdle(filePath, debounceMs, timeoutMs, projectRoot);
+        const tsIdle = (Date.now() - (this.lastTypingTime.get(filePath) ?? 0)) >= debounceMs;
+        if (nativeIdle && tsIdle) {
+            return true;
+        }
+
+        this.outputChannel.appendLine(`PatchWatcher: typing debounce timed out before ${operation} for ${filePath}`);
+        if (patchFilePath) {
+            this.schedulePatchRetry(patchFilePath);
+        }
+        return false;
+    }
+
+    private schedulePatchRetry(patchFilePath: string): void {
+        if (this.pendingPatchRetries.has(patchFilePath)) return;
+        this.pendingPatchRetries.add(patchFilePath);
+        setTimeout(() => {
+            this.pendingPatchRetries.delete(patchFilePath);
+            if (fs.existsSync(patchFilePath)) {
+                this.onPatchFileCreated(vscode.Uri.file(patchFilePath));
+            }
+        }, 500);
     }
 
     private async applyPatch(patch: IpcPatch): Promise<boolean> {

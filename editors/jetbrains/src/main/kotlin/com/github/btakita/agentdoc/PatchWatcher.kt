@@ -53,6 +53,12 @@ class PatchWatcher(private val project: Project) : Disposable {
     /** Dedup cache keyed by patch_id (globally unique). Shared across all roots. */
     private val appliedPatchIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
+    /** Patch files delayed because the target document is still being edited. */
+    private val scheduledPatchRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** Boundary reposition requests delayed because the target document is still being edited. */
+    private val scheduledRepositionRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     @Volatile private var running = false
 
     private val APPLIED_PATCH_TTL_MS = 60_000L // 60s TTL
@@ -285,7 +291,9 @@ class PatchWatcher(private val project: Project) : Disposable {
                     LOG.info("[socket] dedup: patch_id ${patch.patchId} already applied — skipping")
                     return true
                 }
-                awaitIdleBeforeDocumentMutation(patch.file, "socket patch")
+                if (!awaitIdleBeforeDocumentMutation(patch.file, "socket patch")) {
+                    return false
+                }
                 var applied = false
                 ApplicationManager.getApplication().invokeAndWait {
                     // Re-check under EDT to avoid TOCTOU race with file watcher
@@ -351,8 +359,11 @@ class PatchWatcher(private val project: Project) : Disposable {
     private fun repositionBoundaryViaDocument(filePath: String, boundaryId: String? = null, preserveHead: Boolean = false) {
         com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService().submit {
             val lib = AgentDocLib.get()
-            if (lib != null) {
-                lib.agent_doc_await_idle(filePath, 500, 5000)
+            val idle = lib?.agent_doc_await_idle(filePath, TypingTracker.DEBOUNCE_MS, 5_000) ?: true
+            if (!idle) {
+                LOG.warn("[patch-watcher] typing debounce timed out before reposition for $filePath; retrying")
+                scheduleRepositionRetry(filePath, boundaryId, preserveHead)
+                return@submit
             }
             ApplicationManager.getApplication().invokeLater {
                 val reposStart = System.nanoTime()
@@ -416,7 +427,10 @@ class PatchWatcher(private val project: Project) : Disposable {
                 return
             }
 
-            awaitIdleBeforeDocumentMutation(patch.file, "file patch")
+            if (!awaitIdleBeforeDocumentMutation(patch.file, "file patch")) {
+                schedulePatchRetry(patchFile, "typing active")
+                return
+            }
             ApplicationManager.getApplication().invokeLater {
                 if (isClaimedByForceDisk(patch.patchId, patch.file) || isPatchAlreadyApplied(patch, patchFile)) {
                     LOG.info("[patch-watcher] dedup (inner): skipping apply for ${patchFile.name}")
@@ -468,11 +482,51 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
     }
 
-    private fun awaitIdleBeforeDocumentMutation(filePath: String, operation: String) {
-        val lib = AgentDocLib.get() ?: return
+    private fun awaitIdleBeforeDocumentMutation(filePath: String, operation: String): Boolean {
+        val lib = AgentDocLib.get() ?: return true
         val idle = lib.agent_doc_await_idle(filePath, TypingTracker.DEBOUNCE_MS, 5_000)
         if (!idle) {
             LOG.warn("[patch-watcher] typing debounce timed out before $operation for $filePath")
+        }
+        return idle
+    }
+
+    private fun schedulePatchRetry(patchFile: File, reason: String) {
+        val key = try {
+            patchFile.canonicalPath
+        } catch (_: Exception) {
+            patchFile.absolutePath
+        }
+        if (!scheduledPatchRetries.add(key)) return
+        LOG.info("[patch-watcher] deferring ${patchFile.name}: $reason")
+        com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService().submit {
+            try {
+                Thread.sleep(TypingTracker.DEBOUNCE_MS)
+                if (running && patchFile.exists()) {
+                    processPatchFile(patchFile)
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } finally {
+                scheduledPatchRetries.remove(key)
+            }
+        }
+    }
+
+    private fun scheduleRepositionRetry(filePath: String, boundaryId: String?, preserveHead: Boolean) {
+        val key = "$filePath|${boundaryId ?: ""}|$preserveHead"
+        if (!scheduledRepositionRetries.add(key)) return
+        com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService().submit {
+            try {
+                Thread.sleep(TypingTracker.DEBOUNCE_MS)
+                if (running) {
+                    repositionBoundaryViaDocument(filePath, boundaryId, preserveHead)
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } finally {
+                scheduledRepositionRetries.remove(key)
+            }
         }
     }
 

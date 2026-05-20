@@ -60,4 +60,15 @@ describe('patchGuard', () => {
             fs.rmSync(root, { recursive: true, force: true });
         }
     });
+
+    it('keeps active-typing patch timeouts as retry states', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const guardIdx = source.indexOf("awaitIdleBeforeDocumentMutation(patch.file, 'file patch', uri.fsPath)");
+        const applyIdx = source.indexOf('const applied = await this.applyPatch(patch)');
+
+        assert.ok(guardIdx >= 0, 'patch watcher should guard visible writes with typing idle');
+        assert.ok(applyIdx > guardIdx, 'patch watcher should guard before applyPatch');
+        assert.ok(source.includes('this.schedulePatchRetry(patchFilePath)'));
+        assert.ok(source.includes('typing debounce timed out before reposition'));
+    });
 });

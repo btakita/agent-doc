@@ -170,6 +170,57 @@ pub(crate) fn log_patchback_parse_event(file: &Path, shape: PatchbackShape, outc
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VisibleWriteTypingFacts {
+    pub(crate) idle_reached: bool,
+    pub(crate) timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VisibleWriteDecision {
+    Apply,
+    DeferActiveTyping,
+}
+
+impl VisibleWriteDecision {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Apply => "apply",
+            Self::DeferActiveTyping => "defer_active_typing",
+        }
+    }
+
+    pub(crate) const fn outcome(self) -> FlowOutcome {
+        match self {
+            Self::Apply => FlowOutcome::Completed,
+            Self::DeferActiveTyping => FlowOutcome::Blocked,
+        }
+    }
+}
+
+pub(crate) fn decide_visible_write_after_typing(
+    facts: VisibleWriteTypingFacts,
+) -> VisibleWriteDecision {
+    let _timeout_ms = facts.timeout_ms;
+    if facts.idle_reached {
+        VisibleWriteDecision::Apply
+    } else {
+        VisibleWriteDecision::DeferActiveTyping
+    }
+}
+
+pub(crate) fn visible_write_guard_event(decision: VisibleWriteDecision, source: &str) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::DocumentMutation,
+        FlowStage::PreWriteGuard,
+        decision.outcome(),
+    )
+    .with_reason(format!(
+        "visible_write_typing_{}:{source}",
+        decision.as_str()
+    ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OrchestratePatchbackRejectReason {
     MissingExchangePatch,
     RawUnmatchedContent,
@@ -364,6 +415,34 @@ mod tests {
                 .unwrap_err();
 
         assert!(err.to_string().contains("malformed template patchback"));
+    }
+
+    #[test]
+    fn visible_write_guard_defers_when_typing_never_settles() {
+        let decision = decide_visible_write_after_typing(VisibleWriteTypingFacts {
+            idle_reached: false,
+            timeout_ms: 5_000,
+        });
+        let event = visible_write_guard_event(decision, "socket_ipc");
+
+        assert_eq!(decision, VisibleWriteDecision::DeferActiveTyping);
+        assert_eq!(event.flow, FlowName::DocumentMutation);
+        assert_eq!(event.stage, FlowStage::PreWriteGuard);
+        assert_eq!(event.outcome, FlowOutcome::Blocked);
+        assert_eq!(
+            event.reason.as_deref(),
+            Some("visible_write_typing_defer_active_typing:socket_ipc")
+        );
+    }
+
+    #[test]
+    fn visible_write_guard_allows_idle_writes() {
+        let decision = decide_visible_write_after_typing(VisibleWriteTypingFacts {
+            idle_reached: true,
+            timeout_ms: 5_000,
+        });
+
+        assert_eq!(decision, VisibleWriteDecision::Apply);
     }
 
     #[test]

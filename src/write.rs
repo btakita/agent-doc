@@ -1905,6 +1905,7 @@ fn consume_queue_prompt(file: &Path) -> Result<bool> {
         return Ok(false);
     };
 
+    guard_visible_write_idle(file, "queue_consume")?;
     atomic_write(file, &plan.new_document).context("queue consume: failed to write document")?;
     if plan.save_snapshot {
         snapshot::save(file, &plan.new_snapshot)?;
@@ -2382,6 +2383,7 @@ pub(crate) fn normalize_backlog_patch_response(
         }
 
         let rewritten_doc = backlog_component.replace_content(current_content, &normalized_body);
+        guard_visible_write_idle(file, "normalize_pending_patch")?;
         std::fs::write(file, &rewritten_doc).with_context(|| {
             format!(
                 "failed to write normalized pending state {}",
@@ -3821,6 +3823,61 @@ const STALE_SNAPSHOT_RESET_DRIFT_MIN_BYTES: usize = 100;
 /// Maximum current/snapshot size ratio for reset-drift detection.
 const STALE_SNAPSHOT_RESET_DRIFT_MAX_RATIO: f64 = 0.90;
 
+const VISIBLE_WRITE_TYPING_DEBOUNCE_MS: u64 = 500;
+const VISIBLE_WRITE_TYPING_TIMEOUT_MS: u64 = 5_000;
+
+pub(crate) fn guard_visible_write_idle(file: &Path, source: &str) -> Result<()> {
+    guard_visible_write_idle_with_budget(
+        file,
+        source,
+        VISIBLE_WRITE_TYPING_DEBOUNCE_MS,
+        VISIBLE_WRITE_TYPING_TIMEOUT_MS,
+    )
+}
+
+fn guard_visible_write_idle_with_budget(
+    file: &Path,
+    source: &str,
+    debounce_ms: u64,
+    timeout_ms: u64,
+) -> Result<()> {
+    let indicator_path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let idle_reached =
+        agent_doc::debounce::await_idle_via_file(&indicator_path, debounce_ms, timeout_ms);
+    let facts = crate::flow::document_mutation::VisibleWriteTypingFacts {
+        idle_reached,
+        timeout_ms,
+    };
+    let decision = crate::flow::document_mutation::decide_visible_write_after_typing(facts);
+    crate::flow::proof::log_flow_event(
+        file,
+        crate::flow::document_mutation::visible_write_guard_event(decision, source),
+    );
+    if decision == crate::flow::document_mutation::VisibleWriteDecision::Apply {
+        return Ok(());
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "visible_write_deferred_active_typing file={} source={} debounce_ms={} timeout_ms={}",
+            file.display(),
+            source,
+            debounce_ms,
+            timeout_ms
+        ),
+    );
+    anyhow::bail!(
+        "visible document write for {} deferred: editor typing did not settle within {}ms; retry after typing stops",
+        file.display(),
+        timeout_ms
+    )
+}
+
 fn stale_snapshot_reset_drift(snapshot_doc: &str, current_doc: &str) -> Option<(usize, usize)> {
     let snapshot_clean = strip_boundary_for_dedup(snapshot_doc);
     let current_clean = strip_boundary_for_dedup(current_doc);
@@ -4498,6 +4555,7 @@ pub fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()>
         &[],
         "",
     );
+    guard_visible_write_idle(file, "write_inline")?;
     snapshot::save(file, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
@@ -4712,6 +4770,7 @@ pub fn run_template(
         &patches,
         &unmatched,
     );
+    guard_visible_write_idle(file, "run_template")?;
     snapshot::save(file, snapshot_content)?;
 
     atomic_write(file, &final_content)?;
@@ -5184,6 +5243,13 @@ pub fn run_stream(
                 }
             };
             // Snapshot saved BEFORE document write (#wcf5).
+            if let Err(e) = guard_visible_write_idle(file, "run_stream_ipc_timeout") {
+                eprintln!(
+                    "[write] WARNING: visible write deferred before exit(75): {}",
+                    e
+                );
+                std::process::exit(75);
+            }
             if let Err(e) = snapshot::save(file, snapshot_content) {
                 eprintln!(
                     "[write] WARNING: snapshot save before exit(75) failed: {}",
@@ -5409,6 +5475,7 @@ pub fn run_stream(
         &patches,
         &unmatched,
     );
+    guard_visible_write_idle(file, "run_stream")?;
     snapshot::save(file, snapshot_content)?;
     snapshot::save_crdt(file, &snapshot_crdt_state)?;
 
@@ -5727,6 +5794,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
         &patches,
         &unmatched,
     );
+    guard_visible_write_idle(file, "run_ipc_timeout_fallback")?;
     atomic_write(file, &final_content)?;
     snapshot::save(file, &final_content)?;
     snapshot::save_crdt(file, &crdt_state)?;
@@ -5769,6 +5837,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
         merge::merge_contents(&content, &content_ours, &content_current)?
     };
 
+    guard_visible_write_idle(file, "apply_append_from_string")?;
     atomic_write(file, &final_content)?;
     // Save snapshot as content_ours, not final_content
     snapshot::save(file, &content_ours)?;
@@ -5848,6 +5917,7 @@ pub fn apply_template_from_string(file: &Path, response: &str) -> Result<()> {
         Some(response.as_str()),
     )?;
 
+    guard_visible_write_idle(file, "apply_template_from_string")?;
     atomic_write(file, &final_content)?;
     // Save snapshot as the repaired/merged final content.
     snapshot::save(file, &final_content)?;
@@ -5956,6 +6026,7 @@ fn normalized_content_ours_fallback(
 }
 
 fn repair_disk_from_normalization_fallback(file: &Path, fallback: &str) -> Result<()> {
+    guard_visible_write_idle(file, "sidecar_normalization_fallback_repair")?;
     atomic_write(file, fallback).with_context(|| {
         format!(
             "failed to repair {} from normalized content_ours fallback",
@@ -6019,6 +6090,7 @@ fn redeliver_normalization_fallback_to_editor(file: &Path, fallback: &str) {
 }
 
 fn repair_disk_from_ipc_dedupe(file: &Path, content: &str) -> Result<()> {
+    guard_visible_write_idle(file, "ipc_dedupe_repair")?;
     atomic_write(file, content).with_context(|| {
         format!(
             "failed to repair {} after IPC duplicate-response dedupe",
@@ -7982,6 +8054,27 @@ mod tests {
         fs::write(&snap_abs, content).unwrap();
         let loaded = fs::read_to_string(&snap_abs).unwrap();
         assert_eq!(loaded, content);
+    }
+
+    #[test]
+    fn visible_write_guard_blocks_when_editor_typing_active() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/typing")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "body\n").unwrap();
+
+        let doc_str = doc.to_string_lossy().to_string();
+        agent_doc::debounce::document_changed(&doc_str);
+
+        let err = guard_visible_write_idle_with_budget(&doc, "test_visible_write", 60_000, 0)
+            .unwrap_err();
+
+        assert!(err.to_string().contains("editor typing did not settle"));
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("flow=document_mutation"));
+        assert!(log.contains("reason=visible_write_typing_defer_active_typing:test_visible_write"));
+        assert!(log.contains("visible_write_deferred_active_typing"));
     }
 
     #[test]

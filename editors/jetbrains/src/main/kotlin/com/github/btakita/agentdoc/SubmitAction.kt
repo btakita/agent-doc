@@ -31,7 +31,8 @@ class SubmitAction : AnAction() {
         Thread {
             val idle = TypingTracker.awaitIdle(file.path)
             if (!idle) {
-                LOG.warn("[run] typing debounce timed out; routing latest saved content for ${file.name}")
+                LOG.warn("[run] typing debounce timed out; deferring route until typing settles for ${file.name}")
+                return@Thread
             }
             ApplicationManager.getApplication().invokeLater {
                 FileDocumentManager.getInstance().saveAllDocuments()

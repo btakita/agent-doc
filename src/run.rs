@@ -631,6 +631,7 @@ fn apply_append_response(file: &Path, baseline: &str, response: &str) -> Result<
         merge::merge_contents(baseline, &content_ours, &content_current)?
     };
 
+    write::guard_visible_write_idle(file, "direct_run_append")?;
     snapshot::save(file, &final_content)?;
     atomic_write(file, &final_content)?;
     drop(doc_lock);
@@ -700,6 +701,7 @@ fn apply_template_response(
         &final_content,
     )?;
 
+    write::guard_visible_write_idle(file, "direct_run_template")?;
     snapshot::save(file, &final_content)?;
     if let Some(state) = crdt_state {
         snapshot::save_crdt(file, &state)?;
@@ -738,6 +740,7 @@ fn normalize_direct_run_prompt_prefixes(
         file,
     );
     if normalized != content {
+        write::guard_visible_write_idle(file, "direct_run_prefix_normalize")?;
         atomic_write(file, &normalized)?;
         eprintln!("[run] normalized direct-run user prompt prefixes");
     }
@@ -761,6 +764,7 @@ fn normalize_direct_run_template_content(
 fn update_resume_id(file: &Path, session_id: &str) -> Result<()> {
     let current = std::fs::read_to_string(file)?;
     let updated = frontmatter::set_resume_id(&current, session_id)?;
+    write::guard_visible_write_idle(file, "direct_run_update_resume_id")?;
     atomic_write(file, &updated)?;
     snapshot::save(file, &updated)?;
     Ok(())

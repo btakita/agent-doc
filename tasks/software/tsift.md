@@ -55,7 +55,10 @@ Verification:
 Commits:
 - `btakita/tsift`: `bf980bf` (`feat: project cached semantic graph rows`) pushed to `main`.
 - `btakita/agent-loop`: `ae35cca1c` (`chore: update tsift submodule`) committed the submodule pointer; the session document is being committed by this finalize cycle.
-<!-- agent:boundary:d18461b3 -->
+### Re: semantic similarity queue catchup — gpt-5
+
+`#gsim` was completed in the prior implementation cycle and is already reaped from the backlog. The shipped surface is `tsift semantic "<query>" --path .`, backed by semantic GraphStore rows and persisted local `tsift-local-hash-v1` embeddings, with no API call on the query path.
+<!-- agent:boundary:d0928c27 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +67,7 @@ Commits:
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#gvis]~
-- do [#gsim]
+- ~do [#gsim]~
 - do [#gsem]
 - Can the graphify icebox items be removed?
 <!-- /agent:queue -->

@@ -20,8 +20,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-
-FlowCore next steps captured; top backlog item: #flowaudit.
+FlowCore queue verified complete and cleared. Top backlog item: #y9kk.
 <!-- /agent:status -->
 
 ## Exchange
@@ -56,17 +55,28 @@ Verification:
 Commits:
 - `src/agent-doc`: `0b79bb2f` (`agent-doc flowcore audit adapters`)
 - parent gitlink: `0bb1f23ce` (`agent-doc flowcore audit adapters`)
-<!-- agent:boundary:6a5888d7 -->
+❯ Did the entire agent:queue run? If not, why not? Please fix. If yes, the content of agent:queue should be cleared. #spec-test-build-install-commit-push
+### Re: agent:queue completion — gpt-5
+
+Yes. The whole queued batch ran: `#flowaudit`, `#flowadapters`, and `#flowe2e` are reaped into `tasks/agent-doc-bugs2.done.md`, with the implementation in `src/agent-doc` commit `0b79bb2f` and the parent gitlink commit `0bb1f23ce`.
+
+The queue stayed visible because the document was no longer in an active queue cycle (`queue_active: false`), so closeout had no active queue head to consume. I cleared the `agent:queue` component in this closeout and committed the completed-items archive separately so the proof is not only local working-tree state.
+
+Verification:
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- CI/tmux review: latest completed GitHub CI run `26182778611` was green, including `Run make tmux-ci`; newer run `26184408328` was still in progress at review time.
+
+Commits:
+- archive: `6653040f6` (`agent-doc archive completed agent-doc-bugs2 items`)
+<!-- agent:boundary:865f29d6 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue -->
-dispatch #spec-test-build-install-commit-push
-- do [#flowaudit]
-- do [#flowadapters]
-- do [#flowe2e]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

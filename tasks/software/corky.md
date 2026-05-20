@@ -87,25 +87,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-225148.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-230401.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Ensure CI passes / release + publish
+- Archived 1 response topic(s): PyPI 0.28.2 wheels
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ do [#75d8]
-### Re: PyPI 0.28.2 wheels — gpt-5
-
-Completed `#75d8`.
-
-The missing Corky PyPI 0.28.2 wheels are now published:
-
-- `corky-0.28.2-py3-none-manylinux_2_39_x86_64.whl`
-- `corky-0.28.2-py3-none-macosx_10_15_x86_64.whl`
-
-I used the successful wheel artifacts from GitHub Actions run `25724471526` at `a3925b0`, which is the workflow-only fix after `v0.28.2`. That run had already proven the Linux host build and Intel macOS deployment target fixes; its publish job failed only on trusted publishing configuration. I checked both wheels with `twine check`, uploaded only those two files with `twine upload --skip-existing`, and verified PyPI now lists the full 0.28.2 file set: Intel macOS, ARM macOS, Linux x86_64, Windows x86_64, and the sdist.
-
-No Corky repo files were changed.
-<!-- agent:boundary:86b4c4e3 -->
+<!-- agent:boundary:0b3948d1 -->
 <!-- /agent:exchange -->
 ###
 <!--

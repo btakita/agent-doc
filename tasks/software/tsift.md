@@ -31,25 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-225747.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-232041.md`*
 
 Compacted content:
-- Archived 1 response topic(s): graph-db operator workflows
+- Archived 1 response topic(s): native graph features
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ Can we implement the same features as what is in the icebox, directly in tsift?
-### Re: native graph features — gpt-5
-
-Yes. The direct tsift version is viable, and it is probably cleaner now that `tsift` already owns GraphStore, `.tsift/graph.db`, `traverse`, `context-pack`, `summarize`, entities/relationships/concept labels, and `traverse --format html`.
-
-The distinction is that this is not just an implementation task: the spec currently still says LLM-derived semantic groupings and visualization/rendering belong to graphify. So the first step is changing that boundary and making tsift the owner of those three capabilities.
-
-I moved the graphify icebox intent into native tsift backlog work:
-- native semantic extraction: turn the existing summary entity/relationship/concept cache into GraphStore semantic nodes/edges with provenance and freshness.
-- native embedding similarity: add explicit extract/index-time embeddings for concepts/entities and a query surface for nearest related concepts.
-- native graph visualization: upgrade the existing HTML traversal output from a static report into a useful GraphStore-backed visualization.
-
-That means the old graphify integration icebox can be cleared; the feature intent is preserved in the active tsift backlog under native ownership.
-<!-- agent:boundary:dddb87de -->
+<!-- agent:boundary:9ab4fcb0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,9 +44,9 @@ That means the old graphify integration icebox can be cleared; the feature inten
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#gref]
-- do [#guse]
-- do [#gliv]
+- do [#gvis]
+- do [#gsim]
+- do [#gsem]
 - Can the graphify icebox items be removed?
 <!-- /agent:queue -->
 

@@ -35,7 +35,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): tsift graph navigation queue; Convex graph abstraction; Convex graph projection backend
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:c26b9af7 -->
+❯ What are the #next-steps for graph extensions on Convex and sqlite?
+### Re: graph extension next steps — gpt-5
+
+Top backlog item after this cycle: `#gctx`.
+
+The next graph work should start by moving the agent-facing graph surfaces onto the substrate boundary. The substrate and Convex row adapter exist, but `traverse` and `context-pack` still rebuild graph nodes from `index.db` tables and markdown at query time. That keeps SQLite-only traversal working, but it means Convex cannot become an equivalent graph read model yet.
+
+I added three prioritized backlog items:
+
+1. `#gctx` — make `GraphStore` the shared query path for `traverse` and `context-pack`, with SQLite materializing file/symbol/route/session/backlog/source-handle graph records first and Convex proving parity through the same path.
+2. `#cxsync` — add the concrete Convex projection sync surface around the existing adapter: schema/index contract, chunked idempotent upserts, tombstone/delete propagation, dry-run output, retries, and diagnostics.
+3. `#gfresh` — add projection freshness/parity checks so SQLite remains the local correctness store and Convex-backed reads fail closed when the projection is stale or incomplete.
+
+I would keep the existing `#98qd` immediately after those. It becomes the consumer-facing agent-doc orchestration/context-shaping step once the storage/query substrate is ready.
+<!-- agent:boundary:1c12fe05 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,6 +62,9 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gctx] [recommended] Route tsift traverse and context-pack exploration through the provider-neutral GraphStore, materializing files, symbols, routes, sessions, backlog items, and source handles into SQLite graph_nodes/graph_edges first and proving the same query path against the Convex adapter.
+- [ ] [#cxsync] [recommended] Add a concrete Convex projection sync surface for nodes/edges: schema/index documentation or generated functions, chunked idempotent upserts, tombstone/delete propagation, dry-run JSON, retry/partial-failure diagnostics, and mock-client regression tests.
+- [ ] [#gfresh] [recommended] Add SQLite-to-Convex projection freshness and parity checks: projection version/content hash metadata, stale/missing node and edge diagnostics, and fail-closed traverse/context-pack behavior when Convex trails the local SQLite correctness store.
 - [ ] [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.

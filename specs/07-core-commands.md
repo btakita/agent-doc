@@ -95,9 +95,10 @@ Two modes:
 
 `agent-doc audit-docs [--root DIR]`
 
-- Audits instruction files such as `CLAUDE.md`, `AGENTS.md`, `README.md`, and `SKILL.md` for path accuracy, staleness, actionable content, and line budget.
+- Audits instruction files such as `CLAUDE.md`, `AGENTS.md`, `README.md`, and `SKILL.md` for path accuracy, actionable content, and line budget.
 - Discovery prunes heavy skip directories before descent so audit time is spent on real instruction surfaces.
 - Generated agent-doc instruction surfaces are audited as release artifacts: if a root `AGENTS.md`, `.codex/AGENTS.md`, `.opencode/skills/agent-doc/SKILL.md`, or `.claude/skills/agent-doc/SKILL.md` still carries the agent-doc managed frontmatter/sections, it must match the content rendered by the running binary. Custom root instruction files that do not look agent-doc-managed remain user-owned and are not rewritten or failed for content mismatch.
+- Filesystem mtime freshness is advisory for agent-doc audits. Source-only changes may print `Mtime advisory` rows for broad prose or instruction files, but they must not fail the command unless a content-based check also reports blocking drift.
 
 ## ops summary
 

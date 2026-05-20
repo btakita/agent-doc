@@ -12,6 +12,8 @@
 //! - Also audits generated agent-doc instruction surfaces in the explicit root or resolved install
 //!   root. Managed surfaces must match the running binary's rendered content; custom root
 //!   AGENTS.md files are ignored.
+//! - Filesystem mtime staleness is reported as advisory output only; managed instruction surfaces
+//!   are release-blocking through rendered-content comparison, not timestamp comparison.
 //!
 //! ## Agentic Contracts
 //! - `run(root_override)` — performs the audit and returns `Ok(())` on success or a descriptive
@@ -27,6 +29,7 @@
 //!   path, audit scopes to that crate root instead of the outer repo
 //! - managed_instruction_surface_roots: running from a submodule audits the superproject install
 //!   root instead of ignored submodule-local install artifacts
+//! - mtime_staleness_advisory: source-newer-than-doc output is non-blocking when content checks pass
 
 use anyhow::Result;
 use instruction_files::AuditConfig;
@@ -50,7 +53,104 @@ pub fn run(root_override: Option<&Path>) -> Result<()> {
     for root in managed_instruction_surface_roots(root_override) {
         crate::skill::audit_managed_instruction_surfaces(Some(&root))?;
     }
-    instruction_files::run(&config, resolved_root.as_deref())
+    run_agent_doc_audit(&config, resolved_root.as_deref())
+}
+
+fn run_agent_doc_audit(config: &AuditConfig, root_override: Option<&Path>) -> Result<()> {
+    println!("Auditing docs...\n");
+
+    let root = match root_override {
+        Some(path) => path.to_path_buf(),
+        None => instruction_files::find_root(config),
+    };
+    let files = instruction_files::find_instruction_files(&root, config);
+    let mut issues: Vec<instruction_files::Issue> = Vec::new();
+
+    for doc in &files {
+        let rel = doc
+            .strip_prefix(&root)
+            .unwrap_or(doc)
+            .to_string_lossy()
+            .to_string();
+        if let Ok(content) = std::fs::read_to_string(doc) {
+            issues.extend(instruction_files::check_tree_paths(&rel, &content, &root));
+            issues.extend(instruction_files::check_actionable(&rel, &content, config));
+            issues.extend(instruction_files::check_context_invariant(
+                &rel, &content, config,
+            ));
+        }
+    }
+
+    let (budget_issues, counts, total) =
+        instruction_files::check_line_budget(&files, &root, config);
+    issues.extend(budget_issues);
+
+    let staleness_advisories = instruction_files::check_staleness(&files, &root, config)
+        .into_iter()
+        .map(|mut issue| {
+            issue.warning = true;
+            issue.message = format!(
+                "Mtime advisory: {}; generated agent-doc surfaces are checked by rendered content",
+                issue.message
+            );
+            issue
+        })
+        .collect::<Vec<_>>();
+
+    for issue in &issues {
+        print_issue(issue);
+    }
+    for issue in &staleness_advisories {
+        print_issue(issue);
+    }
+
+    let mark = if total <= agent_kit::audit_common::LINE_BUDGET {
+        "\u{2713}"
+    } else {
+        "\u{2717}"
+    };
+    println!(
+        "\nCombined instruction files: {} lines (budget: {}) {}",
+        total,
+        agent_kit::audit_common::LINE_BUDGET,
+        mark
+    );
+    for (name, n) in &counts {
+        println!("  {}: {}", name, n);
+    }
+
+    if !issues.is_empty() {
+        println!("\nFound {} blocking issue(s)", issues.len());
+        std::process::exit(1);
+    }
+
+    if staleness_advisories.is_empty() {
+        println!("\nNo issues found \u{2713}");
+    } else {
+        println!(
+            "\nNo blocking issues found \u{2713} ({} mtime advisory(s))",
+            staleness_advisories.len()
+        );
+    }
+
+    Ok(())
+}
+
+fn print_issue(issue: &instruction_files::Issue) {
+    let mut loc = format!("  {}", issue.file);
+    if issue.line > 0 {
+        if issue.end_line > issue.line {
+            loc.push_str(&format!(":{}-{}", issue.line, issue.end_line));
+        } else {
+            loc.push_str(&format!(":{}", issue.line));
+        }
+    }
+    let marker = if issue.warning {
+        "\u{26a0}"
+    } else {
+        "\u{2717}"
+    };
+    println!("{:<50} {} {}", loc, marker, issue.message);
 }
 
 fn managed_instruction_surface_roots(root_override: Option<&Path>) -> Vec<PathBuf> {

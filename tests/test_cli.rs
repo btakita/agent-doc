@@ -273,6 +273,34 @@ fn test_cli_audit_docs_clean_project() {
 }
 
 #[test]
+fn test_cli_audit_docs_treats_mtime_staleness_as_advisory() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+
+    std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"test\"\n").unwrap();
+    std::fs::write(
+        root.join("AGENTS.md"),
+        "# Agent Instructions\n\nUse `cargo test` before changing code.\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+    let old_time = filetime::FileTime::from_unix_time(1_700_000_000, 0);
+    let new_time = filetime::FileTime::from_unix_time(1_700_000_100, 0);
+    filetime::set_file_mtime(root.join("AGENTS.md"), old_time).unwrap();
+    filetime::set_file_mtime(root.join("src/main.rs"), new_time).unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(root);
+    cmd.arg("audit-docs");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Mtime advisory"))
+        .stdout(predicate::str::contains("No blocking issues found"));
+}
+
+#[test]
 fn test_cli_ops_summary_groups_ops_log_events() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();

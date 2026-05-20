@@ -31,26 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-214623.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-220758.md`*
 
 Compacted content:
-- Archived 1 response topic(s): graph DB conformance
+- Archived 1 response topic(s): graph DB behavior next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are the #next-steps for graph db behavior?
-### Re: graph DB behavior next steps — gpt-5
-
-Top backlog item after this cycle: `#grwp`.
-
-The previous graph DB behavior batch is now complete: `#gval`, `#gobs`, and `#gfed` are all archived as done, and the spec now has SQLite/Convex conformance, doctor diagnostics, and opt-in live Convex acceptance coverage. The next step should be proving the behavior against realistic workspace graphs and operational drift, rather than adding a wider API surface.
-
-I added these follow-ups in priority order:
-
-1. `#grwp` — prove graph-db behavior on a real agent-loop/tsift workspace fixture, including stable `session`, `backlog`, `source_handle`, and `worker_context` rows.
-2. `#gdrf` — add a graph projection drift/diff report between SQLite and Convex snapshots so operators can see concrete upserts, tombstones, stale metadata, and fail-closed repair commands before apply/read paths.
-3. `#gcap` — add graph-db scale/cap regression coverage for deterministic pagination, property filters, bounded neighborhood/path limits, doctor runtime, and SQLite query-plan/index expectations.
-
-I placed them ahead of crates.io/release cleanup because they are still graph DB behavior hardening. `#atvp` and `#g6kf` remain below them as packaging/release follow-up work.
-<!-- agent:boundary:14c9649a -->
+<!-- agent:boundary:92f58d93 -->
 <!-- /agent:exchange -->
 ###
 <!--

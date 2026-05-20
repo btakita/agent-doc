@@ -28,49 +28,12 @@ FlowCore queue verified complete and cleared. Top backlog item: #y9kk.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-190430.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-193823.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #next-steps for FlowCore
+- Archived 2 response topic(s): FlowCore audit/adapters/e2e; agent:queue completion
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: FlowCore audit/adapters/e2e — gpt-5
-
-Implemented the FlowCore follow-up batch.
-
-What changed:
-- Added FlowCore-owned routed-reopen event helpers and removed remaining inline routed-reopen `FlowEvent::new` construction from `route.rs`.
-- Expanded `agent-doc ops summary` so typed `flow_event` records get high-signal buckets for dispatch-proof failures, document-mutation pre-write guards, orchestration child closeout completion, and generic flow/stage/outcome fallback buckets.
-- Added cross-flow regression coverage for route dispatch proof, live typing/IPC write deferral, closeout `session-check` interruption, and queue child plain-response patchback normalization.
-- Updated the FlowCore map, ops-summary spec, and deterministic-simulation spec with the new ownership and coverage boundary.
-
-Verification:
-- `cargo test ops_summary`
-- `cargo test typed_flow_events_cover`
-- `cargo test route_failure_events_are_owned_by_routed_reopen_flow`
-- `make check`
-- `cargo build`
-- `cargo install --path . --force`
-- CI/tmux review: latest GitHub CI run `26182778611` was green; job step `Run make tmux-ci` succeeded. Local `make tmux-ci` was not rerun because the latest CI tmux leg was green after runner startup.
-
-Commits:
-- `src/agent-doc`: `0b79bb2f` (`agent-doc flowcore audit adapters`)
-- parent gitlink: `0bb1f23ce` (`agent-doc flowcore audit adapters`)
-❯ Did the entire agent:queue run? If not, why not? Please fix. If yes, the content of agent:queue should be cleared. #spec-test-build-install-commit-push
-### Re: agent:queue completion — gpt-5
-
-Yes. The whole queued batch ran: `#flowaudit`, `#flowadapters`, and `#flowe2e` are reaped into `tasks/agent-doc-bugs2.done.md`, with the implementation in `src/agent-doc` commit `0b79bb2f` and the parent gitlink commit `0bb1f23ce`.
-
-The queue stayed visible because the document was no longer in an active queue cycle (`queue_active: false`), so closeout had no active queue head to consume. I cleared the `agent:queue` component in this closeout and committed the completed-items archive separately so the proof is not only local working-tree state.
-
-Verification:
-- `make check`
-- `cargo build`
-- `cargo install --path . --force`
-- CI/tmux review: latest completed GitHub CI run `26182778611` was green, including `Run make tmux-ci`; newer run `26184408328` was still in progress at review time.
-
-Commits:
-- archive: `6653040f6` (`agent-doc archive completed agent-doc-bugs2 items`)
-<!-- agent:boundary:865f29d6 -->
+<!-- agent:boundary:b9db435b -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -20,7 +20,8 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-FlowCore queue verified complete and cleared. Top backlog item: #y9kk.
+
+FlowCore refactor is complete enough to leave broad extraction mode; next top backlog item: #fcrg.
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,7 +34,15 @@ FlowCore queue verified complete and cleared. Top backlog item: #y9kk.
 Compacted content:
 - Archived 1 response topic(s): Clear Session Context active-agent guard
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:3a7f306d -->
+❯ What are the #next-steps for the flow core refactoring?
+### Re: FlowCore refactoring next steps — gpt-5
+
+The FlowCore refactor is at the point where the broad extraction queue can stay closed. The current code has dedicated `flow` modules for routed reopen, document mutation, closeout, session cycle, operator clear, and orchestration batch, and the specs now identify those flows as the owners for the recurring bug classes.
+
+The next step is a maintenance gate, not another large rewrite: for the next hot-path bugfix, verify the touched branch does not add new free-form guard/proof strings outside FlowCore, promote any new branch into the owning enum/event, and add the smallest regression at the right level: pure flow test first, SimWorld when interleavings matter, tmux only for external boundary proof.
+
+I added that as the new top backlog item: #fcrg. The previous lower-agent orchestration sequence should stay immediately behind it, starting with #y9kk.
+<!-- agent:boundary:34a26a28 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -45,6 +54,7 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#fcrg] [recommended] FlowCore regression gate: after the next agent-doc hot-path bugfix, audit the touched route/write/preflight/session_check/orchestrate branch for new free-form proof or guard strings, promote any new branch into the owning FlowCore enum/event, and add the smallest pure-flow, SimWorld, or tmux regression before closeout. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

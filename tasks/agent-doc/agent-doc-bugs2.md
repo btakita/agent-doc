@@ -29,26 +29,12 @@ FlowCore refactor is complete enough to leave broad extraction mode; next top ba
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-205405.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-211949.md`*
 
 Compacted content:
-- Archived 2 response topic(s): FlowCore refactoring next steps; FlowCore regression gate
+- Archived 1 response topic(s): full-content IPC guard and FlowCore next step
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ As I was typing in this prompt, the duplicate content corrupt document & the duplicate prompt bugs surfaced again. Please, dear God, make this architecturally, fundamentally, by default logic robust. I'm tired of playing whack-a-mole with these bugs. Your current approach of edge case fixing is simply not working. #spec-test-build-install-commit-push
-
-❯ What are the #next-steps for flow core?
-### Re: full-content IPC guard and FlowCore next step — gpt-5
-
-I replaced the fragile part with a default invariant: any whole-document editor IPC replacement now has to prove the source buffer identity before the editor is allowed to mutate visible text. The binary stamps `fullContent` socket/file payloads with a `patch_id`, expected source-buffer hash, and byte length; JetBrains and VS Code reject the replacement without ACK if the live editor/VFS buffer differs; and the binary refuses to save a snapshot if a consumed full-content patch leaves anything other than the requested target document.
-
-That covers the dedicated `try_ipc_full_content` compact/repair path and the older `try_ipc` normalization fallback path that could also send `fullContent`. I updated the spec and changelog, bumped local plugin versions to JetBrains `0.2.127` and VS Code `0.2.20`, and added Rust, JetBrains, and VS Code tests for the source-buffer proof.
-
-Verification completed: targeted Rust payload test, VS Code `npm test -- --runInBand`, JetBrains `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin`, full `make check`, `make build-release`, `make install`, VS Code VSIX packaging/install, and JetBrains local install into the active IntelliJ IDEA `2026.1` profile. The latest GitHub CI run I inspected also has `make check` and `make tmux-ci` green.
-
-Code commits: submodule `8889122f` (`fix: guard full-content editor ipc`) is already pushed, and the root gitlink commit `0ddf4a6f` is ready; I will push the root after this binary-owned document closeout so the session commit is included too.
-
-For FlowCore, the next step I recorded in backlog is to make this proof a shared `flow::document_mutation` visible-replacement contract rather than an IPC-specific convention, with simulator coverage for stale editor buffers across compact, repair, and IPC timeout recovery.
-<!-- agent:boundary:8cf809ab -->
+<!-- agent:boundary:cc8212ec -->
 <!-- /agent:exchange -->
 ###
 <!--

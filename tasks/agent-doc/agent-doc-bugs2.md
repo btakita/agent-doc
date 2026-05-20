@@ -29,31 +29,12 @@ FlowCore refactor is complete enough to leave broad extraction mode; next top ba
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-230605.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-232754.md`*
 
 Compacted content:
-- Archived 1 response topic(s): duplicate scaffold repair
+- Archived 1 response topic(s): pending_done_guard completion detection
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#pdgd]. #spec-test-build-install-commit-push
-### Re: pending_done_guard completion detection — gpt-5
-
-Implemented `#pdgd`.
-
-The pending-done guard now records same-cycle pending IDs that were explicitly kept open by `--pending-edit`, `--pending-gate`, `--pending-ungate`, `--pending-reorder`, and gate-type edits, then excludes those IDs from missing-`--done` warnings. It still scans response-body completion evidence, including `### Re: do [#id]` headings with later commit/push/verification signals, so completed `do #id` batches are detected even when IDs only appear in the heading.
-
-Updated the closeout spec and release notes, added regressions for edited-open, gated-open, prewrite/precommit kept-open handling, and the `do [#id]` false-negative shape.
-
-Verification:
-- `cargo test pending_done -- --test-threads=2`
-- `make check`
-- `make install`
-- `agent-doc --version`
-- Latest GitHub CI run `26194740504` was green, including `Run make tmux-ci`.
-
-Commits:
-- `95e8920f` in `src/agent-doc`: `fix: refine pending done guard` (pushed to `origin/20260422/codex-agent-backend`)
-- `76da15687` in parent: `chore: update agent-doc submodule`
-<!-- agent:boundary:70e1c9c8 -->
+<!-- agent:boundary:2ab40bef -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -35,7 +35,22 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): graph extension next steps; graph extension implementation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:0a14f92d -->
+❯ What are #next-steps in support graph db api over sqlite and convex?
+### Re: graph DB API next steps — gpt-5
+
+Top backlog item after this cycle: `#gapi`.
+
+The substrate work is past the prototype boundary now: `GraphStore` exists, SQLite materializes `.tsift/graph.db`, `traverse` and `context-pack` read through the store, and Convex has row projection plus snapshot freshness checks. The next step is to make that an explicit graph DB API contract instead of an implementation detail inside traversal.
+
+I added four prioritized backlog items:
+
+1. `#gapi` — promote the provider-neutral graph substrate into a stable graph DB API surface over SQLite and Convex: backend selection, node lookup, kind scans, neighborhood/subgraph reads, shortest paths, JSON schemas, and fail-closed freshness semantics.
+2. `#gcon` — add a backend conformance suite so SQLite and Convex prove the same behavior over the same projection fixtures, including ordering, missing-node failures, and stale projection errors.
+3. `#cxlv` — add the live Convex transport beyond dry-run planning: auth/config, remote snapshot pull, chunked idempotent upserts, tombstones, retries, resume diagnostics, and schema/index guidance.
+4. `#gidx` — harden the SQLite correctness store for incremental projections: version rows, source watermarks, row-level tombstones, migrations, and reader-safe refresh behavior.
+
+I would keep `#98qd` immediately after those. Agent-doc context shaping should consume the stable graph DB API once it exists, rather than binding directly to today’s traversal projection internals.
+<!-- agent:boundary:df6cc18a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,6 +66,10 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gapi] Promote the provider-neutral graph substrate into a stable graph DB API surface over SQLite and Convex: backend selection, node lookup, kind scans, neighborhood/subgraph reads, shortest paths, JSON schemas, and fail-closed freshness semantics.
+- [ ] [#gcon] Add a backend conformance suite for SQLite and Convex graph stores using the same projection fixtures to prove node/edge CRUD, kind scans, outgoing edges, shortest paths, ordering, missing-node failures, and freshness/parity errors match.
+- [ ] [#cxlv] Add live Convex graph projection transport: config/env auth, remote snapshot pull, chunked idempotent upsert/tombstone apply, retry/resume diagnostics, and schema/index installation guidance.
+- [ ] [#gidx] Add incremental graph projection refresh and migration support for the SQLite correctness store: projection version rows, source watermarks, row-level tombstones, graph.db schema migration checks, and reader-safe refresh behavior.
 - [ ] [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.

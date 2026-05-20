@@ -36,7 +36,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): graph-db projection coverage
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:60493574 -->
+❯ What are the #next-steps for graphdb functionality?
+### Re: graphdb next steps — gpt-5
+
+The next graphdb work should move from substrate coverage to operational usability.
+
+Top backlog item: `#gref`.
+
+Three ordered follow-ups are now in the backlog:
+
+1. `#gref`: explicit `graph-db` refresh/status workflow so operators can materialize and inspect `.tsift/graph.db` directly, then get concrete `doctor`, `drift`, and `convex-sync` next commands.
+2. `#guse`: agent-facing graph-db evidence packets for queued/backlog work, built around `worker_context`, `source_handle`, shortest paths, and recommended commands.
+3. `#gliv`: promote the live Convex graph backend acceptance path into a documented release or CI gate once a dedicated deployment and secrets are available.
+
+I would keep the graphify semantic and visualization items in icebox until `#gref` and `#guse` are implemented. The graph DB first needs a reliable operator path and a first-class agent handoff surface.
+<!-- agent:boundary:c32391b1 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,6 +66,9 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gref] Add an explicit graph-db refresh/status operator workflow that materializes .tsift/graph.db without requiring a throwaway traverse call, reports projection version/content hash/source watermark/tombstone counts, and emits next commands for doctor, drift, and convex-sync.
+- [ ] [#guse] Add a graph-db evidence packet for queued or backlog work: start from a backlog id or job packet handle, return bounded worker_context and source_handle rows, shortest paths, recommended next commands, and compiled fixture coverage for agent handoffs.
+- [ ] [#gliv] Promote the live Convex graph backend acceptance path into a documented release or CI gate once a dedicated deployment and secrets exist, including graph-db node/kind/neighborhood/path parity evidence from the remote snapshot.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
 <!-- /agent:backlog -->

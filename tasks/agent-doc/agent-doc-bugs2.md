@@ -33,7 +33,33 @@ FlowCore queue verified complete and cleared. Top backlog item: #y9kk.
 Compacted content:
 - Archived 2 response topic(s): FlowCore audit/adapters/e2e; agent:queue completion
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b9db435b -->
+❯ Getting errors with JB `Clear Session Context`. Why is `Clear Session Context` being blocked? The panes are not running any turns. I still don't understand why we have any blocking at all. It seems too broad. I got the duplicate prompt issue as I was typing in this prompt. We also need a way to recover using `session interrupt-clear` from the JB plugin. Either a menu item and/or via `Sync Tmux Layout` and other commands. #spec-test-build-install-commit-push 
+```
+agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because pane %23 is active_agent_doc (source=authoritative_actor, current_command=agent-doc, tail="gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 41% used"). Wait for an idle prompt, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to intentionally interrupt the pane and clear context.
+```
+```
+agent-doc command failed (exit 1): Error: session_clear refused for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md because pane %37 is active_agent_doc (source=authoritative_actor, current_command=agent-doc, tail="gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 75% used"). Wait for an idle prompt, or run `agent-doc session interrupt-clear /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` to intentionally interrupt the pane and clear context.
+```
+### Re: Clear Session Context active-agent guard — gpt-5
+
+The block was coming from the binary, not JetBrains-local busy state. `session clear` classified the pane as `alive-busy`, then the operator-clear guard treated `current_command=agent-doc` as `active_agent_doc` and failed closed even when there was no protected prompt input and no concrete busy cue. The JetBrains plugin also did not parse that newer `active_agent_doc` refusal shape, so it surfaced the raw command failure instead of the typed recovery notification.
+
+I changed the guard so `pane_current_command=agent-doc` is not blocking evidence by itself. Clear still refuses protected prompt input and explicit busy cues like an active Codex turn, hook-review prompt, or help screen, but ordinary idle/status panes proceed through the normal `/clear` submit path. I also added a direct JetBrains `Interrupt and Clear Session Context` action in the Tools, editor popup, project view popup, and Alt+Enter Agent Doc popup, and taught the plugin to parse legacy `active_agent_doc` refusals as the typed busy-session warning with recovery actions.
+
+No new backlog item is needed from this prompt because the requested recovery path was implemented in the plugin and the broad clear guard was narrowed in the binary.
+
+Committed code locally in `src/agent-doc` as `738f4fe4` (`fix: narrow session clear busy guard`). Per the session-doc commit boundary, I am pushing after this `finalize` closeout completes.
+
+Verification:
+- `cargo test operator_clear -- --test-threads=2`
+- `cargo test live_pane_prompt_ready_accepts_codex_xhigh_status_chrome_only_output -- --test-threads=2`
+- `./gradlew test --tests com.github.btakita.agentdoc.TerminalUtilTest --tests com.github.btakita.agentdoc.AgentDocPopupActionTest`
+- `make check`
+- `./gradlew test buildPlugin`
+- `make install`
+- `agent-doc plugin install --local jetbrains` installed JetBrains plugin `0.2.126` to both IntelliJ IDEA 2026.1 plugin locations (`~/.config/JetBrains/IntelliJIdea2026.1` and `~/.local/share/JetBrains/IntelliJIdea2026.1`)
+- Latest GitHub Actions `CI` run `26184408328` was successful, including the `Run make tmux-ci` step
+<!-- agent:boundary:7fbef0cd -->
 <!-- /agent:exchange -->
 ###
 <!--

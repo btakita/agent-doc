@@ -34,7 +34,29 @@ FlowCore next steps captured; top backlog item: #flowaudit.
 Compacted content:
 - Archived 1 response topic(s): #next-steps for FlowCore
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:6855c923 -->
+### Re: FlowCore audit/adapters/e2e — gpt-5
+
+Implemented the FlowCore follow-up batch.
+
+What changed:
+- Added FlowCore-owned routed-reopen event helpers and removed remaining inline routed-reopen `FlowEvent::new` construction from `route.rs`.
+- Expanded `agent-doc ops summary` so typed `flow_event` records get high-signal buckets for dispatch-proof failures, document-mutation pre-write guards, orchestration child closeout completion, and generic flow/stage/outcome fallback buckets.
+- Added cross-flow regression coverage for route dispatch proof, live typing/IPC write deferral, closeout `session-check` interruption, and queue child plain-response patchback normalization.
+- Updated the FlowCore map, ops-summary spec, and deterministic-simulation spec with the new ownership and coverage boundary.
+
+Verification:
+- `cargo test ops_summary`
+- `cargo test typed_flow_events_cover`
+- `cargo test route_failure_events_are_owned_by_routed_reopen_flow`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- CI/tmux review: latest GitHub CI run `26182778611` was green; job step `Run make tmux-ci` succeeded. Local `make tmux-ci` was not rerun because the latest CI tmux leg was green after runner startup.
+
+Commits:
+- `src/agent-doc`: `0b79bb2f` (`agent-doc flowcore audit adapters`)
+- parent gitlink: `0bb1f23ce` (`agent-doc flowcore audit adapters`)
+<!-- agent:boundary:6a5888d7 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -42,14 +64,14 @@ Compacted content:
 
 <!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
+- do [#flowaudit]
+- do [#flowadapters]
+- do [#flowe2e]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#flowaudit] [recommended] FlowCore consolidation audit: map remaining route/write/session/clear/orchestrate guard strings to typed flow events, update ops summary/spec if any bypass remains. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
-- [ ] [#flowadapters] [recommended] Thin the remaining command adapters now that FlowCore owns decisions: reduce route.rs/write.rs/preflight.rs/session_check.rs hot-path branches by moving pure checks behind flow ports without behavior changes. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
-- [ ] [#flowe2e] [recommended] Add cross-flow regression coverage for route -> document_mutation -> closeout -> session_check under live typing/IPC and queue child patchback scenarios. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

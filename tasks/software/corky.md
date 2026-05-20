@@ -87,31 +87,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-194902.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-203310.md`*
 
 Compacted content:
-- Archived 6 response topic(s): Google Docs/Sheets integration; Corky Sheets write access; Sheets OAuth retry and cleanup support; 3 more
+- Archived 1 response topic(s): Corky OAuth token caching
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ Corky asks for oauth permissions too often. Please properly cache auth tokens to reduce the amount of authorizations needed. See root.md
-### Re: Corky OAuth token caching — gpt-5
-
-Implemented the OAuth cache fix in `src/corky`:
-
-- Updated `src/filter/gmail_auth.rs` so command-triggered Google auth uses `include_granted_scopes=true`, avoids `prompt=consent` when an existing refresh token can be reused, forces consent only when no refresh token exists or refresh failed, and preserves the prior refresh token when Google omits a replacement during incremental auth.
-- Kept returned-scope handling conservative: cached scopes are merged only when a previous refresh grant exists; access-token-only stale cache entries do not inflate scope coverage.
-- Added auth helper tests for incremental URL construction, prompt consent selection, refresh-token preservation, scope merging, and no-refresh fallback.
-- Updated `README.md` and `SPEC.md` to document incremental auth and refresh-token preservation.
-
-Verification:
-- `cargo test filter::gmail_auth`
-- `make check`
-- `cargo run --quiet -- audit-docs`
-- `git diff --check -- src/filter/gmail_auth.rs README.md SPEC.md`
-
-CI note: latest root `Agent Doc` GitHub Actions run `26184790089` has `check` and `tmux-ci` jobs failed before any steps were emitted (`steps: []`), so I treated that as an external runner-start failure rather than a Corky/tmux regression. Corky itself has no tmux CI leg.
-
-The Corky code changes are left in the `src/corky` working tree; I did not commit or push because this prompt did not request that.
-<!-- agent:boundary:25e10bd6 -->
+<!-- agent:boundary:48a1e2a8 -->
 <!-- /agent:exchange -->
 ###
 <!--

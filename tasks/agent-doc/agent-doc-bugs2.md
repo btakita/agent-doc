@@ -34,10 +34,37 @@ FlowCore refactor is complete enough to leave broad extraction mode; next top ba
 Compacted content:
 - Archived 1 response topic(s): full-content IPC guard and FlowCore next step
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:cc8212ec -->
+❯ do [#bqn4]. #spec-test-build-install-commit-push
+### Re: FlowCore full-content source-buffer proof — gpt-5
+
+Done. I moved the full-content source-buffer proof into `flow::document_mutation` and kept `write.rs` as a caller that serializes that shared contract into IPC payloads. The proof now has typed source hash/byte-length construction, stale-buffer replacement decisions, and a FlowCore event for rejected full-content visible writes.
+
+Spec/tests updated:
+
+- `src/agent-doc/SPEC.md`, `src/agent-doc/editors/SPEC.md`, `src/agent-doc/editors/PLUGIN-SPEC.md`, and `src/agent-doc/VERSIONS.md` now describe the FlowCore-owned full-content visible-replacement contract.
+- Added pure FlowCore tests for proof matching/rejection.
+- Added a deterministic SimWorld regression covering stale editor buffers for Compact Exchange, full-content repair, and IPC-timeout recovery.
+
+Verification/build/install:
+
+- `cargo test full_content_source_proof`
+- `cargo test full_content_ipc_payload_carries_source_buffer_identity`
+- `make check`
+- `make install`
+- GitHub CI run `26191058253` passed on pushed agent-doc commit `c6ff6e18`, including `Run make check` and `Run make tmux-ci`.
+
+Commit/push evidence:
+
+- `src/agent-doc`: `c6ff6e18 fix: move full-content proof into FlowCore`, pushed to `origin/20260422/codex-agent-backend`.
+- Parent gitlink: `256953fd2 chore: update agent-doc submodule`, pushed to `origin/main`.
+
+I staged only the intended `src/agent-doc` implementation files inside the submodule and the parent `src/agent-doc` gitlink. The parent worktree still has unrelated local dirty paths and later unrelated local `src/session-share` gitlink commits that I did not push.
+<!-- agent:boundary:20df6296 -->
 <!-- /agent:exchange -->
 ###
 <!--
+As I was writining into the comment below agent:exchange...The duplicate content document corruption bug is still happening. I also saw the duplicate prompt issue occur in corky.md. Do we need more refactoring? Why is this still happening? Do we have adequate log coverage?
+#spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->
@@ -46,7 +73,7 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#bqn4] [recommended] FlowCore Phase 2: move full-content source-buffer proof into flow::document_mutation as the shared visible-replacement contract, with simulator coverage for stale editor buffers during compact, repair, and IPC timeout recovery.
+- [ ] [#qcont] [recommended] Fix auto agent:queue continuation so a direct agent-doc run either drains remaining queue prompts after each successful finalize or explicitly reports single-step resume semantics instead of silently leaving later items unrun. Plan: tasks/agent-doc/plan-auto-queue-continuation-after-finalize.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

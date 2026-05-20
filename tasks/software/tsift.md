@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -61,18 +61,16 @@ Commits:
 ### Re: semantic graph extraction queue catchup — gpt-5
 
 `#gsem` was completed in the prior implementation cycle and is already reaped from the backlog. Cached `summarize --extract` entities, relationships, and concept labels now project into GraphStore semantic nodes and edges with provenance/freshness, and compiled tests cover the projection.
-<!-- agent:boundary:8e217096 -->
+### Re: graphify icebox cleanup — gpt-5
+
+Yes. The current `agent:icebox` is empty, so there are no graphify icebox items left to remove.
+<!-- agent:boundary:ce9dd6a7 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#gvis]~
-- ~do [#gsim]~
-- ~do [#gsem]~
-- Can the graphify icebox items be removed?
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

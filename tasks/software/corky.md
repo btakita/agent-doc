@@ -91,7 +91,38 @@ prompt_presets:
 
 Compacted content:
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:526ff9c5 -->
+❯ do [#pypi-trusted-publisher]. #spec-test-build-install-commit-push
+### Re: #pypi-trusted-publisher — gpt-5
+
+Implemented and pushed the repo-side PyPI trusted publishing hardening in Corky commit `feb074e` (`ci: harden PyPI trusted publishing`).
+
+What changed:
+- `.github/workflows/pypi.yml` now uses explicit `environment.name: pypi`, an environment URL, and `skip-existing: true`.
+- `AGENTS.md` and `SPEC.md` document GitHub OIDC trusted publishing instead of local PyPI token publishing.
+- Added `tests/test_release_workflows.rs` to assert `id-token: write`, `environment: pypi`, `pypa/gh-action-pypi-publish`, `packages-dir: dist`, `skip-existing: true`, and no PyPI password.
+
+Verification:
+- `cargo test --test test_release_workflows` passed.
+- `make check` passed.
+- `cargo run --quiet -- audit-docs` passed.
+- `make release` passed.
+- `cargo install --path .` passed.
+- `corky --version` reports `corky 0.28.2`.
+- Parent Agent Doc latest `check` and `tmux-ci` CI jobs had empty step lists and failed before runner steps, so I classified that as an external CI-start blocker, not a local tmux regression.
+
+Publish rerun:
+- Dispatched PyPI workflow run `26195923707` on `main`.
+- The sdist and all four wheel jobs passed: Linux x86_64, macOS x86_64, macOS arm64, and Windows.
+- The publish job failed with PyPI `invalid-publisher`: valid OIDC token, but no matching PyPI trusted publisher.
+- The rejected token claims were `sub=repo:btakita/corky:environment:pypi`, `repository=btakita/corky`, `workflow_ref=btakita/corky/.github/workflows/pypi.yml@refs/heads/main`, and `environment=pypi`.
+
+Current package state:
+- PyPI latest: `0.28.2`.
+- crates.io latest: `0.28.2`.
+- PyPI `0.28.2` has the sdist plus Linux x86_64, macOS x86_64, macOS arm64, and Windows wheels.
+
+I gated `#pypi-trusted-publisher` because the repo side is done, but PyPI project settings still need a trusted publisher matching the claims above before the workflow can publish successfully.
+<!-- agent:boundary:6693de27 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -100,7 +131,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi, rerun the PyPI workflow, and verify the PyPI latest version matches the released crate.
+- [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
 - [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
 <!-- /agent:backlog -->

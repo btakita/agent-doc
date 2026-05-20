@@ -119,7 +119,35 @@ So the updated layering is:
 5. Convex/FalkorDB projections: deployment choices for reactive product state or production graph reads.
 
 That means `#bahy` is still the right top backlog item, but it should name Convex and optional graph-backend projection explicitly. The risk to avoid is extracting too early into a generic "any content graph DB" package before tsift and Orbit have forced the schema through real adapters. I would keep the first implementation inside or next to tsift, draw the no-code-domain boundary now, and extract once the Orbit code/comment adapter or agent-doc session graph becomes the second real consumer.
-<!-- agent:boundary:72ce05d4 -->
+❯ do [#bahy]. #spec-test-build-install-commit-push
+### Re: #bahy provider-neutral graph substrate spike — gpt-5
+
+Implemented `#bahy` as a first real substrate spike in `src/tsift`.
+
+What changed:
+
+- Added `src/substrate.rs` with content-agnostic graph records: generic nodes, edges, provenance, freshness, projections, paths, and a `GraphStore` trait.
+- Added `SqliteGraphStore` as the local/offline/test implementation, backed by generic `graph_nodes` and `graph_edges` tables.
+- Added a tsift adapter in `src/graph.rs` that projects existing code call edges into generic `code_symbol` nodes and `calls` edges with line metadata and tsift index provenance.
+- Updated `SPEC.md` to make the boundary explicit: SQLite is the first local engine, Convex/FalkorDB are projections/read models, and tsift owns the code adapter rather than enclosing Orbit/BuildParty.
+
+Verification passed:
+
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo test substrate --quiet`
+- `cargo test project_call_edges_to_provider_neutral_substrate --quiet`
+- `make check` (`603` unit tests passed, `107` integration tests passed, `1` ignored sim-world test)
+- `cargo build --release`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.42`
+- Latest GitHub CI run inspected: `26131199849`, workflow `CI`, job `clippy + test`, conclusion `success`; no tmux-specific job exists in that run.
+
+Commits:
+
+- tsift repo: `8937dc5 feat: add provider-neutral graph substrate` — pushed to `btakita/tsift main`.
+- parent repo: `d63e872ea chore: update tsift submodule` — committed locally; parent push follows this mandatory document closeout.
+<!-- agent:boundary:532d4b94 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -128,7 +156,6 @@ That means `#bahy` is still the right top backlog item, but it should name Conve
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bahy] [recommended] Spike a provider-neutral typed property graph substrate behind tsift: SQLite as the local/offline prototype and test engine, generic nodes/edges/provenance/freshness/query APIs, tsift code/comment extraction as one adapter, Convex projection for Orbit's reactive knowledge store, and optional graph-backend projection such as FalkorDB as a replaceable derived read model rather than tsift owning Orbit/BuildParty.
 - [ ] [#7k0p] [recommended] Borrow CodeGraph-style adaptive exploration packets for tsift context/traverse surfaces: project-size-aware budgets, relationship maps, line-numbered clustered source windows, and no-reread guidance.
 - [ ] [#15vh] [recommended] Add framework/route nodes to the tsift graph, starting with narrow Rust/TypeScript/Python route extractors that emit route nodes and handler reference edges.
 - [ ] [#72v1] [recommended] Add a tsift affected-tests/impact query over changed files, imports, and call edges so closeout and CI loops can choose likely test targets without broad manual scanning.

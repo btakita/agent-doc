@@ -5,7 +5,7 @@ agent_doc_write: crdt
 agent: codex
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
-claude_model: claude-opus-4-6
+claude_model: opus
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of agent-loop/tasks/agent-doc/agent-doc-bugs2.md
   '#code-review': Please review corky codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix. '#follow-up-backlog'
@@ -87,24 +87,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260513-040556.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-173822.md`*
 
 Compacted content:
-- Archived 2 response topic(s): oauth callback URL decode; release + publish
+- Archived 1 response topic(s): Corky log review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ Review logs for corky issues. #next-steps
-### Re: Corky log review — gpt-5
-
-Reviewed the Corky session log, the compacted Corky archive, repo-local log files, user-level Corky cache/config locations, and the user systemd Corky timer/service journal.
-
-Findings:
-- I did not find an active Corky runtime log failure. The old `corky-send-kevin` user service/timer is inactive and has no journal entries since May 12, 2026.
-- The compacted release log shows `corky v0.28.2` was published to crates.io and `v0.28.1` should be treated as superseded.
-- The real unresolved release issue is PyPI: the wheel matrix passed, but publish failed with PyPI `invalid-publisher` for `repo:btakita/corky:environment:pypi`; PyPI still reports latest `corky` as `0.27.0`.
-- The current status block still says `crates.io publish — needs token refresh`, which is stale relative to the release log.
-
-Added the follow-up backlog in priority order. Top backlog item: `#pypi-trusted-publisher`.
-<!-- agent:boundary:5a180939 -->
+<!-- agent:boundary:0da0abe7 -->
 <!-- /agent:exchange -->
 ###
 <!--

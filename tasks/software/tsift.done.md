@@ -23,3 +23,4 @@
 - 2026-05-20 [#gqpg] Add graph-db query pagination and filtering across SQLite and Convex snapshots: cursor/limit semantics, property filters, deterministic ordering, cap diagnostics, and conformance coverage over large projection fixtures.
 - 2026-05-20 [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
 - 2026-05-20 [#gdoc] Add graph-db operator examples and fixtures showing SQLite graph-db queries, convex-sync dry-run/apply payloads, stale Convex snapshot failures, and context-pack/traverse handle reuse.
+- 2026-05-20 [#gval] Lock graph DB behavior with a compiled CLI conformance suite shared across SQLite and Convex snapshots: schema-version fail-closed checks, transactional refresh visibility, tombstone reconciliation order, missing-node edge rejection, freshness failures, pagination/filter parity, and deterministic ordering.

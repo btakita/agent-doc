@@ -48,7 +48,39 @@ The decision in [#gp9d] is therefore whether `audit-docs` should continue treati
 My recommendation is content-based for generated/managed surfaces, with optional advisory mtime output for broad docs. The managed-surface path already has a clear expected rendering from the binary, so it can fail on real content drift. For README/SPEC/custom instruction files, mtime is too indirect as a hard gate; a better gate is either explicit required-reference coverage, changed-file-aware checks, or targeted assertions that a spec section was updated when a known code area changed.
 
 I would keep [#gp9d] open until that policy is made explicit in `SPEC.md` and covered with tests. The important invariant is not "every doc must be newer than every touched source file"; it is "agent-facing instructions and required specs must not drift from the binary behavior they claim to describe."
-<!-- agent:boundary:4294ba85 -->
+❯ do [#gp9d] with the recommended content based strategy. I am still questioning why the document itself is still being watched long after a turn ends. Could you both improve the content-based reconciliation logic and tell me why agent-doc still manages a document after the turn is complete. Is this useful for realtime documents?
+### Re: #gp9d audit-docs content freshness — gpt-5
+
+Implemented and shipped the content-based audit-docs strategy.
+
+What changed:
+
+- `src/audit_docs.rs` now keeps generated agent-doc instruction surfaces release-blocking through rendered-content comparison, then runs the rest of the agent-doc audit locally so generic mtime staleness is converted into non-blocking `Mtime advisory` rows.
+- Blocking audit-docs failures remain content/structure based: managed surface content mismatch, tree path issues, actionable-content issues, context-invariant issues, and line budget failures.
+- `tests/test_cli.rs` now covers the source-newer-than-doc case and asserts that it succeeds with advisory output instead of failing.
+- `SPEC.md`, `README.md`, and `specs/07-core-commands.md` now state the policy explicitly: filesystem mtime freshness is advisory for agent-doc audits; generated instruction surfaces fail only when rendered content differs.
+
+Why the document is still managed after a turn:
+
+The document is not only a prompt payload; it is the durable session UI. After a response commits, agent-doc still keeps enough state around to support later edits, route/sync ownership, CRDT sidecars, snapshots, repair, and optional watch/reactive workflows. That is useful for realtime documents because the next user edit can be detected and reconciled against the last committed boundary without starting from scratch or losing editor state.
+
+The important distinction is that this post-turn management should be lightweight ownership/sync state, not an open response cycle. A completed turn should be `committed`; later watches or syncs exist so the document remains a live collaboration surface. They should not imply that the previous turn is still active.
+
+Verification:
+
+- `cargo test audit_docs --test test_cli` passed.
+- `make check` passed after the final source change.
+- `agent-doc audit-docs` now passes with mtime-only drift reported as advisory output.
+- `make install` completed, and the installed binary reports `agent-doc 0.33.16`.
+- Latest GitHub Actions `ci.yml` run on `20260422/codex-agent-backend` is green, including the `Run make tmux-ci` step.
+
+Commits pushed:
+
+- `src/agent-doc`: `1a0aa26d` — `fix: make audit-docs mtime advisory`
+- outer `agent-loop`: `7d3d421bb` — `chore: update agent-doc submodule`
+
+I left the pre-existing dirty `CLAUDE.md` typechange and untracked `AGENTS.md` inside `src/agent-doc` untouched.
+<!-- agent:boundary:5fbb042c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -56,15 +88,12 @@ I would keep [#gp9d] open until that policy is made explicit in `SPEC.md` and co
 
 <!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
-- do [#mut3]
-- do [#clo3]
-- do [#cyc2]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#gp9d] [recommended] Decide whether audit-docs instruction-file freshness should be content-based or mtime-based after source-only changes; current local audit-docs can fail on instruction surface mtimes after src/stream.rs changes even when make check passes.
+- [ ] [#nh3j] [recommended] Clarify audit-docs --root behavior for submodule-local managed skill artifacts; the no-override release path audits the superproject install root, while an explicit submodule root can still see stale tracked .claude/skills/agent-doc/SKILL.md artifacts.
 - [ ] [#ops2] [recommended] Move operator_clear and orchestration_batch onto FlowCore typed outcomes after route and closeout extraction; cover active-pane clear refusal, queue freeze/mid-run mutation, and child patchback normalization. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

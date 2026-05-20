@@ -92,7 +92,22 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): Google Drive tests and OAuth caching
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:940b0c5e -->
+❯ I enabled https://console.cloud.google.com/apis/api/docs.googleapis.com/metrics?project=unop-d3871
+❯ Try tests again
+### Re: Google Docs live tests — gpt-5
+
+Reran the previously skipped live Google Docs API checks for `brian.takita@gmail.com`; they pass now.
+
+Evidence:
+- Created a fresh converted Google Doc with `corky doc upload /tmp/corky-drive-live4.6p9ESv/google-doc.md --convert --account brian.takita@gmail.com`.
+- `corky docs read 1aHNRsVfSsTPYRheGFIBCjUqMZK9mDSPTd_f40OobBZA --account brian.takita@gmail.com` succeeded and returned the initial document text.
+- `corky docs write 1aHNRsVfSsTPYRheGFIBCjUqMZK9mDSPTd_f40OobBZA /tmp/corky-drive-live4.6p9ESv/google-doc-update.md --account brian.takita@gmail.com` succeeded.
+- A follow-up `corky docs read ...` returned the updated markdown body.
+- `corky doc export ... --format txt -o /tmp/corky-docs-retry-export.txt --account brian.takita@gmail.com` also showed the updated content through Drive export.
+- Deleted the temporary Google Doc through Drive API; delete returned HTTP `204`.
+
+No Corky code changed, so I did not rerun the local Rust suite. The Corky repo itself is clean. I marked `#enable-docs-api-corky-oauth` done.
+<!-- agent:boundary:7c717663 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,7 +116,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#enable-docs-api-corky-oauth] Enable Google Docs API for Corky's configured Gmail OAuth project 873280095295, then rerun Google Docs read/write live tests for brian.takita@gmail.com.
 - [ ] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi, rerun the PyPI workflow, and verify the PyPI latest version matches the released crate.
 - [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
@@ -116,4 +130,5 @@ Compacted content:
 - 2026-05-20 [#google-docs-sheets-integration] Add Google Docs/Sheets integration for Corky: required OAuth scopes, read/write Google Docs, read Google Sheets, docs, and tests.
 - 2026-05-20 [#google-workspace-doc-types] Implement broad Google Workspace document type support beyond Sheets: detect Drive MIME types and route Google Docs, Sheets, Slides, Forms/Drawings, PDFs, and common Office files through appropriate read/export/write/upload behavior, with spec updates, docs, tests, build/install, commit, and push.
 - 2026-05-20 [#enable-drive-api-corky-oauth] Enable Google Drive API for Corky's configured Gmail OAuth project 873280095295, then rerun the live Google Workspace Drive CRUD matrix for brian.takita@gmail.com.
+- 2026-05-20 [#enable-docs-api-corky-oauth] Enable Google Docs API for Corky's configured Gmail OAuth project 873280095295, then rerun Google Docs read/write live tests for brian.takita@gmail.com.
 <!-- /agent:done -->

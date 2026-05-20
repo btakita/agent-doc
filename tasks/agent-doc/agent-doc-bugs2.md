@@ -28,37 +28,12 @@ Completed stale visible-closeout write guard and added the IPC editor-side proof
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-183109.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-185020.md`*
 
 Compacted content:
-- Archived 5 response topic(s): editor IPC apply proof; #nh3j status; #nh3j audit-docs root scope; 2 more
+- Archived 1 response topic(s): #ops2 FlowCore clear and orchestration
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#ops2]. #spec-test-build-install-commit-push
-### Re: #ops2 FlowCore clear and orchestration — gpt-5
-
-Implemented `#ops2` in `src/agent-doc`.
-
-Changes:
-- Moved `session clear` guard decisions onto `flow::operator_clear`, including typed outcomes for idle, clean-exit, protected-input, active agent pane, busy pane, and no-live-pane cases.
-- Changed file-scoped clear to fail closed on live busy agent/harness panes and point operators to `agent-doc session interrupt-clear` for destructive discard.
-- Moved sequential orchestration batch freeze, mid-run source mutation, child closeout, and child patchback normalization proof onto `flow::orchestration_batch` events.
-- Kept child plain-response wrapping on the shared document-mutation patchback contract, with transcript/full-document/malformed shapes left rejected.
-- Updated session/orchestration specs and ops summary grouping for the new typed events.
-
-Verification:
-- `cargo test operator_clear -- --test-threads=2`
-- `cargo test orchestration_batch -- --test-threads=2`
-- `cargo test sequential_orchestration_stops_when_exchange_task_list_changes -- --test-threads=2`
-- `cargo test orchestrate_template_finalize -- --test-threads=2`
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- Latest upstream CI run `26181953001` was green, including `Run make tmux-ci`.
-
-Commits:
-- `btakita/agent-doc` `c3608203` (`feat: route clear and orchestration through FlowCore`) pushed to `20260422/codex-agent-backend`.
-- Parent gitlink commit `956dfa3e4` (`chore: update agent-doc FlowCore submodule`) is staged for the parent push after this document closeout commits.
-<!-- agent:boundary:0cfd044c -->
+<!-- agent:boundary:5df190a6 -->
 <!-- /agent:exchange -->
 ###
 <!--

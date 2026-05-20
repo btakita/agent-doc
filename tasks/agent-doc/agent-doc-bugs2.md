@@ -43,7 +43,11 @@ Implemented editor-side apply proof for both plugins. VS Code now captures the e
 Updated the shared editor specs, bumped local plugin builds to JetBrains `0.2.125` and VS Code `0.2.19`, and added focused VS Code, JetBrains, and socket-ACK regressions. Committed the submodule change as `a0e4dcde fix: guard editor IPC apply generation` and the parent gitlink as `d174cc13b agent-doc: guard editor IPC apply generation`; the push follows this closeout boundary.
 
 Verification: `cargo test socket_error_ack_is_error`; `npm test -- --test-name-pattern patchGuard`; `npm test`; `./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest`; `./gradlew test buildPlugin`; `make check`; `make install`; installed `agent-doc 0.33.16`. Latest checked CI tmux evidence was run `26178914295`, where `Run make tmux-ci` succeeded. I left unrelated pre-existing local edits in `src/agent-doc` unstaged.
-<!-- agent:boundary:0eeed238 -->
+❯ Is [#nh3j] done?
+### Re: #nh3j status — gpt-5
+
+No. `#nh3j` is still open in the backlog, unchecked under Pending / Not Built.
+<!-- agent:boundary:810c41d9 -->
 <!-- /agent:exchange -->
 ###
 <!--

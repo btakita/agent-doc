@@ -34,7 +34,26 @@ FlowCore refactor is complete enough to leave broad extraction mode; next top ba
 Compacted content:
 - Archived 1 response topic(s): FlowCore full-content source-buffer proof
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:257c21ac -->
+❯ do [#qcont]. #spec-test-build-install-commit-push
+### Re: auto queue continuation — gpt-5
+
+Implemented `#qcont`.
+
+Direct `agent-doc run` and bare-path runs now synthesize the active queue head when `queue_active: true` and the snapshot matches the document. The run path consumes one queued prompt before strict closeout, so a repeat invocation advances the next prompt. `agent:queue auto` closeouts also print an explicit single-step continuation diagnostic when prompts remain.
+
+Updated the orchestration spec/version notes and added run integration coverage for one-step resume plus repeated invocation drain.
+
+Verification:
+- `cargo test active_queue`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- CI review: latest GitHub Actions `CI` run `26191058253` succeeded, including the `Run make tmux-ci` step.
+
+Commits:
+- `3ba3aec1` in `src/agent-doc`: `fix: resume active queue runs`
+- `00e6dfda0` in parent: `agent-doc: update queue run fix`
+<!-- agent:boundary:9c7325bb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +67,6 @@ As I was writining into the comment below agent:exchange...The duplicate content
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#qcont] [recommended] Fix auto agent:queue continuation so a direct agent-doc run either drains remaining queue prompts after each successful finalize or explicitly reports single-step resume semantics instead of silently leaving later items unrun. Plan: tasks/agent-doc/plan-auto-queue-continuation-after-finalize.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

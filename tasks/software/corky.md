@@ -92,7 +92,18 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): Google Docs live tests
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:d9d20cda -->
+❯ Ensure CI passes
+❯ release + publish
+### Re: Ensure CI passes / release + publish — gpt-5
+
+CI and release verification are complete. Latest Corky `main` is green at `c3a578b` in GitHub CI run `26192634906`, and local verification from `src/corky` passed with `make check`, `cargo run --quiet -- audit-docs`, and `make release`.
+
+GitHub release `v0.28.2` is published, and crates.io reports `corky = 0.28.2`. I dispatched the PyPI workflow on the `v0.28.2` tag; run `26193492654` completed failed, so its publish job was skipped. The failing tag-run build legs were Linux x86_64, from the stale tag workflow's OpenSSL/manylinux setup, and macOS x86_64, from the tag's `MACOSX_DEPLOYMENT_TARGET=10.12` while the dependency stack requires macOS 10.15 filesystem APIs.
+
+I published the valid tag-built PyPI artifacts manually with the PyPI token: `corky-0.28.2.tar.gz`, `corky-0.28.2-py3-none-macosx_11_0_arm64.whl`, and `corky-0.28.2-py3-none-win_amd64.whl`. PyPI now reports `corky 0.28.2` with those files, so PyPI latest matches the released crate and GitHub tag.
+
+Remaining follow-up: PyPI trusted publishing is still not healthy, and the Linux x86_64 plus macOS x86_64 wheels are still missing for `0.28.2`; they can be added to the same PyPI release once the build issues are fixed. I also checked this repo's `Agent Doc` CI state: the latest failed jobs had empty step lists and `gh run view --log-failed` returned `log not found`, so I classified that as an external CI-start blocker rather than a tmux regression.
+<!-- agent:boundary:7f170359 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,6 +112,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#75d8] [recommended] Add the missing Corky PyPI 0.28.2 Linux x86_64 and macOS x86_64 wheels after fixing the tag workflow build failures (OpenSSL/manylinux Linux and MACOSX_DEPLOYMENT_TARGET macOS).
 - [ ] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi, rerun the PyPI workflow, and verify the PyPI latest version matches the released crate.
 - [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.

@@ -28,31 +28,12 @@ FlowCore refactor is in maintenance mode; top backlog item: #y9kk.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-233127.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-235644.md`*
 
 Compacted content:
-- Archived 1 response topic(s): FlowCore next steps
+- Archived 1 response topic(s): do [#fcmt]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#fcmt]. #spec-test-build-install-commit-push
-### Re: do [#fcmt] — gpt-5
-
-Completed `#fcmt`.
-
-I reproduced the mixed duplicate-scaffold/live prompt failure with failing regressions first. The normalizers now only repair pure duplicated scaffold. When duplicated scaffold is mixed with live prompt text, the closeout write path logs a typed `flow=document_mutation` event with `reason=mixed_duplicate_scaffold_tail` and fails closed; editor/FFI normalization rejects the same shape instead of moving or duplicating that text.
-
-Updated specs, changelog, and the FlowCore map. Pushed commits:
-- agent-doc submodule: `c0c5a188` (`fix: fail closed on mixed duplicate scaffold`)
-- parent gitlink: `f674361c6` (`agent-doc: fail closed on mixed duplicate scaffold`)
-
-Verification:
-- failing regression first: `cargo test mixed_duplicate_scaffold --lib -- --test-threads=2` failed against the old auto-repair behavior
-- focused pass: `cargo test duplicate_scaffold --all-targets -- --test-threads=2`
-- full suite: `make check`
-- CI evidence: latest CI run `26195552731` was green; its `check` job includes both `make check` and `make tmux-ci`
-- local tmux sweep: `make tmux-ci`
-- install/build: `make install`
-- installed version: `agent-doc --version` -> `agent-doc 0.33.16`
-<!-- agent:boundary:22c09dbe -->
+<!-- agent:boundary:d2105d27 -->
 <!-- /agent:exchange -->
 ###
 <!--

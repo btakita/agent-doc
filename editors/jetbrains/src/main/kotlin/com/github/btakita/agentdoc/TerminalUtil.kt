@@ -21,7 +21,7 @@ object TerminalUtil {
     internal const val STARTING_ACTOR_ROUTE_MAX_ATTEMPTS = 4
     private val STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
     private val BUSY_CLEAR_REFUSAL_HEADER_REGEX = Regex(
-        """session_clear refused for (.+?) because pane (\S+) is alive-busy""",
+        """session_clear refused for (.+?) because pane (\S+) is (?:alive-busy|active_agent_doc|busy)""",
         RegexOption.DOT_MATCHES_ALL,
     )
     private val PROTECTED_CLEAR_REFUSAL_HEADER_REGEX = Regex(

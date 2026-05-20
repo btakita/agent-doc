@@ -116,6 +116,14 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.InterruptClearSessionContext"
+                class="com.github.btakita.agentdoc.InterruptClearSessionContextAction"
+                text="Interrupt and Clear Session Context"
+                description="Interrupt the bound agent-doc session, then clear its context">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.CopySessionDiagnostics"
                 class="com.github.btakita.agentdoc.CopySessionDiagnosticsAction"
                 text="Copy Session Diagnostics"

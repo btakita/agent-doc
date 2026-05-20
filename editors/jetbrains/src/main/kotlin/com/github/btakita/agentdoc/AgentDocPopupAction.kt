@@ -16,6 +16,7 @@ class AgentDocPopupAction : AnAction() {
             "AgentDoc.ShowSessionStatus",
             "AgentDoc.RestartSupervisorProcess",
             "AgentDoc.ClearSessionContext",
+            "AgentDoc.InterruptClearSessionContext",
             "AgentDoc.CopySessionDiagnostics",
             "AgentDoc.SyncLayout",
             "AgentDoc.RefreshEnvironment",

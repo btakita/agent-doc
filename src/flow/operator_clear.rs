@@ -6,7 +6,6 @@ pub(crate) enum OperatorClearInputState {
     IdlePrompt,
     CleanExit,
     NoLivePane,
-    ActiveAgentDoc,
     ProtectedInput,
     Busy,
 }
@@ -17,7 +16,6 @@ impl OperatorClearInputState {
             Self::IdlePrompt => "idle_prompt",
             Self::CleanExit => "clean_exit",
             Self::NoLivePane => "no_live_pane",
-            Self::ActiveAgentDoc => "active_agent_doc",
             Self::ProtectedInput => "protected_input",
             Self::Busy => "busy",
         }
@@ -29,9 +27,7 @@ pub(crate) fn clear_guard_outcome(state: OperatorClearInputState) -> FlowOutcome
         OperatorClearInputState::IdlePrompt
         | OperatorClearInputState::CleanExit
         | OperatorClearInputState::NoLivePane => FlowOutcome::Completed,
-        OperatorClearInputState::ActiveAgentDoc | OperatorClearInputState::ProtectedInput => {
-            FlowOutcome::FailedClosed
-        }
+        OperatorClearInputState::ProtectedInput => FlowOutcome::FailedClosed,
         OperatorClearInputState::Busy => FlowOutcome::Blocked,
     }
 }
@@ -52,14 +48,6 @@ pub(crate) fn log_clear_guard_event(file: &Path, state: OperatorClearInputState)
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn active_agent_doc_clear_fails_closed() {
-        assert_eq!(
-            clear_guard_outcome(OperatorClearInputState::ActiveAgentDoc),
-            FlowOutcome::FailedClosed
-        );
-    }
 
     #[test]
     fn busy_clear_blocks_without_destructive_confirmation() {

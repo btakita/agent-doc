@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Clear Session Context no longer treats the `agent-doc` wrapper process as
+  blocking evidence by itself.** File-scoped `session clear` now blocks on
+  protected prompt input or explicit busy cues such as an active Codex turn,
+  hook-review prompt, or help screen, but proceeds for ordinary idle/status
+  panes even when `pane_current_command=agent-doc`. JetBrains now parses legacy
+  `active_agent_doc` clear refusals as typed busy-session warnings and exposes a
+  standalone `Interrupt and Clear Session Context` action. Bumped the JetBrains
+  plugin build version to `0.2.126`.
+
 - **Template closeout uses one prompt reconciliation pass before visible writes.**
   Direct template/CRDT disk writes, IPC timeout fallbacks, and repair replays
   now run the same duplicate-prompt reconciliation that IPC snapshots use,

@@ -365,10 +365,16 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> 
     };
     let clean_exit_prompt = evidence.state == LivePaneState::AliveBusy
         && pane_shows_clean_exit_prompt(ctx, tmux, &evidence);
+    let busy_reason = if evidence.state == LivePaneState::AliveBusy {
+        operator_clear_busy_reason(ctx, tmux, &evidence)
+    } else {
+        None
+    };
     let clear_state = operator_clear_input_state_for_evidence(
         &evidence,
         protected_reason.is_some(),
         clean_exit_prompt,
+        busy_reason.is_some(),
     );
     crate::flow::operator_clear::log_clear_guard_event(&ctx.canonical_file, clear_state);
 
@@ -398,28 +404,23 @@ fn reconcile_idle_projection_before_clear(ctx: &SessionContext, tmux: &Tmux) -> 
                 );
             }
         }
-        OperatorClearInputState::ActiveAgentDoc | OperatorClearInputState::Busy => {
-            let log_event = if clear_state == OperatorClearInputState::ActiveAgentDoc {
-                "session_clear_live_busy_guard_refused"
-            } else {
-                "session_clear_live_busy_guard_blocked"
-            };
+        OperatorClearInputState::Busy => {
+            let busy_reason = busy_reason.unwrap_or_else(|| "busy cue".to_string());
             crate::ops_log::log_op(
                 &ctx.canonical_file,
                 &format!(
-                    "{} file={} pane={} source={} state={} current_command={} tail={:?}",
-                    log_event,
+                    "session_clear_live_busy_guard_blocked file={} pane={} source={} reason={} current_command={} tail={:?}",
                     ctx.canonical_file.display(),
                     evidence.pane_id.as_deref().unwrap_or("unknown"),
                     evidence.source,
-                    clear_state.as_str(),
+                    busy_reason.replace(char::is_whitespace, "_"),
                     evidence.current_command.as_deref().unwrap_or("unknown"),
                     evidence.tail.as_deref().unwrap_or("unknown")
                 ),
             );
             anyhow::bail!(
                 "{}",
-                active_clear_refusal_message(&ctx.canonical_file, &evidence, clear_state)
+                busy_clear_refusal_message(&ctx.canonical_file, &evidence, &busy_reason)
             );
         }
     }
@@ -430,6 +431,7 @@ fn operator_clear_input_state_for_evidence(
     evidence: &LivePaneEvidence,
     protected_input: bool,
     clean_exit_prompt: bool,
+    busy_cue: bool,
 ) -> OperatorClearInputState {
     match evidence.state {
         LivePaneState::AliveIdle => OperatorClearInputState::IdlePrompt,
@@ -438,28 +440,13 @@ fn operator_clear_input_state_for_evidence(
         }
         LivePaneState::AliveBusy if protected_input => OperatorClearInputState::ProtectedInput,
         LivePaneState::AliveBusy if clean_exit_prompt => OperatorClearInputState::CleanExit,
-        LivePaneState::AliveBusy
-            if evidence
-                .current_command
-                .as_deref()
-                .is_some_and(active_agent_command) =>
-        {
-            OperatorClearInputState::ActiveAgentDoc
-        }
-        LivePaneState::AliveBusy => OperatorClearInputState::Busy,
+        LivePaneState::AliveBusy if busy_cue => OperatorClearInputState::Busy,
+        // Some harnesses leave a wrapper process (`agent-doc`, `codex`, etc.)
+        // as the pane command even when the visible TUI is only idle/status
+        // chrome. Do not block clear solely on that process name; protected
+        // input and explicit busy cues are handled above.
+        LivePaneState::AliveBusy => OperatorClearInputState::IdlePrompt,
     }
-}
-
-fn active_agent_command(command: &str) -> bool {
-    let name = Path::new(command)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(command)
-        .trim();
-    matches!(
-        name,
-        "agent-doc" | "claude" | "codex" | "opencode" | "bun" | "node"
-    )
 }
 
 fn guard_starting_actor_operator_command(
@@ -627,6 +614,27 @@ fn pane_shows_clean_exit_prompt(
     harness.dispatch_blocker_reason(&captured).as_deref() == Some("clean-exit restart prompt")
 }
 
+fn operator_clear_busy_reason(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    evidence: &LivePaneEvidence,
+) -> Option<String> {
+    let pane = evidence.pane_id.as_deref()?;
+    let captured = crate::sessions::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| crate::sessions::capture_pane(tmux, pane))
+        .ok()?;
+    let harness = harness_for_evidence(ctx, evidence);
+    let reason = harness.dispatch_blocker_reason(&captured)?;
+    match reason.as_str() {
+        "active permission prompt"
+        | "queued draft in composer"
+        | "interactive shell reverse-i-search"
+        | "interactive shell history search"
+        | "clean-exit restart prompt" => None,
+        _ => Some(reason),
+    }
+}
+
 fn harness_for_evidence(
     ctx: &SessionContext,
     evidence: &LivePaneEvidence,
@@ -658,19 +666,15 @@ fn protected_clear_refusal_message(
     )
 }
 
-fn active_clear_refusal_message(
-    file: &Path,
-    evidence: &LivePaneEvidence,
-    state: OperatorClearInputState,
-) -> String {
+fn busy_clear_refusal_message(file: &Path, evidence: &LivePaneEvidence, reason: &str) -> String {
     let pane = evidence.pane_id.as_deref().unwrap_or("unknown");
     let command = evidence.current_command.as_deref().unwrap_or("unknown");
     let tail = evidence.tail.as_deref().unwrap_or("unknown");
     format!(
-        "session_clear refused for {} because pane {} is {} (source={}, current_command={}, tail={:?}). Wait for an idle prompt, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the pane and clear context.",
+        "session_clear refused for {} because pane {} is alive-busy (reason={}, source={}, current_command={}, tail={:?}). Wait for an idle prompt, or run `agent-doc session interrupt-clear {}` to intentionally interrupt the pane and clear context.",
         file.display(),
         pane,
-        state.as_str(),
+        reason,
         evidence.source,
         command,
         tail,
@@ -1993,6 +1997,16 @@ mod tests {
     }
 
     #[test]
+    fn live_pane_prompt_ready_accepts_codex_xhigh_status_chrome_only_output() {
+        let harness = crate::harness::HarnessConfig::codex();
+
+        assert!(live_pane_prompt_ready(
+            &harness,
+            "gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 41% used\n"
+        ));
+    }
+
+    #[test]
     fn live_pane_prompt_ready_accepts_codex_footer_below_prior_output() {
         let harness = crate::harness::HarnessConfig::codex();
 
@@ -2094,7 +2108,27 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     }
 
     #[test]
-    fn operator_clear_refuses_active_agent_doc_pane() {
+    fn operator_clear_allows_agent_doc_wrapper_without_busy_cue() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 41% used".to_string()),
+        };
+
+        let state = operator_clear_input_state_for_evidence(&evidence, false, false, false);
+
+        assert_eq!(state, OperatorClearInputState::IdlePrompt);
+        assert_eq!(
+            crate::flow::operator_clear::clear_guard_outcome(state),
+            crate::flow::types::FlowOutcome::Completed
+        );
+    }
+
+    #[test]
+    fn operator_clear_blocks_explicit_busy_cue() {
         let evidence = LivePaneEvidence {
             pane_id: Some("%7".to_string()),
             source: "authoritative_actor",
@@ -2104,16 +2138,18 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             tail: Some("Working...".to_string()),
         };
 
-        let state = operator_clear_input_state_for_evidence(&evidence, false, false);
+        let state = operator_clear_input_state_for_evidence(&evidence, false, false, true);
 
-        assert_eq!(state, OperatorClearInputState::ActiveAgentDoc);
+        assert_eq!(state, OperatorClearInputState::Busy);
         assert_eq!(
             crate::flow::operator_clear::clear_guard_outcome(state),
-            crate::flow::types::FlowOutcome::FailedClosed
+            crate::flow::types::FlowOutcome::Blocked
         );
-        let message = active_clear_refusal_message(Path::new("/tmp/doc.md"), &evidence, state);
+        let message =
+            busy_clear_refusal_message(Path::new("/tmp/doc.md"), &evidence, "active codex turn");
         assert!(message.contains("session_clear refused"));
-        assert!(message.contains("pane %7 is active_agent_doc"));
+        assert!(message.contains("pane %7 is alive-busy"));
+        assert!(message.contains("reason=active codex turn"));
         assert!(message.contains("agent-doc session interrupt-clear /tmp/doc.md"));
     }
 
@@ -2128,7 +2164,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             tail: Some("Press Enter to restart...".to_string()),
         };
 
-        let state = operator_clear_input_state_for_evidence(&evidence, false, true);
+        let state = operator_clear_input_state_for_evidence(&evidence, false, true, false);
 
         assert_eq!(state, OperatorClearInputState::CleanExit);
         assert_eq!(

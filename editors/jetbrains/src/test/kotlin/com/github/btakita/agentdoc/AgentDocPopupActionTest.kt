@@ -10,6 +10,7 @@ class AgentDocPopupActionTest {
     fun `primary popup actions keep compact exchange and supervisor restart numbered`() {
         assertTrue(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.CompactExchange"))
         assertTrue(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.RestartSupervisorProcess"))
+        assertTrue(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.InterruptClearSessionContext"))
         assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.RunWithJunie"))
         assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.ForceClaim"))
     }

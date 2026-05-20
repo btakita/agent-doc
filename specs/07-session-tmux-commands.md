@@ -51,7 +51,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 - When `route --dispatch-only` has a live authoritative actor pane but the supervisor socket no longer reports a healthy runtime or actor state, route must fail closed before direct-pane submit when that pane still matches the current registered/live owner binding. The refusal logs `route_dispatch_only_authoritative_fallback_refused` with supervisor health and runtime actor state, and the user-facing recovery is to restart or rebind the owner with `agent-doc start <FILE>` before rerouting. Dispatch-only reopen must not degrade to accepted-only proof when the supervisor cannot provide dispatch-start proof.
 - When any busy-pane dispatch-only path finds the pane still busy after auto-fix, route must attempt interrupt recovery for OpenCode as well as Codex. For OpenCode, the interrupt sequence sends Escape twice and then waits for an idle prompt. This handles the post-`Clear Session Context` scenario where the agent-doc child process is still running and OpenCode is showing a progress bar.
 - File-scoped `agent-doc session clear <FILE>` must resolve a direct-pane submit target in the same order that routed reopen prefers an existing live session binding: authoritative actor pane first, then a current live-owner pane for the same file, then the registry pane. Only when none of those panes is directly addressable on the default tmux server may clear fall back to supervisor IPC inject.
-- File-scoped `agent-doc session clear <FILE>` must not run the starting-actor readiness guard, but its operator guard is owned by FlowCore `operator_clear`: clear may submit `/clear` only after an idle prompt, clean-exit proof, or no live pane evidence. A live busy `agent-doc`/harness pane fails closed with typed UX data and a pointer to `agent-doc session interrupt-clear <FILE>`; protected prompt input such as a permission prompt, queued draft, shell history search, or drafted user text remains a distinct refusal reason. Operators use `interrupt-clear` for intentional destructive discard.
+- File-scoped `agent-doc session clear <FILE>` must not run the starting-actor readiness guard, but its operator guard is owned by FlowCore `operator_clear`: clear may submit `/clear` after an idle prompt, clean-exit proof, no live pane evidence, or an otherwise unclassified busy projection with no protected input and no explicit busy cue. A live `agent-doc`/harness wrapper process is not blocking evidence by itself. Protected prompt input such as a permission prompt, queued draft, shell history search, or drafted user text remains a distinct refusal reason; explicit busy cues such as an active Codex turn, hook-review prompt, or help/usage screen fail closed with typed UX data and a pointer to `agent-doc session interrupt-clear <FILE>`. Operators use `interrupt-clear` for intentional destructive discard.
 - File-scoped `agent-doc session clear <FILE>` and `route --dispatch-only <FILE>` must each record their delivery branch in ops-log, including whether the command crossed the live pane's tmux submit boundary or supervisor IPC inject. Dispatch-only route logs must also record both `proof` and `proof_scope`: attempts without a harness dispatch-start hook are `proof=accepted proof_scope=accepted_only`, while hook-backed attempts may record `proof=consumed` or `proof=submitted` with `proof_scope=dispatch_start`.
 - Dispatch-only OpenCode and hook-backed Codex reroutes must not report routed delivery as successful on pane-input acceptance alone. When proof remains `accepted` / `accepted_only`, route records `route_dispatch_only_submit_unproven` and fails closed; only dispatch-start proof may be described as consumed/submitted delivery. Claude Code dispatch-only routes may still use accepted-only delivery because no dispatch-start hook is currently available for that harness.
 - Direct-pane reroute telemetry must keep pane-input acceptance latency distinct from harness dispatch-start proof. A direct submit whose pane-input disappearance is not observed within the tmux/control-mode acceptance window must not be logged as a submit timeout when later hook proof shows the routed prompt was consumed or submitted; in that case `route_latency phase=direct_pane_submit` uses `outcome=acceptance_unobserved_dispatch_proven`, while `phase=dispatch_start_proof` carries the consumed/submitted proof.
@@ -317,17 +317,20 @@ single-owner actor controls:
   launch contract. Before contacting tmux or the supervisor, it must record a
   controller operator-command acceptance or fail with the rejected stage. Clear
   is an explicit operator action and must not fail solely because direct tmux
-  evidence classifies the resolved pane as `alive-busy`; ordinary active/status
-  panes are allowed through the same `/clear` submit path. Clear may fail closed
-  only when the live pane contains protected prompt input such as a permission
-  prompt, queued draft, shell search, or drafted user prompt. The protected-input
-  check must infer the actual harness from the pane's `pane_current_command`
+  evidence classifies the resolved pane as `alive-busy` or because the current
+  pane command is an agent wrapper; ordinary active/status panes are allowed
+  through the same `/clear` submit path. Clear may fail closed when the live pane
+  contains protected prompt input such as a permission prompt, queued draft,
+  shell search, or drafted user prompt, and may block explicit busy cues such as
+  an active Codex turn, hook-review prompt, or help/usage screen. The
+  protected-input check must infer the actual harness from the pane's
+  `pane_current_command`
   when that command is an unambiguous harness binary (`codex`, `opencode`,
   `claude`, `bun`), falling back to the document's configured harness only when
   the command is ambiguous (`node`, `agent-doc`, shell). This prevents false
   positives when the pane runs a different harness than the document specifies.
-  That refusal must
-  record the protected-input reason in the ops log and tell the operator to use
+  Protected-input and explicit-busy refusals must record their reason in the ops
+  log and tell the operator to use
   `agent-doc session interrupt-clear <FILE>` for an explicit discard.
   `interrupt-clear` owns harness-specific interrupt keys, waits for direct
   idle/closed evidence, and then retries the normal clear path. If the interrupt

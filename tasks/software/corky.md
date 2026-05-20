@@ -192,7 +192,45 @@ I did not change code or run the build/test suite in this cycle. The next Corky 
 ```bash
 corky auth --scope sheets --email brian@dreamable.com
 ```
-<!-- agent:boundary:cc433dab -->
+❯ I authenticated. Please run test.
+### Re: Corky Sheets live write test — gpt-5
+
+Live Sheets write test passed for `brian@dreamable.com` against the target spreadsheet `1k52arliMCqbe40_CHWUCinV59EACIoYTG1gVMvnlKrA`.
+
+I used a temporary tab named `corky-live-test-20260520-gpt5` and a two-row CSV:
+
+```csv
+test_id,result
+corky-live-sheets-write,ok
+```
+
+Commands/results:
+
+```bash
+corky sheets push 'https://docs.google.com/spreadsheets/d/1k52arliMCqbe40_CHWUCinV59EACIoYTG1gVMvnlKrA/edit?gid=1675400873#gid=1675400873' 'corky-live-test-20260520-gpt5' /tmp/corky-sheets-live-test.csv --account brian@dreamable.com
+```
+
+Result: Corky created the tab, cleared it, wrote 2 rows, and reported `4 cells updated`.
+
+```bash
+corky sheets read 'https://docs.google.com/spreadsheets/d/1k52arliMCqbe40_CHWUCinV59EACIoYTG1gVMvnlKrA/edit?gid=1675400873#gid=1675400873' --range 'corky-live-test-20260520-gpt5!A1:B2' --format csv --account brian@dreamable.com
+```
+
+Readback returned:
+
+```csv
+test_id,result
+corky-live-sheets-write,ok
+```
+
+```bash
+corky sheets delete-tab 'https://docs.google.com/spreadsheets/d/1k52arliMCqbe40_CHWUCinV59EACIoYTG1gVMvnlKrA/edit?gid=1675400873#gid=1675400873' 'corky-live-test-20260520-gpt5' --account brian@dreamable.com
+```
+
+Result: Corky reported `Deleted tab corky-live-test-20260520-gpt5.` I then retried reading that deleted range and got the expected Sheets API `HTTP 400` invalid-range error, confirming the temporary tab was gone.
+
+I removed the local temporary CSV afterward. No code changed in this cycle, so I did not run the build/test suite.
+<!-- agent:boundary:f06d5670 -->
 <!-- /agent:exchange -->
 ###
 <!--

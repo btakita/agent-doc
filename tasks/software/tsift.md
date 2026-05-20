@@ -68,7 +68,28 @@ The current tsift graph workload is still a good fit for SQLite: symbol rows, in
 A graph DB becomes worth reconsidering only if tsift starts needing persistent multi-hop pattern matching over richer typed edges at scale, for example constrained route-to-handler-to-symbol-to-test traversals across very large monorepos, and measurements show SQL plus in-memory traversal is too slow or too awkward. Even then, I would prototype it as a derived read-only cache rebuilt from SQLite, not as the source of truth.
 
 For now, the better direction is to keep the reliability model and make the SQLite graph model more graph-shaped when needed: typed node/edge tables, indexes around source/destination/kind, and possibly materialized paths or closure tables for the handful of traversals agents ask for repeatedly. That should cover most graph-product ergonomics without giving up the concurrency and recovery behavior tsift already has. I would treat this as guidance for the existing graph/route/adaptive-packet backlog items rather than adding a separate database-migration item.
-<!-- agent:boundary:74a28476 -->
+❯ Can our work to make a graphdb backed by sqlite be abstracted into a standalone package for any sort of content? Such that it can support from /home/brian/work/btakita/agent-loop/src/session-share/tasks/root.md Knowledge Navigator or Orbit or any BuildParty agents?
+
+❯ Or would tsift be the correct abstraction that encloses the sqlite-backed graphdb?
+### Re: standalone SQLite graph substrate vs tsift boundary — gpt-5
+
+Yes, the SQLite-backed graph work can be abstracted, but I would draw the boundary lower than tsift.
+
+The reusable package should be a small local typed property graph substrate: nodes, edges, labels/kinds, properties, provenance/source refs, content hashes, freshness timestamps, aliases, FTS/vector hooks, path/neighborhood/subgraph queries, WAL/snapshot/lock behavior, and rebuildable projections. It should not know about code symbols, ASTs, LiveKit, Orbit, semantic heroes, or agent-doc. That makes it usable for source code, markdown sessions, docs, issues, videos, semantic tags, enhanced content, facts, and admin registries.
+
+Then tsift becomes one opinionated product built on top of that substrate: it owns code ingestion, tree-sitter extraction, files/symbols/routes/call edges, `source-read`, `context-pack`, `traverse`, freshness gates, and agent-facing code retrieval. That is the right abstraction for code and repo navigation, but it is too narrow to be the enclosing abstraction for Knowledge Navigator, Orbit modules, or BuildParty's agent graph.
+
+For BuildParty/Orbit specifically, the local SQLite graph should be treated as a dev/offline/edge/rebuildable graph substrate or ingestion artifact, not the platform runtime SoR. The current BuildParty database strategy already points production durable state at Postgres and runtime graph queries at FalkorDB. A standalone SQLite graph package can still be valuable there: it can power local module builds, deterministic tests, portable knowledge packs, content-ingestion staging, and small deployments. Production can project the same generic node/edge/provenance model into Postgres/FalkorDB.
+
+So the clean layering is:
+
+1. **Generic graph substrate** — SQLite-backed typed property graph library/CLI, content-agnostic.
+2. **tsift** — code intelligence product and CLI using the substrate for source-code graphs.
+3. **agent-doc / session tooling** — session/backlog/document graph adapters using the same substrate.
+4. **BuildParty / Orbit / Knowledge Navigator** — product agents and content modules that may import or project from the substrate, but are not enclosed by tsift.
+
+I would not extract immediately as a polished public package. First, define the graph schema/API inside tsift with an explicit `no code-domain concepts below this line` boundary. Once a second real consumer lands, probably agent-doc session graphs or an Orbit module pack, extract that layer into a standalone crate/package. That avoids designing an abstract graph library in the dark while still keeping the implementation ready to split.
+<!-- agent:boundary:42cadbaf -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -77,6 +98,7 @@ For now, the better direction is to keep the reliability model and make the SQLi
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#bahy] [recommended] Spike a standalone SQLite-backed typed property graph crate behind tsift: generic nodes/edges/provenance/freshness/query APIs, with tsift as the code-domain adapter and Orbit/BuildParty as separate consumers rather than tsift-owned products.
 - [ ] [#7k0p] [recommended] Borrow CodeGraph-style adaptive exploration packets for tsift context/traverse surfaces: project-size-aware budgets, relationship maps, line-numbered clustered source windows, and no-reread guidance.
 - [ ] [#15vh] [recommended] Add framework/route nodes to the tsift graph, starting with narrow Rust/TypeScript/Python route extractors that emit route nodes and handler reference edges.
 - [ ] [#72v1] [recommended] Add a tsift affected-tests/impact query over changed files, imports, and call edges so closeout and CI loops can choose likely test targets without broad manual scanning.

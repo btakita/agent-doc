@@ -57,7 +57,56 @@ Clarified `agent-doc audit-docs --root` behavior for managed instruction surface
 Updated `src/audit_docs.rs`, `specs/07-core-commands.md`, `SPEC.md`, `README.md`, and `docs/guide/commands.md`. Added direct unit coverage for the superproject default and explicit submodule-root paths. Committed the submodule change as `7390050c docs: clarify audit-docs root scope` and the parent gitlink as `3d220380a agent-doc: clarify audit-docs root scope`; the push follows this closeout boundary.
 
 Verification: `cargo test managed_instruction_surface_roots`; `make check`; `make build`; `make install`; installed `agent-doc 0.33.16`; `cargo run --quiet -- audit-docs` passed with no blocking issues and 5 mtime advisories. Latest checked CI tmux evidence was run `26180114469`, where `Run make tmux-ci` succeeded.
-<!-- agent:boundary:adbc7a1c -->
+❯ The duplicate document content + corruption & duplicate typed in prompt issues surfaced as I was typing in this prompt. We need to change the approach to make reconciliation robust. The 1 off fix approach we have been doing is neverending game of whack-a-mole.
+❯ The duplicate prompt as I was typing issue surfaced in corky.md.
+
+❯ #spec-test-build-install-commit-push
+### Re: duplicate live prompt reconciliation — gpt-5
+
+Implemented the reconciliation fix in `src/agent-doc` and committed it in the submodule as `9d86655d` (`fix: reconcile duplicate live prompts before closeout`). The parent repo now points to that submodule commit in `e506fe0be` (`agent-doc: update live prompt reconciliation`). Per the session commit contract, the remote push is the next closeout step after this `agent-doc finalize` commit lands.
+
+What changed:
+- Final template closeout now receives the pre-write visible document and runs duplicate prompt reconciliation before saving snapshots or replacing the document.
+- The duplicate prompt scanner is response-block-aware, so assistant prose can quote prompt text without being stripped.
+- The same reconciliation path covers direct template/CRDT disk writes, IPC timeout fallbacks, and repair replays, rather than only post-IPC snapshot cleanup.
+- Specs, flow docs, and the changelog now state the invariant.
+The duplicate document content + corruption & duplicate typed in prompt issues surfaced as I was typing in this prompt. We need to change the approach to make reconciliation robust. The 1 off fix approach we have been doing is a neverending game of whack-a-mole.
+
+### Re: duplicate live prompt reconciliation — gpt-5
+
+Implemented the reconciliation fix in `src/agent-doc` and committed it in the submodule as `9d86655d` (`fix: reconcile duplicate live prompts before closeout`). The parent repo now points to that submodule commit in `e506fe0be` (`agent-doc: update live prompt reconciliation`). Per the session commit contract, the remote push is the next closeout step after this `agent-doc finalize` commit lands.
+
+What changed:
+- Final template closeout now receives the pre-write visible document and runs duplicate prompt reconciliation before saving snapshots or replacing the document.
+- The duplicate prompt scanner is response-block-aware, so assistant prose can quote prompt text without being stripped.
+- The same reconciliation path covers direct template/CRDT disk writes, IPC timeout fallbacks, and repair replays, rather than only post-IPC snapshot cleanup.
+- Specs, flow docs, and the changelog now state the invariant.
+
+Verification:
+- `cargo test prompt_dedupe`
+- `cargo test direct_merge_prompt_copy`
+- `cargo test ipc_snapshot_dedupes`
+- `cargo test normalize_final_template_content_`
+- `make check`
+- `make build`
+- `make install`
+- `cargo fmt -- --check`
+- `git diff --check`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest CI tmux evidence: GitHub CI run `26181083839` on `20260422/codex-agent-backend` completed successfully on 2026-05-20; its `make tmux-ci` leg reported `228 passed; 0 failed`.
+Verification:
+- `cargo test prompt_dedupe`
+- `cargo test direct_merge_prompt_copy`
+- `cargo test ipc_snapshot_dedupes`
+- `cargo test normalize_final_template_content_`
+- `make check`
+- `make build`
+- `make install`
+- `cargo fmt -- --check`
+- `git diff --check`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest CI tmux evidence: GitHub CI run `26181083839` on `20260422/codex-agent-backend` completed successfully on 2026-05-20; its `make tmux-ci` leg reported `228 passed; 0 failed`.
+<!-- agent:boundary:c31c0f45 -->
 <!-- /agent:exchange -->
 ###
 <!--

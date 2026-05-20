@@ -31,35 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-220758.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260520-223256.md`*
 
 Compacted content:
-- Archived 1 response topic(s): graph DB behavior next steps
+- Archived 1 response topic(s): graph-db projection coverage
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: graph-db projection coverage — gpt-5
-
-Implemented the queued graph-db work and pushed it.
-
-Completed items:
-- `#grwp`: `tsift traverse` now materializes deterministic `source_handle` and `worker_context` rows into `.tsift/graph.db`, including links from backlog/job packets to bounded source windows. Added compiled CLI coverage that refreshes a workspace-style fixture and proves session, backlog, source_handle, worker_context, neighborhood, and path queries through `tsift graph-db`.
-- `#gdrf`: added `tsift graph-db ... drift --json` for SQLite-vs-Convex projection diff reports with node/edge upserts, tombstones, stale projection metadata, duplicate/orphan failures, required-index gaps, and next commands.
-- `#gcap`: added large synthetic graph-db regression coverage for full cursor pagination, property-filter selectivity, bounded neighborhood/path caps via `--max-hops`, doctor runtime, and SQLite query-plan index assertions.
-
-Updated `src/tsift/SPEC.md`, `src/tsift/src/main.rs`, and `src/tsift/tests/graph_db_conformance.rs`.
-
-Verification:
-- `cargo fmt --check`
-- `cargo test --test graph_db_conformance`
-- `make ci-full` (`clippy`, full tests, ignored tests)
-- `cargo build`
-- `cargo install --path .`
-
-CI/tmux evidence: latest root GitHub Actions `Agent Doc` run `26193364811` for `chore: update tsift graph-db coverage` still failed before runner steps started; both `check` and `tmux-ci` jobs have empty step lists and `gh run view --log-failed` reports `log not found`. I’m classifying that as the existing external CI-start blocker, not a code or tmux regression.
-
-Commits pushed:
-- `src/tsift`: `26e9396 feat: expand graph-db projection coverage`
-- parent `agent-loop`: `5fcea49d7 chore: update tsift graph-db coverage`
-<!-- agent:boundary:5b6bea54 -->
+<!-- agent:boundary:60493574 -->
 <!-- /agent:exchange -->
 ###
 <!--

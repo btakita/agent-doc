@@ -49,7 +49,30 @@ I added three prioritized follow-ups:
 3. `#gdoc` — add operator-facing examples and fixtures that show SQLite `graph-db` queries, Convex dry-run/apply payloads, stale snapshot failures, and `context-pack`/`traverse` handle reuse.
 
 I kept `#98qd` immediately after those because agent-doc context shaping should consume the stable graph DB API once the Convex backend contract and large-query behavior are explicit.
-<!-- agent:boundary:16dbabad -->
+### Re: graph DB hardening implementation — gpt-5
+
+Completed the queued `#cvxa`, `#gqpg`, `#98qd`, and `#gdoc` batch.
+
+Implemented:
+
+1. `#cvxa` — added `examples/convex-graph`, a reusable Convex app-side schema/mutation/HTTP-action package for `tsift convex-sync --remote-snapshot --apply`, and added a local HTTP smoke test proving `--apply` chunks round-trip through the documented transport.
+2. `#gqpg` — added `graph-db kind` / `graph-db neighborhood` node-id cursor pagination, repeatable `--property KEY=VALUE` filters, page diagnostics, deterministic ordering, and SQLite/Convex snapshot parity coverage.
+3. `#98qd` — materialized agent-doc queue entries as `job_packet` graph nodes, linked queued jobs to backlog targets, and extended `context-pack` exploration with bounded `worker_context` nodes linked to source handles.
+4. `#gdoc` — added `fixtures/graph-db-operator-examples` with SQLite graph-db commands, Convex dry-run/apply examples, a stale snapshot fixture, and handle-reuse guidance. Updated `SPEC.md`, `README.md`, `CLAUDE.md`, and `VERSIONS.md`.
+
+Commits and push:
+
+- tsift submodule: `44b5ec8` (`feat: harden graph db convex handoffs`) pushed to `btakita/tsift main`.
+- parent repo: `32f7f2f20` (`chore: update tsift submodule`) pushed to `btakita/agent-loop main`.
+
+Verification:
+
+- `cargo check` passed.
+- Focused graph-db, Convex transport, traversal, and context-pack tests passed.
+- `make check` passed: clippy plus `cargo test` with 631 unit tests passed, 1 ignored, and 107 integration tests passed.
+- `cargo install --path .` completed; installed `tsift --version` reports `tsift 0.1.42`.
+- GitHub Actions `CI` run `26188672412` passed on the pushed tsift commit (`clippy + test`, 2m14s). The repo has no `tmux-test` workflow and the CI run has no tmux job to remediate.
+<!-- agent:boundary:458579eb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -57,19 +80,15 @@ I kept `#98qd` immediately after those because agent-doc context shaping should 
 
 <!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
-- do [#gapi]
-- do [#gcon]
-- do [#cxlv]
-- do [#gidx]
+- do [#cvxa]
+- do [#gqpg]
+- do [#98qd]
+- do [#gdoc]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cvxa] Add a reusable Convex graph backend package: schema, indexes, mutations/actions matching tsift convex-sync payloads, plus a local/hosted smoke test proving --apply round-trips against the documented endpoint.
-- [ ] [#gqpg] Add graph-db query pagination and filtering across SQLite and Convex snapshots: cursor/limit semantics, property filters, deterministic ordering, cap diagnostics, and conformance coverage over large projection fixtures.
-- [ ] [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
-- [ ] [#gdoc] Add graph-db operator examples and fixtures showing SQLite graph-db queries, convex-sync dry-run/apply payloads, stale Convex snapshot failures, and context-pack/traverse handle reuse.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
 <!-- /agent:backlog -->

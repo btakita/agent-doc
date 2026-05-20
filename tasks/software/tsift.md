@@ -50,7 +50,24 @@ I added four prioritized backlog items:
 4. `#gidx` — harden the SQLite correctness store for incremental projections: version rows, source watermarks, row-level tombstones, migrations, and reader-safe refresh behavior.
 
 I would keep `#98qd` immediately after those. Agent-doc context shaping should consume the stable graph DB API once it exists, rather than binding directly to today’s traversal projection internals.
-<!-- agent:boundary:df6cc18a -->
+### Re: graph DB API implementation — gpt-5
+
+Implemented and committed the four queued graph DB items.
+
+- `#gapi`: added a stable provider-neutral graph DB API surface through the expanded `GraphStore` contract and new `tsift graph-db` CLI for schema, node lookup, kind scans, neighborhoods, shortest paths, SQLite reads, and Convex snapshot reads.
+- `#gcon`: extended backend conformance coverage across SQLite and Convex row stores for CRUD, ordering, neighborhoods, missing-edge safety, shortest paths, and freshness-gated graph reads.
+- `#cxlv`: extended `convex-sync` beyond dry-run planning with `--remote-snapshot`, `--apply`, `--endpoint`, `TSIFT_CONVEX_GRAPH_URL`, bearer-token env support, ordered idempotent chunks, retry receipts, and apply-mode diagnostics.
+- `#gidx`: added SQLite graph projection version rows, content/source watermarks, row-level tombstones, schema version checks, and transactional reader-safe projection refreshes.
+
+Spec updates are in `src/tsift/SPEC.md`. Implementation is committed in the tsift submodule as `128d1cd` (`feat: add graph db api and convex sync transport`), and the parent repo submodule pointer is committed as `f42c8c643` (`chore: update tsift submodule`).
+
+Verification:
+- `make check` passed (`cargo clippy --all-targets -- -D warnings` plus `cargo test`: 628 unit tests passed, 1 ignored; 107 integration tests passed).
+- `cargo install --path .` completed and replaced `/home/brian/.cargo/bin/tsift`; `tsift --version` reports `tsift 0.1.42`.
+- Latest GitHub Actions run for `btakita/tsift` was successful: run `26184524562`, job `clippy + test`. That workflow has no tmux-test job listed, so there was no tmux CI leg to remediate.
+
+Push is intentionally after this finalize step per the session closeout ordering.
+<!-- agent:boundary:1d8872e3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -58,18 +75,15 @@ I would keep `#98qd` immediately after those. Agent-doc context shaping should c
 
 <!-- agent:queue -->
 dispatch #spec-test-build-install-commit-push
-- do [#gctx]
-- do [#cxsync]
-- do [#gfresh]
+- do [#gapi]
+- do [#gcon]
+- do [#cxlv]
+- do [#gidx]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gapi] Promote the provider-neutral graph substrate into a stable graph DB API surface over SQLite and Convex: backend selection, node lookup, kind scans, neighborhood/subgraph reads, shortest paths, JSON schemas, and fail-closed freshness semantics.
-- [ ] [#gcon] Add a backend conformance suite for SQLite and Convex graph stores using the same projection fixtures to prove node/edge CRUD, kind scans, outgoing edges, shortest paths, ordering, missing-node failures, and freshness/parity errors match.
-- [ ] [#cxlv] Add live Convex graph projection transport: config/env auth, remote snapshot pull, chunked idempotent upsert/tombstone apply, retry/resume diagnostics, and schema/index installation guidance.
-- [ ] [#gidx] Add incremental graph projection refresh and migration support for the SQLite correctness store: projection version rows, source watermarks, row-level tombstones, graph.db schema migration checks, and reader-safe refresh behavior.
 - [ ] [#98qd] Support agent-doc context shaping/orchestration: add tsift-backed backlog coverage for job packets, source handles, and bounded worker context.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.

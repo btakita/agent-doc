@@ -29,31 +29,12 @@ FlowCore refactor is complete enough to leave broad extraction mode; next top ba
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-214535.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260520-223000.md`*
 
 Compacted content:
-- Archived 1 response topic(s): FlowCore full-content source-buffer proof
+- Archived 1 response topic(s): auto queue continuation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#qcont]. #spec-test-build-install-commit-push
-### Re: auto queue continuation — gpt-5
-
-Implemented `#qcont`.
-
-Direct `agent-doc run` and bare-path runs now synthesize the active queue head when `queue_active: true` and the snapshot matches the document. The run path consumes one queued prompt before strict closeout, so a repeat invocation advances the next prompt. `agent:queue auto` closeouts also print an explicit single-step continuation diagnostic when prompts remain.
-
-Updated the orchestration spec/version notes and added run integration coverage for one-step resume plus repeated invocation drain.
-
-Verification:
-- `cargo test active_queue`
-- `make check`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- CI review: latest GitHub Actions `CI` run `26191058253` succeeded, including the `Run make tmux-ci` step.
-
-Commits:
-- `3ba3aec1` in `src/agent-doc`: `fix: resume active queue runs`
-- `00e6dfda0` in parent: `agent-doc: update queue run fix`
-<!-- agent:boundary:9c7325bb -->
+<!-- agent:boundary:7cd28a60 -->
 <!-- /agent:exchange -->
 ###
 <!--

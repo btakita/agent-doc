@@ -168,7 +168,8 @@ use crate::flow::routed_reopen::{
     dispatch_only_dispatch_start_proof_required as flow_dispatch_only_dispatch_start_proof_required,
     dispatch_only_sent_console_message, dispatch_only_sent_log_message,
     dispatch_only_starting_pane_ready_retry_budget,
-    dispatch_only_starting_pane_recovery_retry_budget,
+    dispatch_only_starting_pane_recovery_retry_budget, log_dispatch_proof_failed,
+    log_prompt_ready_barrier_failed,
     should_print_dispatch_only_unproven_progress as flow_should_print_dispatch_only_unproven_progress,
     starting_actor_not_ready_log_line, starting_actor_ready_log_line,
     starting_actor_terminal_log_line, starting_actor_timeout_coalesced_log_line,
@@ -1857,15 +1858,7 @@ fn require_dispatch_only_dispatch_start_proof(
         dispatch_start,
         timeout_secs: timeout,
     };
-    crate::flow::proof::log_flow_event(
-        file,
-        crate::flow::types::FlowEvent::new(
-            crate::flow::types::FlowName::RoutedReopen,
-            crate::flow::types::FlowStage::DispatchProof,
-            crate::flow::types::FlowOutcome::FailedClosed,
-        )
-        .with_reason("accepted_only_dispatch_start_proof"),
-    );
+    log_dispatch_proof_failed(file, "accepted_only_dispatch_start_proof");
     crate::ops_log::log_op(file, &accepted_only_dispatch_start_log_message(facts));
     anyhow::bail!(accepted_only_dispatch_start_refusal_message(facts));
 }
@@ -2743,15 +2736,7 @@ fn wait_for_authoritative_actor_ready(
     match record_starting_actor_timeout(file_path, &last_facts, &log_line) {
         Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
             crate::ops_log::log_op(file, &log_line);
-            crate::flow::proof::log_flow_event(
-                file,
-                crate::flow::types::FlowEvent::new(
-                    crate::flow::types::FlowName::RoutedReopen,
-                    crate::flow::types::FlowStage::PromptReadyBarrier,
-                    crate::flow::types::FlowOutcome::FailedClosed,
-                )
-                .with_reason("starting_actor_not_ready"),
-            );
+            log_prompt_ready_barrier_failed(file, "starting_actor_not_ready");
         }
         Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
             let file_display = file.display().to_string();
@@ -2772,15 +2757,7 @@ fn wait_for_authoritative_actor_ready(
                 err
             );
             crate::ops_log::log_op(file, &log_line);
-            crate::flow::proof::log_flow_event(
-                file,
-                crate::flow::types::FlowEvent::new(
-                    crate::flow::types::FlowName::RoutedReopen,
-                    crate::flow::types::FlowStage::PromptReadyBarrier,
-                    crate::flow::types::FlowOutcome::FailedClosed,
-                )
-                .with_reason("starting_actor_not_ready_unpersisted"),
-            );
+            log_prompt_ready_barrier_failed(file, "starting_actor_not_ready_unpersisted");
         }
     }
     Ok(None)
@@ -2934,15 +2911,7 @@ fn route_via_authoritative_actor(
                     reopen_outcome.reason
                 ),
             );
-            crate::flow::proof::log_flow_event(
-                file,
-                crate::flow::types::FlowEvent::new(
-                    crate::flow::types::FlowName::RoutedReopen,
-                    crate::flow::types::FlowStage::PromptReadyBarrier,
-                    crate::flow::types::FlowOutcome::FailedClosed,
-                )
-                .with_reason("dispatch_only_busy_actor_not_ready"),
-            );
+            log_prompt_ready_barrier_failed(file, "dispatch_only_busy_actor_not_ready");
             anyhow::bail!(
                 "authoritative actor generation {} for {} owns pane {} but dispatch-only route will not inject a new trigger because {} did not return to a dispatch-ready prompt in the current generation after waiting {}s. {}",
                 actor.record.generation,

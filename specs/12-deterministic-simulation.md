@@ -176,3 +176,11 @@ local default coverage to the ignored live-tmux sweep.
 The simulator tests print schedule count, command count, elapsed time, and the
 active budget for each corpus so CI logs show when generated coverage starts to
 approach the budget.
+
+FlowCore also has a pure cross-flow regression that does not need the simulator
+state machine: it proves routed dispatch-proof failure, editor-visible
+typing/IPC write deferral, closeout `session-check` interruption, and queue
+child plain-response patchback normalization all emit typed flow events that
+`ops summary` can bucket. Promote new route/write/closeout/orchestration bug
+classes into SimWorld only when the behavior needs schedule interleavings or
+durable document state beyond those pure event contracts.

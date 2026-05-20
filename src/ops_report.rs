@@ -36,7 +36,7 @@ struct BucketKey {
 #[derive(Debug, Clone)]
 struct ClassifiedEvent {
     timestamp: Option<u64>,
-    category: &'static str,
+    category: String,
     file: Option<String>,
     session: Option<String>,
     detail: String,
@@ -166,34 +166,40 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
 
     let category = match event_name {
         "flow_event" => classify_flow_event(&fields),
-        "ipc_write_consumed" => "write ipc consumed",
-        "commit_success" => "commit success",
+        "ipc_write_consumed" => "write ipc consumed".to_string(),
+        "commit_success" => "commit success".to_string(),
         "commit_noop" if field_eq(&fields, "drift_kind", "user_follow_up") => {
-            "expected user follow-up noop"
+            "expected user follow-up noop".to_string()
         }
         "commit_noop" if field_eq(&fields, "drift_kind", "working_tree_edits") => {
-            "anomalous drift noop"
+            "anomalous drift noop".to_string()
         }
-        "commit_noop" if field_eq(&fields, "drift_kind", "none") => "expected already-current noop",
-        "commit_noop" => "commit noop",
-        "route_dispatch_start_proven" => "route dispatch proven",
-        "post_commit_user_follow_up" => "expected user follow-up",
+        "commit_noop" if field_eq(&fields, "drift_kind", "none") => {
+            "expected already-current noop".to_string()
+        }
+        "commit_noop" => "commit noop".to_string(),
+        "route_dispatch_start_proven" => "route dispatch proven".to_string(),
+        "post_commit_user_follow_up" => "expected user follow-up".to_string(),
         "post_commit_local_drift" if field_eq(&fields, "kind", "user_follow_up") => {
-            "expected user follow-up"
+            "expected user follow-up".to_string()
         }
-        "post_commit_local_drift" => "anomalous post-commit drift",
-        "session_clear_active_pane_allowed" => "active clear allowed",
-        "session_clear_protected_input_guard_refused" => "expected protected-input clear refusal",
-        "session_clear_live_busy_guard_bypassed" => "busy clear bypassed",
-        "session_clear_live_busy_guard_refused" => "busy clear refused",
-        "session_clear_live_busy_guard_blocked" => "busy clear blocked",
-        "route_authoritative_actor_starting_not_ready" => "starting actor not ready",
-        "route_dispatch_start_unproven_but_accepted" => "accepted-only route proof",
+        "post_commit_local_drift" => "anomalous post-commit drift".to_string(),
+        "session_clear_active_pane_allowed" => "active clear allowed".to_string(),
+        "session_clear_protected_input_guard_refused" => {
+            "expected protected-input clear refusal".to_string()
+        }
+        "session_clear_live_busy_guard_bypassed" => "busy clear bypassed".to_string(),
+        "session_clear_live_busy_guard_refused" => "busy clear refused".to_string(),
+        "session_clear_live_busy_guard_blocked" => "busy clear blocked".to_string(),
+        "route_authoritative_actor_starting_not_ready" => "starting actor not ready".to_string(),
+        "route_dispatch_start_unproven_but_accepted" => "accepted-only route proof".to_string(),
         "route_dispatch_only_sent" if field_eq(&fields, "proof_scope", "accepted_only") => {
-            "accepted-only route proof"
+            "accepted-only route proof".to_string()
         }
-        "route_dispatch_only_submit_unproven" => "dispatch-only not proven",
-        "sync_latency" if field_eq(&fields, "status", "over_budget") => "sync over budget",
+        "route_dispatch_only_submit_unproven" => "dispatch-only not proven".to_string(),
+        "sync_latency" if field_eq(&fields, "status", "over_budget") => {
+            "sync over budget".to_string()
+        }
         _ => return None,
     };
 
@@ -208,59 +214,83 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
     })
 }
 
-fn classify_flow_event(fields: &BTreeMap<String, String>) -> &'static str {
+fn classify_flow_event(fields: &BTreeMap<String, String>) -> String {
     match (
         fields.get("flow").map(String::as_str),
         fields.get("stage").map(String::as_str),
         fields.get("outcome").map(String::as_str),
     ) {
         (Some("routed_reopen"), Some("prompt_ready_barrier"), Some("failed_closed")) => {
-            "flow routed reopen prompt-ready failures"
+            "flow routed reopen prompt-ready failures".to_string()
         }
-        (Some("routed_reopen"), Some("dispatch_submit"), Some("failed_closed")) => {
-            "flow routed reopen dispatch failures"
-        }
+        (
+            Some("routed_reopen"),
+            Some("dispatch_submit" | "dispatch_proof"),
+            Some("failed_closed"),
+        ) => "flow routed reopen dispatch failures".to_string(),
         (Some("document_mutation"), Some("patchback_parse"), Some("failed_closed")) => {
-            "flow document mutation parse failures"
+            "flow document mutation parse failures".to_string()
         }
         (Some("document_mutation"), Some("patchback_parse"), Some("completed")) => {
-            "flow document mutation parsed"
+            "flow document mutation parsed".to_string()
+        }
+        (Some("document_mutation"), Some("pre_write_guard"), Some("blocked" | "failed_closed")) => {
+            "flow document mutation pre-write guard blocked".to_string()
         }
         (Some("closeout"), Some("pre_write_guard"), Some("blocked" | "failed_closed")) => {
-            "flow closeout pre-write guard blocked"
+            "flow closeout pre-write guard blocked".to_string()
         }
         (Some("closeout"), Some("pre_commit_guard"), Some("blocked" | "failed_closed")) => {
-            "flow closeout pre-commit guard blocked"
+            "flow closeout pre-commit guard blocked".to_string()
         }
         (Some("closeout"), Some("terminal_guard"), Some("blocked" | "failed_closed")) => {
-            "flow closeout terminal guard blocked"
+            "flow closeout terminal guard blocked".to_string()
         }
         (Some("closeout"), Some("session_check"), Some("blocked" | "failed_closed")) => {
-            "flow closeout session-check failures"
+            "flow closeout session-check failures".to_string()
         }
-        (Some("closeout"), Some("commit"), Some("completed")) => "flow closeout commit completed",
+        (Some("closeout"), Some("commit"), Some("completed")) => {
+            "flow closeout commit completed".to_string()
+        }
         (Some("closeout"), Some("commit"), Some("blocked" | "failed_closed")) => {
-            "flow closeout commit failures"
+            "flow closeout commit failures".to_string()
         }
         (
             Some("orchestration_batch"),
             Some("child_closeout"),
             Some("blocked" | "failed_closed"),
-        ) => "flow orchestration child closeout failures",
+        ) => "flow orchestration child closeout failures".to_string(),
+        (Some("orchestration_batch"), Some("child_closeout"), Some("completed")) => {
+            "flow orchestration child closeout completed".to_string()
+        }
         (Some("orchestration_batch"), Some("queue_freeze"), Some("blocked" | "failed_closed")) => {
-            "flow orchestration batch freeze blocked"
+            "flow orchestration batch freeze blocked".to_string()
+        }
+        (Some("orchestration_batch"), Some("queue_freeze"), Some("completed")) => {
+            "flow orchestration batch freeze completed".to_string()
         }
         (Some("operator_clear"), Some("operator_guard"), Some("blocked" | "failed_closed")) => {
-            "flow operator clear guard failures"
+            "flow operator clear guard failures".to_string()
+        }
+        (Some("operator_clear"), Some("operator_guard"), Some("completed")) => {
+            "flow operator clear guard completed".to_string()
         }
         (Some("session_cycle"), _, Some("blocked" | "failed_closed")) => {
-            "flow session cycle failures"
+            "flow session cycle failures".to_string()
         }
         (Some("routed_reopen"), _, Some("blocked" | "failed_closed")) => {
-            "flow routed reopen failures"
+            "flow routed reopen failures".to_string()
         }
-        (Some("closeout"), _, Some("blocked" | "failed_closed")) => "flow closeout failures",
-        _ => "flow events",
+        (Some("closeout"), _, Some("blocked" | "failed_closed")) => {
+            "flow closeout failures".to_string()
+        }
+        (Some(flow), Some(stage), Some(outcome)) => format!(
+            "flow {} {} {}",
+            flow.replace('_', " "),
+            stage.replace('_', " "),
+            outcome.replace('_', " ")
+        ),
+        _ => "flow events".to_string(),
     }
 }
 
@@ -368,14 +398,18 @@ mod tests {
 [120] flow_event file=/repo/tasks/a.md flow=closeout stage=pre_write_guard outcome=blocked reason=pending_capture_recommendations
 [121] flow_event file=/repo/tasks/a.md flow=closeout stage=terminal_guard outcome=blocked reason=already_committed
 [122] flow_event file=/repo/tasks/a.md flow=document_mutation stage=patchback_parse outcome=completed reason=valid_patch
-[123] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
+[123] flow_event file=/repo/tasks/a.md flow=document_mutation stage=pre_write_guard outcome=blocked reason=visible_write_typing_defer_active_typing:socket_ipc
+[124] flow_event file=/repo/tasks/a.md flow=routed_reopen stage=dispatch_proof outcome=failed_closed reason=accepted_only_dispatch_start_proof
+[125] flow_event file=/repo/tasks/a.md flow=orchestration_batch stage=child_closeout outcome=completed reason=child_patchback:wrapped_plain_response
+[126] flow_event file=/repo/tasks/a.md flow=session_cycle stage=plan outcome=completed reason=normal
+[127] controller_supervisor_heartbeat session=s1 pane=%1 generation=3 state=ready
 ";
 
         let report =
             summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
 
-        assert_eq!(report.scanned_lines, 24);
-        assert_eq!(report.matched_events, 23);
+        assert_eq!(report.scanned_lines, 28);
+        assert_eq!(report.matched_events, 27);
         assert!(
             report.buckets.iter().any(|bucket| {
                 bucket.category == "write ipc consumed"
@@ -506,6 +540,50 @@ mod tests {
                         .samples
                         .iter()
                         .any(|sample| sample.contains("valid_patch"))
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "flow document mutation pre-write guard blocked"
+                    && bucket.file == "tasks/a.md"
+                    && bucket
+                        .samples
+                        .iter()
+                        .any(|sample| sample.contains("visible_write_typing_defer_active_typing"))
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "flow routed reopen dispatch failures"
+                    && bucket.file == "tasks/a.md"
+                    && bucket
+                        .samples
+                        .iter()
+                        .any(|sample| sample.contains("accepted_only_dispatch_start_proof"))
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "flow orchestration child closeout completed"
+                    && bucket.file == "tasks/a.md"
+                    && bucket
+                        .samples
+                        .iter()
+                        .any(|sample| sample.contains("child_patchback:wrapped_plain_response"))
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.buckets.iter().any(|bucket| {
+                bucket.category == "flow session cycle plan completed"
+                    && bucket.file == "tasks/a.md"
+                    && bucket
+                        .samples
+                        .iter()
+                        .any(|sample| sample.contains("reason=normal"))
             }),
             "{report:#?}"
         );

@@ -54,21 +54,25 @@ enums as extraction proceeds:
 flow_event file=<path> flow=<flow> stage=<stage> outcome=<outcome> reason=<token>
 ```
 
-`agent-doc ops summary` groups these events by flow stage and outcome. The
-mirror-mode emitters now cover routed reopen prompt-ready failures, document
-mutation patchback parse outcomes, strict closeout guard blocks, committed-cycle
-late-fallback rejection, repair recovery boundaries, and closeout commit
-completion. Later phases should replace tactical log parsing with flow events
-rather than adding more free-form log strings.
+`agent-doc ops summary` groups these events by flow stage and outcome. It keeps
+named buckets for common failures, and falls back to a generic
+`flow <flow> <stage> <outcome>` bucket for newly added typed events so a
+FlowCore emitter cannot disappear into an undifferentiated tactical-log bucket.
+The mirror-mode emitters now cover routed reopen prompt-ready and dispatch-proof
+failures, document-mutation patchback parse and visible-write guard outcomes,
+strict closeout guard blocks, committed-cycle late-fallback rejection, repair
+recovery boundaries, orchestration child patchback normalization, operator clear
+guards, and closeout commit completion. Later phases should replace tactical log
+parsing with flow events rather than adding more free-form log strings.
 
 ## Phase Boundaries
 
 Phase 1 adds the vocabulary, pure decision helpers, mirror-mode events, and
 ops-summary grouping. The routed-reopen extraction has started: delivery mode,
-dispatch-start proof, degraded-authority refusal, runtime guard, and
-prompt-ready-barrier classifiers now live in `flow::routed_reopen`, while
-`route.rs` keeps tmux, supervisor IPC, and controller I/O. Route, closeout,
-document mutation, operator clear, and orchestration extraction should continue
-by moving one pure decision at a time behind the new types, then deleting the
-corresponding tactical branch from the legacy module after equivalent
-deterministic coverage exists.
+dispatch-start proof, degraded-authority refusal, runtime guard, event
+construction, and prompt-ready-barrier classifiers now live in
+`flow::routed_reopen`, while `route.rs` keeps tmux, supervisor IPC, and
+controller I/O. Route, closeout, document mutation, operator clear, and
+orchestration extraction should continue by moving one pure decision at a time
+behind the new types, then deleting the corresponding tactical branch from the
+legacy module after equivalent deterministic coverage exists.

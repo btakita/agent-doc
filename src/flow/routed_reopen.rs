@@ -1,4 +1,5 @@
-use super::types::{DispatchProof, RouteDecision};
+use super::types::{DispatchProof, FlowEvent, FlowName, FlowOutcome, FlowStage, RouteDecision};
+use std::path::Path;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -790,6 +791,32 @@ pub(crate) fn degraded_authoritative_actor_refusal_message(
     )
 }
 
+pub(crate) fn prompt_ready_barrier_failed_event(reason: impl Into<String>) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::RoutedReopen,
+        FlowStage::PromptReadyBarrier,
+        FlowOutcome::FailedClosed,
+    )
+    .with_reason(reason)
+}
+
+pub(crate) fn dispatch_proof_failed_event(reason: impl Into<String>) -> FlowEvent {
+    FlowEvent::new(
+        FlowName::RoutedReopen,
+        FlowStage::DispatchProof,
+        FlowOutcome::FailedClosed,
+    )
+    .with_reason(reason)
+}
+
+pub(crate) fn log_prompt_ready_barrier_failed(file: &Path, reason: impl Into<String>) {
+    super::proof::log_flow_event(file, prompt_ready_barrier_failed_event(reason));
+}
+
+pub(crate) fn log_dispatch_proof_failed(file: &Path, reason: impl Into<String>) {
+    super::proof::log_flow_event(file, dispatch_proof_failed_event(reason));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1210,6 +1237,27 @@ mod tests {
                 restarted_supervisor: true,
             }),
             BusyPaneAutoFixOutcome::RetryRouteAfterSupervisorRestart
+        );
+    }
+
+    #[test]
+    fn route_failure_events_are_owned_by_routed_reopen_flow() {
+        let prompt_event = prompt_ready_barrier_failed_event("starting_actor_not_ready");
+        assert_eq!(prompt_event.flow, FlowName::RoutedReopen);
+        assert_eq!(prompt_event.stage, FlowStage::PromptReadyBarrier);
+        assert_eq!(prompt_event.outcome, FlowOutcome::FailedClosed);
+        assert_eq!(
+            prompt_event.reason.as_deref(),
+            Some("starting_actor_not_ready")
+        );
+
+        let proof_event = dispatch_proof_failed_event("accepted_only_dispatch_start_proof");
+        assert_eq!(proof_event.flow, FlowName::RoutedReopen);
+        assert_eq!(proof_event.stage, FlowStage::DispatchProof);
+        assert_eq!(proof_event.outcome, FlowOutcome::FailedClosed);
+        assert_eq!(
+            proof_event.reason.as_deref(),
+            Some("accepted_only_dispatch_start_proof")
         );
     }
 }

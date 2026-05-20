@@ -92,7 +92,15 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): Corky OAuth token caching
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:48a1e2a8 -->
+❯ Please support all types of Google docs...not just Google sheets. #next-steps
+### Re: Google Workspace document coverage — gpt-5
+
+Outcome: Added a top-priority backlog item for broader Google Workspace document coverage beyond Sheets. It should make the future implementation MIME-type-aware instead of treating Sheets as the only structured Google document path.
+
+Execution boundary: this `#next-steps` cycle captured the follow-up in the session backlog; no Corky code was changed in this turn.
+
+Top backlog item: `#google-workspace-doc-types`.
+<!-- agent:boundary:75a0c61d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -101,6 +109,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#google-workspace-doc-types] Implement broad Google Workspace document type support beyond Sheets: detect Drive MIME types and route Google Docs, Sheets, Slides, Forms/Drawings, PDFs, and common Office files through appropriate read/export/write/upload behavior, with spec updates, docs, tests, build/install, commit, and push.
 - [ ] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi, rerun the PyPI workflow, and verify the PyPI latest version matches the released crate.
 - [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.

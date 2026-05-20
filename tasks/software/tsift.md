@@ -36,7 +36,20 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): graph-db operator workflows
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:9b7eb2be -->
+❯ Can we implement the same features as what is in the icebox, directly in tsift?
+### Re: native graph features — gpt-5
+
+Yes. The direct tsift version is viable, and it is probably cleaner now that `tsift` already owns GraphStore, `.tsift/graph.db`, `traverse`, `context-pack`, `summarize`, entities/relationships/concept labels, and `traverse --format html`.
+
+The distinction is that this is not just an implementation task: the spec currently still says LLM-derived semantic groupings and visualization/rendering belong to graphify. So the first step is changing that boundary and making tsift the owner of those three capabilities.
+
+I moved the graphify icebox intent into native tsift backlog work:
+- native semantic extraction: turn the existing summary entity/relationship/concept cache into GraphStore semantic nodes/edges with provenance and freshness.
+- native embedding similarity: add explicit extract/index-time embeddings for concepts/entities and a query surface for nearest related concepts.
+- native graph visualization: upgrade the existing HTML traversal output from a static report into a useful GraphStore-backed visualization.
+
+That means the old graphify integration icebox can be cleared; the feature intent is preserved in the active tsift backlog under native ownership.
+<!-- agent:boundary:dddb87de -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,14 +66,14 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gvis] Native graph visualization in tsift: upgrade traverse --format html from static lists into a useful GraphStore-backed symbol/dependency/semantic graph visualization with compiled CLI coverage.
+- [ ] [#gsim] Native embedding-backed semantic similarity in tsift: persist concept/entity embeddings beside summaries or graph rows, add a nearest-related-concepts query surface, and keep model/API use behind explicit extract/index paths.
+- [ ] [#gsem] Native LLM semantic graph extraction in tsift: project summarize entities, relationships, and concept labels into GraphStore semantic nodes/edges with freshness/provenance and compiled CLI coverage.
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->
-- [ ] [#9jc8] graphify integration: LLM-based entity extraction for semantic layer beyond AST
-- [ ] [#zv4m] graphify integration: HTML visualization of symbol/dependency graphs
-- [ ] [#rd2f] graphify integration: semantic similarity between concepts (embedding-based)
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

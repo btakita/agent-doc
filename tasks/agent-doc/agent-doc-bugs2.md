@@ -50,21 +50,30 @@ I extracted the authoritative actor routed-reopen slice into `flow::routed_reope
 Updated the session-actor spec and Unreleased notes. Verification passed: `cargo check`, `cargo test routed_reopen`, `make check`, `cargo build`, and `cargo install --path .`. Latest GitHub CI run `26130637848` was green, including `Run make tmux-ci`, so no local tmux rerun was required.
 
 Committed and pushed submodule commit `3beb84b0` to `btakita/agent-doc` branch `20260422/codex-agent-backend`, then committed and pushed parent gitlink commit `3737e8cce` to `btakita/agent-loop` `main`.
-<!-- agent:boundary:902a9b92 -->
+### Re: FlowCore closeout, mutation, and session-cycle slices — gpt-5.5
+Completed #mut3, #clo3, and #cyc2.
+
+I extracted the next FlowCore slices: `flow::document_mutation` now owns template patchback shape parsing/classification and the orchestrate plain-response contract before visible writes; `flow::closeout` now owns the strict terminal transaction for commit, snapshot convergence retry, parent gitlink verification, session-check, and fallback-patch cleanup; `flow::session_cycle` now provides the shared prompt-target and finalize-command contract used by `preflight` and `plan`.
+
+Updated the closeout/core/diff specs and Unreleased notes. Verification passed: `cargo check`, focused FlowCore/write/orchestrate/plan/preflight tests, `make check`, `cargo build`, and `cargo install --path .`. Latest GitHub CI run `26131409609` was green, including `Run make tmux-ci`.
+
+Submodule commit `b6c0fa59` is pushed to `btakita/agent-doc` branch `20260422/codex-agent-backend`; parent gitlink commit `9ea21ba89` is committed and will be pushed with this closeout commit.
+<!-- agent:boundary:b8873c8b -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue -->
+dispatch #spec-test-build-install-commit-push
+- do [#mut3]
+- do [#clo3]
+- do [#cyc2]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#mut3] Extract document_mutation as the single pre-visible-write gate for patchback shape parsing, prompt ownership normalization, duplicate scaffold/prompt-prefix repair, and malformed plain-response rejection across write, repair, and orchestrate. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
-- [ ] [#clo3] Extract closeout as the shared terminal-state transaction for IPC, stream, direct finalize, write --commit, and repair so pre-write failures stay recoverable and late fallback writers cannot mutate a committed cycle. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
-- [ ] [#cyc2] Promote session_cycle from mirror vocabulary to the owner of preflight -> plan -> response capture -> pending-capture -> finalize/session-check outcomes, including prompt-target parsing and pending mutation requirements. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#ops2] [recommended] Move operator_clear and orchestration_batch onto FlowCore typed outcomes after route and closeout extraction; cover active-pane clear refusal, queue freeze/mid-run mutation, and child patchback normalization. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

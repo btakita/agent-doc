@@ -47,7 +47,17 @@ Verification: `cargo test socket_error_ack_is_error`; `npm test -- --test-name-p
 ### Re: #nh3j status — gpt-5
 
 No. `#nh3j` is still open in the backlog, unchecked under Pending / Not Built.
-<!-- agent:boundary:810c41d9 -->
+❯ do [#nh3j]. #spec-test-build-install-commit-push
+### Re: #nh3j audit-docs root scope — gpt-5
+
+Completed `#nh3j`.
+
+Clarified `agent-doc audit-docs --root` behavior for managed instruction surfaces. The default no-override path still audits the git superproject install root from submodule checkouts, which is the normal release/install path. An explicit `--root DIR` now has documented and unit-tested semantics: it audits generated surfaces under that root exactly, so submodule-local tracked artifacts such as `.claude/skills/agent-doc/SKILL.md` can still be checked intentionally.
+
+Updated `src/audit_docs.rs`, `specs/07-core-commands.md`, `SPEC.md`, `README.md`, and `docs/guide/commands.md`. Added direct unit coverage for the superproject default and explicit submodule-root paths. Committed the submodule change as `7390050c docs: clarify audit-docs root scope` and the parent gitlink as `3d220380a agent-doc: clarify audit-docs root scope`; the push follows this closeout boundary.
+
+Verification: `cargo test managed_instruction_surface_roots`; `make check`; `make build`; `make install`; installed `agent-doc 0.33.16`; `cargo run --quiet -- audit-docs` passed with no blocking issues and 5 mtime advisories. Latest checked CI tmux evidence was run `26180114469`, where `Run make tmux-ci` succeeded.
+<!-- agent:boundary:adbc7a1c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -60,7 +70,6 @@ dispatch #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#nh3j] [recommended] Clarify audit-docs --root behavior for submodule-local managed skill artifacts; the no-override release path audits the superproject install root, while an explicit submodule root can still see stale tracked .claude/skills/agent-doc/SKILL.md artifacts.
 - [ ] [#ops2] [recommended] Move operator_clear and orchestration_batch onto FlowCore typed outcomes after route and closeout extraction; cover active-pane clear refusal, queue freeze/mid-run mutation, and child patchback normalization. Plan: tasks/agent-doc/plan-agent-doc-flowcore-refactor.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

@@ -34,12 +34,30 @@ FlowCore refactor is complete enough to leave broad extraction mode; next top ba
 Compacted content:
 - Archived 1 response topic(s): auto queue continuation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7cd28a60 -->
+The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push
+### Re: duplicate scaffold repair — gpt-5
+
+Reproduced the mixed duplicate-scaffold closeout as a failing regression first in `normalize_template_structure_repairs_duplicate_scaffold_with_user_text`; it failed before the fix because safe prompt text stranded between duplicate `agent:exchange` close markers was treated as ambiguous escaped conversation content.
+
+Fixed the normalizer to recognize the duplicated scaffold plus safe prompt-text shape, drop the duplicated `queue`/`backlog`/`done` scaffold, move the prompt text back into `agent:exchange`, and keep truly ambiguous suffixes fail-closed. Wired the repair through binary closeout normalization, editor-visible normalization, and FFI, and updated `SPEC.md`, `specs/07-closeout-commands.md`, and `VERSIONS.md`. The FlowCore guard budget was audited and incremented by one because this new repair path reruns the existing conversation-tail guard after normalization.
+
+Verification:
+- failing-first: `cargo test normalize_template_structure_repairs_duplicate_scaffold_with_user_text` failed before the implementation, then passed after the fix
+- focused: `cargo test duplicate_scaffold`; `cargo test duplicate_exchange_close`; `cargo test live_prompt_prefix_variant`; `cargo test normalize_final_template_content`; `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted --test test_cli`
+- full: `make check` passed after the FlowCore budget audit
+- build/install: `cargo build` passed; `make install` passed and installed `agent-doc 0.33.16`
+- tmux/CI: latest GitHub `CI` run `26192346037` succeeded with `Run make check` and `Run make tmux-ci`; local `make tmux-ci` passed with 228 ignored/live tests
+
+Commits created:
+- `src/agent-doc`: `a1bd5840 fix: repair mixed duplicate scaffold closeouts`
+- parent repo: `82f0bc912 fix: update agent-doc duplicate scaffold repair`
+
+Push will run immediately after this document closeout so the session-document commit is included on `origin/main`.
+<!-- agent:boundary:905257b5 -->
 <!-- /agent:exchange -->
 ###
 <!--
-As I was writining into the comment below agent:exchange...The duplicate content document corruption bug is still happening. I also saw the duplicate prompt issue occur in corky.md. Do we need more refactoring? Why is this still happening? Do we have adequate log coverage?
-#spec-test-build-install-commit-push
+The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push 
 -->
 
 <!-- agent:queue -->

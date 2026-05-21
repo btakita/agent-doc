@@ -19,7 +19,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Completed: #gdblock graph-db SQLite lock recovery shipped in tsift 5128c46; superproject gitlink commit 66cd04534 created for closeout push.
+Completed: #cmgevfix shipped in agent-doc e17bf1f and superproject gitlink 7680e03cf; graph evidence is refreshed before packet validation and graph failures fall back to manual review.
 <!-- /agent:status -->
 
 ## Spec
@@ -58,7 +58,7 @@ I could not start `#cmgevfix` because `agent-doc plan` stopped the cycle before 
 `tsift graph orchestration contract invalid: conflict-matrix missing evidence_packet_id gevd-d102ace0f7 for target cmgevfix`
 
 No repo edits, tests, build, install, manual commit, or push were performed. `#cmgevfix` stays open because the planner cannot produce a valid execution contract while the conflict-matrix/evidence graph is inconsistent for the target item itself.
-<!-- agent:boundary:0023c641 -->
+<!-- agent:boundary:d5e3595c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -74,7 +74,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#cmgevfix] [recommended] Resolve the missing conflict-matrix evidence packet that blocks #tsdag: detect conflict-matrix entries whose evidence_packet_id is absent (including gevd-8fb9f57781), regenerate evidence before conflict-matrix/dispatch-trace, and add regression coverage proving agent-doc plan proceeds after repair.
 - [ ] [#tsdag] [recommended] Add graph-level dependency DAG extraction for agent-doc work: derive explicit and implicit edges among backlog ids from file/symbol/test/config overlap, semantic relations, worker_result follow-up ids, and depends-on text; emit nodes, edges, cycle diagnostics, topo batches, replay commands, and repair commands as a versioned JSON contract.
 - [ ] [#impactdag] [recommended] Extend conflict-matrix and dispatch-trace with scheduler fields: parallel_safe, blocks, blocked_by, required_context, expected_tests, and stable graph handles so agent-doc can run topological antichains without scraping prose.
 - [ ] [#dagfix] [recommended] Add regeneration fixtures for real agent-doc queue DAGs: refresh -> evidence -> conflict-matrix -> dependency-dag -> dispatch-trace, asserting projection freshness, packet ids, worker_result closure, cycle detection, and stale graph fail-closed behavior.

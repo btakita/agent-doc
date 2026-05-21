@@ -86,7 +86,23 @@ The multi-write shape should stay projection-oriented:
 So the thing we may need later is a small projection committer/outbox, not a distributed transaction broker. A broker becomes justified only if a promoted backend becomes a primary shared writer with independent user-visible state that cannot be regenerated from the repo/session projection. For tsift's graph rows, regeneration and content-hash drift checks are cheaper and safer than two-phase commit.
 
 For the candidates specifically: DuckDB should probably remain an embedded analytics/read-model sink if it ever wins the gate; it does not need a broker. Ladybug might need a single-writer service or queue if its production adapter is remote or multi-process, but that queue can still consume deterministic projection batches. We should promote at most one non-SQLite write sink at a time behind the `GraphStore`/projection contract, keep SQLite as the fallback baseline until the lock/install story is at least as good, and require backend-eval plus drift/doctor evidence before reads default to anything else.
-<!-- agent:boundary:245a7022 -->
+❯ Do we have real performance wins with Ladybug & DuckDB?
+### Re: Ladybug and DuckDB performance — gpt-5
+
+Not yet. I ran the current benchmark with `tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --json backend-eval`, and the real dataset result argues against promotion.
+
+On the real agent-loop projection, the dataset was large enough to matter: 349,095 nodes and 576,953 edges. End-to-end totals were:
+
+- SQLite: 25.49s, parity OK.
+- DuckDB/DuckPGQ prototype: 32.38s, parity failed because `dispatch_trace` differed from SQLite.
+- Ladybug prototype: 40.70s, parity failed for the same `dispatch_trace` mismatch.
+
+There are isolated load/read-count wins: DuckDB loaded the row adapter in 2.64s versus SQLite refresh at 20.70s, and Ladybug loaded in 3.31s. Both were also faster on the simple status/count read. But those wins do not survive the actual operator workload. On real `evidence`, `conflict_matrix`, and `dispatch_trace`, both prototypes were much slower than SQLite, and the dispatch trace row count differed: SQLite returned 223 rows while both candidates returned 219.
+
+The synthetic dataset was tiny by comparison, 96 nodes and 270 edges. Ladybug narrowly beat SQLite there, 3.08ms versus 3.27ms, while DuckDB was 3.53ms. That is not a promotion signal; it is below the scale where the real workload behavior shows up.
+
+So the current answer is: no real performance win yet. We have a useful gate and some hints that a columnar/graph backend might improve projection load or count-style scans, but the existing DuckDB and Ladybug paths are read-only prototypes, slower on the important graph orchestration queries, and not parity-correct on the real dispatch trace. Promotion should stay on hold until a production adapter beats SQLite end-to-end on real data and preserves exact parity.
+<!-- agent:boundary:25977229 -->
 <!-- /agent:exchange -->
 ###
 <!--

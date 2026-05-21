@@ -50,7 +50,15 @@ No repo edits, tests, build, install, manual commit, or push were performed. I a
 Added `#cmgevfix` as the new top backlog item to resolve the missing `evidence_packet_id` failure that blocked `#tsdag`.
 
 Top of backlog: `#cmgevfix`
-<!-- agent:boundary:0cb57351 -->
+❯ do [#cmgevfix]. #spec-test-build-install-commit-push
+### Re: #cmgevfix blocked — gpt-5
+
+I could not start `#cmgevfix` because `agent-doc plan` stopped the cycle before implementation with another fail-closed tsift graph evidence error:
+
+`tsift graph orchestration contract invalid: conflict-matrix missing evidence_packet_id gevd-d102ace0f7 for target cmgevfix`
+
+No repo edits, tests, build, install, manual commit, or push were performed. `#cmgevfix` stays open because the planner cannot produce a valid execution contract while the conflict-matrix/evidence graph is inconsistent for the target item itself.
+<!-- agent:boundary:0023c641 -->
 <!-- /agent:exchange -->
 ###
 <!--

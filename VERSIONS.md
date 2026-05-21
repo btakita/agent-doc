@@ -29,6 +29,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   exchange. Unrelated scratch comments stay user-owned and remain outside
   `agent:exchange`.
 
+- **Route pre-dispatch now shares duplicate prompt comment cleanup.** `agent-doc
+  route` runs the same post-exchange duplicate-prompt comment scrub before
+  sending a routed reopen, so editor Run actions do not dispatch against a
+  document that still contains a stale prompt copy in the scratch comment below
+  `agent:exchange`.
+
 - **Lower-agent job packet MVP.** `agent-doc plan` now emits deterministic
   lower-agent routing fields (`dispatch_candidate`, task class, risk,
   parallelism, model tier, context budgets, write scope, proof requirements,

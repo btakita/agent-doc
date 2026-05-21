@@ -160,6 +160,42 @@ fn authoritative_actor_ready_poll_surfaces_terminal_states() {
     );
 }
 
+#[test]
+fn route_scrubs_duplicate_prompt_comment_before_dispatch() {
+    let prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Reproduce bugs with tests first and fix the implementation. #spec-test-build-install-commit-push";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ {prompt}\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "{prompt}\n",
+            "-->\n\n",
+            "<!--\n",
+            "Keep this unrelated scratch note hidden.\n",
+            "-->\n"
+        ),
+        prompt = prompt
+    );
+
+    let cleaned = scrub_duplicate_prompt_comments_for_route(&content)
+        .unwrap()
+        .expect("route should canonicalize duplicate prompt scratch comments before dispatch");
+
+    let duplicate_comment = format!("<!--\n{prompt}\n-->");
+    assert!(
+        !cleaned.contains(&duplicate_comment),
+        "route must not dispatch with duplicate prompt text still in the post-exchange comment:\n{cleaned}"
+    );
+    assert!(
+        cleaned.contains("\n<!--\n-->\n\n<!--\nKeep this unrelated scratch note hidden."),
+        "route must preserve the ordinary comment shell and unrelated scratch comments:\n{cleaned}"
+    );
+}
+
 fn test_registry_entry(pane: &str, file: &str, cwd: &std::path::Path) -> sessions::SessionEntry {
     sessions::SessionEntry {
         pane: pane.to_string(),

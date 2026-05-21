@@ -1339,11 +1339,26 @@ pub fn run_with_tmux(
     // Ensure session UUID exists in frontmatter (generate if missing)
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
-    let (updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
+    let (mut updated_content, session_id) = frontmatter::ensure_session_for_file(&content, file)?;
     if updated_content != content {
         std::fs::write(file, &updated_content)
             .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("[route] Generated session UUID: {}", session_id);
+    }
+    if let Some(cleaned_content) = scrub_duplicate_prompt_comments_for_route(&updated_content)? {
+        crate::write::atomic_write_pub(file, &cleaned_content)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "post_exchange_duplicate_prompt_comment_removed file={} source=route",
+                file.display()
+            ),
+        );
+        eprintln!(
+            "[route] scrubbed duplicate prompt text from comment after exchange in {}",
+            file.display()
+        );
+        updated_content = cleaned_content;
     }
 
     let fm = frontmatter::parse_for_file(&updated_content, file).map(|(f, _)| f)?;
@@ -1415,6 +1430,15 @@ pub fn run_with_tmux(
             Err(e)
         }
     }
+}
+
+fn scrub_duplicate_prompt_comments_for_route(content: &str) -> Result<Option<String>> {
+    let (frontmatter, _) = frontmatter::parse(content)
+        .context("failed to parse document frontmatter before route cleanup")?;
+    if !frontmatter.resolve_mode().is_template() {
+        return Ok(None);
+    }
+    Ok(crate::template::remove_post_exchange_duplicate_prompt_comments(content))
 }
 
 fn cleanup_failed_route_panes(

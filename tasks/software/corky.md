@@ -103,7 +103,7 @@ tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/corky.m
 ```
 
 No code, spec, or test files were changed. I did not run build/install, commit, or push for Corky. The `#sheets-scope` backlog item remains open because implementation did not begin.
-<!-- agent:boundary:95caf7ac -->
+<!-- agent:boundary:788fac70 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -112,7 +112,6 @@ No code, spec, or test files were changed. I did not run build/install, commit, 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#sheets-scope] [recommended] `corky sheets` OAuth scope handling. `corky sheets read` and `corky sheets write` share the same OAuth client + token cache, but `read` only requests `spreadsheets.readonly` and `write` then fails with HTTP 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` because the cached token lacks the write scope. Observed 2026-05-21 attempting to update the Velvet Thunder MVP worksheet (`1k52arliMCqbe40_CHWUCinV59EACIoYTG1gVMvnlKrA Wed 5/20/26!K3:L3`) via `corky sheets write` — the write API call surfaced the scope error mid-operation rather than re-auth'ing first. Fix options, ranked: (a) request the full `spreadsheets` scope upfront on any first-time `sheets *` auth (single broader prompt, no UX regression since read+write are paired in this workflow); (b) detect `ACCESS_TOKEN_SCOPE_INSUFFICIENT` from the write API and auto-trigger a re-auth flow with the missing scope; (c) add `corky sheets reauth --scope write` command + a clear "your token is read-only; re-auth needed" error message. Workaround for now: delete `~/.config/corky/...token...` and rerun `corky sheets write` (will prompt for fresh OAuth — verify it requests `spreadsheets` not `spreadsheets.readonly`).
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
 <!-- /agent:backlog -->
 
@@ -129,4 +128,5 @@ No code, spec, or test files were changed. I did not run build/install, commit, 
 - 2026-05-20 [#75d8] [recommended] Add the missing Corky PyPI 0.28.2 Linux x86_64 and macOS x86_64 wheels after fixing the tag workflow build failures (OpenSSL/manylinux Linux and MACOSX_DEPLOYMENT_TARGET macOS).
 - 2026-05-20 [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - 2026-05-20 [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
+- 2026-05-21 [#sheets-scope] [recommended] `corky sheets` OAuth scope handling. `corky sheets read` and `corky sheets write` share the same OAuth client + token cache, but `read` only requests `spreadsheets.readonly` and `write` then fails with HTTP 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` because the cached token lacks the write scope. Observed 2026-05-21 attempting to update the Velvet Thunder MVP worksheet (`1k52arliMCqbe40_CHWUCinV59EACIoYTG1gVMvnlKrA Wed 5/20/26!K3:L3`) via `corky sheets write` — the write API call surfaced the scope error mid-operation rather than re-auth'ing first. Fix options, ranked: (a) request the full `spreadsheets` scope upfront on any first-time `sheets *` auth (single broader prompt, no UX regression since read+write are paired in this workflow); (b) detect `ACCESS_TOKEN_SCOPE_INSUFFICIENT` from the write API and auto-trigger a re-auth flow with the missing scope; (c) add `corky sheets reauth --scope write` command + a clear "your token is read-only; re-auth needed" error message. Workaround for now: delete `~/.config/corky/...token...` and rerun `corky sheets write` (will prompt for fresh OAuth — verify it requests `spreadsheets` not `spreadsheets.readonly`).
 <!-- /agent:done -->

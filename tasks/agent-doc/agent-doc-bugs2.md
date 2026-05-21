@@ -29,24 +29,12 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-050429.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-050730.md`*
 
 Compacted content:
-- Archived 1 response topic(s): review backlog lifecycle
+- Archived 1 response topic(s): graph acceptance gate
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#aggtp]. #spec-test-build-install-commit-push
-### Re: graph acceptance gate — gpt-5
-
-I could not start `#aggtp` yet because `agent-doc plan` failed closed on the required tsift graph evidence step:
-
-```text
-tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json status
-Error: attempt to write a readonly database
-Caused by: Error code 776: Database has hot journal that must be rolled back (requires write access)
-```
-
-No repo edits, tests, build, install, commit, or push were performed. `#aggtp` remains open because implementation did not begin; I added a blocker follow-up for repairing the tsift graph DB state before rerunning the work.
-<!-- agent:boundary:9d88b3a4 -->
+<!-- agent:boundary:0c018904 -->
 <!-- /agent:exchange -->
 ###
 <!--

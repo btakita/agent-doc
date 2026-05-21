@@ -80,7 +80,8 @@ prompt_presets:
 - [x] Gmail API body decode (attachment + base64 padding) — v0.22.2
 - [x] `corky sync refetch` — v0.23.0
 - [x] Google Docs/Sheets integration — main 9e67e35
-- [ ] crates.io publish — needs token refresh
+- [x] crates.io publish — v0.28.2; v0.28.1 superseded by v0.28.2
+- [ ] PyPI trusted publishing — remaining blocker: workflow run 26195923707 still fails `invalid-publisher`; PyPI 0.28.2 artifacts are present but do not close the trusted-publisher setup item.
 - [ ] `corky doc upload` — deferred (Google Drive OAuth design)
 <!-- /agent:status -->
 
@@ -92,7 +93,31 @@ prompt_presets:
 Compacted content:
 - Archived 2 response topic(s): #pypi-trusted-publisher; PyPI trusted publisher setup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:a54c823b -->
+❯ do [#release-status-cleanup]. #spec-test-build-install-commit-push
+### Re: #release-status-cleanup — gpt-5
+
+Completed and pushed Corky commit `9d5f183` (`docs: clarify release status reconciliation`).
+
+What changed:
+- Updated `SPEC.md` §21 with a release-status reconciliation rule that keeps registry parity separate from trusted-publisher workflow health.
+- Added `tests/test_release_workflows.rs` coverage so the spec continues to say crates.io completion does not automatically close a failing PyPI trusted-publishing workflow.
+- Reconciled this session status: crates.io publish is complete for v0.28.2, v0.28.1 is superseded, and PyPI trusted publishing remains the blocker because the workflow still fails `invalid-publisher`.
+
+Live release checks used:
+- crates.io API reports `corky` `max_version` / `max_stable_version` as `0.28.2`: https://crates.io/api/v1/crates/corky
+- PyPI JSON reports `corky` `0.28.2` artifacts are present: https://pypi.org/pypi/corky/0.28.2/json
+- GitHub release `v0.28.2` is published: https://github.com/btakita/corky/releases/tag/v0.28.2
+- Latest checked PyPI workflow run `26195923707` failed with `invalid-publisher`, so trusted publishing setup remains open.
+
+Verification:
+- `cargo fmt`
+- `make check` (green; clippy + full test suite)
+- `make release` (green; `.bin/corky` -> `target/release/corky`)
+- `make install` (green; GPU `transcribe-cuda` install)
+- `.bin/corky --version` -> `corky 0.28.2`
+- `corky --version` -> `corky 0.28.2`
+- Corky has no tmux CI workflow or `make tmux-ci`; pushed CI run `26197993227` passed (`cargo clippy --features vendored-openssl -- -D warnings` and `cargo test --features vendored-openssl`).
+<!-- agent:boundary:70918e01 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -102,7 +127,6 @@ Compacted content:
 
 <!-- agent:backlog -->
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
-- [ ] [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 - [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
 <!-- /agent:backlog -->
 
@@ -117,4 +141,5 @@ Compacted content:
 - 2026-05-20 [#enable-drive-api-corky-oauth] Enable Google Drive API for Corky's configured Gmail OAuth project 873280095295, then rerun the live Google Workspace Drive CRUD matrix for brian.takita@gmail.com.
 - 2026-05-20 [#enable-docs-api-corky-oauth] Enable Google Docs API for Corky's configured Gmail OAuth project 873280095295, then rerun Google Docs read/write live tests for brian.takita@gmail.com.
 - 2026-05-20 [#75d8] [recommended] Add the missing Corky PyPI 0.28.2 Linux x86_64 and macOS x86_64 wheels after fixing the tag workflow build failures (OpenSSL/manylinux Linux and MACOSX_DEPLOYMENT_TARGET macOS).
+- 2026-05-20 [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
 <!-- /agent:done -->

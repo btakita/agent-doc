@@ -87,70 +87,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260520-232100.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260521-002350.md`*
 
 Compacted content:
+- Archived 2 response topic(s): #pypi-trusted-publisher; PyPI trusted publisher setup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ do [#pypi-trusted-publisher]. #spec-test-build-install-commit-push
-### Re: #pypi-trusted-publisher — gpt-5
-
-Implemented and pushed the repo-side PyPI trusted publishing hardening in Corky commit `feb074e` (`ci: harden PyPI trusted publishing`).
-
-What changed:
-- `.github/workflows/pypi.yml` now uses explicit `environment.name: pypi`, an environment URL, and `skip-existing: true`.
-- `AGENTS.md` and `SPEC.md` document GitHub OIDC trusted publishing instead of local PyPI token publishing.
-- Added `tests/test_release_workflows.rs` to assert `id-token: write`, `environment: pypi`, `pypa/gh-action-pypi-publish`, `packages-dir: dist`, `skip-existing: true`, and no PyPI password.
-
-Verification:
-- `cargo test --test test_release_workflows` passed.
-- `make check` passed.
-- `cargo run --quiet -- audit-docs` passed.
-- `make release` passed.
-- `cargo install --path .` passed.
-- `corky --version` reports `corky 0.28.2`.
-- Parent Agent Doc latest `check` and `tmux-ci` CI jobs had empty step lists and failed before runner steps, so I classified that as an external CI-start blocker, not a local tmux regression.
-
-Publish rerun:
-- Dispatched PyPI workflow run `26195923707` on `main`.
-- The sdist and all four wheel jobs passed: Linux x86_64, macOS x86_64, macOS arm64, and Windows.
-- The publish job failed with PyPI `invalid-publisher`: valid OIDC token, but no matching PyPI trusted publisher.
-- The rejected token claims were `sub=repo:btakita/corky:environment:pypi`, `repository=btakita/corky`, `workflow_ref=btakita/corky/.github/workflows/pypi.yml@refs/heads/main`, and `environment=pypi`.
-
-Current package state:
-- PyPI latest: `0.28.2`.
-- crates.io latest: `0.28.2`.
-- PyPI `0.28.2` has the sdist plus Linux x86_64, macOS x86_64, macOS arm64, and Windows wheels.
-
-I gated `#pypi-trusted-publisher` because the repo side is done, but PyPI project settings still need a trusted publisher matching the claims above before the workflow can publish successfully.
-❯ How do I make corky a trusted publisher?
-### Re: PyPI trusted publisher setup — gpt-5
-
-Do this on PyPI, not in GitHub. The Corky workflow is already emitting the right OIDC claims; PyPI just does not yet have a matching publisher entry for the `corky` project.
-
-1. Log in to PyPI as an owner or maintainer for `corky`.
-2. Open `Your projects` → `corky` → `Manage` → `Publishing`.
-3. Add a new `GitHub Actions` trusted publisher.
-4. Enter these values:
-
-| Field | Value |
-|---|---|
-| Owner | `btakita` |
-| Repository name | `corky` |
-| Workflow name / filename | `pypi.yml` |
-| Environment name | `pypi` |
-
-PyPI’s UI usually asks for the workflow filename, so use `pypi.yml`, not the full path. The matching GitHub claim is still `.github/workflows/pypi.yml`, which is what the failed run showed as `workflow_ref=btakita/corky/.github/workflows/pypi.yml@refs/heads/main`.
-
-After adding it, rerun:
-
-```bash
-gh workflow run PyPI --ref main
-```
-
-The workflow has `skip-existing: true`, so rerunning should skip the already-uploaded `0.28.2` files instead of treating them as duplicate-upload failures. If it still fails, compare the error’s rendered claims against the table above; PyPI’s own troubleshooting says `invalid-publisher` means the token is valid but does not match a configured publisher, commonly because of owner/repo/workflow/environment mismatch.
-
-References: [PyPI: Adding a Trusted Publisher](https://docs.pypi.org/trusted-publishers/adding-a-publisher/) and [PyPI: Trusted Publisher troubleshooting](https://docs.pypi.org/trusted-publishers/troubleshooting/).
-<!-- agent:boundary:3f96eb6d -->
+<!-- agent:boundary:a54c823b -->
 <!-- /agent:exchange -->
 ###
 <!--

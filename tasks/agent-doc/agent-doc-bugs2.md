@@ -100,7 +100,11 @@ Verification:
 Commits pushed:
 - `src/agent-doc`: `9c01f9a1 fix: clean duplicate prompt comments`, pushed to `origin/20260422/codex-agent-backend`.
 - root repo: `582d3807c chore: update agent-doc submodule`, pushed to `origin/main`.
-<!-- agent:boundary:c15dec51 -->
+### Re: closeout residue repair — gpt-5
+
+I repaired the pre-fix closeout residue from the earlier IPC write: the hidden duplicate prompt comment below `agent:exchange` is removed, and the accidental duplicate `#pwcm` backlog entry is collapsed into the canonical generated item `#r7k8`. The pushed implementation now also covers the IPC ack-content path that preserved that residue.
+
+<!-- agent:boundary:bfbb52e6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -114,7 +118,6 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 
 <!-- agent:backlog -->
 - [ ] [#r7k8] [recommended] Incorporate tsift #pwcm planner conflict-matrix report into lower-agent orchestration before enabling parallel worker dispatch: use graph/context/diff/impact outputs to rank worker scopes, flag shared file/symbol/test/config conflicts, and emit fail-closed ownership blocks. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
-- [ ] [#pwcm] [recommended] Incorporate tsift's planner conflict-matrix report into lower-agent orchestration before enabling parallel worker dispatch: use graph/context/diff/impact outputs to rank worker scopes, flag shared file/symbol/test/config conflicts, and emit fail-closed ownership blocks. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Missed response materialization no longer closes as already committed.**
+  IPC ACK/sidecar success now proves that the expected response body actually
+  materialized before saving the snapshot, logging
+  `ipc_materialization_missing_response` and falling back when the editor
+  returns prompt-only or partial response content. `agent-doc commit` also
+  refuses the `snapshot == HEAD` already-current no-op when an active captured
+  response is absent from the staged snapshot, leaving the cycle recoverable
+  through `agent-doc write --commit <FILE>`.
+
 - **Preflight baseline capture is tied to the stable visible diff.** Preflight
   now waits for the shared editor typing indicator before any document-mutating
   recovery, commit, pending maintenance, or duplicate prompt residue cleanup.

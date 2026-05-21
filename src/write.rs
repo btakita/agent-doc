@@ -2393,6 +2393,93 @@ fn serialize_template_response(patches: &[template::PatchBlock], unmatched: &str
     out
 }
 
+fn response_materialization_probe(patches: &[template::PatchBlock], unmatched: &str) -> String {
+    let mut selected = patches
+        .iter()
+        .filter(|patch| patch.name == "exchange")
+        .cloned()
+        .collect::<Vec<_>>();
+    let selected_exchange = !selected.is_empty();
+    if selected.is_empty() && unmatched.trim().is_empty() {
+        selected = patches
+            .iter()
+            .filter(|patch| patch.name != "frontmatter")
+            .filter(|patch| !is_backlog_component(&patch.name))
+            .filter(|patch| !crate::component::is_review_component(&patch.name))
+            .cloned()
+            .collect();
+    }
+    let probe_unmatched = if selected_exchange { "" } else { unmatched };
+    serialize_template_response(&selected, probe_unmatched)
+}
+
+pub(crate) fn response_materialization_probe_from_response(response: &str) -> String {
+    match template::parse_patches(response) {
+        Ok((patches, unmatched)) => response_materialization_probe(&patches, &unmatched),
+        Err(_) => response.to_string(),
+    }
+}
+
+pub(crate) fn response_materialized_in_content(response: &str, content: &str) -> bool {
+    let probe = response_materialization_probe_from_response(response);
+    probe.trim().is_empty() || crate::repair::response_already_applied(content, &probe)
+}
+
+fn ipc_response_materialized_or_fallback(
+    file: &Path,
+    source: &str,
+    response: &str,
+    content: &str,
+) -> bool {
+    if response_materialized_in_content(response, content) {
+        return true;
+    }
+    let response_hash = crate::ops_log::content_hash(response);
+    let content_hash = crate::ops_log::content_hash(content);
+    eprintln!(
+        "[write] IPC {} consumed a patch for {}, but the materialized content is missing the captured response body — falling back before snapshot/commit",
+        source,
+        file.display()
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "ipc_materialization_missing_response file={} source={} response_sha256={} content_len={} content_hash={}",
+            file.display(),
+            source,
+            response_hash,
+            content.len(),
+            content_hash
+        ),
+    );
+    false
+}
+
+fn response_materialization_probe_from_ipc_payload(payload: &serde_json::Value) -> String {
+    let patches = payload
+        .get("patches")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let name = item
+                        .get("component")
+                        .or_else(|| item.get("name"))
+                        .and_then(|value| value.as_str())?;
+                    let content = item.get("content").and_then(|value| value.as_str())?;
+                    Some(template::PatchBlock::new(name, content))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let unmatched = payload
+        .get("unmatched")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    response_materialization_probe(&patches, unmatched)
+}
+
 pub(crate) fn normalize_backlog_patch_response(
     file: &Path,
     current_content: &str,
@@ -5924,12 +6011,23 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     let timeout = std::time::Duration::from_secs(2);
     let poll_interval = std::time::Duration::from_millis(100);
     let start = std::time::Instant::now();
+    let mut consumed_without_materialization = false;
 
     while start.elapsed() < timeout {
         if !patch_file.exists() {
             // Plugin consumed the patch — update snapshot from current file
             let content = std::fs::read_to_string(file)
                 .with_context(|| format!("failed to read {} after IPC", file.display()))?;
+            let expected_response = response_materialization_probe(&patches, &unmatched);
+            if !ipc_response_materialized_or_fallback(
+                file,
+                "explicit_file_ipc",
+                &expected_response,
+                &content,
+            ) {
+                consumed_without_materialization = true;
+                break;
+            }
             snapshot::save(file, &content)?;
             crate::ops_log::log_op(
                 file,
@@ -5961,10 +6059,16 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
     }
 
     // Timeout — fall back to direct stream write
-    eprintln!(
-        "[write] IPC timeout ({}s) — falling back to direct write",
-        timeout.as_secs()
-    );
+    if consumed_without_materialization {
+        eprintln!(
+            "[write] IPC patch was consumed without materializing the response — falling back to direct write"
+        );
+    } else {
+        eprintln!(
+            "[write] IPC timeout ({}s) — falling back to direct write",
+            timeout.as_secs()
+        );
+    }
     // Clean up the unconsumed patch file
     let _ = std::fs::remove_file(&patch_file);
 
@@ -6717,6 +6821,20 @@ pub fn try_ipc(
                     );
                     let repair_disk = repair_disk || dedupe_repair;
 
+                    let expected_response = response_materialization_probe(patches, unmatched);
+                    if !ipc_response_materialized_or_fallback(
+                        file,
+                        "socket_ack_content",
+                        &expected_response,
+                        &effective_snap,
+                    ) {
+                        return Ok(IpcResult {
+                            success: false,
+                            patch_id,
+                            skipped_committed_cycle: false,
+                        });
+                    }
+
                     eprintln!(
                         "[write] snapshot from {} ({} bytes)",
                         snap_source,
@@ -7451,6 +7569,15 @@ fn write_ipc_and_poll(
                         return Ok(false);
                     }
                 }
+            }
+            let expected_response = response_materialization_probe_from_ipc_payload(payload);
+            if !ipc_response_materialized_or_fallback(
+                doc_file,
+                "file_ipc",
+                &expected_response,
+                &current_on_disk,
+            ) {
+                return Ok(false);
             }
 
             // Plugin applied the patch — update snapshot as actual post-write disk state.
@@ -9154,6 +9281,85 @@ scratch
         assert!(
             result.success,
             "should return true when plugin consumes patch"
+        );
+    }
+
+    #[test]
+    fn try_ipc_rejects_consumed_partial_response_materialization() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let original = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "content\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, original).unwrap();
+
+        let patch = crate::template::PatchBlock::new(
+            "exchange",
+            "### Re: missed patchback - gpt-5\n\nRecovered answer.",
+        );
+        let partial = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "content\n",
+            "### Re: missed patchback - gpt-5\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let partial_for_watcher = partial.to_string();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = fs::read_to_string(&path)
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                        {
+                            let _ = fs::write(&doc_for_watcher, &partial_for_watcher);
+                            let _ =
+                                fs::write(ack_dir.join(format!("{pid}.md")), &partial_for_watcher);
+                        }
+                        let _ = fs::remove_file(path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let result = try_ipc(&doc, &[patch], "", None, Some(original), None, None, None).unwrap();
+        assert!(
+            !result.success,
+            "IPC consume without the full response body must fall back instead of saving a successful snapshot"
+        );
+
+        let snap = snapshot::load(&doc).unwrap();
+        assert!(
+            snap.as_deref()
+                .is_none_or(|content| !content.contains("Recovered answer.")),
+            "partial IPC materialization must not become the committed snapshot: {snap:?}"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("ipc_materialization_missing_response") && log.contains("source=file_ipc"),
+            "missing response materialization should be logged for operator repair:\n{log}"
         );
     }
 
@@ -12776,7 +12982,34 @@ mod submodule_patch_routing_tests {
                 let _ = std::fs::create_dir_all(&ack_dir);
                 let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
                 let content = if !file_path.is_empty() {
-                    std::fs::read_to_string(file_path).unwrap_or_default()
+                    let file = Path::new(file_path);
+                    let before = std::fs::read_to_string(file).unwrap_or_default();
+                    let patches = v
+                        .get("patches")
+                        .and_then(|value| value.as_array())
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| {
+                                    let name = item
+                                        .get("component")
+                                        .or_else(|| item.get("name"))
+                                        .and_then(|value| value.as_str())?;
+                                    let content =
+                                        item.get("content").and_then(|value| value.as_str())?;
+                                    Some(crate::template::PatchBlock::new(name, content))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    let unmatched = v
+                        .get("unmatched")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("");
+                    let after = crate::template::apply_patches(&before, &patches, unmatched, file)
+                        .unwrap_or(before);
+                    let _ = std::fs::write(file, &after);
+                    after
                 } else {
                     String::new()
                 };

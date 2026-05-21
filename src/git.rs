@@ -1708,6 +1708,11 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     }
 
     if snapshot_matches_head {
+        ensure_active_capture_materialized_for_head_current_noop(
+            file,
+            snapshot_content.as_deref(),
+            head_doc.as_deref(),
+        )?;
         if let Some(kind) = post_commit_local_drift {
             if kind == PostCommitLocalDriftKind::UserFollowUp {
                 eprintln!(
@@ -2578,6 +2583,49 @@ fn repair_clean_head_if_only_transient_worktree_drift(
         &format!("transient_cleanup file={} basis=head", file.display()),
     );
     Ok(Some((Some(head_doc.clone()), head_doc)))
+}
+
+fn ensure_active_capture_materialized_for_head_current_noop(
+    file: &Path,
+    snapshot_content: Option<&str>,
+    head_doc: Option<&str>,
+) -> Result<()> {
+    let Some(capture) = crate::capture::load_active(file)? else {
+        return Ok(());
+    };
+    if matches!(
+        capture.state,
+        crate::capture::CaptureState::Committed | crate::capture::CaptureState::Discarded
+    ) {
+        return Ok(());
+    }
+    let Some(materialized) = snapshot_content.or(head_doc) else {
+        return Ok(());
+    };
+    if crate::write::response_materialized_in_content(&capture.response_body, materialized) {
+        return Ok(());
+    }
+
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "commit_blocked_missing_captured_response file={} capture_id={} response_sha256={} basis=head_current",
+            file.display(),
+            capture.capture_id,
+            capture.response_sha256
+        ),
+    );
+    crate::flow::closeout::log_closeout_guard_event(
+        file,
+        crate::flow::types::FlowStage::TerminalGuard,
+        crate::flow::types::FlowOutcome::FailedClosed,
+        crate::flow::closeout::CloseoutGuardReason::AlreadyCommitted,
+    );
+    anyhow::bail!(
+        "captured response body is not present in the staged snapshot for {} even though the snapshot already matches HEAD; refusing already-committed closeout. Replay the captured response with `agent-doc write --commit {}` before marking the cycle committed.",
+        file.display(),
+        file.display()
+    );
 }
 
 fn finalize_already_committed_noop(
@@ -4665,6 +4713,93 @@ Done.
             log.contains("post_commit_local_drift file=")
                 && log.contains("kind=working_tree_edits"),
             "out-of-component local edits should be classified as working-tree drift:\n{log}"
+        );
+    }
+
+    #[test]
+    fn commit_blocks_head_current_noop_when_active_capture_response_missing() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please answer the prompt\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, committed).unwrap();
+        crate::snapshot::save(&doc, committed).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        crate::cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: missed patchback — gpt-5\n\n",
+            "Recovered answer.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        crate::capture::capture_response(&doc, response).unwrap();
+
+        let head_before = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let err = commit(&doc)
+            .expect_err("HEAD-current snapshot must not close a missing captured response");
+        let head_after = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+
+        assert!(
+            err.to_string()
+                .contains("captured response body is not present"),
+            "error should name the missing captured response body:\n{err}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&head_before.stdout),
+            String::from_utf8_lossy(&head_after.stdout),
+            "blocked no-op closeout must not advance HEAD"
+        );
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::ResponseCaptured
+        );
+        let capture = crate::capture::load_active(&doc).unwrap().unwrap();
+        assert_eq!(capture.state, crate::capture::CaptureState::Captured);
+
+        let head = show_head(&doc).unwrap().unwrap();
+        assert!(
+            !head.contains("Recovered answer."),
+            "HEAD should remain prompt-only when response materialization is missing:\n{head}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_blocked_missing_captured_response file="),
+            "blocked missing materialization should be logged:\n{log}"
+        );
+        assert!(
+            !log.contains("commit_already_current file="),
+            "missing response materialization must not be recorded as already-current closeout:\n{log}"
         );
     }
 

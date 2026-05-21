@@ -54,7 +54,16 @@ tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-
 ```
 
 `#autodag` remains open. The blocker to resolve first is the `tsift graph-db` evidence timeout or the local queue-head drift that is reactivating `#autodag`.
-<!-- agent:boundary:5646741e -->
+❯ Add to tsift.md backlog fixes for `tsift graph-db` evidence timeout and the local queue-head drift that is reactivating `#autodag`.
+### Re: tsift backlog capture — gpt-5
+
+Added the requested follow-up work to `tasks/software/tsift.md` rather than editing code in this cycle:
+
+- `tsift graph-db evidence` timeout on agent-doc backlog ids, with bounded traversal/target-resolution regression coverage.
+- Queue-head drift coverage for consumed prompts reverting from completed queue text back to active `do #id` text, with non-reactivating repair guidance.
+
+No code or spec files were changed here; this cycle only records the backlog work in the named target document.
+<!-- agent:boundary:01c9a14e -->
 <!-- /agent:exchange -->
 ###
 <!--

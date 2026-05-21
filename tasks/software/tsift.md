@@ -31,134 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-044005.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-050641.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do #aorp
+- Archived 4 response topic(s): next steps; dogfood #orchdog; simpler #orchdog options; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ Update #next-steps in agent-doc-bugs2.md with latest tsift features.
-❯ Add #next-steps to tsift.md for agent orchestration and graphdb features.
-### Re: next steps — gpt-5
-
-Captured the requested `#next-steps` backlog updates.
-
-For `tasks/agent-doc/agent-doc-bugs2.md`, I added top item `#aggtp` for an agent-doc graph-backed orchestration acceptance gate using the latest tsift evidence, conflict-matrix, dispatch-trace, worker-result, and job-packet contracts.
-
-For `tasks/software/tsift.md`, I added `#orchdog` and `#gdbhard`. The top tsift backlog item is `#orchdog`; the top agent-doc-bugs2 backlog item is `#aggtp`.
-
-No code or test files changed in this cycle.
-❯ How do I dogfood [#orchdog] in Claude Code and in Codex?
-### Re: dogfood #orchdog — gpt-5
-
-Use the same acceptance shape in both harnesses, but invoke `agent-doc` differently.
-
-Claude Code path:
-
-1. In `tasks/software/tsift.md`, add an exchange prompt such as:
-
-```markdown
-do [#orchdog] by running the graph-backed orchestration dogfood path in Claude Code: refresh graph-db, gather evidence, conflict-matrix, dispatch-trace, create/collect job packets, compare worker_prompt_packet and worker_result closure fields, and record any tsift fixture gaps. #spec-test-build-install-commit-push
-```
-
-2. From Claude Code, run:
-
-```text
-/agent-doc tasks/software/tsift.md
-```
-
-3. The Claude Code agent should use the slash-command/Skill path, then still close through `agent-doc finalize ... --stream` or `agent-doc write --commit ...` if repairing.
-
-Codex path:
-
-1. Do not use a leading slash. Send a normal Codex prompt:
-
-```text
-agent-doc tasks/software/tsift.md do [#orchdog] by running the graph-backed orchestration dogfood path in Codex: refresh graph-db, gather evidence, conflict-matrix, dispatch-trace, create/collect job packets, compare worker_prompt_packet and worker_result closure fields, and record any tsift fixture gaps. #spec-test-build-install-commit-push
-```
-
-2. Codex should run `agent-doc preflight`, `agent-doc plan`, execute the repo work, then run `agent-doc finalize ... --stream` and `agent-doc session-check tasks/software/tsift.md`.
-
-For both harnesses, the core evidence commands to compare are:
-
-```bash
-tsift graph-db --path . refresh --json
-tsift graph-db --path . doctor --json
-tsift graph-db --path . evidence orchdog --depth 3 --limit 8 --json
-tsift conflict-matrix --path tasks/software/tsift.md orchdog --json
-tsift dispatch-trace --path tasks/software/tsift.md orchdog --format json
-tsift dispatch-trace --path tasks/software/tsift.md orchdog --format html
-agent-doc jobs create tasks/software/tsift.md --operation-doc --audit
-agent-doc jobs list tasks/software/tsift.md
-agent-doc jobs status tasks/software/tsift.md
-agent-doc jobs collect tasks/software/tsift.md --json
-```
-
-The dogfood comparison should check whether Claude Code and Codex produce the same contract-grade fields: `packet_id`, `projection_hash`, replay/repair commands, owned files/symbols, forbidden files, expected tests, `worker_feedback`, worker result status, touched files/tests, and follow-up ids. Any missing or unstable field becomes the tsift-side fixture gap to add under `#orchdog` rather than an agent-doc routing bug by default.
-
-No repo files needed to change for this answer.
-❯ Please provide simpler options to complete [#orchdog] using agent-doc. See root.md
-### Re: simpler #orchdog options — gpt-5
-
-The simpler `root.md` pattern is: put one compact `do [#id] ... #preset` directive in the exchange and let `agent-doc preflight -> plan -> work -> finalize` own the details.
-
-Recommended one-shot option:
-
-```markdown
-do [#orchdog] by dogfooding graph-backed orchestration on a real agent-doc queue run, using the smallest useful path: agent-doc planning/job packets, tsift graph evidence, conflict-matrix, dispatch-trace, jobs create/collect, and fixture/spec updates only for gaps found. #spec-test-build-install-commit-push
-```
-
-Claude Code invocation:
-
-```text
-/agent-doc tasks/software/tsift.md
-```
-
-Codex invocation:
-
-```text
-agent-doc tasks/software/tsift.md
-```
-
-If you want it even smaller, use an evidence-only first pass:
-
-```markdown
-do [#orchdog] evidence-only: run agent-doc planning/job-packet dogfood plus tsift graph evidence/conflict-matrix/dispatch-trace, report the smallest fixture gaps, but do not implement fixes yet.
-```
-
-Then follow with:
-
-```markdown
-do [#orchdog] implement the fixture/spec gaps found in the evidence-only pass. #spec-test-build-install-commit-push
-```
-
-If you want agent-doc to batch it like the `root.md` queue style, add only this queue item under the existing queue preset, then invoke the document normally:
-
-```markdown
-- do [#orchdog]
-```
-
-I would use the one-shot option first. It is short enough for Claude Code and Codex, keeps the work bound to `#orchdog`, and still asks for the required spec/test/build/install/commit/push closeout.
-❯ What is the recommended prompt_preset to dogfood tsift.md in root.md?
-### Re: root.md preset for tsift dogfood — gpt-5
-
-Use `#spec-test-commit-push` if you want to use an existing `root.md` preset today. `root.md` does not currently define `#spec-test-build-install-commit-push`, so that name should stay a `tsift.md` preset unless you intentionally add root-specific semantics for it.
-
-For repeatable root-driven tsift dogfooding, the cleaner preset to add later would be a dedicated one:
-
-```yaml
-'#dogfood-tsift': Dogfood tsift graph-backed orchestration against /home/brian/work/btakita/agent-loop/tasks/software/tsift.md using the smallest useful agent-doc path: plan, graph-db evidence, conflict-matrix, dispatch-trace, jobs create/collect, worker_prompt_packet/worker_result comparison, and capture tsift fixture gaps. Do not deploy.
-```
-
-Then `root.md` can stay compact:
-
-```markdown
-do [#x63e] [#v4v0] #dogfood-tsift
-```
-
-For completing `tsift.md` item `#orchdog` directly from the tsift session, keep using `tsift.md`'s own `#spec-test-build-install-commit-push` preset.
-
-No backlog mutation is needed for this answer-only cycle.
-<!-- agent:boundary:20daa104 -->
+<!-- agent:boundary:1df3b3ed -->
 <!-- /agent:exchange -->
 ###
 
@@ -166,16 +44,19 @@ No backlog mutation is needed for this answer-only cycle.
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#dtrc]
-- do [#gafe]
-- do [#wfcl]
+- do [#gdbevid]
+- do [#cmgr]
+- do [#gdbidx]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps.
+- [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.**
 - [ ] [#gdbhard] [recommended] Harden graph-db operator docs/fixtures around the current feature set: refresh/status/doctor/evidence/drift/convex-sync replay paths, stale Convex repair commands, and real agent-loop session examples that can be regenerated in CI.
+- [ ] [#gdbevid] [recommended] `tsift graph-db evidence <backlog-id>` returns 0 rows for backlog ids present in a session document but lacking projection-linked context (worker_context / source_handle / semantic / worker_result all empty). Observed 2026-05-21 dogfood: `evidence x63e` + `evidence v4v0` both empty despite both items being canonical backlog rows. Likely fix: cross-link from session document `agent:backlog` items into the graph projection when they're first observed, even before any worker run; OR document the expected empty-state and adjust the operator messaging to distinguish "no context yet" from "broken projection."
+- [ ] [#cmgr] `tsift conflict-matrix` defaults to `fail_closed=true` when individual targets lack source-ownership evidence, even when the **inter-target** conflict score is `low` / `0` (no file/symbol/test overlap). This is conservative-correct but operators see a confusing combined verdict: cross-item conflict says "safe to parallel" while per-item fail_closed says "don't dispatch." Suggest: surface the two signals as orthogonal fields in the output envelope (`per_target_fail_closed: [...]` + `cross_target_parallel_safe: bool`) rather than a single `can_parallel` field, OR have `can_parallel=true` once cross-target overlap is `low` and downgrade the per-target signal to a soft warning.
+- [ ] [#gdbidx] tsift session-share workspace has 41 stale files and zero cached summaries — `tsift summarize --extract` has not been run for this submodule. Either auto-run on `graph-db refresh` when staleness exceeds a threshold, or fail-closed the refresh with a clearer "index stale: run `tsift summarize`" actionable message rather than the current warning that ships alongside successful refresh.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

@@ -30,33 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-205326.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-212634.md`*
 
 Compacted content:
-- Archived 5 response topic(s): #tsdag blocked; next steps for missing evidence packet; #cmgevfix blocked; 2 more
+- Archived 2 response topic(s): #impactdag and #dagfix; #dagfix queue closeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: #impactdag and #dagfix — gpt-5
-
-Completed both queued tsift items.
-
-`#impactdag`: `conflict-matrix` and `dispatch-trace` worker packets now expose scheduler-ready JSON fields: `parallel_safe`, `blocks`, `blocked_by`, structured `required_context`, `expected_tests`, and stable `graph_handles` for target node, evidence packet, worker prompt packet, projection hash, source handles, worker-context handles, and semantic handles. Unsafe overlap and worker-result follow-up debt now produce explicit block edges so agent-doc can compute antichains without scraping prose.
-
-`#dagfix`: the graph orchestration fixtures now replay `refresh -> evidence -> conflict-matrix -> dependency-dag -> dispatch-trace`, with regenerated samples for dependency-DAG freshness, packet ids, worker-result closure, cycle diagnostics, and stale Convex fail-closed repair coverage.
-
-Verification completed:
-- `cargo test --test graph_db_conformance`
-- `make check`
-- `cargo build`
-- `cargo install --path .` (`tsift 0.1.42` installed)
-- GitHub Actions CI `26243171288` was green; this repo has no `tmux-test` workflow or `tmux-ci` target to replay.
-
-Commits and push:
-- tsift `ed28437` (`feat: expose orchestration scheduler fields`) pushed to `btakita/tsift:main`
-- superproject `189dcac98` (`chore: update tsift scheduler fields`) pushed to `btakita/agent-loop:main`
-### Re: #dagfix queue closeout — gpt-5
-
-`#dagfix` was completed and reaped in the previous closeout alongside `#impactdag`; this cycle only consumes the remaining auto-queue line. No additional repo changes were needed.
-<!-- agent:boundary:2fa8a3f5 -->
+<!-- agent:boundary:14f78cc3 -->
 <!-- /agent:exchange -->
 ###
 <!--

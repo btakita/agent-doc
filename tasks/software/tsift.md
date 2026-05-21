@@ -36,7 +36,19 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): do #802b
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:1d51841f -->
+❯ What are #next-steps for graph db features & subagent support?
+### Re: graph db features & subagent support — gpt-5
+
+The graph DB base is already fairly complete: SQLite correctness store, Convex projection/snapshot path, conformance coverage, `graph-db evidence`, and `conflict-matrix` are all represented in the completed work. The next useful layer is making those graph outputs directly drive agent-doc/subagent orchestration instead of remaining operator-facing tsift commands.
+
+I added the follow-up backlog in priority order. Top backlog item: `#agbr`.
+
+1. `#agbr` — wire `graph-db evidence` and `conflict-matrix` into agent-doc planning/orchestration, with fail-closed stale/missing-target checks.
+2. `#wctx` — promote conflict-matrix worker prompt packets into first-class subagent context: owned files/symbols, read-only context, forbidden files, expected tests, expansion commands, and token budgets.
+3. `#mxfx` — add a deterministic multi-worker acceptance fixture proving overlapping targets are blocked and non-overlapping worker prompts are safe to dispatch.
+4. `#gobx` — expose graph orchestration observability through `context-pack` / `session-review`, including freshness, evidence ids, dispatch decisions, and next commands.
+5. `#semx` — fold semantic graph rows into dispatch ranking so related concept/entity paths improve worker-scope recommendations without replacing hard file/symbol conflict gates.
+<!-- agent:boundary:bc719507 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,6 +63,11 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#agbr] [recommended] Wire tsift graph evidence into agent-doc planning/orchestration: have agent-doc plan/orchestrate call graph-db evidence and conflict-matrix for queued do-items, attach handles to prompt_targets, and fail closed on stale graph.db or missing targets.
+- [ ] [#wctx] [recommended] Make worker prompt packets first-class: emit owned files/symbols, read-only context, forbidden files, expected tests, expansion commands, and token budgets from conflict-matrix so subagents can start with bounded graph-backed context.
+- [ ] [#mxfx] [recommended] Add a deterministic multi-worker acceptance fixture for subagent support: seed overlapping and non-overlapping backlog targets, run graph-db evidence plus conflict-matrix, and prove the generated worker prompts prevent shared-file/test conflicts.
+- [ ] [#gobx] [recommended] Add session-level graph orchestration observability: record graph projection freshness, evidence packet ids, conflict-matrix decisions, worker ownership blocks, and follow-up commands in context-pack/session-review output.
+- [ ] [#semx] [recommended] Use semantic graph rows in dispatch ranking: combine semantic_concept/entity edges with code/route/backlog paths so conflict-matrix can recommend related-but-safe follow-up worker scopes.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

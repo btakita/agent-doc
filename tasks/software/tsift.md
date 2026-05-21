@@ -113,7 +113,17 @@ Verification:
 Commits:
 - `btakita/tsift` pushed `dbac74c` (`feat: version graph orchestration packets`).
 - Superproject submodule pointer committed locally as `6c6a39ec1` (`chore: update tsift submodule`); the root push follows this document closeout boundary.
-<!-- agent:boundary:2c7d7017 -->
+❯ Add #next-steps to agent-doc-bugs2.md for recently added tsift features.
+❯ Add #next-steps to tsift.md for agent orchestration and graph db features.
+### Re: next steps for graph orchestration — gpt-5
+Added recommended next-step backlog items for both documents.
+
+Top agent-doc backlog item added to `tasks/agent-doc/agent-doc-bugs2.md`: `#gxct` — validate tsift graph orchestration contracts in agent-doc plan/orchestrate before lower-agent dispatch.
+
+Top tsift backlog item added here: `#gcfx` — add compiled contract-parity fixtures comparing the documented graph orchestration contracts with live CLI JSON output.
+
+I kept agent-doc-owned work in `agent-doc-bugs2.md` and tsift-owned graph/reporting work in `tsift.md`. No code changes or tests were run; this was backlog triage only.
+<!-- agent:boundary:dd38b881 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -131,6 +141,9 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gdtr] [recommended] Add graph-backed dispatch trace exports: compact JSON/HTML views linking backlog, job_packet, worker_result, source_handle, semantic rows, evidence packet ids, and worker_prompt_packets for operator review.
+- [ ] [#wrfb] [recommended] Add worker-result feedback reports: summarize completed/blocked worker_result rows, touched files/tests, follow-up ids, and outcome history so conflict-matrix can warn about repeated blockage without weakening hard conflict gates.
+- [ ] [#gcfx] [recommended] Add compiled contract-parity fixtures comparing graph-orchestration-contracts.json with live graph-db evidence, conflict-matrix, context-pack, and session-review JSON output, including contract_version, packet_id, projection_hash, replay_commands, and repair_commands.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

@@ -31,24 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-054738.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-055801.md`*
 
 Compacted content:
-- Archived 1 response topic(s): graph-db operator hardening
+- Archived 2 response topic(s): dependency DAG queue blocker; post-closeout queue additions
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: dependency DAG queue blocker — gpt-5
-
-I did not start `#tsdag`, `#impactdag`, or `#dagfix` because the `agent-doc plan` contract returned a blocker before repo work:
-
-`tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --json evidence tsdag --depth 3 --limit 8` timed out after 30 seconds while collecting graph evidence for `#tsdag`.
-
-Because the planning record failed closed before implementation, the three backlog items remain open. I did not make new code changes, run the spec/test/build/install preset, or create additional commits for this queue batch.
-### Re: post-closeout queue additions — gpt-5
-
-After the blocked `#tsdag` / `#impactdag` / `#dagfix` response, the document queued `#cmgrwres` and `#gdblock` as additional dogfood follow-ups.
-
-I did not start those new items in this cycle. The active batch is still blocked at planning time because graph-db evidence for `#tsdag` timed out, so the later queue additions remain open for a fresh cycle after that graph-db evidence blocker is resolved. No additional repo edits, tests, installs, commits, or pushes were performed for `#cmgrwres` / `#gdblock`.
-<!-- agent:boundary:a53b205a -->
+<!-- agent:boundary:1e32829f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,6 +54,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#bfd1] [recommended] Fix tsift graph-db evidence timeout on agent-doc backlog ids by bounding target resolution/path traversal and adding regression coverage for evidence autodag --depth 3 --limit 8 against session backlog fixtures.
+- [ ] [#w94s] [recommended] Add graph-evidence coverage for queue-head drift where consumed queue prompts revert from done do-id text to active do-id text, including repair guidance that does not reactivate completed queue items.
 - [ ] [#tsdag] [recommended] Add graph-level dependency DAG extraction for agent-doc work: derive explicit and implicit edges among backlog ids from file/symbol/test/config overlap, semantic relations, worker_result follow-up ids, and depends-on text; emit nodes, edges, cycle diagnostics, topo batches, replay commands, and repair commands as a versioned JSON contract.
 - [ ] [#impactdag] [recommended] Extend conflict-matrix and dispatch-trace with scheduler fields: parallel_safe, blocks, blocked_by, required_context, expected_tests, and stable graph handles so agent-doc can run topological antichains without scraping prose.
 - [ ] [#dagfix] [recommended] Add regeneration fixtures for real agent-doc queue DAGs: refresh -> evidence -> conflict-matrix -> dependency-dag -> dispatch-trace, asserting projection freshness, packet ids, worker_result closure, cycle detection, and stale graph fail-closed behavior.

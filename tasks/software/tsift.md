@@ -31,30 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-031017.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-033842.md`*
 
 Compacted content:
-- Archived 6 response topic(s): graph db features & subagent support; transfer agent-doc backlog; graph-backed worker dispatch; 3 more
+- Archived 1 response topic(s): graph orchestration contracts
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: graph orchestration contracts — gpt-5
-Completed `#gcfx`, `#wrfb`, and `#gdtr`.
-
-Implemented and pushed tsift graph orchestration updates:
-- contract parity coverage now compares `fixtures/graph-db-operator-examples/graph-orchestration-contracts.json` against live `graph-db evidence`, `conflict-matrix`, `context-pack`, `session-review`, and `dispatch-trace` JSON output.
-- `conflict-matrix` now includes worker-result feedback summaries and repeated-blockage warnings without weakening hard conflict gates.
-- added `tsift dispatch-trace --format json|html` for operator review of backlog, job packet, worker result, source handle, semantic, evidence packet, and worker prompt packet links.
-
-Verification:
-- `make check`
-- `cargo build`
-- `cargo install --path . --locked`
-- tsift GitHub Actions CI run `26203831313` passed (`clippy + test`, `live Convex graph acceptance`).
-- agent-loop GitHub Actions run `26203839021` failed before job logs/steps were available (`tmux-ci` and `check` empty-step failures), so I classified it as an external CI-start blocker rather than a code or tmux regression.
-
-Pushed commits:
-- `btakita/tsift` `9728ade` (`feat: add dispatch trace graph reports`)
-- agent-loop submodule pointer `39117c97b` (`chore: update tsift submodule`)
-<!-- agent:boundary:28cf808f -->
+<!-- agent:boundary:cf507abe -->
 <!-- /agent:exchange -->
 ###
 <!--

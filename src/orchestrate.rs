@@ -1575,11 +1575,13 @@ fn collect_graph_evidence_for_tasks(
             "[orchestrate] tsift graph evidence targets: {}",
             graph_evidence.targets.join(", ")
         );
-        if fail_on_conflict_matrix && graph_evidence.conflict_matrix.fail_closed {
+        if fail_on_conflict_matrix
+            && let Some(blocker) = graph_evidence.conflict_matrix.parallel_dispatch_blocker()
+        {
             anyhow::bail!(
-                "tsift conflict-matrix failed closed for {}: {}",
+                "tsift conflict-matrix blocked parallel dispatch for {}: {}",
                 graph_evidence.targets.join(", "),
-                graph_evidence.conflict_matrix.decisions.join("; ")
+                blocker
             );
         }
     }
@@ -2055,34 +2057,103 @@ mod tests {
             prompt_target_handles: vec![crate::tsift_graph::TsiftPromptTargetHandle {
                 prompt_target: "do #gkke".to_string(),
                 target: "gkke".to_string(),
-                evidence_packet_id: "gkke:gbak-gkke".to_string(),
+                evidence_packet_id: "gevd-gkke".to_string(),
                 target_node_id: "gbak-gkke".to_string(),
                 target_kind: "backlog".to_string(),
                 target_label: "#gkke".to_string(),
+                projection_hash: Some("abc".to_string()),
                 worker_context_handles: vec!["wctx-gkke".to_string()],
                 source_handles: vec!["src-gkke".to_string()],
                 semantic_handles: Vec::new(),
                 next_commands: Vec::new(),
+                replay_commands: vec!["tsift graph-db evidence gkke --json".to_string()],
+                repair_commands: Vec::new(),
             }],
             conflict_matrix: crate::tsift_graph::TsiftConflictMatrixSummary {
+                contract_version: Some("conflict-matrix-v1".to_string()),
                 can_parallel: true,
                 fail_closed: false,
-                evidence_packet_ids: vec!["gkke:gbak-gkke".to_string()],
-                decisions: vec!["candidate #1 gkke risk=low".to_string()],
-                worker_ownership_blocks: vec!["Worker 1 owns gkke (#gkke)".to_string()],
-                worker_prompt_packets: vec![crate::tsift_graph::TsiftWorkerPromptPacket {
+                inputs: Some(crate::tsift_graph::TsiftConflictMatrixInputs {
+                    graph_db_evidence_targets: vec!["gkke".to_string()],
+                    evidence_packets: vec![crate::tsift_graph::TsiftConflictMatrixEvidencePacket {
+                        target: "gkke".to_string(),
+                        packet_id: "gevd-gkke".to_string(),
+                        target_node_id: "gbak-gkke".to_string(),
+                        projection_hash: Some("abc".to_string()),
+                        replay_command: Some("tsift graph-db evidence gkke --json".to_string()),
+                    }],
+                    context_pack_command: Some("tsift --envelope context-pack session.md --budget normal".to_string()),
+                    cached_diff_command: Some("tsift diff-digest --cached /tmp/repo --json".to_string()),
+                    impact_command: Some("tsift impact /tmp/repo --cached --limit 20 --json".to_string()),
+                }),
+                context_pack: Some(crate::tsift_graph::TsiftConflictMatrixContextSummary {
+                    target: "session.md".to_string(),
+                    target_kind: "agent_doc_session".to_string(),
+                    prompt_targets: vec!["do #gkke".to_string()],
+                    touched_files: vec!["src/orchestrate.rs".to_string()],
+                    touched_symbols: vec!["run_ordered_tasks_internal".to_string()],
+                    files_changed: 1,
+                    worker_context: vec!["orchestration worker context".to_string()],
+                    source_windows: vec!["src/orchestrate.rs:1-80".to_string()],
+                    status_reminders: Vec::new(),
+                }),
+                candidates: vec![crate::tsift_graph::TsiftConflictMatrixCandidate {
                     target: "gkke".to_string(),
                     rank: 1,
                     risk: "low".to_string(),
+                    risk_score: 0,
+                    risk_reasons: Vec::new(),
+                    evidence_packet_id: "gevd-gkke".to_string(),
+                    target_node_id: "gbak-gkke".to_string(),
+                    target_kind: "backlog".to_string(),
+                    target_label: "#gkke".to_string(),
+                    owned_files: vec!["src/orchestrate.rs".to_string()],
+                    owned_symbols: vec!["run_ordered_tasks_internal".to_string()],
+                    config_files: Vec::new(),
+                    affected_tests: vec!["cargo test orchestrate".to_string()],
+                    staged_files: Vec::new(),
+                    staged_symbols: Vec::new(),
+                    staged_tests: Vec::new(),
+                    staged_config_files: Vec::new(),
+                    semantic_dispatch_score: 4,
+                    semantic_dispatch_reasons: vec!["source handle matched orchestration".to_string()],
+                }],
+                conflicts: Vec::new(),
+                evidence_packet_ids: vec!["gevd-gkke".to_string()],
+                decisions: vec!["candidate #1 gkke risk=low".to_string()],
+                worker_ownership_blocks: vec!["Worker 1 owns gkke (#gkke)".to_string()],
+                worker_prompt_packets: vec![crate::tsift_graph::TsiftWorkerPromptPacket {
+                    contract_version: Some("worker-prompt-packet-v1".to_string()),
+                    packet_id: Some("wpp-gkke".to_string()),
+                    target: "gkke".to_string(),
+                    rank: 1,
+                    risk: "low".to_string(),
+                    projection_hash: Some("abc".to_string()),
                     title: "Worker 1 owns gkke (#gkke)".to_string(),
                     owned_files: vec!["src/orchestrate.rs".to_string()],
-                    owned_symbols: Vec::new(),
+                    owned_symbols: vec!["run_ordered_tasks_internal".to_string()],
                     read_only_context: vec!["src-gkke".to_string()],
                     forbidden_files: Vec::new(),
                     expected_tests: vec!["cargo test orchestrate".to_string()],
                     expansion_commands: vec!["tsift graph-db evidence gkke --json".to_string()],
+                    token_budget: Some(crate::tsift_graph::TsiftWorkerPromptTokenBudget {
+                        prompt_estimated_tokens: 32,
+                        max_prompt_tokens: 256,
+                        source_window_count: 1,
+                        source_window_lines: 80,
+                        max_context_bytes: 9600,
+                    }),
+                    semantic_dispatch_score: 4,
+                    semantic_dispatch_reasons: vec![
+                        "source handle matched orchestration".to_string()
+                    ],
+                    prompt: Some(
+                        "Worker 1 owns gkke (#gkke)\n\nFail closed if the task requires a forbidden/shared file."
+                            .to_string(),
+                    ),
                 }],
                 next_commands: Vec::new(),
+                warnings: Vec::new(),
             },
             next_commands: Vec::new(),
         }
@@ -2586,8 +2657,12 @@ mod tests {
 
         let prompt = &agent.prompts.borrow()[0];
         assert!(prompt.contains("<tsift_graph_evidence>"));
-        assert!(prompt.contains("\"evidence_packet_id\": \"gkke:gbak-gkke\""));
+        assert!(prompt.contains("\"evidence_packet_id\": \"gevd-gkke\""));
         assert!(prompt.contains("Worker 1 owns gkke (#gkke)"));
+        assert!(prompt.contains("\"context_pack\""));
+        assert!(prompt.contains("\"candidates\""));
+        assert!(prompt.contains("Fail closed if the task requires a forbidden/shared file"));
+        assert!(prompt.contains("\"token_budget\""));
         let final_doc = fs::read_to_string(&doc).unwrap();
         assert!(!final_doc.contains("<tsift_graph_evidence>"));
     }

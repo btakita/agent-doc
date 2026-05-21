@@ -46,6 +46,8 @@ pub(crate) struct TsiftPromptTargetHandle {
     pub(crate) target_node_id: String,
     pub(crate) target_kind: String,
     pub(crate) target_label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) projection_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) worker_context_handles: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -54,12 +56,26 @@ pub(crate) struct TsiftPromptTargetHandle {
     pub(crate) semantic_handles: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) next_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) replay_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) repair_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TsiftConflictMatrixSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) contract_version: Option<String>,
     pub(crate) can_parallel: bool,
     pub(crate) fail_closed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) inputs: Option<TsiftConflictMatrixInputs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) context_pack: Option<TsiftConflictMatrixContextSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) candidates: Vec<TsiftConflictMatrixCandidate>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) conflicts: Vec<TsiftConflictMatrixConflict>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) evidence_packet_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -70,13 +86,115 @@ pub(crate) struct TsiftConflictMatrixSummary {
     pub(crate) worker_prompt_packets: Vec<TsiftWorkerPromptPacket>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) next_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TsiftConflictMatrixInputs {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) graph_db_evidence_targets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) evidence_packets: Vec<TsiftConflictMatrixEvidencePacket>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) context_pack_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cached_diff_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) impact_command: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TsiftConflictMatrixEvidencePacket {
+    pub(crate) target: String,
+    pub(crate) packet_id: String,
+    pub(crate) target_node_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) projection_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) replay_command: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TsiftConflictMatrixContextSummary {
+    pub(crate) target: String,
+    pub(crate) target_kind: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) prompt_targets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) touched_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) touched_symbols: Vec<String>,
+    pub(crate) files_changed: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) worker_context: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) source_windows: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) status_reminders: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TsiftConflictMatrixCandidate {
+    pub(crate) target: String,
+    pub(crate) rank: usize,
+    pub(crate) risk: String,
+    pub(crate) risk_score: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) risk_reasons: Vec<String>,
+    pub(crate) evidence_packet_id: String,
+    pub(crate) target_node_id: String,
+    pub(crate) target_kind: String,
+    pub(crate) target_label: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) owned_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) owned_symbols: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) config_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) affected_tests: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) staged_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) staged_symbols: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) staged_tests: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) staged_config_files: Vec<String>,
+    pub(crate) semantic_dispatch_score: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) semantic_dispatch_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TsiftConflictMatrixConflict {
+    pub(crate) left: String,
+    pub(crate) right: String,
+    pub(crate) risk: String,
+    pub(crate) risk_score: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) shared_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) shared_symbols: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) shared_tests: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) shared_config_files: Vec<String>,
+    pub(crate) verdict: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TsiftWorkerPromptPacket {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) contract_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) packet_id: Option<String>,
     pub(crate) target: String,
     pub(crate) rank: usize,
     pub(crate) risk: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) projection_hash: Option<String>,
     pub(crate) title: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) owned_files: Vec<String>,
@@ -90,6 +208,22 @@ pub(crate) struct TsiftWorkerPromptPacket {
     pub(crate) expected_tests: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) expansion_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) token_budget: Option<TsiftWorkerPromptTokenBudget>,
+    pub(crate) semantic_dispatch_score: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) semantic_dispatch_reasons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub(crate) struct TsiftWorkerPromptTokenBudget {
+    pub(crate) prompt_estimated_tokens: usize,
+    pub(crate) max_prompt_tokens: usize,
+    pub(crate) source_window_count: usize,
+    pub(crate) source_window_lines: usize,
+    pub(crate) max_context_bytes: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -99,9 +233,13 @@ struct TaskGraphPromptContext<'a> {
     target_node_id: &'a str,
     target_kind: &'a str,
     target_label: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    projection_hash: Option<&'a str>,
     worker_context_handles: &'a [String],
     source_handles: &'a [String],
     semantic_handles: &'a [String],
+    replay_commands: &'a [String],
+    repair_commands: &'a [String],
     conflict_matrix: TaskGraphConflictContext<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
     worker_prompt_packet: Option<&'a TsiftWorkerPromptPacket>,
@@ -109,11 +247,20 @@ struct TaskGraphPromptContext<'a> {
 
 #[derive(Debug, Serialize)]
 struct TaskGraphConflictContext<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    contract_version: Option<&'a str>,
     can_parallel: bool,
     fail_closed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inputs: Option<&'a TsiftConflictMatrixInputs>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_pack: Option<&'a TsiftConflictMatrixContextSummary>,
+    candidates: &'a [TsiftConflictMatrixCandidate],
+    conflicts: &'a [TsiftConflictMatrixConflict],
     evidence_packet_ids: &'a [String],
     decisions: &'a [String],
     worker_ownership_blocks: &'a [String],
+    warnings: &'a [String],
 }
 
 pub(crate) fn collect_for_do_items(
@@ -234,15 +381,24 @@ impl TsiftGraphEvidencePlan {
             target_node_id: &handle.target_node_id,
             target_kind: &handle.target_kind,
             target_label: &handle.target_label,
+            projection_hash: handle.projection_hash.as_deref(),
             worker_context_handles: &handle.worker_context_handles,
             source_handles: &handle.source_handles,
             semantic_handles: &handle.semantic_handles,
+            replay_commands: &handle.replay_commands,
+            repair_commands: &handle.repair_commands,
             conflict_matrix: TaskGraphConflictContext {
+                contract_version: self.conflict_matrix.contract_version.as_deref(),
                 can_parallel: self.conflict_matrix.can_parallel,
                 fail_closed: self.conflict_matrix.fail_closed,
+                inputs: self.conflict_matrix.inputs.as_ref(),
+                context_pack: self.conflict_matrix.context_pack.as_ref(),
+                candidates: &self.conflict_matrix.candidates,
+                conflicts: &self.conflict_matrix.conflicts,
                 evidence_packet_ids: &self.conflict_matrix.evidence_packet_ids,
                 decisions: &self.conflict_matrix.decisions,
                 worker_ownership_blocks: &self.conflict_matrix.worker_ownership_blocks,
+                warnings: &self.conflict_matrix.warnings,
             },
             worker_prompt_packet,
         };
@@ -251,6 +407,58 @@ impl TsiftGraphEvidencePlan {
             serde_json::to_string_pretty(&context)
                 .context("serializing tsift graph prompt context")?
         )))
+    }
+}
+
+impl TsiftConflictMatrixSummary {
+    pub(crate) fn parallel_dispatch_blocker(&self) -> Option<String> {
+        if self.can_parallel && !self.fail_closed {
+            return None;
+        }
+
+        let mut reasons = Vec::new();
+        if self.fail_closed {
+            reasons.push("conflict-matrix fail_closed=true".to_string());
+        }
+        if !self.can_parallel {
+            reasons.push("conflict-matrix can_parallel=false".to_string());
+        }
+        reasons.extend(self.decisions.iter().cloned());
+        reasons.extend(
+            self.conflicts
+                .iter()
+                .filter(|conflict| conflict.risk != "low")
+                .map(|conflict| conflict.describe()),
+        );
+        if reasons.is_empty() {
+            reasons.push("conflict-matrix did not approve parallel dispatch".to_string());
+        }
+        Some(reasons.join("; "))
+    }
+}
+
+impl TsiftConflictMatrixConflict {
+    fn describe(&self) -> String {
+        let mut parts = vec![format!(
+            "pair {}<->{} risk={} verdict={}",
+            self.left, self.right, self.risk, self.verdict
+        )];
+        if !self.shared_files.is_empty() {
+            parts.push(format!("shared_files={}", self.shared_files.join(",")));
+        }
+        if !self.shared_symbols.is_empty() {
+            parts.push(format!("shared_symbols={}", self.shared_symbols.join(",")));
+        }
+        if !self.shared_tests.is_empty() {
+            parts.push(format!("shared_tests={}", self.shared_tests.join(",")));
+        }
+        if !self.shared_config_files.is_empty() {
+            parts.push(format!(
+                "shared_config_files={}",
+                self.shared_config_files.join(",")
+            ));
+        }
+        parts.join(" ")
     }
 }
 
@@ -369,22 +577,28 @@ fn parse_evidence_handle(
         .with_context(|| format!("tsift graph-db evidence target not found: {target}"))?;
     let target_kind = string_at(value, "/target_node/kind").unwrap_or_default();
     let target_label = string_at(value, "/target_node/label").unwrap_or_default();
+    let evidence_packet_id =
+        string_at(value, "/packet_id").unwrap_or_else(|| format!("{target}:{target_node_id}"));
     Ok(TsiftPromptTargetHandle {
         prompt_target: prompt_target.to_string(),
         target: target.to_string(),
-        evidence_packet_id: format!("{target}:{target_node_id}"),
+        evidence_packet_id,
         target_node_id,
         target_kind,
         target_label,
+        projection_hash: string_at(value, "/projection_hash"),
         worker_context_handles: node_ids(value.pointer("/worker_context")),
         source_handles: node_ids(value.pointer("/source_handles")),
         semantic_handles: node_ids(value.pointer("/semantic_related")),
         next_commands: string_array(value.pointer("/next_commands")),
+        replay_commands: string_array(value.pointer("/replay_commands")),
+        repair_commands: string_array(value.pointer("/repair_commands")),
     })
 }
 
 fn parse_conflict_matrix(value: &Value) -> TsiftConflictMatrixSummary {
     TsiftConflictMatrixSummary {
+        contract_version: string_at(value, "/contract_version"),
         can_parallel: value
             .pointer("/can_parallel")
             .and_then(Value::as_bool)
@@ -393,6 +607,10 @@ fn parse_conflict_matrix(value: &Value) -> TsiftConflictMatrixSummary {
             .pointer("/fail_closed")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        inputs: parse_conflict_matrix_inputs(value.pointer("/inputs")),
+        context_pack: parse_conflict_matrix_context(value.pointer("/context_pack")),
+        candidates: parse_conflict_matrix_candidates(value.pointer("/candidates")),
+        conflicts: parse_conflict_matrix_conflicts(value.pointer("/conflicts")),
         evidence_packet_ids: string_array(value.pointer("/orchestration/evidence_packet_ids")),
         decisions: string_array(value.pointer("/orchestration/conflict_matrix_decisions")),
         worker_ownership_blocks: string_array(
@@ -400,6 +618,7 @@ fn parse_conflict_matrix(value: &Value) -> TsiftConflictMatrixSummary {
         ),
         worker_prompt_packets: parse_worker_prompt_packets(value.pointer("/worker_prompt_packets")),
         next_commands: string_array(value.pointer("/next_commands")),
+        warnings: string_array(value.pointer("/warnings")),
     }
 }
 
@@ -410,9 +629,12 @@ fn parse_worker_prompt_packets(value: Option<&Value>) -> Vec<TsiftWorkerPromptPa
             packets
                 .iter()
                 .map(|packet| TsiftWorkerPromptPacket {
+                    contract_version: string_at(packet, "/contract_version"),
+                    packet_id: string_at(packet, "/packet_id"),
                     target: string_at(packet, "/target").unwrap_or_default(),
                     rank: packet.pointer("/rank").and_then(Value::as_u64).unwrap_or(0) as usize,
                     risk: string_at(packet, "/risk").unwrap_or_default(),
+                    projection_hash: string_at(packet, "/projection_hash"),
                     title: string_at(packet, "/title").unwrap_or_default(),
                     owned_files: string_array(packet.pointer("/owned_files")),
                     owned_symbols: string_array(packet.pointer("/owned_symbols")),
@@ -420,10 +642,129 @@ fn parse_worker_prompt_packets(value: Option<&Value>) -> Vec<TsiftWorkerPromptPa
                     forbidden_files: string_array(packet.pointer("/forbidden_files")),
                     expected_tests: string_array(packet.pointer("/expected_tests")),
                     expansion_commands: string_array(packet.pointer("/expansion_commands")),
+                    token_budget: parse_worker_prompt_token_budget(packet.pointer("/token_budget")),
+                    semantic_dispatch_score: i64_at(packet, "/semantic_dispatch_score"),
+                    semantic_dispatch_reasons: string_array(
+                        packet.pointer("/semantic_dispatch_reasons"),
+                    ),
+                    prompt: string_at(packet, "/prompt"),
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn parse_conflict_matrix_inputs(value: Option<&Value>) -> Option<TsiftConflictMatrixInputs> {
+    let value = value?;
+    Some(TsiftConflictMatrixInputs {
+        graph_db_evidence_targets: string_array(value.pointer("/graph_db_evidence_targets")),
+        evidence_packets: value
+            .pointer("/evidence_packets")
+            .and_then(Value::as_array)
+            .map(|packets| {
+                packets
+                    .iter()
+                    .map(|packet| TsiftConflictMatrixEvidencePacket {
+                        target: string_at(packet, "/target").unwrap_or_default(),
+                        packet_id: string_at(packet, "/packet_id").unwrap_or_default(),
+                        target_node_id: string_at(packet, "/target_node_id").unwrap_or_default(),
+                        projection_hash: string_at(packet, "/projection_hash"),
+                        replay_command: string_at(packet, "/replay_command"),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        context_pack_command: string_at(value, "/context_pack_command"),
+        cached_diff_command: string_at(value, "/cached_diff_command"),
+        impact_command: string_at(value, "/impact_command"),
+    })
+}
+
+fn parse_conflict_matrix_context(
+    value: Option<&Value>,
+) -> Option<TsiftConflictMatrixContextSummary> {
+    let value = value?;
+    Some(TsiftConflictMatrixContextSummary {
+        target: string_at(value, "/target").unwrap_or_default(),
+        target_kind: string_at(value, "/target_kind").unwrap_or_default(),
+        prompt_targets: string_array(value.pointer("/prompt_targets")),
+        touched_files: string_array(value.pointer("/touched_files")),
+        touched_symbols: string_array(value.pointer("/touched_symbols")),
+        files_changed: usize_at(value, "/files_changed"),
+        worker_context: string_array(value.pointer("/worker_context")),
+        source_windows: string_array(value.pointer("/source_windows")),
+        status_reminders: string_array(value.pointer("/status_reminders")),
+    })
+}
+
+fn parse_conflict_matrix_candidates(value: Option<&Value>) -> Vec<TsiftConflictMatrixCandidate> {
+    value
+        .and_then(Value::as_array)
+        .map(|candidates| {
+            candidates
+                .iter()
+                .map(|candidate| TsiftConflictMatrixCandidate {
+                    target: string_at(candidate, "/target").unwrap_or_default(),
+                    rank: usize_at(candidate, "/rank"),
+                    risk: string_at(candidate, "/risk").unwrap_or_default(),
+                    risk_score: usize_at(candidate, "/risk_score"),
+                    risk_reasons: string_array(candidate.pointer("/risk_reasons")),
+                    evidence_packet_id: string_at(candidate, "/evidence_packet_id")
+                        .unwrap_or_default(),
+                    target_node_id: string_at(candidate, "/target_node_id").unwrap_or_default(),
+                    target_kind: string_at(candidate, "/target_kind").unwrap_or_default(),
+                    target_label: string_at(candidate, "/target_label").unwrap_or_default(),
+                    owned_files: string_array(candidate.pointer("/owned_files")),
+                    owned_symbols: string_array(candidate.pointer("/owned_symbols")),
+                    config_files: string_array(candidate.pointer("/config_files")),
+                    affected_tests: string_array(candidate.pointer("/affected_tests")),
+                    staged_files: string_array(candidate.pointer("/staged_overlap/files")),
+                    staged_symbols: string_array(candidate.pointer("/staged_overlap/symbols")),
+                    staged_tests: string_array(candidate.pointer("/staged_overlap/tests")),
+                    staged_config_files: string_array(
+                        candidate.pointer("/staged_overlap/config_files"),
+                    ),
+                    semantic_dispatch_score: i64_at(candidate, "/semantic_dispatch_score"),
+                    semantic_dispatch_reasons: string_array(
+                        candidate.pointer("/semantic_dispatch_reasons"),
+                    ),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_conflict_matrix_conflicts(value: Option<&Value>) -> Vec<TsiftConflictMatrixConflict> {
+    value
+        .and_then(Value::as_array)
+        .map(|conflicts| {
+            conflicts
+                .iter()
+                .map(|conflict| TsiftConflictMatrixConflict {
+                    left: string_at(conflict, "/left").unwrap_or_default(),
+                    right: string_at(conflict, "/right").unwrap_or_default(),
+                    risk: string_at(conflict, "/risk").unwrap_or_default(),
+                    risk_score: usize_at(conflict, "/risk_score"),
+                    shared_files: string_array(conflict.pointer("/shared_files")),
+                    shared_symbols: string_array(conflict.pointer("/shared_symbols")),
+                    shared_tests: string_array(conflict.pointer("/shared_tests")),
+                    shared_config_files: string_array(conflict.pointer("/shared_config_files")),
+                    verdict: string_at(conflict, "/verdict").unwrap_or_default(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_worker_prompt_token_budget(value: Option<&Value>) -> Option<TsiftWorkerPromptTokenBudget> {
+    let value = value?;
+    Some(TsiftWorkerPromptTokenBudget {
+        prompt_estimated_tokens: usize_at(value, "/prompt_estimated_tokens"),
+        max_prompt_tokens: usize_at(value, "/max_prompt_tokens"),
+        source_window_count: usize_at(value, "/source_window_count"),
+        source_window_lines: usize_at(value, "/source_window_lines"),
+        max_context_bytes: usize_at(value, "/max_context_bytes"),
+    })
 }
 
 fn node_ids(value: Option<&Value>) -> Vec<String> {
@@ -443,6 +784,14 @@ fn string_at(value: &Value, pointer: &str) -> Option<String> {
         .pointer(pointer)
         .and_then(Value::as_str)
         .map(ToString::to_string)
+}
+
+fn usize_at(value: &Value, pointer: &str) -> usize {
+    value.pointer(pointer).and_then(Value::as_u64).unwrap_or(0) as usize
+}
+
+fn i64_at(value: &Value, pointer: &str) -> i64 {
+    value.pointer(pointer).and_then(Value::as_i64).unwrap_or(0)
 }
 
 fn string_array(value: Option<&Value>) -> Vec<String> {
@@ -522,12 +871,12 @@ JSON
     ;;
   *"graph-db"*"--json evidence agbr"*)
     cat <<'JSON'
-{{"root":"/tmp/repo","backend":"sqlite","target":"agbr","freshness":{{"status":"current","fail_closed":false,"diagnostics":[]}},"target_node":{{"id":"gbak-agbr","kind":"backlog","label":"#agbr"}},"worker_context":[{{"id":"wctx-agbr"}}],"source_handles":[{{"id":"src-agbr"}}],"semantic_related":[{{"id":"sem-agbr"}}],"next_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"]}}
+{{"root":"/tmp/repo","backend":"sqlite","target":"agbr","packet_id":"gevd-agbr","projection_hash":"abc","freshness":{{"status":"current","fail_closed":false,"diagnostics":[]}},"target_node":{{"id":"gbak-agbr","kind":"backlog","label":"#agbr"}},"worker_context":[{{"id":"wctx-agbr"}}],"source_handles":[{{"id":"src-agbr"}}],"semantic_related":[{{"id":"sem-agbr"}}],"next_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"],"replay_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"],"repair_commands":["tsift graph-db --path /tmp/repo refresh --json"]}}
 JSON
     ;;
   *"conflict-matrix"*)
     cat <<'JSON'
-{{"targets":["agbr"],"can_parallel":true,"fail_closed":false,"orchestration":{{"evidence_packet_ids":["agbr:gbak-agbr"],"conflict_matrix_decisions":["candidate #1 agbr risk=low"],"worker_ownership_blocks":["Worker 1 owns agbr (#agbr)"]}},"worker_prompt_packets":[{{"target":"agbr","rank":1,"risk":"low","title":"Worker 1 owns agbr (#agbr)","owned_files":["tasks.md"],"owned_symbols":["Exchange"],"read_only_context":["src-agbr"],"forbidden_files":[],"expected_tests":["cargo test"],"expansion_commands":["tsift graph-db evidence agbr --json"]}}],"next_commands":["tsift conflict-matrix --path /tmp/repo agbr --json"]}}
+{{"contract_version":"conflict-matrix-v1","targets":["agbr"],"can_parallel":true,"fail_closed":false,"inputs":{{"graph_db_evidence_targets":["agbr"],"evidence_packets":[{{"target":"agbr","packet_id":"gevd-agbr","target_node_id":"gbak-agbr","projection_hash":"abc","replay_command":"tsift graph-db evidence agbr --json"}}],"context_pack_command":"tsift --envelope context-pack tasks.md --budget normal","cached_diff_command":"tsift diff-digest --cached /tmp/repo --json","impact_command":"tsift impact /tmp/repo --cached --limit 20 --json"}},"context_pack":{{"target":"tasks.md","target_kind":"agent_doc_session","prompt_targets":["do #agbr"],"touched_files":["tasks.md"],"touched_symbols":["Exchange"],"files_changed":1,"worker_context":["summary"],"source_windows":["tasks.md:1-20"],"status_reminders":[]}},"candidates":[{{"target":"agbr","rank":1,"risk":"low","risk_score":0,"risk_reasons":[],"evidence_packet_id":"gevd-agbr","target_node_id":"gbak-agbr","target_kind":"backlog","target_label":"#agbr","owned_files":["tasks.md"],"owned_symbols":["Exchange"],"config_files":[],"affected_tests":["cargo test"],"staged_overlap":{{"files":[],"symbols":[],"tests":[],"config_files":[]}},"semantic_dispatch_score":3,"semantic_dispatch_reasons":["semantic match"]}}],"conflicts":[],"orchestration":{{"evidence_packet_ids":["gevd-agbr"],"conflict_matrix_decisions":["candidate #1 agbr risk=low"],"worker_ownership_blocks":["Worker 1 owns agbr (#agbr)"]}},"worker_prompt_packets":[{{"contract_version":"worker-prompt-packet-v1","packet_id":"wpp-agbr","target":"agbr","rank":1,"risk":"low","projection_hash":"abc","title":"Worker 1 owns agbr (#agbr)","owned_files":["tasks.md"],"owned_symbols":["Exchange"],"read_only_context":["src-agbr","semantic_rank: semantic match"],"forbidden_files":[],"expected_tests":["cargo test"],"expansion_commands":["tsift graph-db evidence agbr --json"],"token_budget":{{"prompt_estimated_tokens":20,"max_prompt_tokens":200,"source_window_count":1,"source_window_lines":20,"max_context_bytes":2400}},"semantic_dispatch_score":3,"semantic_dispatch_reasons":["semantic match"],"prompt":"Worker 1 owns agbr (#agbr)\n\nFail closed if the task requires a forbidden/shared file."}}],"next_commands":["tsift conflict-matrix --path /tmp/repo agbr --json"],"warnings":[]}}
 JSON
     ;;
   *)
@@ -579,11 +928,32 @@ esac
         assert_eq!(plan.graph_db_status.status, "current");
         assert_eq!(
             plan.prompt_target_handles[0].evidence_packet_id,
-            "agbr:gbak-agbr"
+            "gevd-agbr"
+        );
+        assert_eq!(plan.conflict_matrix.evidence_packet_ids, vec!["gevd-agbr"]);
+        assert_eq!(
+            plan.conflict_matrix.contract_version.as_deref(),
+            Some("conflict-matrix-v1")
         );
         assert_eq!(
-            plan.conflict_matrix.evidence_packet_ids,
-            vec!["agbr:gbak-agbr"]
+            plan.conflict_matrix.candidates[0].owned_files,
+            vec!["tasks.md"]
+        );
+        assert_eq!(
+            plan.conflict_matrix
+                .context_pack
+                .as_ref()
+                .unwrap()
+                .touched_files,
+            vec!["tasks.md"]
+        );
+        assert_eq!(
+            plan.conflict_matrix.worker_prompt_packets[0]
+                .token_budget
+                .as_ref()
+                .unwrap()
+                .source_window_count,
+            1
         );
         let context = plan
             .prompt_context_for_task("do #agbr")
@@ -592,6 +962,9 @@ esac
         assert!(context.contains("<tsift_graph_evidence>"));
         assert!(context.contains("\"source_handles\": ["));
         assert!(context.contains("\"Worker 1 owns agbr (#agbr)\""));
+        assert!(context.contains("\"context_pack\""));
+        assert!(context.contains("\"candidates\""));
+        assert!(context.contains("Fail closed if the task requires a forbidden/shared file"));
 
         let calls = std::fs::read_to_string(log).unwrap();
         assert!(calls.contains("graph-db"));
@@ -616,5 +989,39 @@ esac
         assert!(calls.contains("status"));
         assert!(!calls.contains("evidence agbr"));
         assert!(!calls.contains("conflict-matrix"));
+    }
+
+    #[test]
+    fn conflict_matrix_blocks_parallel_when_report_does_not_approve_dispatch() {
+        let summary = TsiftConflictMatrixSummary {
+            contract_version: Some("conflict-matrix-v1".to_string()),
+            can_parallel: false,
+            fail_closed: false,
+            inputs: None,
+            context_pack: None,
+            candidates: Vec::new(),
+            conflicts: vec![TsiftConflictMatrixConflict {
+                left: "left".to_string(),
+                right: "right".to_string(),
+                risk: "high".to_string(),
+                risk_score: 40,
+                shared_files: Vec::new(),
+                shared_symbols: vec!["shared_symbol".to_string()],
+                shared_tests: Vec::new(),
+                shared_config_files: Vec::new(),
+                verdict: "split by file or serialize".to_string(),
+            }],
+            evidence_packet_ids: Vec::new(),
+            decisions: vec!["pair left<->right risk=high".to_string()],
+            worker_ownership_blocks: Vec::new(),
+            worker_prompt_packets: Vec::new(),
+            next_commands: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let blocker = summary.parallel_dispatch_blocker().unwrap();
+
+        assert!(blocker.contains("can_parallel=false"));
+        assert!(blocker.contains("shared_symbols=shared_symbol"));
     }
 }

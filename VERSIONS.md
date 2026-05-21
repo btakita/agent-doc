@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **tsift conflict-matrix orchestration now carries the full planner contract.**
+  `agent-doc plan` and orchestration prompts now preserve the
+  `conflict-matrix-v1` context-pack, cached diff, impact, ranked candidate,
+  conflict, worker prompt packet, token budget, and semantic ranking fields
+  emitted by tsift. Parallel orchestration now blocks unless tsift explicitly
+  reports `can_parallel=true` and `fail_closed=false`, so shared symbol/test
+  risks cannot slip through just because they are not file-level fail-closed
+  conflicts.
+
 - **IPC duplicate-response detection now uses normalized response deltas.**
   IPC timeout fallbacks and ack-content normalization fallbacks compare the
   normalized `base -> content_ours` response insertion hunks against the

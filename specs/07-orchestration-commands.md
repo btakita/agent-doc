@@ -31,7 +31,7 @@ This file covers binary-owned planning/orchestration and the queue surface that 
 - `pending_mutations.expect_add` signals that the response likely needs new backlog capture.
 - `execution_scope=plan_backlog_only` suppresses repo implementation work for report/planning contracts such as `#agent-doc-bug`.
 - Copied `prompt_presets` frontmatter defines reusable prompts but does not invoke them; plan/preflight must ignore preset definition lines when expanding preset references from added diff text.
-- When graph evidence is active, `plan` calls `tsift graph-db --path <FILE> --json status`, `tsift graph-db --path <FILE> --json evidence <id> --depth 3 --limit 8`, and `tsift conflict-matrix --path <FILE> --json <id...>`. A stale/fail-closed graph freshness report or an unresolved target id becomes a blocker instead of an advisory warning. The emitted `graph_evidence` record attaches evidence packet ids, graph node handles, conflict-matrix decisions, and worker ownership packet summaries to the matching prompt targets.
+- When graph evidence is active, `plan` calls `tsift graph-db --path <FILE> --json status`, `tsift graph-db --path <FILE> --json evidence <id> --depth 3 --limit 8`, and `tsift conflict-matrix --path <FILE> --json <id...>`. A stale/fail-closed graph freshness report or an unresolved target id becomes a blocker instead of an advisory warning. The emitted `graph_evidence` record carries the `conflict-matrix-v1` planner contract: evidence packet ids, graph node handles, context-pack summary, cached diff and impact commands, ranked candidates, shared file/symbol/test/config conflicts, worker ownership block labels, first-class worker prompt packets, token budgets, semantic ranking reasons, and warnings.
 
 ## orchestrate
 
@@ -87,7 +87,7 @@ Additional rules:
 
 - Resolves tasks and presets first, then hands them to the existing worktree fan-out backend.
 - The legacy `agent-doc parallel` entry is only a compatibility wrapper over this same dispatch path.
-- If a materialized tsift graph database exists and resolved tasks include `do #id` / `do [#id]` items, orchestration collects the same graph evidence and conflict matrix as `plan`. Sequential and DAG child prompts receive a bounded `<tsift_graph_evidence>` JSON block outside the document mutation so the graph handles are available to the fresh agent without being injected into `agent:exchange`. Parallel worktree job packets receive the same block in the task prompt. Parallel mode fails closed when `conflict-matrix.fail_closed=true`; all modes fail closed on stale graph freshness or missing evidence targets.
+- If a materialized tsift graph database exists and resolved tasks include `do #id` / `do [#id]` items, orchestration collects the same graph evidence and conflict matrix as `plan`. Sequential and DAG child prompts receive a bounded `<tsift_graph_evidence>` JSON block outside the document mutation so the graph handles are available to the fresh agent without being injected into `agent:exchange`. Parallel worktree job packets receive the same block in the task prompt, including the worker prompt packet's ownership prompt and forbidden/shared-file instructions. Parallel mode fails closed unless the conflict matrix explicitly reports `can_parallel=true` and `fail_closed=false`; all modes fail closed on stale graph freshness or missing evidence targets.
 
 ## `--mode dag`
 

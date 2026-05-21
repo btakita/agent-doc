@@ -51,7 +51,11 @@ Commit / push:
 - agent-doc subrepo: `ab9129dd` (`feat: validate tsift graph job packets`) pushed to `btakita/agent-doc` branch `20260422/codex-agent-backend`.
 - superproject pointer: `195517e0c` (`chore: update agent-doc graph packet validation`) pushed to `btakita/agent-loop` `main`.
 - Follow-up already captured in backlog: `#dxtr` for dispatch-trace-backed closeout/job packet audit evidence.
-<!-- agent:boundary:b9897228 -->
+### Re: closeout repair — gpt-5
+
+Reopened closeout to persist the pending-state repair that was left as local drift after the earlier response write. The prior implementation response is present in the exchange, `#gxct` and `#wpkm` are reaped from backlog into the done archive, and `#dxtr` remains open as the already captured follow-up.
+
+<!-- agent:boundary:cc7b7979 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -59,7 +63,7 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 -->
 
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - do [#gxct]
 - do [#wpkm]
@@ -68,8 +72,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#gxct] [recommended] Validate tsift graph orchestration contracts in agent-doc plan/orchestrate: require contract_version, packet_id, projection_hash, freshness=current, replay_commands, and repair_commands before dispatching lower-agent work.
-- [ ] [#wpkm] [recommended] Map tsift worker_prompt_packets into lower-agent job packets: preserve owned_files, read_only_context, forbidden_files, expected_tests, expansion_commands, token budgets, and fail-closed prompt text.
+- [ ] [#dxtr] [recommended] Consume tsift dispatch-trace outputs in agent-doc plan/orchestrate closeout: attach evidence packet ids, worker_feedback summaries, graph links, replay/repair commands, and freshness/projection hashes to lower-agent job packets and parent closeouts so graph-backed dispatch can be audited without scraping CLI output.
 - [ ] [#wrcx] [recommended] Collect lower-agent closeouts into worker_result lines that tsift can project back into graph evidence, including status, touched files, tests, and follow-up ids.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

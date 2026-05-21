@@ -29,37 +29,12 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-043857.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-050429.md`*
 
 Compacted content:
-- Archived 1 response topic(s): lower-agent orchestration
+- Archived 1 response topic(s): review backlog lifecycle
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: review backlog lifecycle — gpt-5
-
-Implemented #rvel, #fwjw, and #0fcx.
-
-The pending system now has a first-class `agent:review` component. `--pending-gate` moves backlog items into review, `--pending-ungate` moves them back to backlog, `agent-doc migrate` moves legacy `[/]` backlog items into review, and preflight reports `review_count` / `review_gated_count` plus a warning for legacy gated backlog entries. I also added `--review-add` and `--review-edit` for direct review-list mutations, and `review_done_guard` as an opt-in closeout guard that can require gated review before `--done` completes a tracked item.
-
-I updated the docs and specs to describe the new review lifecycle, the agent-doc / job packet / opdoc / runbook / plan taxonomy, and the retained-audit role of opdocs. The FlowCore guard budget was updated only after adding a typed closeout reason for strict `review_done_guard` blocks.
-
-Verification completed:
-
-- `cargo test --test pending_integration`
-- `cargo test component::`
-- `cargo test migrate::`
-- `cargo test frontmatter::`
-- `cargo test --test finalize_integration`
-- `cargo test skill::`
-- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
-- `cargo fmt --check`
-- `git diff --check`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- GitHub CI run `26205740633` was green; its `Run make tmux-ci` step completed successfully at `2026-05-21T04:46:44Z`.
-
-Committed implementation in `src/agent-doc` as `171f7939 feat: add review backlog lifecycle`, then committed the parent submodule pointer as `843d1c8c4 agent-doc: update review lifecycle`.
-<!-- agent:boundary:132fec51 -->
+<!-- agent:boundary:459d57ed -->
 <!-- /agent:exchange -->
 ###
 <!--

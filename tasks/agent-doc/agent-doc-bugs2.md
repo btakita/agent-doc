@@ -34,7 +34,17 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 Compacted content:
 - Archived 8 response topic(s): JB Interrupt and Clear Session Context; tsift #pwcm backlog accounting; backlog update and duplicate prompt corruption; 5 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:4012942d -->
+❯ do [#agbr]. #spec-test-build-install-commit-push
+### Re: #agbr tsift graph evidence — gpt-5
+
+Implemented `#agbr`. `agent-doc plan` now adds optional `graph_evidence` for queued `do #id` targets when a materialized `.tsift/graph.db` exists, and fails closed on stale graph state or missing evidence targets. `agent-doc orchestrate` now attaches bounded `<tsift_graph_evidence>` JSON packets to fresh child prompts/job packets, and parallel fan-out blocks when the tsift conflict matrix fail-closes.
+
+The change adds `src/tsift_graph.rs`, wires it through `plan.rs` and `orchestrate.rs`, adds regression coverage for target extraction, evidence handles, stale graph failure, and sequential prompt attachment, and documents the behavior in README/SPEC/orchestration docs. `AGENTS.md` was also refreshed by the required `tsift status --fix` session-start step.
+
+Verification passed: `cargo test tsift_graph -- --test-threads=1`, `cargo test sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt -- --test-threads=1`, `cargo test build_plan_includes_finalize_placeholder_for_template_docs -- --test-threads=1`, `cargo check`, `make check`, `make install`, and `agent-doc --version` returned `0.33.16`. CI review: latest GitHub CI run `26201015869` on `20260422/codex-agent-backend` succeeded, including the `Run make tmux-ci` step.
+
+Committed and pushed `src/agent-doc` commit `67838bd8 feat: add tsift graph evidence to orchestration`, then committed and pushed the root gitlink update `db879348b agent-doc: update tsift graph evidence integration`. The nested repo is clean; only unrelated pre-existing root worktree changes remain outside this task.
+<!-- agent:boundary:db3e8d5f -->
 <!-- /agent:exchange -->
 ###
 
@@ -45,7 +55,6 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#agbr] [recommended] Wire tsift graph evidence into agent-doc planning/orchestration: have agent-doc plan/orchestrate call tsift graph-db evidence and tsift conflict-matrix for queued do-items, attach graph handles to prompt_targets/job packets, and fail closed on stale graph.db or missing targets.
 - [ ] [#r7k8] [recommended] Incorporate tsift #pwcm planner conflict-matrix report into lower-agent orchestration before enabling parallel worker dispatch: use graph/context/diff/impact outputs to rank worker scopes, flag shared file/symbol/test/config conflicts, and emit fail-closed ownership blocks. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

@@ -36,7 +36,23 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): graph evidence blocker; LadybugDB backend question
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:ce46b31a -->
+❯ Would duckdb with graph extensions or duckdb + ladybugdb be a viable + faster replacement for sqlite?
+### Re: DuckDB / Ladybug as SQLite replacement — gpt-5
+
+Short answer: not as a direct replacement for the current `.tsift/graph.db` correctness store. DuckDB or Ladybug could be worth an optional analytical backend, but they do not remove the main `#gdblock` failure mode unless tsift also changes the process model.
+
+The current store is a small provider-neutral `GraphStore` surface: node/edge upserts, kind scans, outgoing-edge scans, bounded neighborhoods, shortest path, projection version rows, and transactional full-projection replacement. The local code keeps that in `src/tsift/src/substrate.rs` with indexed `graph_nodes` / `graph_edges` tables and a delete+insert refresh transaction. That is a good fit for SQLite. The lock bug is more specifically that the graph store does not appear to have the same WAL/busy-timeout/snapshot-recovery discipline already described elsewhere in the tsift spec for index and summary DB reads.
+
+DuckDB is attractive for wide analytical scans and bulk reporting, and DuckPGQ gives DuckDB SQL/PGQ graph query syntax. The catch is that DuckPGQ is a community extension still under active development, and DuckDB's native file concurrency model is one read-write process or many read-only processes. That means a Codex + Claude Code + agent-doc workflow with independent processes can still hit writer/reader coordination problems. It may be faster for large `status`, `drift`, graph analytics, or contract-regeneration workloads, but it is not a clean drop-in for `graph-db evidence` unless benchmarks prove those paths are scan-bound rather than point-lookup/traversal-bound.
+
+Ladybug is the stronger graph-shaped candidate. Its docs position it as an embedded graph DB with Cypher, columnar storage, CSR adjacency/join indices, vectorized/factorized query execution, multicore parallelism, serializable ACID transactions, Rust bindings, and DuckDB attach/import support. That could plausibly beat SQLite for large join-heavy graph workloads. But its concurrency docs have the same strategic limitation for this use case: one read-write database object, or multiple read-only database objects; multi-process read/write is expected to go through a single API-server process. So adopting Ladybug directly would either keep the same class of lock/operator issue or force tsift to introduce a graph broker service.
+
+Recommendation: keep SQLite as the default correctness backend and fix `#gdblock` locally first. The lowest-risk path is WAL mode for `.tsift/graph.db`, a short busy timeout, read-only snapshot fallback including sidecars, and clear lock diagnostics/recovery commands. If we want DuckDB/Ladybug, add them behind the existing `GraphStore` contract as experimental read models and benchmark them against the real graph-db workloads: `refresh`, `status`, `evidence`, `conflict-matrix`, `dispatch-trace`, large synthetic traversal caps, and concurrent agent-doc processes. A replacement should require a measured win and no regression in offline portability, deterministic ordering, crash recovery, and binary install friction.
+
+Sources checked: [DuckDB concurrency](https://duckdb.org/docs/current/connect/concurrency), [DuckDB graph queries / DuckPGQ](https://duckdb.org/docs/lts/guides/sql_features/graph_queries.html), [Ladybug overview](https://docs.ladybugdb.com/), [Ladybug concurrency](https://docs.ladybugdb.com/concurrency/), [Ladybug Rust API](https://docs.ladybugdb.com/client-apis/rust/), [Ladybug DuckDB extension](https://docs.ladybugdb.com/extensions/attach/duckdb/).
+
+Closeout: no repo files changed for this response; no tests run because this was an evaluation-only prompt. Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, targeted `rg`/`sed` inspection, and current primary docs lookup. Preflight warning noted: one legacy gated backlog item remains in `agent:backlog` and can be migrated separately with `agent-doc migrate`.
+<!-- agent:boundary:84b279e0 -->
 <!-- /agent:exchange -->
 ###
 <!--

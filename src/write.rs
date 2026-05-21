@@ -224,6 +224,8 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use similar::{ChangeTag, TextDiff};
+
 use crate::snapshot::find_project_root;
 use crate::{
     component, component::is_backlog_component, frontmatter, merge, repair, sessions, snapshot,
@@ -6304,6 +6306,19 @@ fn content_ours_merged_with_disk_edits(
     if strip_boundary_for_dedup(&on_disk_content) == strip_boundary_for_dedup(content_ours) {
         return content_ours.to_string();
     }
+    if response_already_in_current(base, content_ours, &on_disk_content) {
+        eprintln!(
+            "[write] normalization fallback: response delta already in current file; adopting current content"
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "sidecar_normalization_fallback_adopted_current_delta file={} delta=response_contained",
+                file.display()
+            ),
+        );
+        return on_disk_content;
+    }
 
     let base_state = crate::crdt::CrdtDoc::from_text(base).encode_state();
     match merge::merge_contents_crdt(Some(&base_state), content_ours, &on_disk_content) {
@@ -7889,17 +7904,112 @@ fn capture_locked_pre_response(path: &Path) -> Result<(std::fs::File, String)> {
     Ok((doc_lock, content_at_start))
 }
 
+fn normalize_component_content_for_delta(content: &str) -> String {
+    crate::diff::strip_comments(&strip_boundary_for_dedup(content))
+}
+
+fn containment_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn base_prompt_prefix_equivalents(base: &str) -> HashSet<String> {
+    base.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            Some(
+                trimmed
+                    .strip_prefix('❯')
+                    .unwrap_or(trimmed)
+                    .trim()
+                    .to_string(),
+            )
+        })
+        .collect()
+}
+
+fn inserted_delta_hunks(base: &str, ours: &str) -> Vec<Vec<String>> {
+    let base_prefix_equivalents = base_prompt_prefix_equivalents(base);
+    let base_lines = base
+        .lines()
+        .filter_map(containment_line)
+        .collect::<HashSet<_>>();
+    let diff = TextDiff::from_lines(base, ours);
+    let mut hunks = Vec::<Vec<String>>::new();
+    let mut current = Vec::<String>::new();
+
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Insert => {
+                let line = change.to_string();
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if base_lines.contains(trimmed) {
+                    continue;
+                }
+                if let Some(unprefixed) = trimmed.strip_prefix('❯') {
+                    let unprefixed = unprefixed.trim();
+                    if base_prefix_equivalents.contains(unprefixed) {
+                        continue;
+                    }
+                }
+                current.push(trimmed.to_string());
+            }
+            ChangeTag::Delete | ChangeTag::Equal => {
+                if !current.is_empty() {
+                    hunks.push(std::mem::take(&mut current));
+                }
+            }
+        }
+    }
+    if !current.is_empty() {
+        hunks.push(current);
+    }
+
+    hunks
+        .into_iter()
+        .filter(|hunk| response_delta_hunk_is_actionable(hunk))
+        .collect()
+}
+
+fn response_delta_hunk_is_actionable(hunk: &[String]) -> bool {
+    hunk.iter().any(|line| {
+        line.starts_with("### Re:")
+            || line.starts_with("## Assistant")
+            || line.starts_with("## User")
+    }) || hunk.len() >= 2
+}
+
+fn contains_contiguous_hunk(haystack: &[String], needle: &[String]) -> bool {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return false;
+    }
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
 /// Detect whether the plugin has already applied the agent's response patches.
 ///
 /// On IPC sidecar ack timeout, the socket delivery may have succeeded but the
-/// confirmation didn't arrive in time. If the plugin applied the patches, the
-/// exchange component in `content_current` already contains the response content
+/// confirmation did not arrive in time. If the plugin applied the patches, the
+/// exchange component in `content_current` already contains the response delta
 /// from `content_ours`. CRDT merging in this state would duplicate the response.
 ///
-/// Detection: extract the lines that `content_ours` added to the exchange
-/// component (relative to `base`), and check if they're already present in
-/// `content_current`'s exchange. Conservative — returns false on any parse
-/// failure or ambiguous state.
+/// Detection: compute normalized insertion hunks from `base -> content_ours` in
+/// `agent:exchange`, ignore boundary/comment churn and prompt-prefix-only
+/// normalization lines, and require each actionable response hunk to appear
+/// contiguously in `content_current`. This is intentionally stricter than a
+/// line-overlap count so short responses do not adopt current content from a
+/// coincidental shared body line.
 fn response_already_in_current(base: &str, content_ours: &str, content_current: &str) -> bool {
     let base_comps = crate::component::parse(base).unwrap_or_default();
     let ours_comps = crate::component::parse(content_ours).unwrap_or_default();
@@ -7913,44 +8023,32 @@ fn response_already_in_current(base: &str, content_ours: &str, content_current: 
         return false;
     };
 
-    let base_content = base_e.content(base);
-    let ours_content = ours_e.content(content_ours);
-    let current_content = current_e.content(content_current);
+    let base_content = normalize_component_content_for_delta(base_e.content(base));
+    let ours_content = normalize_component_content_for_delta(ours_e.content(content_ours));
+    let current_content = normalize_component_content_for_delta(current_e.content(content_current));
 
     // No changes to exchange — nothing to detect
     if ours_content.trim() == base_content.trim() {
         return false;
     }
 
-    // Find lines added by ours that aren't in base
-    let base_lines: std::collections::HashSet<&str> = base_content.lines().collect();
-    let response_lines: Vec<&str> = ours_content
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .filter(|line| !base_lines.contains(line))
-        .collect();
-
-    if response_lines.is_empty() {
+    let response_hunks = inserted_delta_hunks(&base_content, &ours_content);
+    if response_hunks.is_empty() {
         return false;
     }
 
-    // Check if the majority of response lines are already in current
-    let current_lines: std::collections::HashSet<&str> = current_content.lines().collect();
-    let present_count = response_lines
+    let current_lines = current_content
+        .lines()
+        .filter_map(containment_line)
+        .collect::<Vec<_>>();
+    let detected = response_hunks
         .iter()
-        .filter(|line| current_lines.contains(*line))
-        .count();
-
-    // Require ≥80% of response lines present to confirm plugin applied.
-    // A lower threshold risks false positives from coincidental line matches.
-    let threshold = std::cmp::max(1, (response_lines.len() * 4) / 5);
-    let detected = present_count >= threshold;
+        .all(|hunk| contains_contiguous_hunk(&current_lines, hunk));
 
     if detected {
         eprintln!(
-            "[write] plugin-applied detection: {}/{} response lines already in current",
-            present_count,
-            response_lines.len()
+            "[write] plugin-applied detection: {} normalized response delta hunk(s) already in current",
+            response_hunks.len()
         );
     }
 
@@ -11823,6 +11921,59 @@ Implemented.
     }
 
     #[test]
+    fn normalization_fallback_adopts_ack_content_response_delta_before_merge() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("test.md");
+        let baseline = "\
+<!-- agent:exchange patch=append -->
+do #ackdelta
+<!-- agent:boundary:base -->
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+❯ do #ackdelta
+### Re: ack delta — gpt-5
+
+Done.
+<!-- agent:boundary:ours -->
+<!-- /agent:exchange -->
+";
+        let disk_after_ack_content = "\
+<!-- agent:exchange patch=append -->
+do #ackdelta
+while typing next prompt
+### Re: ack delta — gpt-5
+
+Done.
+<!-- agent:boundary:current -->
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, disk_after_ack_content).unwrap();
+
+        let fallback = normalized_content_ours_fallback(
+            &doc,
+            Some(baseline),
+            content_ours,
+            &["do #ackdelta".to_string()],
+        );
+
+        assert_eq!(
+            fallback.matches("### Re: ack delta — gpt-5").count(),
+            1,
+            "ack-content normalization fallback must not replay an already-applied response: {fallback}"
+        );
+        assert!(
+            fallback.contains("while typing next prompt"),
+            "ack-content fallback should preserve concurrent disk edits: {fallback}"
+        );
+        assert!(
+            fallback.contains("❯ do #ackdelta"),
+            "ack-content fallback should still normalize the prompt prefix: {fallback}"
+        );
+    }
+
+    #[test]
     fn normalization_fallback_splices_pending_mutations_from_disk() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
@@ -12909,6 +13060,62 @@ With multiple lines.
     }
 
     #[test]
+    fn response_already_in_current_rejects_partial_line_overlap() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: answer — gpt-5
+Done.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+Done.
+<!-- /agent:exchange -->
+";
+        assert!(
+            !response_already_in_current(base, content_ours, content_current),
+            "a shared response body line is not proof that the response delta was applied"
+        );
+    }
+
+    #[test]
+    fn response_already_in_current_accepts_normalized_delta_with_bare_prompt() {
+        let base = "\
+<!-- agent:exchange patch=append -->
+do #ipcd
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+❯ do #ipcd
+### Re: #ipcd — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+do #ipcd
+while typing next prompt
+### Re: #ipcd — gpt-5
+
+Implemented.
+<!-- /agent:exchange -->
+";
+        assert!(
+            response_already_in_current(base, content_ours, content_current),
+            "the response hunk should be detected even when prompt-prefix normalization differs"
+        );
+    }
+
+    #[test]
     fn response_already_in_current_false_when_not_applied() {
         let base = "\
 <!-- agent:exchange patch=append -->
@@ -12957,6 +13164,46 @@ Same content.
         assert!(
             !response_already_in_current(base, base, base),
             "should return false when ours equals base"
+        );
+    }
+
+    #[test]
+    fn adopt_current_response_without_duplication_rejects_partial_line_overlap() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let base = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+<!-- /agent:exchange -->
+";
+        let content_ours = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+### Re: timeout fallback — gpt-5
+Done.
+<!-- /agent:exchange -->
+";
+        let content_current = "\
+<!-- agent:exchange patch=append -->
+User prompt here.
+Done.
+<!-- /agent:exchange -->
+";
+
+        std::fs::write(&doc, content_current).unwrap();
+        let adopted = adopt_current_response_without_duplication(
+            &doc,
+            base,
+            content_ours,
+            content_current,
+            None,
+            "### Re: timeout fallback — gpt-5\nDone.\n",
+        )
+        .unwrap();
+
+        assert!(
+            adopted.is_none(),
+            "socket-timeout fallback must not adopt current content from a partial line overlap"
         );
     }
 

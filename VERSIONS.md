@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **IPC duplicate-response detection now uses normalized response deltas.**
+  IPC timeout fallbacks and ack-content normalization fallbacks compare the
+  normalized `base -> content_ours` response insertion hunks against the
+  current `agent:exchange` before adopting editor-applied content. Boundary
+  churn, ordinary comments, and prompt-prefix-only normalization are ignored,
+  but a single overlapping response body line is no longer treated as proof
+  that the plugin applied the full response. This prevents both false adoption
+  and CRDT replay of an already-visible editor response.
+
 - **Pending-done guard now distinguishes kept-open pending mutations from completion.**
   Same-cycle `--pending-edit`, `--pending-gate`, `--pending-ungate`,
   `--pending-reorder`, and gate-type edits record a kept-open id ledger that

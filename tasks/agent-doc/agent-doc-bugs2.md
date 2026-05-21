@@ -29,23 +29,12 @@ Added auto-DAG next steps; top backlog item: #autodag.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-054342.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-054855.md`*
 
 Compacted content:
-- Archived 1 response topic(s): job packet graph gate
+- Archived 1 response topic(s): auto-DAG next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Review session logs to add #next-steps to fix agent-doc bugs.
-❯ What are the #next-steps to have agent-doc have an auto-dag feature where task dependencies are setup into a dag schedule and run as a dag. Add pending items to this document and to tsift.md
-### Re: auto-DAG next steps — gpt-5
-
-I reviewed the compacted exchange, completed-work archive, tsift backlog, and `tsift session-review --next-context`. The log signal is clear: the graph-backed job packet gate is now done, so the next step is scheduler lifecycle control rather than another context-packet contract. The session logs also show prompt-budget/cache-resend, restart-loop, and no-op closeout guardrails, so the scheduler needs preflight gates before it starts a large multi-agent run.
-
-Top backlog item: `#autodag`.
-
-I added the agent-doc items in priority order: `#autodag`, `#dagdispatch`, `#dagrecover`, `#daglogs`.
-
-I also added the tsift support items: `#tsdag`, `#impactdag`, `#dagfix`.
-<!-- agent:boundary:c9d12783 -->
+<!-- agent:boundary:7265d908 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -53,12 +42,12 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 -->
 
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#w25k]
-- do [#aggtp]
-- do [#jpktscope]
-- do [#jpktwsmis]
+- do [#autodag]
+- do [#dagdispatch]
+- do [#dagrecover]
+- do [#daglogs]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

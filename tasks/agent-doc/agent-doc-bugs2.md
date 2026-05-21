@@ -55,7 +55,34 @@ Commit / push:
 
 Reopened closeout to persist the pending-state repair that was left as local drift after the earlier response write. The prior implementation response is present in the exchange, `#gxct` and `#wpkm` are reaped from backlog into the done archive, and `#dxtr` remains open as the already captured follow-up.
 
-<!-- agent:boundary:cc7b7979 -->
+### Re: #dxtr/#wrcx tsift dispatch-trace closeout audit — gpt-5
+
+Implemented both queue items.
+
+For `#dxtr`, graph-backed plan/orchestrate now collects and validates `tsift dispatch-trace --json` output, carries dispatch trace contract/version data, worker feedback, graph node/edge links, replay and repair commands, and projection freshness/hash details into lower-agent prompt packets and parent FlowCore audit proofs.
+
+For `#wrcx`, ordered lower-agent closeouts now receive a hidden `worker_result` line before finalize, including status, touched files, test commands, and follow-up ids so tsift can project child results back into graph evidence.
+
+Updated specs/version notes in `SPEC.md`, `specs/07-orchestration-commands.md`, and `VERSIONS.md`. Manual commits:
+
+- `src/agent-doc` commit `f726e82e` (`feat: attach tsift dispatch trace audit`)
+- outer repo pointer commit `81d3ee989` (`chore: update agent-doc dispatch trace audit`)
+
+Verification completed before closeout:
+
+- Red-first targeted tests failed on the missing dispatch-trace and `worker_result` behavior.
+- `cargo test collect_for_do_items_attaches_graph_handles`
+- `cargo test sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt`
+- `cargo fmt --check`
+- `git diff --check`
+- full `cargo test`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- installed `agent-doc --version` -> `agent-doc 0.33.16`
+- installed `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
+- CI/tmux evidence: GitHub Actions CI run `26204266575` completed successfully, including job `check` step `Run make tmux-ci`.
+<!-- agent:boundary:44b181fb -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,15 +92,13 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#gxct]
-- do [#wpkm]
+- do [#dxtr]
+- do [#wrcx]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#dxtr] [recommended] Consume tsift dispatch-trace outputs in agent-doc plan/orchestrate closeout: attach evidence packet ids, worker_feedback summaries, graph links, replay/repair commands, and freshness/projection hashes to lower-agent job packets and parent closeouts so graph-backed dispatch can be audited without scraping CLI output.
-- [ ] [#wrcx] [recommended] Collect lower-agent closeouts into worker_result lines that tsift can project back into graph evidence, including status, touched files, tests, and follow-up ids.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

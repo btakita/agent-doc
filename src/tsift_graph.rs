@@ -11,7 +11,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -19,6 +19,7 @@ const TSIFT_BIN_ENV: &str = "AGENT_DOC_TSIFT_BIN";
 const GRAPH_DB_EVIDENCE_CONTRACT_VERSION: &str = "graph-db-evidence-v1";
 const CONFLICT_MATRIX_CONTRACT_VERSION: &str = "conflict-matrix-v1";
 const WORKER_PROMPT_PACKET_CONTRACT_VERSION: &str = "worker-prompt-packet-v1";
+const DISPATCH_TRACE_CONTRACT_VERSION: &str = "dispatch-trace-v1";
 const LOWER_AGENT_JOB_PACKET_CONTRACT_VERSION: &str = "agent-doc-lower-agent-job-v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +28,8 @@ pub(crate) struct TsiftGraphEvidencePlan {
     pub(crate) graph_db_status: TsiftGraphDbStatus,
     pub(crate) prompt_target_handles: Vec<TsiftPromptTargetHandle>,
     pub(crate) conflict_matrix: TsiftConflictMatrixSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) dispatch_trace: Option<TsiftDispatchTraceSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) next_commands: Vec<String>,
 }
@@ -171,6 +174,8 @@ pub(crate) struct TsiftConflictMatrixCandidate {
     pub(crate) semantic_dispatch_score: i64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) semantic_dispatch_reasons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) worker_feedback: Option<TsiftWorkerFeedbackSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,6 +225,8 @@ pub(crate) struct TsiftWorkerPromptPacket {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) semantic_dispatch_reasons: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) worker_feedback: Option<TsiftWorkerFeedbackSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) prompt: Option<String>,
 }
 
@@ -230,6 +237,84 @@ pub(crate) struct TsiftWorkerPromptTokenBudget {
     pub(crate) source_window_count: usize,
     pub(crate) source_window_lines: usize,
     pub(crate) max_context_bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub(crate) struct TsiftWorkerFeedbackSummary {
+    pub(crate) total: usize,
+    pub(crate) completed: usize,
+    pub(crate) blocked: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) touched_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) expected_tests: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) follow_up_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) outcome_history: Vec<String>,
+    pub(crate) repeated_blockage: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) stale_expected_tests: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) follow_up_debt: Vec<String>,
+    pub(crate) closure_rank_score: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) closure_rank_reasons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub(crate) struct TsiftProjectionFreshness {
+    pub(crate) status: String,
+    pub(crate) fail_closed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) content_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source_watermark: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TsiftDispatchTraceSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) contract_version: Option<String>,
+    pub(crate) projection_freshness: TsiftProjectionFreshness,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) projection_hashes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) evidence_packet_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) worker_prompt_packets: Vec<TsiftWorkerPromptPacket>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) worker_feedback: Vec<TsiftWorkerFeedbackSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) graph_nodes: Vec<TsiftDispatchTraceGraphNode>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) graph_edges: Vec<TsiftDispatchTraceGraphEdge>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) replay_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) repair_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TsiftDispatchTraceGraphNode {
+    pub(crate) id: String,
+    pub(crate) kind: String,
+    pub(crate) label: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) properties: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TsiftDispatchTraceGraphEdge {
+    pub(crate) from_id: String,
+    pub(crate) to_id: String,
+    pub(crate) kind: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -251,6 +336,8 @@ struct TaskGraphPromptContext<'a> {
     conflict_matrix: TaskGraphConflictContext<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
     worker_prompt_packet: Option<&'a TsiftWorkerPromptPacket>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dispatch_trace: Option<&'a TsiftDispatchTraceSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     lower_agent_job_packet: Option<LowerAgentJobPacket<'a>>,
 }
@@ -278,6 +365,8 @@ struct LowerAgentJobPacket<'a> {
     contract_version: &'static str,
     source_contract_version: &'a str,
     packet_id: &'a str,
+    evidence_packet_id: &'a str,
+    target_node_id: &'a str,
     target: &'a str,
     rank: usize,
     risk: &'a str,
@@ -294,6 +383,23 @@ struct LowerAgentJobPacket<'a> {
     semantic_dispatch_score: i64,
     semantic_dispatch_reasons: &'a [String],
     fail_closed_prompt: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dispatch_trace: Option<LowerAgentDispatchTraceAudit<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct LowerAgentDispatchTraceAudit<'a> {
+    contract_version: &'a str,
+    projection_freshness: &'a TsiftProjectionFreshness,
+    projection_hashes: &'a [String],
+    evidence_packet_ids: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worker_feedback: Option<&'a TsiftWorkerFeedbackSummary>,
+    graph_nodes: &'a [TsiftDispatchTraceGraphNode],
+    graph_edges: &'a [TsiftDispatchTraceGraphEdge],
+    replay_commands: &'a [String],
+    repair_commands: &'a [String],
+    warnings: &'a [String],
 }
 
 pub(crate) fn collect_for_do_items(
@@ -364,15 +470,45 @@ pub(crate) fn collect_for_do_items(
         next_commands.insert(command.clone());
     }
 
-    let plan = TsiftGraphEvidencePlan {
+    let mut plan = TsiftGraphEvidencePlan {
         targets: do_items.into_iter().map(|item| item.target).collect(),
         graph_db_status,
         prompt_target_handles: handles,
         conflict_matrix,
+        dispatch_trace: None,
         next_commands: next_commands.into_iter().collect(),
     };
     validate_graph_contracts(&plan)?;
+
+    let dispatch_trace = collect_dispatch_trace(file, &plan.targets)?;
+    let mut next_commands = plan.next_commands.iter().cloned().collect::<BTreeSet<_>>();
+    for command in &dispatch_trace.replay_commands {
+        next_commands.insert(command.clone());
+    }
+    for command in &dispatch_trace.repair_commands {
+        next_commands.insert(command.clone());
+    }
+    plan.dispatch_trace = Some(dispatch_trace);
+    plan.next_commands = next_commands.into_iter().collect();
+    validate_dispatch_trace_contract(&plan)?;
     Ok(Some(plan))
+}
+
+fn collect_dispatch_trace(file: &Path, targets: &[String]) -> Result<TsiftDispatchTraceSummary> {
+    let mut trace_args = vec![
+        "dispatch-trace".to_string(),
+        "--path".to_string(),
+        file.display().to_string(),
+        "--json".to_string(),
+        "--depth".to_string(),
+        "3".to_string(),
+        "--limit".to_string(),
+        "8".to_string(),
+    ];
+    trace_args.extend(targets.iter().cloned());
+    let trace_refs = trace_args.iter().map(String::as_str).collect::<Vec<_>>();
+    let trace_json = run_tsift_json(&trace_refs).context("running tsift dispatch-trace")?;
+    Ok(parse_dispatch_trace(&trace_json))
 }
 
 pub(crate) fn extract_do_target(text: &str) -> Option<String> {
@@ -406,10 +542,15 @@ impl TsiftGraphEvidencePlan {
             return Ok(None);
         };
         let worker_prompt_packet = self
-            .conflict_matrix
-            .worker_prompt_packets
-            .iter()
-            .find(|packet| packet.target.eq_ignore_ascii_case(&target));
+            .dispatch_trace
+            .as_ref()
+            .and_then(|trace| trace.worker_prompt_packet_for_target(&target))
+            .or_else(|| {
+                self.conflict_matrix
+                    .worker_prompt_packets
+                    .iter()
+                    .find(|packet| packet.target.eq_ignore_ascii_case(&target))
+            });
         let context = TaskGraphPromptContext {
             target: &handle.target,
             contract_version: handle.contract_version.as_deref(),
@@ -437,8 +578,10 @@ impl TsiftGraphEvidencePlan {
                 warnings: &self.conflict_matrix.warnings,
             },
             worker_prompt_packet,
-            lower_agent_job_packet: worker_prompt_packet
-                .and_then(TsiftWorkerPromptPacket::as_lower_agent_job_packet),
+            dispatch_trace: self.dispatch_trace.as_ref(),
+            lower_agent_job_packet: worker_prompt_packet.and_then(|packet| {
+                packet.as_lower_agent_job_packet(handle, self.dispatch_trace.as_ref())
+            }),
         };
         Ok(Some(format!(
             "<tsift_graph_evidence>\n{}\n</tsift_graph_evidence>",
@@ -446,14 +589,92 @@ impl TsiftGraphEvidencePlan {
                 .context("serializing tsift graph prompt context")?
         )))
     }
+
+    pub(crate) fn worker_result_line_for_task(
+        &self,
+        task_label: &str,
+        response_text: &str,
+    ) -> Option<String> {
+        let target = extract_do_target(task_label)?;
+        let packet = self
+            .conflict_matrix
+            .worker_prompt_packets
+            .iter()
+            .find(|packet| packet.target.eq_ignore_ascii_case(&target))
+            .or_else(|| {
+                self.dispatch_trace
+                    .as_ref()
+                    .and_then(|trace| trace.worker_prompt_packet_for_target(&target))
+            });
+        Some(render_worker_result_line(
+            &target,
+            response_text,
+            packet
+                .map(|packet| packet.owned_files.as_slice())
+                .unwrap_or(&[]),
+            packet
+                .map(|packet| packet.expected_tests.as_slice())
+                .unwrap_or(&[]),
+        ))
+    }
+
+    pub(crate) fn closeout_audit_proof_for_task(&self, task_label: &str) -> Option<String> {
+        let target = extract_do_target(task_label)?;
+        let handle = self
+            .prompt_target_handles
+            .iter()
+            .find(|handle| handle.target.eq_ignore_ascii_case(&target))?;
+        let mut parts = vec![
+            "finalize_session_check".to_string(),
+            format!("evidence_packet_id={}", handle.evidence_packet_id),
+            format!("target_node_id={}", handle.target_node_id),
+        ];
+        if let Some(hash) = handle.projection_hash.as_deref() {
+            parts.push(format!("projection_hash={hash}"));
+        }
+        if let Some(trace) = &self.dispatch_trace {
+            if let Some(version) = trace.contract_version.as_deref() {
+                parts.push(format!("dispatch_trace={version}"));
+            }
+            if !trace.projection_hashes.is_empty() {
+                parts.push(format!(
+                    "trace_projection_hashes={}",
+                    trace.projection_hashes.join(",")
+                ));
+            }
+            if let Some(packet) = trace.worker_prompt_packet_for_target(&target)
+                && let Some(feedback) = &packet.worker_feedback
+            {
+                parts.push(format!(
+                    "worker_feedback=completed:{}_blocked:{}_follow_up:{}",
+                    feedback.completed,
+                    feedback.blocked,
+                    feedback.follow_up_ids.join(",")
+                ));
+            }
+            if !trace.replay_commands.is_empty() {
+                parts.push(format!("replay_commands={}", trace.replay_commands.len()));
+            }
+            if !trace.repair_commands.is_empty() {
+                parts.push(format!("repair_commands={}", trace.repair_commands.len()));
+            }
+        }
+        Some(parts.join(" "))
+    }
 }
 
 impl TsiftWorkerPromptPacket {
-    fn as_lower_agent_job_packet(&self) -> Option<LowerAgentJobPacket<'_>> {
+    fn as_lower_agent_job_packet<'a>(
+        &'a self,
+        handle: &'a TsiftPromptTargetHandle,
+        dispatch_trace: Option<&'a TsiftDispatchTraceSummary>,
+    ) -> Option<LowerAgentJobPacket<'a>> {
         Some(LowerAgentJobPacket {
             contract_version: LOWER_AGENT_JOB_PACKET_CONTRACT_VERSION,
             source_contract_version: self.contract_version.as_deref()?,
             packet_id: self.packet_id.as_deref()?,
+            evidence_packet_id: &handle.evidence_packet_id,
+            target_node_id: &handle.target_node_id,
             target: &self.target,
             rank: self.rank,
             risk: &self.risk,
@@ -469,7 +690,29 @@ impl TsiftWorkerPromptPacket {
             semantic_dispatch_score: self.semantic_dispatch_score,
             semantic_dispatch_reasons: &self.semantic_dispatch_reasons,
             fail_closed_prompt: self.prompt.as_deref()?,
+            dispatch_trace: dispatch_trace.and_then(|trace| {
+                Some(LowerAgentDispatchTraceAudit {
+                    contract_version: trace.contract_version.as_deref()?,
+                    projection_freshness: &trace.projection_freshness,
+                    projection_hashes: &trace.projection_hashes,
+                    evidence_packet_ids: &trace.evidence_packet_ids,
+                    worker_feedback: self.worker_feedback.as_ref(),
+                    graph_nodes: &trace.graph_nodes,
+                    graph_edges: &trace.graph_edges,
+                    replay_commands: &trace.replay_commands,
+                    repair_commands: &trace.repair_commands,
+                    warnings: &trace.warnings,
+                })
+            }),
         })
+    }
+}
+
+impl TsiftDispatchTraceSummary {
+    fn worker_prompt_packet_for_target(&self, target: &str) -> Option<&TsiftWorkerPromptPacket> {
+        self.worker_prompt_packets
+            .iter()
+            .find(|packet| packet.target.eq_ignore_ascii_case(target))
     }
 }
 
@@ -785,6 +1028,95 @@ fn validate_graph_contracts(plan: &TsiftGraphEvidencePlan) -> Result<()> {
     }
 }
 
+fn validate_dispatch_trace_contract(plan: &TsiftGraphEvidencePlan) -> Result<()> {
+    let mut errors = Vec::new();
+    let Some(trace) = &plan.dispatch_trace else {
+        errors.push("dispatch-trace missing report".to_string());
+        anyhow::bail!(
+            "tsift graph orchestration contract invalid: {}",
+            errors.join("; ")
+        );
+    };
+
+    require_version(
+        &mut errors,
+        "dispatch-trace",
+        "contract_version",
+        trace.contract_version.as_deref(),
+        DISPATCH_TRACE_CONTRACT_VERSION,
+    );
+    if trace.projection_freshness.fail_closed {
+        errors.push(format!(
+            "dispatch-trace projection freshness failed closed: {}",
+            trace.projection_freshness.diagnostics.join("; ")
+        ));
+    }
+    if trace.projection_freshness.status != "current" {
+        errors.push(format!(
+            "dispatch-trace projection freshness must be current, got {}",
+            trace.projection_freshness.status
+        ));
+    }
+    require_nonempty_list(
+        &mut errors,
+        "dispatch-trace",
+        "projection_hashes",
+        &trace.projection_hashes,
+    );
+    require_nonempty_list(
+        &mut errors,
+        "dispatch-trace",
+        "replay_commands",
+        &trace.replay_commands,
+    );
+    require_nonempty_list(
+        &mut errors,
+        "dispatch-trace",
+        "repair_commands",
+        &trace.repair_commands,
+    );
+
+    for handle in &plan.prompt_target_handles {
+        if !trace
+            .evidence_packet_ids
+            .iter()
+            .any(|id| id == &handle.evidence_packet_id)
+        {
+            errors.push(format!(
+                "dispatch-trace missing evidence_packet_id {} for target {}",
+                handle.evidence_packet_id, handle.target
+            ));
+        }
+        let Some(packet) = trace.worker_prompt_packet_for_target(&handle.target) else {
+            errors.push(format!(
+                "dispatch-trace missing worker_prompt_packet for target {}",
+                handle.target
+            ));
+            continue;
+        };
+        let packet_label = format!("dispatch-trace worker_prompt_packet {}", handle.target);
+        require_version(
+            &mut errors,
+            &packet_label,
+            "contract_version",
+            packet.contract_version.as_deref(),
+            WORKER_PROMPT_PACKET_CONTRACT_VERSION,
+        );
+        if packet.worker_feedback.is_none() {
+            errors.push(format!("{packet_label} missing worker_feedback"));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "tsift graph orchestration contract invalid: {}",
+            errors.join("; ")
+        )
+    }
+}
+
 fn require_version(
     errors: &mut Vec<String>,
     subject: &str,
@@ -839,6 +1171,47 @@ fn parse_conflict_matrix(value: &Value) -> TsiftConflictMatrixSummary {
     }
 }
 
+fn parse_dispatch_trace(value: &Value) -> TsiftDispatchTraceSummary {
+    TsiftDispatchTraceSummary {
+        contract_version: string_at(value, "/contract_version"),
+        projection_freshness: parse_projection_freshness(value.pointer("/projection_freshness")),
+        projection_hashes: string_array(value.pointer("/projection_hashes")),
+        evidence_packet_ids: string_array(value.pointer("/evidence_packet_ids")),
+        worker_prompt_packets: parse_worker_prompt_packets(value.pointer("/worker_prompt_packets")),
+        worker_feedback: value
+            .pointer("/worker_feedback")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(parse_worker_feedback_summary)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        graph_nodes: parse_dispatch_trace_nodes(value.pointer("/nodes")),
+        graph_edges: parse_dispatch_trace_edges(value.pointer("/edges")),
+        replay_commands: string_array(value.pointer("/replay_commands")),
+        repair_commands: string_array(value.pointer("/repair_commands")),
+        warnings: string_array(value.pointer("/warnings")),
+    }
+}
+
+fn parse_projection_freshness(value: Option<&Value>) -> TsiftProjectionFreshness {
+    let Some(value) = value else {
+        return TsiftProjectionFreshness::default();
+    };
+    TsiftProjectionFreshness {
+        status: string_at(value, "/status").unwrap_or_else(|| "unknown".to_string()),
+        fail_closed: value
+            .pointer("/fail_closed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        content_hash: string_at(value, "/content_hash"),
+        source_watermark: string_at(value, "/source_watermark"),
+        diagnostics: string_array(value.pointer("/diagnostics")),
+    }
+}
+
 fn parse_worker_prompt_packets(value: Option<&Value>) -> Vec<TsiftWorkerPromptPacket> {
     value
         .and_then(Value::as_array)
@@ -864,7 +1237,64 @@ fn parse_worker_prompt_packets(value: Option<&Value>) -> Vec<TsiftWorkerPromptPa
                     semantic_dispatch_reasons: string_array(
                         packet.pointer("/semantic_dispatch_reasons"),
                     ),
+                    worker_feedback: packet
+                        .pointer("/worker_feedback")
+                        .map(parse_worker_feedback_summary),
                     prompt: string_at(packet, "/prompt"),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_worker_feedback_summary(value: &Value) -> TsiftWorkerFeedbackSummary {
+    TsiftWorkerFeedbackSummary {
+        total: usize_at(value, "/total"),
+        completed: usize_at(value, "/completed"),
+        blocked: usize_at(value, "/blocked"),
+        touched_files: string_array(value.pointer("/touched_files")),
+        expected_tests: string_array(value.pointer("/expected_tests")),
+        follow_up_ids: string_array(value.pointer("/follow_up_ids")),
+        outcome_history: string_array(value.pointer("/outcome_history")),
+        repeated_blockage: value
+            .pointer("/repeated_blockage")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        stale_expected_tests: string_array(value.pointer("/stale_expected_tests")),
+        follow_up_debt: string_array(value.pointer("/follow_up_debt")),
+        closure_rank_score: usize_at(value, "/closure_rank_score"),
+        closure_rank_reasons: string_array(value.pointer("/closure_rank_reasons")),
+        warnings: string_array(value.pointer("/warnings")),
+    }
+}
+
+fn parse_dispatch_trace_nodes(value: Option<&Value>) -> Vec<TsiftDispatchTraceGraphNode> {
+    value
+        .and_then(Value::as_array)
+        .map(|nodes| {
+            nodes
+                .iter()
+                .map(|node| TsiftDispatchTraceGraphNode {
+                    id: string_at(node, "/id").unwrap_or_default(),
+                    kind: string_at(node, "/kind").unwrap_or_default(),
+                    label: string_at(node, "/label").unwrap_or_default(),
+                    properties: string_map(node.pointer("/properties")),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_dispatch_trace_edges(value: Option<&Value>) -> Vec<TsiftDispatchTraceGraphEdge> {
+    value
+        .and_then(Value::as_array)
+        .map(|edges| {
+            edges
+                .iter()
+                .map(|edge| TsiftDispatchTraceGraphEdge {
+                    from_id: string_at(edge, "/from_id").unwrap_or_default(),
+                    to_id: string_at(edge, "/to_id").unwrap_or_default(),
+                    kind: string_at(edge, "/kind").unwrap_or_default(),
                 })
                 .collect()
         })
@@ -945,6 +1375,9 @@ fn parse_conflict_matrix_candidates(value: Option<&Value>) -> Vec<TsiftConflictM
                     semantic_dispatch_reasons: string_array(
                         candidate.pointer("/semantic_dispatch_reasons"),
                     ),
+                    worker_feedback: candidate
+                        .pointer("/worker_feedback")
+                        .map(parse_worker_feedback_summary),
                 })
                 .collect()
         })
@@ -1024,6 +1457,95 @@ fn string_array(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn string_map(value: Option<&Value>) -> BTreeMap<String, String> {
+    value
+        .and_then(Value::as_object)
+        .map(|object| {
+            object
+                .iter()
+                .filter_map(|(key, value)| value.as_str().map(|value| (key.clone(), value.into())))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn render_worker_result_line(
+    target: &str,
+    response_text: &str,
+    touched_files: &[String],
+    expected_tests: &[String],
+) -> String {
+    let status = infer_worker_result_status(response_text);
+    let mut line = format!("<!-- worker_result: {status} #{target}");
+    if !touched_files.is_empty() {
+        line.push_str(" touched files: ");
+        line.push_str(&touched_files.join(", "));
+    }
+    if !expected_tests.is_empty() {
+        line.push_str(" tests: ");
+        line.push_str(
+            &expected_tests
+                .iter()
+                .map(|test| format!("`{test}`"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+    }
+    let follow_up_ids = extract_follow_up_ids(response_text, target);
+    line.push_str(" follow-up: ");
+    if follow_up_ids.is_empty() {
+        line.push_str("none");
+    } else {
+        line.push_str(
+            &follow_up_ids
+                .iter()
+                .map(|id| format!("#{id}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+    }
+    line.push_str(" -->");
+    line
+}
+
+fn infer_worker_result_status(response_text: &str) -> &'static str {
+    let lower = response_text.to_ascii_lowercase();
+    if lower.contains("externally blocked") || lower.contains("blocked") {
+        "blocked"
+    } else {
+        "completed"
+    }
+}
+
+fn extract_follow_up_ids(response_text: &str, target: &str) -> Vec<String> {
+    let target = target.to_ascii_lowercase();
+    let mut ids = Vec::new();
+    let chars = response_text.chars().collect::<Vec<_>>();
+    let mut idx = 0usize;
+    while idx < chars.len() {
+        if chars[idx] != '#' {
+            idx += 1;
+            continue;
+        }
+        idx += 1;
+        let start = idx;
+        while idx < chars.len() && chars[idx].is_ascii_alphanumeric() {
+            idx += 1;
+        }
+        if start == idx {
+            continue;
+        }
+        let id = chars[start..idx]
+            .iter()
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if id != target && !ids.iter().any(|existing| existing == &id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1093,7 +1615,12 @@ JSON
     ;;
   *"conflict-matrix"*)
     cat <<'JSON'
-{{"contract_version":"conflict-matrix-v1","targets":["agbr"],"can_parallel":true,"fail_closed":false,"inputs":{{"graph_db_evidence_targets":["agbr"],"evidence_packets":[{{"target":"agbr","packet_id":"gevd-agbr","target_node_id":"gbak-agbr","projection_hash":"abc","replay_command":"tsift graph-db evidence agbr --json"}}],"context_pack_command":"tsift --envelope context-pack tasks.md --budget normal","cached_diff_command":"tsift diff-digest --cached /tmp/repo --json","impact_command":"tsift impact /tmp/repo --cached --limit 20 --json"}},"context_pack":{{"target":"tasks.md","target_kind":"agent_doc_session","prompt_targets":["do #agbr"],"touched_files":["tasks.md"],"touched_symbols":["Exchange"],"files_changed":1,"worker_context":["summary"],"source_windows":["tasks.md:1-20"],"status_reminders":[]}},"candidates":[{{"target":"agbr","rank":1,"risk":"low","risk_score":0,"risk_reasons":[],"evidence_packet_id":"gevd-agbr","target_node_id":"gbak-agbr","target_kind":"backlog","target_label":"#agbr","owned_files":["tasks.md"],"owned_symbols":["Exchange"],"config_files":[],"affected_tests":["cargo test"],"staged_overlap":{{"files":[],"symbols":[],"tests":[],"config_files":[]}},"semantic_dispatch_score":3,"semantic_dispatch_reasons":["semantic match"]}}],"conflicts":[],"orchestration":{{"evidence_packet_ids":["gevd-agbr"],"conflict_matrix_decisions":["candidate #1 agbr risk=low"],"worker_ownership_blocks":["Worker 1 owns agbr (#agbr)"]}},"worker_prompt_packets":[{{"contract_version":"worker-prompt-packet-v1","packet_id":"wpp-agbr","target":"agbr","rank":1,"risk":"low","projection_hash":"abc","title":"Worker 1 owns agbr (#agbr)","owned_files":["tasks.md"],"owned_symbols":["Exchange"],"read_only_context":["src-agbr","semantic_rank: semantic match"],"forbidden_files":[],"expected_tests":["cargo test"],"expansion_commands":["tsift graph-db evidence agbr --json"],"token_budget":{{"prompt_estimated_tokens":20,"max_prompt_tokens":200,"source_window_count":1,"source_window_lines":20,"max_context_bytes":2400}},"semantic_dispatch_score":3,"semantic_dispatch_reasons":["semantic match"],"prompt":"Worker 1 owns agbr (#agbr)\n\nFail closed if the task requires a forbidden/shared file."}}],"next_commands":["tsift conflict-matrix --path /tmp/repo agbr --json"],"warnings":[]}}
+{{"contract_version":"conflict-matrix-v1","targets":["agbr"],"can_parallel":true,"fail_closed":false,"inputs":{{"graph_db_evidence_targets":["agbr"],"evidence_packets":[{{"target":"agbr","packet_id":"gevd-agbr","target_node_id":"gbak-agbr","projection_hash":"abc","replay_command":"tsift graph-db evidence agbr --json"}}],"context_pack_command":"tsift --envelope context-pack tasks.md --budget normal","cached_diff_command":"tsift diff-digest --cached /tmp/repo --json","impact_command":"tsift impact /tmp/repo --cached --limit 20 --json"}},"context_pack":{{"target":"tasks.md","target_kind":"agent_doc_session","prompt_targets":["do #agbr"],"touched_files":["tasks.md"],"touched_symbols":["Exchange"],"files_changed":1,"worker_context":["summary"],"source_windows":["tasks.md:1-20"],"status_reminders":[]}},"candidates":[{{"target":"agbr","rank":1,"risk":"low","risk_score":0,"risk_reasons":[],"evidence_packet_id":"gevd-agbr","target_node_id":"gbak-agbr","target_kind":"backlog","target_label":"#agbr","owned_files":["tasks.md"],"owned_symbols":["Exchange"],"config_files":[],"affected_tests":["cargo test"],"staged_overlap":{{"files":[],"symbols":[],"tests":[],"config_files":[]}},"semantic_dispatch_score":3,"semantic_dispatch_reasons":["semantic match"],"worker_feedback":{{"total":1,"completed":1,"blocked":0,"touched_files":["tasks.md"],"expected_tests":["cargo test"],"follow_up_ids":["next1"],"outcome_history":["completed #agbr"],"repeated_blockage":false,"stale_expected_tests":[],"follow_up_debt":[],"closure_rank_score":0,"closure_rank_reasons":[]}}}}],"conflicts":[],"orchestration":{{"evidence_packet_ids":["gevd-agbr"],"conflict_matrix_decisions":["candidate #1 agbr risk=low"],"worker_ownership_blocks":["Worker 1 owns agbr (#agbr)"],"projection_hashes":["abc"],"projection_freshness":{{"status":"current","fail_closed":false,"content_hash":"abc","source_watermark":"abc","diagnostics":[]}}}},"worker_prompt_packets":[{{"contract_version":"worker-prompt-packet-v1","packet_id":"wpp-agbr","target":"agbr","rank":1,"risk":"low","projection_hash":"abc","title":"Worker 1 owns agbr (#agbr)","owned_files":["tasks.md"],"owned_symbols":["Exchange"],"read_only_context":["src-agbr","semantic_rank: semantic match"],"forbidden_files":[],"expected_tests":["cargo test"],"expansion_commands":["tsift graph-db evidence agbr --json"],"token_budget":{{"prompt_estimated_tokens":20,"max_prompt_tokens":200,"source_window_count":1,"source_window_lines":20,"max_context_bytes":2400}},"semantic_dispatch_score":3,"semantic_dispatch_reasons":["semantic match"],"worker_feedback":{{"total":1,"completed":1,"blocked":0,"touched_files":["tasks.md"],"expected_tests":["cargo test"],"follow_up_ids":["next1"],"outcome_history":["completed #agbr"],"repeated_blockage":false,"stale_expected_tests":[],"follow_up_debt":[],"closure_rank_score":0,"closure_rank_reasons":[]}},"prompt":"Worker 1 owns agbr (#agbr)\n\nFail closed if the task requires a forbidden/shared file."}}],"next_commands":["tsift conflict-matrix --path /tmp/repo agbr --json"],"warnings":[]}}
+JSON
+    ;;
+  *"dispatch-trace"*)
+    cat <<'JSON'
+{{"contract_version":"dispatch-trace-v1","root":"/tmp/repo","targets":["agbr"],"projection_freshness":{{"status":"current","fail_closed":false,"content_hash":"abc","source_watermark":"abc","diagnostics":[]}},"projection_hashes":["abc"],"evidence_packet_ids":["gevd-agbr"],"worker_prompt_packets":[{{"contract_version":"worker-prompt-packet-v1","packet_id":"wpp-agbr","target":"agbr","rank":1,"risk":"low","projection_hash":"abc","title":"Worker 1 owns agbr (#agbr)","owned_files":["tasks.md"],"owned_symbols":["Exchange"],"read_only_context":["src-agbr","semantic_rank: semantic match"],"forbidden_files":[],"expected_tests":["cargo test"],"expansion_commands":["tsift graph-db evidence agbr --json"],"token_budget":{{"prompt_estimated_tokens":20,"max_prompt_tokens":200,"source_window_count":1,"source_window_lines":20,"max_context_bytes":2400}},"semantic_dispatch_score":3,"semantic_dispatch_reasons":["semantic match"],"worker_feedback":{{"total":1,"completed":1,"blocked":0,"touched_files":["tasks.md"],"expected_tests":["cargo test"],"follow_up_ids":["next1"],"outcome_history":["completed #agbr"],"repeated_blockage":false,"stale_expected_tests":[],"follow_up_debt":[],"closure_rank_score":0,"closure_rank_reasons":[]}},"prompt":"Worker 1 owns agbr (#agbr)\n\nFail closed if the task requires a forbidden/shared file."}}],"worker_feedback":[{{"total":1,"completed":1,"blocked":0,"touched_files":["tasks.md"],"expected_tests":["cargo test"],"follow_up_ids":["next1"],"outcome_history":["completed #agbr"],"repeated_blockage":false,"stale_expected_tests":[],"follow_up_debt":[],"closure_rank_score":0,"closure_rank_reasons":[]}}],"summary":{{"backlog":1,"job_packet":1,"worker_result":1,"worker_context":1,"source_handle":1,"semantic_rows":0}},"nodes":[{{"id":"gbak-agbr","kind":"backlog","label":"#agbr","properties":{{"ref_id":"agbr"}}}},{{"id":"job-agbr","kind":"job_packet","label":"do #agbr","properties":{{"ref_id":"agbr"}}}},{{"id":"wres-agbr","kind":"worker_result","label":"completed #agbr","properties":{{"status":"completed","touched_files":"tasks.md","expected_tests":"cargo test","follow_up_ids":"next1"}}}}],"edges":[{{"from_id":"job-agbr","to_id":"gbak-agbr","kind":"targets","properties":{{}}}},{{"from_id":"gbak-agbr","to_id":"wres-agbr","kind":"has_result","properties":{{}}}}],"conflict_matrix_decisions":["candidate #1 agbr risk=low"],"replay_commands":["tsift conflict-matrix --path /tmp/repo agbr --json"],"repair_commands":["tsift graph-db --path /tmp/repo refresh --json"],"truncated":false,"warnings":[]}}
 JSON
     ;;
   *)
@@ -1182,11 +1709,21 @@ esac
         assert!(context.contains("\"context_pack\""));
         assert!(context.contains("\"candidates\""));
         assert!(context.contains("Fail closed if the task requires a forbidden/shared file"));
+        assert!(context.contains("\"lower_agent_job_packet\""));
+        assert!(context.contains("\"dispatch_trace\""));
+        assert!(context.contains("\"contract_version\": \"dispatch-trace-v1\""));
+        assert!(context.contains("\"worker_feedback\""));
+        assert!(context.contains("\"follow_up_ids\": ["));
+        assert!(context.contains("\"graph_nodes\": ["));
+        assert!(context.contains("\"graph_edges\": ["));
+        assert!(context.contains("\"replay_commands\": ["));
+        assert!(context.contains("\"repair_commands\": ["));
 
         let calls = std::fs::read_to_string(log).unwrap();
         assert!(calls.contains("graph-db"));
         assert!(calls.contains("evidence agbr"));
         assert!(calls.contains("conflict-matrix"));
+        assert!(calls.contains("dispatch-trace"));
     }
 
     #[cfg(unix)]

@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **tsift dispatch-trace audit data now rides with graph-backed orchestration.**
+  `agent-doc plan` / `orchestrate` now collect `dispatch-trace-v1` alongside
+  graph-db evidence and conflict matrices, fail closed on missing projection
+  hashes, worker feedback, replay/repair commands, or graph links, and attach
+  that audit context to each normalized lower-agent job packet. Sequential/DAG
+  child closeouts now append a hidden `worker_result` line with status, target
+  id, touched files, tests, and follow-up ids before `finalize`, allowing the
+  next tsift projection to connect worker outcomes back into graph evidence.
+
 - **tsift conflict-matrix orchestration now carries the full planner contract.**
   `agent-doc plan` and orchestration prompts now preserve the
   `conflict-matrix-v1` context-pack, cached diff, impact, ranked candidate,

@@ -144,6 +144,8 @@ struct OrderedTaskStepOptions<'a> {
     agent_override: Option<&'a str>,
     model_override: Option<&'a str>,
     graph_context: Option<&'a str>,
+    graph_evidence: Option<&'a crate::tsift_graph::TsiftGraphEvidencePlan>,
+    task_label: &'a str,
 }
 
 trait LifecycleOps {
@@ -703,6 +705,8 @@ fn run_ordered_tasks_internal(
                         agent_override: options.agent_override,
                         model_override: effective_model.as_deref(),
                         graph_context: graph_context.as_deref(),
+                        graph_evidence,
+                        task_label: &task.label,
                     },
                     global_config,
                     lifecycle,
@@ -711,7 +715,13 @@ fn run_ordered_tasks_internal(
                     Ok(()) => crate::flow::orchestration_batch::BatchChildResult {
                         label: task.label.clone(),
                         outcome: crate::flow::types::FlowOutcome::Completed,
-                        proof: Some("finalize_session_check".to_string()),
+                        proof: Some(
+                            graph_evidence
+                                .and_then(|evidence| {
+                                    evidence.closeout_audit_proof_for_task(&task.label)
+                                })
+                                .unwrap_or_else(|| "finalize_session_check".to_string()),
+                        ),
                     },
                     Err(err) => {
                         let child = crate::flow::orchestration_batch::BatchChildResult {
@@ -949,6 +959,15 @@ fn run_ordered_task_step(
     if let Some(diff_text) = preflight.diff.as_deref() {
         write::enforce_imperative_response_contract_for_diff(file, diff_text, &response_text)?;
     }
+
+    let finalize_text = if let Some(worker_result_line) =
+        options.graph_evidence.and_then(|evidence| {
+            evidence.worker_result_line_for_task(options.task_label, &response_text)
+        }) {
+        append_worker_result_line(&finalize_text, &worker_result_line, mode)
+    } else {
+        finalize_text
+    };
 
     lifecycle.finalize(
         file,
@@ -1649,6 +1668,35 @@ Stopped sequential orchestration after {completed_steps} of {total_steps} step(s
     );
 }
 
+fn append_worker_result_line(
+    response: &str,
+    worker_result_line: &str,
+    mode: ResolvedMode,
+) -> String {
+    if response.contains(worker_result_line) {
+        return response.to_string();
+    }
+    if mode.is_template() {
+        const CLOSE: &str = "<!-- /patch:exchange -->";
+        if let Some(idx) = response.rfind(CLOSE) {
+            let mut out = String::with_capacity(response.len() + worker_result_line.len() + 2);
+            out.push_str(response[..idx].trim_end());
+            out.push('\n');
+            out.push_str(worker_result_line);
+            out.push('\n');
+            out.push_str(&response[idx..]);
+            return out;
+        }
+    }
+    let mut out = response.trim_end().to_string();
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(worker_result_line);
+    out.push('\n');
+    out
+}
+
 fn extract_tasks_from_text(text: &str) -> Vec<String> {
     let code_blocks = collect_fenced_task_blocks(text);
     if let Some(block) = code_blocks.last()
@@ -2118,6 +2166,21 @@ mod tests {
                     staged_config_files: Vec::new(),
                     semantic_dispatch_score: 4,
                     semantic_dispatch_reasons: vec!["source handle matched orchestration".to_string()],
+                    worker_feedback: Some(crate::tsift_graph::TsiftWorkerFeedbackSummary {
+                        total: 1,
+                        completed: 1,
+                        blocked: 0,
+                        touched_files: vec!["src/orchestrate.rs".to_string()],
+                        expected_tests: vec!["cargo test orchestrate".to_string()],
+                        follow_up_ids: Vec::new(),
+                        outcome_history: vec!["completed #gkke".to_string()],
+                        repeated_blockage: false,
+                        stale_expected_tests: Vec::new(),
+                        follow_up_debt: Vec::new(),
+                        closure_rank_score: 0,
+                        closure_rank_reasons: Vec::new(),
+                        warnings: Vec::new(),
+                    }),
                 }],
                 conflicts: Vec::new(),
                 evidence_packet_ids: vec!["gevd-gkke".to_string()],
@@ -2148,6 +2211,21 @@ mod tests {
                     semantic_dispatch_reasons: vec![
                         "source handle matched orchestration".to_string()
                     ],
+                    worker_feedback: Some(crate::tsift_graph::TsiftWorkerFeedbackSummary {
+                        total: 1,
+                        completed: 1,
+                        blocked: 0,
+                        touched_files: vec!["src/orchestrate.rs".to_string()],
+                        expected_tests: vec!["cargo test orchestrate".to_string()],
+                        follow_up_ids: Vec::new(),
+                        outcome_history: vec!["completed #gkke".to_string()],
+                        repeated_blockage: false,
+                        stale_expected_tests: Vec::new(),
+                        follow_up_debt: Vec::new(),
+                        closure_rank_score: 0,
+                        closure_rank_reasons: Vec::new(),
+                        warnings: Vec::new(),
+                    }),
                     prompt: Some(
                         "Worker 1 owns gkke (#gkke)\n\nFail closed if the task requires a forbidden/shared file."
                             .to_string(),
@@ -2156,6 +2234,100 @@ mod tests {
                 next_commands: Vec::new(),
                 warnings: Vec::new(),
             },
+            dispatch_trace: Some(crate::tsift_graph::TsiftDispatchTraceSummary {
+                contract_version: Some("dispatch-trace-v1".to_string()),
+                projection_freshness: crate::tsift_graph::TsiftProjectionFreshness {
+                    status: "current".to_string(),
+                    fail_closed: false,
+                    content_hash: Some("abc".to_string()),
+                    source_watermark: Some("abc".to_string()),
+                    diagnostics: Vec::new(),
+                },
+                projection_hashes: vec!["abc".to_string()],
+                evidence_packet_ids: vec!["gevd-gkke".to_string()],
+                worker_prompt_packets: vec![crate::tsift_graph::TsiftWorkerPromptPacket {
+                    contract_version: Some("worker-prompt-packet-v1".to_string()),
+                    packet_id: Some("wpp-gkke".to_string()),
+                    target: "gkke".to_string(),
+                    rank: 1,
+                    risk: "low".to_string(),
+                    projection_hash: Some("abc".to_string()),
+                    title: "Worker 1 owns gkke (#gkke)".to_string(),
+                    owned_files: vec!["src/orchestrate.rs".to_string()],
+                    owned_symbols: vec!["run_ordered_tasks_internal".to_string()],
+                    read_only_context: vec!["src-gkke".to_string()],
+                    forbidden_files: Vec::new(),
+                    expected_tests: vec!["cargo test orchestrate".to_string()],
+                    expansion_commands: vec!["tsift graph-db evidence gkke --json".to_string()],
+                    token_budget: Some(crate::tsift_graph::TsiftWorkerPromptTokenBudget {
+                        prompt_estimated_tokens: 32,
+                        max_prompt_tokens: 256,
+                        source_window_count: 1,
+                        source_window_lines: 80,
+                        max_context_bytes: 9600,
+                    }),
+                    semantic_dispatch_score: 4,
+                    semantic_dispatch_reasons: vec![
+                        "source handle matched orchestration".to_string()
+                    ],
+                    worker_feedback: Some(crate::tsift_graph::TsiftWorkerFeedbackSummary {
+                        total: 1,
+                        completed: 1,
+                        blocked: 0,
+                        touched_files: vec!["src/orchestrate.rs".to_string()],
+                        expected_tests: vec!["cargo test orchestrate".to_string()],
+                        follow_up_ids: Vec::new(),
+                        outcome_history: vec!["completed #gkke".to_string()],
+                        repeated_blockage: false,
+                        stale_expected_tests: Vec::new(),
+                        follow_up_debt: Vec::new(),
+                        closure_rank_score: 0,
+                        closure_rank_reasons: Vec::new(),
+                        warnings: Vec::new(),
+                    }),
+                    prompt: Some(
+                        "Worker 1 owns gkke (#gkke)\n\nFail closed if the task requires a forbidden/shared file."
+                            .to_string(),
+                    ),
+                }],
+                worker_feedback: vec![crate::tsift_graph::TsiftWorkerFeedbackSummary {
+                    total: 1,
+                    completed: 1,
+                    blocked: 0,
+                    touched_files: vec!["src/orchestrate.rs".to_string()],
+                    expected_tests: vec!["cargo test orchestrate".to_string()],
+                    follow_up_ids: Vec::new(),
+                    outcome_history: vec!["completed #gkke".to_string()],
+                    repeated_blockage: false,
+                    stale_expected_tests: Vec::new(),
+                    follow_up_debt: Vec::new(),
+                    closure_rank_score: 0,
+                    closure_rank_reasons: Vec::new(),
+                    warnings: Vec::new(),
+                }],
+                graph_nodes: vec![
+                    crate::tsift_graph::TsiftDispatchTraceGraphNode {
+                        id: "gbak-gkke".to_string(),
+                        kind: "backlog".to_string(),
+                        label: "#gkke".to_string(),
+                        properties: std::collections::BTreeMap::new(),
+                    },
+                    crate::tsift_graph::TsiftDispatchTraceGraphNode {
+                        id: "wres-gkke".to_string(),
+                        kind: "worker_result".to_string(),
+                        label: "completed #gkke".to_string(),
+                        properties: std::collections::BTreeMap::new(),
+                    },
+                ],
+                graph_edges: vec![crate::tsift_graph::TsiftDispatchTraceGraphEdge {
+                    from_id: "gbak-gkke".to_string(),
+                    to_id: "wres-gkke".to_string(),
+                    kind: "has_result".to_string(),
+                }],
+                replay_commands: vec!["tsift conflict-matrix --path /tmp/repo gkke --json".to_string()],
+                repair_commands: vec!["tsift graph-db --path /tmp/repo refresh --json".to_string()],
+                warnings: Vec::new(),
+            }),
             next_commands: Vec::new(),
         }
     }
@@ -2671,6 +2843,15 @@ mod tests {
         assert!(prompt.contains("\"expected_tests\": ["));
         assert!(prompt.contains("\"expansion_commands\": ["));
         assert!(prompt.contains("\"fail_closed_prompt\""));
+        let finalize_calls = lifecycle.finalize_calls.borrow();
+        assert_eq!(finalize_calls.len(), 1);
+        assert!(
+            finalize_calls[0].contains("worker_result: completed #gkke"),
+            "child closeout should include a tsift-projectable worker_result line:\n{}",
+            finalize_calls[0]
+        );
+        assert!(finalize_calls[0].contains("src/orchestrate.rs"));
+        assert!(finalize_calls[0].contains("`cargo test orchestrate`"));
         let final_doc = fs::read_to_string(&doc).unwrap();
         assert!(!final_doc.contains("<tsift_graph_evidence>"));
     }

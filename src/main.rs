@@ -75,6 +75,7 @@ mod hooks;
 mod init;
 mod input_diag;
 mod install;
+mod jobs;
 mod layout;
 mod lib_gc;
 mod lib_install;
@@ -854,6 +855,11 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Manage lower-agent job packets for a session document
+    Jobs {
+        #[command(subcommand)]
+        action: JobsAction,
+    },
     /// Check for updates and upgrade to the latest version.
     Upgrade,
     /// Generate content-source annotation sidecar for a document
@@ -1046,6 +1052,51 @@ enum OpsAction {
         #[arg(long, default_value_t = ops_report::default_summary_limit())]
         limit: usize,
         /// Emit JSON instead of a human-readable report
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum JobsAction {
+    /// Generate job packets from the current planning record
+    Create {
+        /// Path to the session document
+        file: PathBuf,
+        /// Also create an operation document for retained audit/review
+        #[arg(long)]
+        operation_doc: bool,
+        /// Preserve generated packets after success; records intent in index metadata
+        #[arg(long)]
+        audit: bool,
+        /// Token/byte budget used for generated tsift context sidecars
+        #[arg(long, default_value_t = 6000)]
+        budget: usize,
+    },
+    /// List generated job packets for a document
+    List {
+        /// Path to the session document
+        file: PathBuf,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show job packet completion status
+    Status {
+        /// Path to the session document
+        file: PathBuf,
+        /// Emit JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Collect worker result sidecars or embedded Worker Result JSON blocks
+    Collect {
+        /// Path to the session document
+        file: PathBuf,
+        /// Specific cycle id to collect; defaults to latest
+        #[arg(long)]
+        cycle: Option<String>,
+        /// Emit JSON
         #[arg(long)]
         json: bool,
     },
@@ -1764,6 +1815,26 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Preflight { file } => preflight::run(&file),
         Commands::Plan { file } => plan::run(&file),
+        Commands::Jobs { action } => match action {
+            JobsAction::Create {
+                file,
+                operation_doc,
+                audit,
+                budget,
+            } => jobs::create(
+                &file,
+                jobs::CreateOptions {
+                    operation_doc,
+                    audit,
+                    budget,
+                },
+            ),
+            JobsAction::List { file, json } => jobs::list(&file, json),
+            JobsAction::Status { file, json } => jobs::status(&file, json),
+            JobsAction::Collect { file, cycle, json } => {
+                jobs::collect(&file, cycle.as_deref(), json)
+            }
+        },
         Commands::SessionCheck { file } => session_check::run(&file),
         Commands::Read { file, component } => read::run(&file, component.as_deref()),
         Commands::ResponseToc {

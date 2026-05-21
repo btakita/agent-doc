@@ -18,6 +18,18 @@ This file covers binary-owned planning/orchestration and the queue surface that 
 
 - Emits the binary-owned planning record for the current cycle:
   - `prompt_targets`
+  - `dispatch_candidate`
+  - `task_class`
+  - `risk`
+  - `parallelizable`
+  - `suggested_parent_tier`
+  - `model_tier`
+  - `dispatch_mode`
+  - `context_budget_tokens`
+  - `job_packet_budget_tokens`
+  - `write_scope`
+  - `required_proof`
+  - `tsift_context`
   - `execution_scope`
   - `repo_actions`
   - `required_commands`
@@ -30,6 +42,19 @@ This file covers binary-owned planning/orchestration and the queue surface that 
 - For explicit `do #id` / `do [#id]` directives that resolve an existing tracked-work item, the planned finalize command includes the matching `--done <id>` argument so the harness closeout path does not rely on the agent remembering that flag manually.
 - `pending_mutations.expect_add` signals that the response likely needs new backlog capture.
 - `execution_scope=plan_backlog_only` suppresses repo implementation work for report/planning contracts such as `#agent-doc-bug`.
+- Lower-agent routing fields are deterministic structural hints, not authority
+  to skip parent review. `dispatch_candidate=true` means the prompt is shaped
+  well enough for job packets; `agent_doc_dispatch: off` disables that
+  candidate flag, while `agent_doc_dispatch: auto` records an opt-in for future
+  automatic dispatch. `task_class`, `risk`, model tier, token budgets,
+  `write_scope`, and `required_proof` come from prompt targets, pending text,
+  requested presets, and visible repo-work directives.
+- `tsift_context` records the stable JSON handoff commands used by job packets:
+  `tsift status --json`, `tsift context-pack <FILE> --json --budget normal`,
+  `tsift source-read <handle>`, `tsift diff-digest --cached`, and
+  `tsift test-digest --input`. Missing or stale context gates automatic
+  lower-agent dispatch; manual packets may still be generated, but the stale or
+  missing status must remain visible to workers and parent review.
 - Copied `prompt_presets` frontmatter defines reusable prompts but does not invoke them; plan/preflight must ignore preset definition lines when expanding preset references from added diff text.
 - When graph evidence is active, `plan` calls `tsift graph-db --path <FILE> --json status`, `tsift graph-db --path <FILE> --json evidence <id> --depth 3 --limit 8`, `tsift conflict-matrix --path <FILE> --json <id...>`, and `tsift dispatch-trace --path <FILE> --json <id...> --depth 3 --limit 8`. A stale/fail-closed graph freshness report or an unresolved target id becomes a blocker instead of an advisory warning. The emitted `graph_evidence` record carries the `conflict-matrix-v1` and `dispatch-trace-v1` planner contracts: evidence packet ids, graph node handles and edges, context-pack summary, cached diff and impact commands, ranked candidates, shared file/symbol/test/config conflicts, worker ownership block labels, worker feedback summaries, first-class worker prompt packets, token budgets, semantic ranking reasons, projection hashes, replay/repair commands, and warnings.
 
@@ -97,6 +122,47 @@ Additional rules:
 - Executes in deterministic topological source order.
 - Every ready node still runs through the normal single-document lifecycle: inject prompt -> `preflight` -> fresh agent request -> `finalize` -> `session-check`.
 - DAG mode is dependency-aware but not concurrent against one session document. Real concurrency belongs to `--mode parallel`.
+
+## jobs
+
+`agent-doc jobs create <FILE> [--operation-doc] [--audit] [--budget N]`
+
+- Reads the current `agent-doc plan` record and emits one markdown job packet
+  per supported `do #id` / `do [#id]` repo action.
+- Packets live under `.agent-doc/jobs/<cycle>/<job-id>.md` and are ignored by
+  default. `--audit` records the preservation intent in the cycle index.
+- Each packet carries the `agent-doc-job-packet-v1` contract in frontmatter:
+  parent document, cycle id, job id, prompt target, task class, model tier,
+  risk, write scope, context budget, source snapshot, tsift status, and result
+  sidecar path.
+- Packet body sections are stable: Goal, Allowed Commands, Required Context,
+  tsift Handles, Acceptance Criteria, Output Schema, Escalation Conditions, and
+  Worker Result.
+- The worker result schema is `agent-doc-worker-result-v1` with:
+  `status`, `changed_paths`, `commands_run`, `findings`, `proof`,
+  `confidence`, and `needs_parent_attention`.
+- When `tsift status --json` and `tsift context-pack --json` are available,
+  create writes a compact `<job-id>.context.json` sidecar and links it from the
+  packet. If tsift is missing or fails, the packet records the diagnostic and
+  remains manual-review only.
+- `--operation-doc` writes a retained operation note under
+  `tasks/agent-doc/operations/` when that tracked directory exists, otherwise
+  under `.agent-doc/operations/`.
+
+`agent-doc jobs list <FILE> [--json]`
+
+- Lists generated cycles and packet paths for the parent document.
+
+`agent-doc jobs status <FILE> [--json]`
+
+- Reports each packet as `open`, `result_sidecar`, or `embedded_result`.
+
+`agent-doc jobs collect <FILE> [--cycle ID] [--json]`
+
+- Reads `<job-id>.result.json` sidecars or embedded `## Worker Result` JSON
+  blocks and returns a parent-review bundle. Collection never applies patches
+  or marks backlog items done; the parent session still owns merge, tests, and
+  `finalize`.
 
 ## `agent:queue`
 

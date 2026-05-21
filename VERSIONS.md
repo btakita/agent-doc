@@ -6,6 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Lower-agent job packet MVP.** `agent-doc plan` now emits deterministic
+  lower-agent routing fields (`dispatch_candidate`, task class, risk,
+  parallelism, model tier, context budgets, write scope, proof requirements,
+  dispatch mode, and tsift context commands). New `agent-doc jobs
+  create/list/status/collect` commands generate `agent-doc-job-packet-v1`
+  markdown packets under `.agent-doc/jobs/<cycle>/`, optionally write operation
+  docs, attach tsift context sidecars when `tsift context-pack --json` is
+  available, and collect `agent-doc-worker-result-v1` envelopes for parent
+  review without applying patches or bypassing finalize.
+
 - **tsift dispatch-trace audit data now rides with graph-backed orchestration.**
   `agent-doc plan` / `orchestrate` now collect `dispatch-trace-v1` alongside
   graph-db evidence and conflict matrices, fail closed on missing projection

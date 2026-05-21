@@ -430,6 +430,15 @@ pub struct Frontmatter {
     /// ```
     #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
     pub prompt_presets: indexmap::IndexMap<String, String>,
+    /// Lower-agent dispatch policy for planning/job-packet generation.
+    /// Values are currently interpreted by `plan` as manual/auto/off text;
+    /// unknown values round-trip so newer policy names do not break older binaries.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "agent_doc_dispatch"
+    )]
+    pub dispatch: Option<String>,
     /// Whether the supervisor starts from the parent process env before
     /// applying the `env:` overlay. Default `true` — the supervised claude
     /// child inherits PATH/HOME/TERM/TMUX/... from the shell that launched
@@ -1155,6 +1164,7 @@ mod tests {
             hooks: std::collections::HashMap::new(),
             env: indexmap::IndexMap::new(),
             prompt_presets: indexmap::IndexMap::new(),
+            dispatch: None,
             agent_doc_env_inherit: None,
             cwd: None,
             queue_active: None,

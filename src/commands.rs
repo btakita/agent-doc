@@ -235,6 +235,26 @@ fn all_commands() -> Vec<CommandInfo> {
         "Clean up: callback orchestration, compaction",
     ));
     cmds.push(cmd(
+        "/agent-doc jobs create",
+        "<FILE> [--operation-doc] [--audit]",
+        "Generate lower-agent job packets from the current planning record",
+    ));
+    cmds.push(cmd(
+        "/agent-doc jobs list",
+        "<FILE> [--json]",
+        "List lower-agent job packets for a document",
+    ));
+    cmds.push(cmd(
+        "/agent-doc jobs status",
+        "<FILE> [--json]",
+        "Show lower-agent job packet result status",
+    ));
+    cmds.push(cmd(
+        "/agent-doc jobs collect",
+        "<FILE> [--cycle ID] [--json]",
+        "Collect structured worker result envelopes",
+    ));
+    cmds.push(cmd(
         "/agent-doc backlog add",
         "<FILE> <ITEM>",
         "Add item to the backlog component",

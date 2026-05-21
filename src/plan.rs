@@ -53,6 +53,20 @@ pub struct DispatchPlan {
     pub prompt_targets: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph_evidence: Option<crate::tsift_graph::TsiftGraphEvidencePlan>,
+    pub dispatch_candidate: bool,
+    pub task_class: String,
+    pub risk: String,
+    pub parallelizable: bool,
+    pub suggested_parent_tier: String,
+    pub model_tier: String,
+    pub dispatch_mode: String,
+    pub context_budget_tokens: usize,
+    pub job_packet_budget_tokens: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub write_scope: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_proof: Vec<String>,
+    pub tsift_context: TsiftContextPlan,
     pub execution_scope: ExecutionScope,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repo_actions: Vec<String>,
@@ -73,6 +87,19 @@ pub struct PendingMutationPlan {
     pub text: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub target_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct TsiftContextPlan {
+    pub status: String,
+    pub freshness_policy: String,
+    pub index_status_command: String,
+    pub context_pack_command: String,
+    pub source_read_command: String,
+    pub diff_digest_command: String,
+    pub test_digest_command: String,
+    pub stale_fallback: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +161,18 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         return Ok(DispatchPlan {
             prompt_targets: Vec::new(),
             graph_evidence: None,
+            dispatch_candidate: false,
+            task_class: "no_changes".to_string(),
+            risk: "low".to_string(),
+            parallelizable: false,
+            suggested_parent_tier: "low".to_string(),
+            model_tier: "low".to_string(),
+            dispatch_mode: dispatch_mode(&fm),
+            context_budget_tokens: 0,
+            job_packet_budget_tokens: 0,
+            write_scope: Vec::new(),
+            required_proof: Vec::new(),
+            tsift_context: tsift_context_plan(file),
             execution_scope: ExecutionScope::Normal,
             repo_actions: Vec::new(),
             required_commands: finalize_placeholder_commands(file, &fm, &[]),
@@ -170,6 +209,14 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &added_diff_lines,
         &prompt_bearing_changes,
     )?;
+    let routing = routing_fields(
+        file,
+        execution_scope,
+        &repo_actions,
+        &prompt_targets,
+        &pending_mutations,
+        &fm,
+    );
     let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
     let graph_evidence = match crate::tsift_graph::collect_for_do_items(file, &prompt_targets) {
         Ok(graph_evidence) => graph_evidence,
@@ -237,6 +284,18 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     Ok(DispatchPlan {
         prompt_targets,
         graph_evidence,
+        dispatch_candidate: routing.dispatch_candidate,
+        task_class: routing.task_class,
+        risk: routing.risk,
+        parallelizable: routing.parallelizable,
+        suggested_parent_tier: routing.suggested_parent_tier.clone(),
+        model_tier: routing.model_tier,
+        dispatch_mode: routing.dispatch_mode,
+        context_budget_tokens: routing.context_budget_tokens,
+        job_packet_budget_tokens: routing.job_packet_budget_tokens,
+        write_scope: routing.write_scope,
+        required_proof: routing.required_proof,
+        tsift_context: routing.tsift_context,
         execution_scope,
         repo_actions,
         required_commands,
@@ -323,6 +382,196 @@ fn finalize_placeholder_commands(
         fm.resolve_mode(),
         &pending,
     )]
+}
+
+struct RoutingFields {
+    dispatch_candidate: bool,
+    task_class: String,
+    risk: String,
+    parallelizable: bool,
+    suggested_parent_tier: String,
+    model_tier: String,
+    dispatch_mode: String,
+    context_budget_tokens: usize,
+    job_packet_budget_tokens: usize,
+    write_scope: Vec<String>,
+    required_proof: Vec<String>,
+    tsift_context: TsiftContextPlan,
+}
+
+fn routing_fields(
+    file: &Path,
+    execution_scope: ExecutionScope,
+    repo_actions: &[String],
+    prompt_targets: &[String],
+    pending_mutations: &[PendingMutationPlan],
+    fm: &frontmatter::Frontmatter,
+) -> RoutingFields {
+    let combined_text = prompt_targets
+        .iter()
+        .chain(repo_actions.iter())
+        .chain(pending_mutations.iter().map(|mutation| &mutation.text))
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase();
+    let task_class = infer_task_class(repo_actions, &combined_text);
+    let risk = infer_risk(repo_actions, &combined_text);
+    let suggested_parent_tier = tier_for_risk(&risk).to_string();
+    let dispatch_candidate = execution_scope == ExecutionScope::Normal
+        && !repo_actions.is_empty()
+        && dispatch_mode(fm) != "off";
+    let parallelizable = dispatch_candidate && repo_actions.len() > 1;
+    let context_budget_tokens = if risk == "high" { 10_000 } else { 6_000 };
+    let mut required_proof = vec![
+        "changed_paths".to_string(),
+        "commands".to_string(),
+        "verification".to_string(),
+        "confidence".to_string(),
+        "escalation".to_string(),
+    ];
+    if combined_text.contains("commit") {
+        required_proof.push("commit".to_string());
+    }
+    if combined_text.contains("push") {
+        required_proof.push("push".to_string());
+    }
+
+    RoutingFields {
+        dispatch_candidate,
+        task_class,
+        risk: risk.clone(),
+        parallelizable,
+        suggested_parent_tier: suggested_parent_tier.clone(),
+        model_tier: suggested_parent_tier,
+        dispatch_mode: dispatch_mode(fm),
+        context_budget_tokens,
+        job_packet_budget_tokens: context_budget_tokens,
+        write_scope: infer_write_scope(&combined_text),
+        required_proof,
+        tsift_context: tsift_context_plan(file),
+    }
+}
+
+fn dispatch_mode(fm: &frontmatter::Frontmatter) -> String {
+    fm.dispatch
+        .as_deref()
+        .unwrap_or("manual")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn infer_task_class(repo_actions: &[String], text: &str) -> String {
+    if repo_actions.is_empty() {
+        return "prompt_response".to_string();
+    }
+    if text.contains("lower-agent") || text.contains("orchestration") || text.contains("job packet")
+    {
+        return "lower_agent_orchestration".to_string();
+    }
+    if text.contains("spec") && text.contains("test") {
+        return "spec_test_build".to_string();
+    }
+    if repo_actions.len() > 1 {
+        return "multi_target_repo_work".to_string();
+    }
+    "tracked_repo_work".to_string()
+}
+
+fn infer_risk(repo_actions: &[String], text: &str) -> String {
+    let high_risk_terms = [
+        "concurrency",
+        "crdt",
+        "tmux",
+        "routing",
+        "orchestration",
+        "lower-agent",
+        "job packet",
+        "dispatch",
+        "git",
+        "security",
+        "cross-module",
+    ];
+    if repo_actions.len() > 3 || high_risk_terms.iter().any(|term| text.contains(term)) {
+        return "high".to_string();
+    }
+    if repo_actions.len() > 1 || text.contains("test") || text.contains("build") {
+        return "medium".to_string();
+    }
+    "low".to_string()
+}
+
+fn tier_for_risk(risk: &str) -> &'static str {
+    match risk {
+        "high" => "high",
+        "medium" => "med",
+        _ => "low",
+    }
+}
+
+fn infer_write_scope(text: &str) -> Vec<String> {
+    let mut scope = Vec::new();
+    if text.contains("agent-doc") || text.contains("job") || text.contains("plan") {
+        scope.push("src/agent-doc/src/".to_string());
+    }
+    if text.contains("spec") {
+        scope.push("src/agent-doc/specs/".to_string());
+    }
+    if text.contains("runbook") {
+        scope.push("src/agent-doc/runbooks/".to_string());
+    }
+    if text.contains("test") {
+        scope.push("src/agent-doc/tests/".to_string());
+    }
+    if text.contains("tsift") {
+        scope.push("src/tsift/".to_string());
+    }
+    scope.sort();
+    scope.dedup();
+    if scope.is_empty() {
+        scope.push("undetermined".to_string());
+    }
+    scope
+}
+
+fn tsift_context_plan(file: &Path) -> TsiftContextPlan {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let root = crate::snapshot::find_project_root(&canonical)
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let status = if root.join(".tsift/index.db").exists() {
+        "available"
+    } else if root.join(".tsift").is_dir() {
+        "missing_index"
+    } else {
+        "missing"
+    };
+    let file_arg = shell_quote(&display_path(file));
+    let root_arg = shell_quote(&display_path(&root));
+    TsiftContextPlan {
+        status: status.to_string(),
+        freshness_policy: "fresh context required for automatic dispatch; manual packets record stale or missing context explicitly".to_string(),
+        index_status_command: format!("tsift status --json {root_arg}"),
+        context_pack_command: format!("tsift context-pack {file_arg} --json --budget normal"),
+        source_read_command: "tsift source-read <handle>".to_string(),
+        diff_digest_command: format!("tsift diff-digest --cached {root_arg} --json"),
+        test_digest_command: format!("tsift test-digest --path {root_arg} --input <test.log> --json"),
+        stale_fallback: "fail closed before automatic lower-agent dispatch; for manual packets, include the diagnostic and require parent review".to_string(),
+    }
+}
+
+fn display_path(path: &Path) -> String {
+    path.display().to_string()
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-' | b':')
+        })
+    {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn pending_mutations_for_doc(
@@ -778,6 +1027,62 @@ do [#dodone]. spec-test-build-install-commit-push
                     && cmd.contains("--stream")),
             "expected finalize command to carry --done, got: {:?}",
             plan.required_commands
+        );
+    }
+
+    #[test]
+    fn build_plan_emits_lower_agent_routing_fields() {
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+agent_doc_dispatch: auto
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Pending
+
+<!-- agent:backlog -->
+- [ ] [#jobp1] Define lower-agent job packet spec and runbook.
+- [ ] [#jobp2] Add tsift context packet tests.
+<!-- /agent:backlog -->
+"#;
+
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "do [#jobp1]\ndo [#jobp2]\n<!-- /agent:exchange -->",
+        );
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert!(plan.dispatch_candidate);
+        assert_eq!(plan.dispatch_mode, "auto");
+        assert_eq!(plan.task_class, "lower_agent_orchestration");
+        assert_eq!(plan.risk, "high");
+        assert!(plan.parallelizable);
+        assert_eq!(plan.model_tier, "high");
+        assert_eq!(plan.context_budget_tokens, 10_000);
+        assert!(
+            plan.write_scope
+                .contains(&"src/agent-doc/specs/".to_string())
+        );
+        assert!(plan.write_scope.contains(&"src/tsift/".to_string()));
+        assert!(plan.required_proof.contains(&"verification".to_string()));
+        assert_eq!(plan.tsift_context.status, "missing");
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|cmd| cmd.contains("--done jobp1") && cmd.contains("--done jobp2"))
         );
     }
 

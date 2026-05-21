@@ -18,8 +18,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Graph orchestration next steps refreshed; top tsift backlog item: #dtrc.
+Worker-feedback closure contracts implemented and pushed; queued #dtrc, #gafe, and #wfcl complete.
 <!-- /agent:status -->
 
 ## Spec
@@ -47,20 +46,44 @@ Top tsift backlog item: `#dtrc` — add dispatch-trace replay/contract fixture c
 Top agent-doc backlog item added to `tasks/agent-doc/agent-doc-bugs2.md`: `#dxtr` — consume tsift dispatch-trace outputs in agent-doc plan/orchestrate closeout.
 
 The queued `#wrfb` / `#gdtr` tsift work is already implemented and pushed in the compacted graph orchestration contracts turn (`btakita/tsift` `9728ade`, parent submodule pointer `39117c97b`). This cycle only records the next follow-ups and queue bookkeeping. I did not rerun tests because no code changed in this cycle; the implementation turn already recorded `make check`, `cargo build`, local install, and green tsift CI for those features.
-<!-- agent:boundary:9ff1d717 -->
+### Re: worker-feedback closure contracts — gpt-5
+
+Completed `#dtrc`, `#gafe`, and `#wfcl`.
+
+Implemented in `btakita/tsift` commit `3560d68` and updated/pushed the parent submodule pointer in `btakita/agent-loop` commit `a5c464241`.
+
+What changed:
+- `conflict-matrix` now carries worker-feedback closure controls: stale expected tests, follow-up debt, closure rank scores/reasons, and warnings that can reorder equal-risk safe candidates without modifying hard file/symbol/test/config gates.
+- `worker_prompt_packets` and `dispatch-trace` include the worker-feedback closure summary, and the HTML trace shows closure/stale/debt signals.
+- Added `fixtures/graph-db-operator-examples/agent-orchestration-acceptance-pack.json` plus conformance coverage for a real queue replay path: `refresh -> evidence -> conflict-matrix -> dispatch-trace` JSON/HTML, packet/replay/repair command consistency, and graph.db link checks.
+- Updated `SPEC.md`, README, and graph orchestration contract fixtures.
+
+Verification:
+- `cargo test --test graph_db_conformance` — 22 passed, 1 ignored
+- `make ci-full` — clippy, normal tests, ignored deterministic SimWorld coverage, and the env-gated live Convex path passed
+- `cargo build`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.42`
+- GitHub Actions `CI` run `26204657736` — green after push; annotations were the existing Node 20 deprecation notice and the documented live Convex URL configuration note.
+
+Pushed:
+- `btakita/tsift` `main`: `3560d68`
+- `btakita/agent-loop` `main`: `a5c464241`
+<!-- agent:boundary:04a024b6 -->
 <!-- /agent:exchange -->
 ###
 
 
 <!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- do [#dtrc]
+- do [#gafe]
+- do [#wfcl]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#dtrc] [recommended] Add dispatch-trace replay/contract fixture coverage over a real agent-doc queue run: refresh -> evidence -> conflict-matrix -> dispatch-trace JSON/HTML, then assert trace links, worker_feedback summaries, packet ids, and repair/replay commands stay consistent with graph.db.
-- [ ] [#gafe] [recommended] Add an agent-orchestration acceptance pack in tsift fixtures: sample agent-doc job packets, worker_result rows, conflict-matrix output, dispatch-trace export, and context-pack/session-review follow-up commands that agent-doc can consume as golden contracts.
-- [ ] [#wfcl] [recommended] Add worker-feedback closure ranking controls to conflict-matrix and dispatch-trace: deterministic warnings for repeated blockage, stale expected tests, and follow-up debt that can reorder otherwise safe candidates without weakening file/symbol/test/config hard gates.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

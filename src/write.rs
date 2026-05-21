@@ -4338,7 +4338,10 @@ fn remove_duplicate_post_exchange_prompt_comments(
     };
 
     let source = prompt_source.unwrap_or(content);
-    let prompt_candidates = exchange_prompt_candidates_for_duplicate_comments(source, true);
+    let mut prompt_candidates = exchange_prompt_candidates_for_duplicate_comments(source, true);
+    if prompt_candidates.is_empty() {
+        prompt_candidates = exchange_prompt_candidates_for_duplicate_comments(source, false);
+    }
     if prompt_candidates.is_empty() {
         return content.to_string();
     }
@@ -13169,6 +13172,44 @@ Verification:
         assert!(
             repaired.contains("Keep this unrelated scratch note hidden."),
             "unique scratch comments must stay outside exchange:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_template_structure_removes_answered_prompt_html_comment_tail() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let content = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "❯ The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. Was this an issue because I didn't restart agent-doc on this document? #spec-test-build-install-commit-push\n",
+            "### Re: backlog update and duplicate prompt corruption — gpt-5\n",
+            "Implemented.\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let repaired = normalize_template_structure_or_fail(content, &doc).unwrap();
+
+        assert!(
+            repaired.contains("### Re: backlog update and duplicate prompt corruption"),
+            "answered exchange turn should remain:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains(
+                "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
+            ),
+            "answered prompt duplicate comment should be removed:\n{repaired}"
         );
     }
 

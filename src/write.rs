@@ -6465,6 +6465,11 @@ pub(crate) fn dedupe_ipc_snapshot_content(
         if prompt_changed {
             deduped = prompt_deduped;
         }
+        let comment_deduped =
+            remove_duplicate_post_exchange_prompt_comments(&deduped, Some(before), file);
+        if comment_deduped != deduped {
+            deduped = comment_deduped;
+        }
     }
     let (prefix_deduped, prefix_changed) =
         dedupe_live_prompt_prefix_variants_in_tail(&deduped, file);
@@ -9964,6 +9969,48 @@ scratch
         assert_eq!(repaired.matches("sent + received \n").count(), 1);
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("live_prompt_prefix_variant_repaired"));
+        assert!(log.contains("ipc_snapshot_deduped"));
+    }
+
+    #[test]
+    fn ipc_snapshot_dedupes_duplicate_prompt_html_comment_against_before_content() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let before = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. Was this an issue because I didn't restart agent-doc on this document? #spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!--\n",
+            "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let after = before.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: duplicate prompt cleanup — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+        );
+        fs::write(&doc, before).unwrap();
+
+        let (repaired, changed) =
+            dedupe_ipc_snapshot_content(&doc, Some(before), &after, "test_ipc");
+
+        assert!(changed);
+        assert!(
+            !repaired.contains(
+                "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
+            ),
+            "IPC ack-content dedupe must remove the duplicate prompt comment:\n{repaired}"
+        );
+        assert!(repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"));
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("duplicate_post_exchange_prompt_comment_removed"));
         assert!(log.contains("ipc_snapshot_deduped"));
     }
 

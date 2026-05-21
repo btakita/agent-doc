@@ -36,7 +36,16 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): #cmgrwres
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:c27d730f -->
+❯ Any backlog work that should be done on the agent-doc code
+❯ do [#tsdag]. #spec-test-build-install-commit-push
+### Re: #tsdag blocked — gpt-5
+
+I could not start `#tsdag` because `agent-doc plan` stopped the cycle before implementation with a fail-closed tsift graph evidence error:
+
+`tsift graph orchestration contract invalid: conflict-matrix missing evidence_packet_id gevd-8fb9f57781 for target tsdag`
+
+No repo edits, tests, build, install, manual commit, or push were performed. I am not marking `#tsdag` done or gated because implementation did not begin; it stays open until the graph evidence / conflict-matrix state for this document is repaired or regenerated, then this same `do [#tsdag]. #spec-test-build-install-commit-push` request can be rerun.
+<!-- agent:boundary:7b240a67 -->
 <!-- /agent:exchange -->
 ###
 <!--

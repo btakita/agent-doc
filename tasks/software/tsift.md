@@ -71,7 +71,22 @@ Commits and push:
 Note: an installed full-workspace smoke against this agent-loop session hit an existing SQLite `database is locked` state, and `tsift status` reported a stale workspace projection. I left that unrelated workspace index state untouched.
 
 Confidence: high for the CLI surface, parity harness, and regression coverage. The DuckDB/DuckPGQ and Ladybug adapters intentionally remain prototype/read-only and promotion-held until a real engine adapter satisfies the gate.
-<!-- agent:boundary:556a87fa -->
+❯ What does the multi-write story look like? Do we need a broker for both duckdb + ladybug and ladybug?
+### Re: multi-write story — gpt-5
+
+Short version: no full broker yet, and I would not introduce one just because DuckDB/DuckPGQ and Ladybug exist as candidates. The current system has one real writer: the projection builder writes `.tsift/graph.db` through SQLite in a single transaction, with WAL for concurrent readers and read-only snapshot recovery when the live file is locked. The DuckDB/DuckPGQ and Ladybug backend-eval paths are read-only prototypes that load the same provider-neutral rows and compare query/report parity against SQLite; they are not participating in write durability.
+
+The multi-write shape should stay projection-oriented:
+
+1. Treat repo/session state as the source of truth, not any graph backend.
+2. Build one deterministic `GraphProjection` rowset with `projection_version`, content hash, source watermark, and tombstones.
+3. Commit the local SQLite read model synchronously, because it is bundled, transactionally simple, and gives the CLI a dependable offline substrate.
+4. Fan out the exact same rowset to optional promoted sinks only through an idempotent projection sink/outbox, then verify with drift/parity reports. Failed secondary writes should mark that sink stale, not corrupt or block the local read model.
+
+So the thing we may need later is a small projection committer/outbox, not a distributed transaction broker. A broker becomes justified only if a promoted backend becomes a primary shared writer with independent user-visible state that cannot be regenerated from the repo/session projection. For tsift's graph rows, regeneration and content-hash drift checks are cheaper and safer than two-phase commit.
+
+For the candidates specifically: DuckDB should probably remain an embedded analytics/read-model sink if it ever wins the gate; it does not need a broker. Ladybug might need a single-writer service or queue if its production adapter is remote or multi-process, but that queue can still consume deterministic projection batches. We should promote at most one non-SQLite write sink at a time behind the `GraphStore`/projection contract, keep SQLite as the fallback baseline until the lock/install story is at least as good, and require backend-eval plus drift/doctor evidence before reads default to anything else.
+<!-- agent:boundary:245a7022 -->
 <!-- /agent:exchange -->
 ###
 <!--

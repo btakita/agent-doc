@@ -29,47 +29,12 @@ Added auto-DAG next steps; top backlog item: #autodag.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-070545.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-144508.md`*
 
 Compacted content:
-- Archived 1 response topic(s): post-exchange HTML comment retention
+- Archived 2 response topic(s): jobslock; jobslock
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#jobslock]. #spec-test-build-install-commit-push
-### Re: jobslock — gpt-5
-
-I could not start the `#jobslock` implementation cycle because `agent-doc plan` returned a blocker before repo work: tsift graph evidence failed closed while running `tsift conflict-matrix --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json jobslock`, which timed out after 30 seconds.
-
-Because the planning contract says to stop on blockers, I did not update specs/tests, build, install, commit, or push. `#jobslock` remains open until the planning blocker is cleared or the session is rerun with a planning path that permits manual execution despite degraded tsift evidence.
-###### Re: jobslock retry — gpt-5
-
-I retried the `#jobslock` cycle. `agent-doc plan` still stops before repo work with the same planner blocker: `tsift conflict-matrix --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json jobslock` timed out after 30 seconds while gathering tsift graph evidence.
-
-I did not edit code, specs, or tests, and I did not build, install, commit, or push. `#jobslock` stays open because implementation did not begin; this was a planning-stage blocker, not a code-complete external gate.
-### Re: jobslock — gpt-5
-
-Implemented `#jobslock` in `src/agent-doc`.
-
-The planner now downgrades recoverable tsift graph database access failures such as SQLite lock, hot-journal, and read-only errors into `warnings[]` plus `manual_packet_only: true` instead of adding a hard blocker. `agent-doc jobs create` now preserves that flag and warning in the job index, operation doc, and packet body while omitting graph acceptance evidence for parent-reviewed manual packets. Stale/non-current graph freshness and invalid graph contracts still fail closed.
-
-Updated the SPEC and module contracts, then added regressions for planner downgrade, jobs-create packet generation, and graph access error classification.
-
-Verification:
-- `cargo test manual_packet_only`
-- `cargo test classifies_recoverable_graph_db_access_errors`
-- `cargo test create_allows_manual_packets_when_graph_db_is_locked`
-- `make check`
-- `make install`
-- `cargo fmt --check`
-- `git diff --check`
-- GitHub CI run `26210823159`: `Run make check` and `Run make tmux-ci` both succeeded
-
-Commits pushed before this repair closeout:
-- `95148e2` in `src/agent-doc`: `fix: allow manual job packets on graph db lock`
-- `360148e9c` in root: `chore: update agent-doc submodule`
-- `d209f5ead` in root: `agent-doc(agent-doc-bugs2): 2026-05-21 10:39:22`
-
-This repair commit writes the missing document response and will be pushed after `session-check` passes.
-<!-- agent:boundary:17214942 -->
+<!-- agent:boundary:a0e3d18c -->
 <!-- /agent:exchange -->
 ###
 <!--

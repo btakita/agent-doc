@@ -19,7 +19,8 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-Project created. Repo: https://github.com/btakita/tsift. Submodule: src/tsift. Spec extracted to src/tsift/SPEC.md.
+
+Graph orchestration next steps refreshed; top tsift backlog item: #dtrc.
 <!-- /agent:status -->
 
 ## Spec
@@ -36,22 +37,37 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): graph orchestration contracts
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:cf507abe -->
+❯ Update #next-steps in agent-doc-bugs2.md with latest tsift features.
+❯ Add #next-steps to tsift.md for agent orchestration and graphdb features.
+### Re: graph orchestration next steps — gpt-5
+
+I updated the next-step backlog split after the latest tsift graph orchestration features.
+
+Top tsift backlog item: `#dtrc` — add dispatch-trace replay/contract fixture coverage over a real agent-doc queue run.
+
+Top agent-doc backlog item added to `tasks/agent-doc/agent-doc-bugs2.md`: `#dxtr` — consume tsift dispatch-trace outputs in agent-doc plan/orchestrate closeout.
+
+The queued `#wrfb` / `#gdtr` tsift work is already implemented and pushed in the compacted graph orchestration contracts turn (`btakita/tsift` `9728ade`, parent submodule pointer `39117c97b`). This cycle only records the next follow-ups and queue bookkeeping. I did not rerun tests because no code changed in this cycle; the implementation turn already recorded `make check`, `cargo build`, local install, and green tsift CI for those features.
+<!-- agent:boundary:8734bfef -->
 <!-- /agent:exchange -->
 ###
-<!--
--->
+
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#gcfx]~
-- do [#wrfb]
-- do [#gdtr]
+- do [#wfcl]
+- do [#gafe]
+- do [#dtrc]
+- Update #next-steps in agent-doc-bugs2.md with latest tsift features.
+  Add #next-steps to tsift.md for agent orchestration and graphdb features.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#wfcl] [recommended] Add worker-feedback closure ranking controls to conflict-matrix and dispatch-trace: deterministic warnings for repeated blockage, stale expected tests, and follow-up debt that can reorder otherwise safe candidates without weakening file/symbol/test/config hard gates.
+- [ ] [#gafe] [recommended] Add an agent-orchestration acceptance pack in tsift fixtures: sample agent-doc job packets, worker_result rows, conflict-matrix output, dispatch-trace export, and context-pack/session-review follow-up commands that agent-doc can consume as golden contracts.
+- [ ] [#dtrc] [recommended] Add dispatch-trace replay/contract fixture coverage over a real agent-doc queue run: refresh -> evidence -> conflict-matrix -> dispatch-trace JSON/HTML, then assert trace links, worker_feedback summaries, packet ids, and repair/replay commands stay consistent with graph.db.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

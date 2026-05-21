@@ -34,7 +34,34 @@ Added auto-DAG next steps; top backlog item: #autodag.
 Compacted content:
 - Archived 1 response topic(s): duplicate prompt/editor normalization
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:9ddd0520 -->
+❯ The finalize step removes my html comment block after the agent:exchange close tag. The html comment block should be retained. #spec-test-build-install-commit-push
+### Re: post-exchange HTML comment retention — gpt-5
+
+Implemented. `agent-doc` no longer deletes ordinary HTML comment blocks after `&lt;!-- /agent:exchange --&gt;` during preflight, editor-visible normalization, IPC snapshot dedupe, or final template reconciliation. Those comments now stay outside `agent:exchange` as user-owned scratch content even when they look like the prompt being answered.
+
+Changed paths:
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/src/preflight.rs`
+- `src/agent-doc/src/template.rs`
+- `src/agent-doc/tests/finalize_integration.rs`
+- `src/agent-doc/SPEC.md`
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification:
+- `cargo test --all-targets html_comment -- --test-threads=2`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest GitHub CI run `26209899896` was green, including `Run make tmux-ci`.
+
+Commits:
+- `affbaaf7` in `src/agent-doc`: `fix: preserve post-exchange html comments`
+- `3e2c260da` in the parent repo: `chore: update agent-doc submodule`
+
+Push is intentionally after this finalize step so the session-document closeout commit is included in the push.
+<!-- agent:boundary:c30b965b -->
 <!-- /agent:exchange -->
 ###
 <!--

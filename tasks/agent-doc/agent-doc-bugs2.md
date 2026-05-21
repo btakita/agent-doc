@@ -29,31 +29,12 @@ Added auto-DAG next steps; top backlog item: #autodag.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-144508.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-172906.md`*
 
 Compacted content:
-- Archived 2 response topic(s): jobslock; jobslock
+- Archived 1 response topic(s): duplicate prompt corruption
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Why is it so difficult to recognize that I'm typing in a prompt? I clearly see the diff in my editor. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push
-### Re: duplicate prompt corruption — gpt-5
-
-You were right about the shape: the prompt diff was visible and preflight did recognize it, but the newer comment-preservation rule was too broad. It preserved a stale post-exchange HTML comment containing an older copy of the same prompt, so the document could keep carrying duplicate prompt residue even though the active prompt was already in `agent:exchange`.
-
-I reproduced that first with failing regressions, starting with `cargo test duplicate_prompt_html_comment --lib`, which failed because editor-visible normalization kept the duplicate comment. I then fixed the shared cleanup path so preflight, editor-visible normalization, IPC snapshot dedupe, and final template reconciliation remove ordinary post-exchange HTML comments only when the body duplicates or near-duplicates a prompt already present in `agent:exchange`; unrelated scratch comments still stay outside the exchange.
-
-Changed paths in `src/agent-doc`: `src/template.rs`, `src/preflight.rs`, `src/write.rs`, `tests/finalize_integration.rs`, `specs/04-diff-computation.md`, `specs/07-closeout-commands.md`, and `VERSIONS.md`.
-
-Verification completed:
-- Failing-first proof: `cargo test duplicate_prompt_html_comment --lib` failed before implementation.
-- Focused passes: `cargo test duplicate_prompt_html`, `cargo test post_exchange_duplicate`, and `cargo test html_comment_tail`.
-- CI/tmux evidence: latest `agent-doc` CI run `26233010436` was green, including `Run make tmux-ci`.
-- Full local suite: `make check` passed.
-- Local install: `make install` passed and `agent-doc --version` reports `agent-doc 0.33.16`.
-
-Commits:
-- `src/agent-doc`: `0bc3c58` (`fix: clean duplicate prompt comments`), pushed to `origin/20260422/codex-agent-backend`.
-- Superproject pointer: `d6c744949` (`agent-doc: clean duplicate prompt comments`), ready to push after this document closeout commit.
-<!-- agent:boundary:af702f7a -->
+<!-- agent:boundary:4fc63477 -->
 <!-- /agent:exchange -->
 ###
 

@@ -31,39 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-040851.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-044005.md`*
 
 Compacted content:
-- Archived 3 response topic(s): graph orchestration next steps; worker-feedback closure contracts; graph orchestration next steps
+- Archived 1 response topic(s): do #aorp
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#aorp]. #spec-test-build-install-commit-push
-### Re: do #aorp — gpt-5
-
-Implemented `#aorp`.
-
-What changed:
-- Added a graph conformance acceptance test that regenerates normalized `graph-db refresh`, `graph-db evidence`, `conflict-matrix`, `dispatch-trace` JSON/HTML, `context-pack`, and `session-review` samples from the real queue fixture.
-- Added `regenerated_samples` to `fixtures/graph-db-operator-examples/agent-orchestration-acceptance-pack.json`, so CI fails when checked-in orchestration contracts drift from live regenerated output.
-- Updated the tsift spec and fixture README to document the regeneration contract.
-
-Commits created locally:
-- `src/tsift`: `e7f664b test: add agent orchestration acceptance regeneration`
-- parent repo pointer: `1de98edb3 chore: update tsift acceptance harness`
-
-Verification:
-- `cargo fmt --check`
-- `cargo test --test graph_db_conformance agent_orchestration_acceptance_pack_regenerates_from_real_queue_fixture`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- `tsift --version` -> `tsift 0.1.42`
-
-CI review:
-- `btakita/tsift` latest `CI` run `26204657736` is green for `clippy + test` and `live Convex graph acceptance`.
-- parent `btakita/agent-loop` latest `Agent Doc` run `26205168579` shows empty-step failures for `tmux-ci` and `check`; no job steps started, so I treated it as an external CI-start blocker rather than a tmux/code regression.
-
-Operational note: `agent-doc plan` was attempted after preflight, but the installed pre-change planner stayed CPU-bound inside `tsift conflict-matrix --path ... --json aorp` with no output and had to be interrupted. I executed from the explicit `#aorp` backlog item plus `#spec-test-build-install-commit-push` preset instead.
-<!-- agent:boundary:375e48ac -->
+<!-- agent:boundary:c822d408 -->
 <!-- /agent:exchange -->
 ###
 <!--

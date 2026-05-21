@@ -35,7 +35,43 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): #impactdag and #dagfix; #dagfix queue closeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:14f78cc3 -->
+❯ do [#dbbench]. #spec-test-build-install-commit-push
+### Re: #dbbench — gpt-5
+
+Implemented `#dbbench` and marked it done.
+
+Changed paths:
+- `src/tsift/SPEC.md`
+- `src/tsift/src/main.rs`
+- `src/tsift/src/substrate.rs`
+- `src/tsift/tests/graph_db_conformance.rs`
+- `src/tsift/fixtures/graph-db-operator-examples/agent-orchestration-acceptance-pack.json`
+
+What changed:
+- Added `tsift graph-db backend-eval` for experimental DuckDB/DuckPGQ and Ladybug backend evaluation.
+- Added a read-only experimental `GraphStore` harness over provider-neutral rows and parity/timing reports against SQLite on real and synthetic datasets.
+- Covered refresh/load, status, evidence, conflict-matrix, and dispatch-trace operations with promotion decisions, lock/install notes, cached planner inputs, deterministic dispatch-trace traversal, and conformance coverage.
+
+Verification:
+- `cargo check`
+- `cargo test graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `cargo test cli_accepts_global_compact_flag`
+- `cargo test agent_orchestration_acceptance_pack_regenerates_from_real_queue_fixture --test graph_db_conformance`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.42`
+- GitHub tsift CI `26255514008`: success for live Convex acceptance and full clippy/test.
+- Superproject Agent Doc CI `26255527494`: failed before any job steps or logs for `check` and `tmux-ci`; treated as an external CI-start blocker per runbook, not a tmux regression.
+
+Commits and push:
+- `btakita/tsift@e8fced7` (`feat: add graph backend evaluation gate`) pushed to `origin/main`.
+- `btakita/agent-loop@db58d6c` (`chore: update tsift backend evaluation`) pushed to `origin/main`.
+
+Note: an installed full-workspace smoke against this agent-loop session hit an existing SQLite `database is locked` state, and `tsift status` reported a stale workspace projection. I left that unrelated workspace index state untouched.
+
+Confidence: high for the CLI surface, parity harness, and regression coverage. The DuckDB/DuckPGQ and Ladybug adapters intentionally remain prototype/read-only and promotion-held until a real engine adapter satisfies the gate.
+<!-- agent:boundary:556a87fa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -47,7 +83,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#dbbench] [recommended] Add an experimental GraphStore backend evaluation for DuckDB/DuckPGQ and Ladybug: prototype read-only adapters behind the existing contract, benchmark refresh/status/evidence/conflict-matrix/dispatch-trace on real and synthetic projections, and only promote if it beats SQLite without worsening multi-process lock behavior or install portability.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

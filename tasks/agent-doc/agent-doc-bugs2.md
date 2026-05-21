@@ -29,38 +29,12 @@ Added auto-DAG next steps; top backlog item: #autodag.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-215448.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-222359.md`*
 
 Compacted content:
-- Archived 2 response topic(s): duplicate prompt corruption; duplicate prompt comment shell
+- Archived 1 response topic(s): #missedpb missed patchback closeout
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#missedpb]. #spec-test-build-install-commit-push
-### Re: #missedpb missed patchback closeout — gpt-5
-
-Implemented #missedpb.
-
-What changed:
-- `src/agent-doc/src/write.rs` now treats IPC ACK/sidecar/file consumption as insufficient unless the materialized candidate contains the expected response-body probe. Prompt-only, unrelated, or partial-heading materialization logs `ipc_materialization_missing_response` and falls back before snapshot/commit can mark the response committed.
-- `src/agent-doc/src/git.rs` now blocks the `snapshot == HEAD` already-current no-op when an active captured response is absent from the staged snapshot/HEAD, leaving the cycle recoverable via `agent-doc write --commit <FILE>`.
-- `src/agent-doc/specs/07-closeout-commands.md`, `src/agent-doc/VERSIONS.md`, and `src/agent-doc/tests/test_cli.rs` were updated for the new invariant and audited FlowCore guard token.
-
-Verification run:
-- `cargo fmt`
-- `cargo test commit_blocks_head_current_noop_when_active_capture_response_missing`
-- `cargo test try_ipc_rejects_consumed_partial_response_materialization`
-- `cargo test try_ipc_routes_to_submodule_root_not_superproject`
-- `cargo test try_ipc_routes_to_git_toplevel_for_non_submodule`
-- `make check`
-- `make install`
-- GitHub `Agent Doc` run `26255697164` was red before runner steps were created: both `tmux-ci` and `check` jobs had empty step lists and completed in ~2s, so I classified it as an external CI-start blocker rather than a code/tmux regression.
-- `make tmux-ci` passed locally: 228 ignored/live tmux tests passed.
-
-Commits:
-- `src/agent-doc`: `c5d396d9 fix: guard missed response materialization`, pushed to `origin/20260422/codex-agent-backend`.
-- root submodule pointer: `d1f0b2d9c agent-doc(root): bump agent-doc for materialization guard`, committed locally before this finalize. Per the session closeout ordering, I will push root `main` after this `finalize` creates the session-document commit.
-
-Confidence: high. The regression now has both direct unit coverage and full default/live verification. No escalation was needed.
-<!-- agent:boundary:3302a7c8 -->
+<!-- agent:boundary:2e9d2563 -->
 <!-- /agent:exchange -->
 ###
 <!--

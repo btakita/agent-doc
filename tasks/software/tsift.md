@@ -62,7 +62,7 @@ It might be worth a narrow backend experiment behind `GraphStore` only, because 
 My judgment: keep SQLite as the local correctness/offline backend and fix the lock behavior directly, probably with WAL/transaction/owned-lock recovery. Treat Ladybug as a possible optional graph projection backend only after a small benchmark proves it improves evidence/path/neighborhood workloads enough to justify the migration cost.
 
 Sources checked: Ladybug GitHub README (`https://github.com/LadybugDB/ladybug`), Ladybug docs overview (`https://docs.ladybugdb.com/`), client APIs (`https://docs.ladybugdb.com/client-apis/`), and concurrency docs (`https://docs.ladybugdb.com/concurrency/`). Local context checked: `src/tsift/Cargo.toml`, `src/tsift/SPEC.md`, `src/tsift/src/substrate.rs`, and `src/tsift/tests/graph_db_conformance.rs`.
-<!-- agent:boundary:7e9b8cd3 -->
+<!-- agent:boundary:0350a49c -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -80,8 +80,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#bfd1] [recommended] Fix tsift graph-db evidence timeout on agent-doc backlog ids by bounding target resolution/path traversal and adding regression coverage for evidence autodag --depth 3 --limit 8 against session backlog fixtures.
-- [ ] [#w94s] [recommended] Add graph-evidence coverage for queue-head drift where consumed queue prompts revert from done do-id text to active do-id text, including repair guidance that does not reactivate completed queue items.
 - [ ] [#tsdag] [recommended] Add graph-level dependency DAG extraction for agent-doc work: derive explicit and implicit edges among backlog ids from file/symbol/test/config overlap, semantic relations, worker_result follow-up ids, and depends-on text; emit nodes, edges, cycle diagnostics, topo batches, replay commands, and repair commands as a versioned JSON contract.
 - [ ] [#impactdag] [recommended] Extend conflict-matrix and dispatch-trace with scheduler fields: parallel_safe, blocks, blocked_by, required_context, expected_tests, and stable graph handles so agent-doc can run topological antichains without scraping prose.
 - [ ] [#dagfix] [recommended] Add regeneration fixtures for real agent-doc queue DAGs: refresh -> evidence -> conflict-matrix -> dependency-dag -> dispatch-trace, asserting projection freshness, packet ids, worker_result closure, cycle detection, and stale graph fail-closed behavior.

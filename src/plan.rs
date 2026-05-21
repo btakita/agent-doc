@@ -51,6 +51,8 @@ use crate::{
 pub struct DispatchPlan {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_targets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_evidence: Option<crate::tsift_graph::TsiftGraphEvidencePlan>,
     pub execution_scope: ExecutionScope,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repo_actions: Vec<String>,
@@ -131,6 +133,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let Some(diff_text) = doc_diff.or(harness_diff.clone()).or(queue_diff) else {
         return Ok(DispatchPlan {
             prompt_targets: Vec::new(),
+            graph_evidence: None,
             execution_scope: ExecutionScope::Normal,
             repo_actions: Vec::new(),
             required_commands: finalize_placeholder_commands(file, &fm, &[]),
@@ -168,6 +171,13 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &prompt_bearing_changes,
     )?;
     let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
+    let graph_evidence = match crate::tsift_graph::collect_for_do_items(file, &prompt_targets) {
+        Ok(graph_evidence) => graph_evidence,
+        Err(err) => {
+            blockers.push(format!("tsift graph evidence failed closed: {err:#}"));
+            None
+        }
+    };
 
     let mut required_commands = Vec::new();
     let mut handoff = HandoffTarget::None;
@@ -226,6 +236,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     Ok(DispatchPlan {
         prompt_targets,
+        graph_evidence,
         execution_scope,
         repo_actions,
         required_commands,

@@ -139,6 +139,13 @@ struct OrderedTaskRunOptions<'a> {
     model_override: Option<&'a str>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct OrderedTaskStepOptions<'a> {
+    agent_override: Option<&'a str>,
+    model_override: Option<&'a str>,
+    graph_context: Option<&'a str>,
+}
+
 trait LifecycleOps {
     fn preflight(&self, file: &Path) -> Result<PreflightOutput>;
     fn finalize(
@@ -502,6 +509,7 @@ fn run_with_dependencies(
                     "`agent-doc orchestrate --mode sequential` requires git-backed finalize"
                 );
             }
+            let graph_evidence = collect_graph_evidence_for_tasks(file, &batch.tasks, false)?;
             let execution_tasks = batch
                 .tasks
                 .into_iter()
@@ -512,6 +520,7 @@ fn run_with_dependencies(
                 .collect::<Vec<_>>();
             if config.plan {
                 print_plan(&execution_tasks);
+                print_graph_plan(graph_evidence.as_ref(), &execution_tasks)?;
                 return Ok(());
             }
             run_ordered_tasks_internal(
@@ -525,6 +534,7 @@ fn run_with_dependencies(
                 global_config,
                 lifecycle,
                 agent_runner,
+                graph_evidence.as_ref(),
             )
         }
         OrchestrateMode::Parallel => {
@@ -541,12 +551,21 @@ fn run_with_dependencies(
             for (idx, task) in batch.tasks.iter().enumerate() {
                 eprintln!("[orchestrate]   {}: {}", idx + 1, task);
             }
+            let graph_evidence = if config.dry_run {
+                None
+            } else {
+                collect_graph_evidence_for_tasks(file, &batch.tasks, true)?
+            };
             let parallel_tasks = batch
                 .tasks
                 .into_iter()
                 .map(|task| parallel::ParallelTask {
                     description: task.clone(),
-                    prompt: apply_prompt_preset_block(&task, prompt_preset_block.as_deref()),
+                    prompt: apply_parallel_graph_context(
+                        &task,
+                        apply_prompt_preset_block(&task, prompt_preset_block.as_deref()),
+                        graph_evidence.as_ref(),
+                    ),
                 })
                 .collect::<Vec<_>>();
             if config.plan {
@@ -558,6 +577,7 @@ fn run_with_dependencies(
                     })
                     .collect();
                 print_plan(&exec);
+                print_graph_plan(graph_evidence.as_ref(), &exec)?;
                 return Ok(());
             }
             parallel_runner.run(
@@ -604,6 +624,11 @@ fn run_with_dependencies(
             if config.no_git {
                 anyhow::bail!("`agent-doc orchestrate --mode dag` requires git-backed finalize");
             }
+            let graph_targets = dag_tasks
+                .iter()
+                .map(|task| task.prompt.clone())
+                .collect::<Vec<_>>();
+            let graph_evidence = collect_graph_evidence_for_tasks(file, &graph_targets, false)?;
             let execution_tasks = plan_dag_execution(&dag_tasks)?
                 .into_iter()
                 .map(|task| ExecutionTask {
@@ -613,6 +638,7 @@ fn run_with_dependencies(
                 .collect::<Vec<_>>();
             if config.plan {
                 print_plan(&execution_tasks);
+                print_graph_plan(graph_evidence.as_ref(), &execution_tasks)?;
                 return Ok(());
             }
             run_ordered_tasks_internal(
@@ -626,6 +652,7 @@ fn run_with_dependencies(
                 global_config,
                 lifecycle,
                 agent_runner,
+                graph_evidence.as_ref(),
             )
         }
     }
@@ -638,6 +665,7 @@ fn run_ordered_tasks_internal(
     global_config: &Config,
     lifecycle: &impl LifecycleOps,
     agent_runner: &impl FreshAgentRunner,
+    graph_evidence: Option<&crate::tsift_graph::TsiftGraphEvidencePlan>,
 ) -> Result<()> {
     let mut effective_model: Option<String> = options.model_override.map(String::from);
     let dispatch_ctx = build_dispatch_context(file);
@@ -665,11 +693,17 @@ fn run_ordered_tasks_internal(
                 }
             }
             QueueItemKind::Prompt => {
+                let graph_context = graph_evidence
+                    .and_then(|evidence| evidence.prompt_context_for_task(&task.label).transpose())
+                    .transpose()?;
                 let child_result = match run_ordered_task_step(
                     file,
                     &task.prompt,
-                    options.agent_override,
-                    effective_model.as_deref(),
+                    OrderedTaskStepOptions {
+                        agent_override: options.agent_override,
+                        model_override: effective_model.as_deref(),
+                        graph_context: graph_context.as_deref(),
+                    },
                     global_config,
                     lifecycle,
                     agent_runner,
@@ -785,8 +819,7 @@ fn build_effective_agent_config(
 fn run_ordered_task_step(
     file: &Path,
     task: &str,
-    agent_override: Option<&str>,
-    model_override: Option<&str>,
+    options: OrderedTaskStepOptions<'_>,
     global_config: &Config,
     lifecycle: &impl LifecycleOps,
     agent_runner: &impl FreshAgentRunner,
@@ -802,23 +835,29 @@ fn run_ordered_task_step(
         fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
     let (fm, _) = frontmatter::parse(&doc)?;
     let mode = fm.resolve_mode();
-    let agent_name = agent_override
+    let agent_name = options
+        .agent_override
         .or(fm.agent.as_deref())
         .or(global_config.default_agent.as_deref())
         .unwrap_or("claude");
     let harness = agent_doc::model_tier::harness_key_for_agent_name(agent_name);
-    let resolved_model = model_override
+    let resolved_model = options
+        .model_override
         .or(fm.resolve_harness_model(&harness))
         .map(|m| agent_doc::model_tier::canonical_model_name(m, &harness, &global_config.model));
     let model = resolved_model.as_deref();
     let session_accretion = crate::session_accretion::inspect(file).ok();
-    let prompt = build_agent_prompt(
+    let mut prompt = build_agent_prompt(
         file,
         mode,
         preflight.diff.as_deref(),
         &doc,
         session_accretion.as_ref(),
     );
+    if let Some(graph_context) = options.graph_context {
+        prompt.push_str("\n\n");
+        prompt.push_str(graph_context);
+    }
     let expanded_env = expand_frontmatter_env(&fm);
 
     let resolved_harness_args = resolve_orchestrate_agent_args(&fm, agent_name, global_config);
@@ -1502,6 +1541,72 @@ fn print_plan(tasks: &[ExecutionTask]) {
     }
 }
 
+fn print_graph_plan(
+    graph_evidence: Option<&crate::tsift_graph::TsiftGraphEvidencePlan>,
+    tasks: &[ExecutionTask],
+) -> Result<()> {
+    let Some(graph_evidence) = graph_evidence else {
+        return Ok(());
+    };
+    eprintln!(
+        "[orchestrate] tsift graph targets: {}",
+        graph_evidence.targets.join(", ")
+    );
+    for task in tasks {
+        if let Some(context) = graph_evidence.prompt_context_for_task(&task.label)? {
+            eprintln!("[orchestrate] --- tsift graph evidence: {} ---", task.label);
+            for line in context.lines() {
+                eprintln!("[orchestrate] {}", line);
+            }
+            eprintln!("[orchestrate] --- end tsift graph evidence ---");
+        }
+    }
+    Ok(())
+}
+
+fn collect_graph_evidence_for_tasks(
+    file: &Path,
+    tasks: &[String],
+    fail_on_conflict_matrix: bool,
+) -> Result<Option<crate::tsift_graph::TsiftGraphEvidencePlan>> {
+    let graph_evidence = crate::tsift_graph::collect_for_do_items(file, tasks)?;
+    if let Some(graph_evidence) = &graph_evidence {
+        eprintln!(
+            "[orchestrate] tsift graph evidence targets: {}",
+            graph_evidence.targets.join(", ")
+        );
+        if fail_on_conflict_matrix && graph_evidence.conflict_matrix.fail_closed {
+            anyhow::bail!(
+                "tsift conflict-matrix failed closed for {}: {}",
+                graph_evidence.targets.join(", "),
+                graph_evidence.conflict_matrix.decisions.join("; ")
+            );
+        }
+    }
+    Ok(graph_evidence)
+}
+
+fn apply_parallel_graph_context(
+    task_label: &str,
+    prompt: String,
+    graph_evidence: Option<&crate::tsift_graph::TsiftGraphEvidencePlan>,
+) -> String {
+    let Some(graph_evidence) = graph_evidence else {
+        return prompt;
+    };
+    match graph_evidence.prompt_context_for_task(task_label) {
+        Ok(Some(context)) => format!("{prompt}\n\n{context}"),
+        Ok(None) => prompt,
+        Err(err) => {
+            eprintln!(
+                "[orchestrate] warning: failed to render tsift graph evidence for `{}`: {}",
+                task_label, err
+            );
+            prompt
+        }
+    }
+}
+
 fn finalize_orchestration_batch_changed(
     file: &Path,
     completed_steps: usize,
@@ -1936,6 +2041,53 @@ mod tests {
         bool,
     );
 
+    fn test_graph_evidence_plan() -> crate::tsift_graph::TsiftGraphEvidencePlan {
+        crate::tsift_graph::TsiftGraphEvidencePlan {
+            targets: vec!["gkke".to_string()],
+            graph_db_status: crate::tsift_graph::TsiftGraphDbStatus {
+                root: Some("/tmp/repo".to_string()),
+                graph_db: Some("/tmp/repo/.tsift/graph.db".to_string()),
+                status: "current".to_string(),
+                content_hash: Some("abc".to_string()),
+                source_watermark: Some("abc".to_string()),
+                diagnostics: Vec::new(),
+            },
+            prompt_target_handles: vec![crate::tsift_graph::TsiftPromptTargetHandle {
+                prompt_target: "do #gkke".to_string(),
+                target: "gkke".to_string(),
+                evidence_packet_id: "gkke:gbak-gkke".to_string(),
+                target_node_id: "gbak-gkke".to_string(),
+                target_kind: "backlog".to_string(),
+                target_label: "#gkke".to_string(),
+                worker_context_handles: vec!["wctx-gkke".to_string()],
+                source_handles: vec!["src-gkke".to_string()],
+                semantic_handles: Vec::new(),
+                next_commands: Vec::new(),
+            }],
+            conflict_matrix: crate::tsift_graph::TsiftConflictMatrixSummary {
+                can_parallel: true,
+                fail_closed: false,
+                evidence_packet_ids: vec!["gkke:gbak-gkke".to_string()],
+                decisions: vec!["candidate #1 gkke risk=low".to_string()],
+                worker_ownership_blocks: vec!["Worker 1 owns gkke (#gkke)".to_string()],
+                worker_prompt_packets: vec![crate::tsift_graph::TsiftWorkerPromptPacket {
+                    target: "gkke".to_string(),
+                    rank: 1,
+                    risk: "low".to_string(),
+                    title: "Worker 1 owns gkke (#gkke)".to_string(),
+                    owned_files: vec!["src/orchestrate.rs".to_string()],
+                    owned_symbols: Vec::new(),
+                    read_only_context: vec!["src-gkke".to_string()],
+                    forbidden_files: Vec::new(),
+                    expected_tests: vec!["cargo test orchestrate".to_string()],
+                    expansion_commands: vec!["tsift graph-db evidence gkke --json".to_string()],
+                }],
+                next_commands: Vec::new(),
+            },
+            next_commands: Vec::new(),
+        }
+    }
+
     struct FakeAgentRunner {
         prompts: RefCell<Vec<String>>,
         envs: RefCell<Vec<AgentEnv>>,
@@ -2365,6 +2517,7 @@ mod tests {
             &Config::default(),
             &lifecycle,
             &agent,
+            None,
         )
         .unwrap();
 
@@ -2384,6 +2537,59 @@ mod tests {
         );
         assert_eq!(*agent.fresh_calls.borrow(), 1);
         assert_eq!(*agent.streaming_calls.borrow(), 0);
+    }
+
+    #[test]
+    fn sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = dir.path().join("baseline.md");
+        fs::write(&doc, template_doc()).unwrap();
+        fs::write(&baseline, template_doc()).unwrap();
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: baseline.to_string_lossy().into_owned(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response:
+                "<!-- patch:exchange -->\n### Re: task — gpt-5\n\nImplemented.\n<!-- /patch:exchange -->\n"
+                    .to_string(),
+            streaming_chunks: None,
+        };
+        let tasks = vec![ExecutionTask {
+            label: "do #gkke".to_string(),
+            prompt: "do #gkke".to_string(),
+        }];
+        let graph_evidence = test_graph_evidence_plan();
+
+        run_ordered_tasks_internal(
+            &doc,
+            &tasks,
+            OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: None,
+                model_override: Some("gpt-5"),
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            Some(&graph_evidence),
+        )
+        .unwrap();
+
+        let prompt = &agent.prompts.borrow()[0];
+        assert!(prompt.contains("<tsift_graph_evidence>"));
+        assert!(prompt.contains("\"evidence_packet_id\": \"gkke:gbak-gkke\""));
+        assert!(prompt.contains("Worker 1 owns gkke (#gkke)"));
+        let final_doc = fs::read_to_string(&doc).unwrap();
+        assert!(!final_doc.contains("<tsift_graph_evidence>"));
     }
 
     #[test]
@@ -2427,6 +2633,7 @@ mod tests {
             &Config::default(),
             &lifecycle,
             &agent,
+            None,
         )
         .unwrap();
 
@@ -2544,6 +2751,7 @@ mod tests {
             &Config::default(),
             &lifecycle,
             &agent,
+            None,
         )
         .unwrap_err()
         .to_string();
@@ -2666,6 +2874,7 @@ mod tests {
             &Config::default(),
             &lifecycle,
             &agent,
+            None,
         )
         .unwrap();
 
@@ -2802,6 +3011,7 @@ mod tests {
             &Config::default(),
             &lifecycle,
             &agent,
+            None,
         )
         .unwrap();
 

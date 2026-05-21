@@ -72,7 +72,35 @@ Verification:
 - Confirmed `git show HEAD:tasks/software/tsift.done.md` contains `[#pwcm]`.
 
 I left the unrelated existing working-tree changes, including the `tasks/software/tsift.md` queue edits, untouched. No new backlog item came out of this change.
-<!-- agent:boundary:ffe8d904 -->
+❯ I meant update the backlog in this document. [#pwcm] may change the plan for multi agent work.
+
+The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. Was this an issue because I didn't restart agent-doc on this document? #spec-test-build-install-commit-push
+### Re: backlog update and duplicate prompt corruption — gpt-5
+
+I updated this document's backlog for tsift `#pwcm` by adding a follow-up tied to the lower-agent orchestration plan: incorporate tsift's planner conflict-matrix output before enabling parallel worker dispatch, so worker scopes are ranked with graph/context/diff/impact evidence and shared-file/symbol/test/config conflicts produce fail-closed ownership blocks.
+
+The duplicate prompt/comment shape was not something a restart should have been required to fix. This cycle did recover a stale empty `preflight_started` record, but the root issue was narrower: closeout and session checks intentionally ignore ordinary HTML comments so scratch notes do not become prompts. That let a hidden post-exchange HTML comment that duplicated the live prompt survive as stale document residue.
+
+I reproduced that first with a failing regression: a live prompt inside `agent:exchange` plus a near-duplicate prompt copy inside a post-exchange HTML comment. Then I fixed final template reconciliation so it removes only complete ordinary HTML comments whose body duplicates or near-duplicates the unresolved prompt being answered. Unrelated scratch comments still remain outside `agent:exchange` and are still ignored by prompt-bearing checks.
+
+Changed in `src/agent-doc`:
+- Added duplicate post-exchange prompt-comment cleanup in `src/write.rs`.
+- Added regressions for removing the duplicate prompt comment and preserving a unique scratch comment.
+- Updated `SPEC.md`, `specs/07-closeout-commands.md`, and `VERSIONS.md` with the closeout contract.
+
+Verification:
+- Reproduced the bug first: `cargo test normalize_final_template_content_removes_duplicate_prompt_html_comment_tail` failed before the fix.
+- `cargo test duplicate_prompt_html_comment`
+- `cargo test post_exchange`
+- `make check`
+- `make install`
+- `agent-doc --version` reports `agent-doc 0.33.16`.
+- Latest completed GitHub CI before the push was green: run `26197772085`, including `Run make tmux-ci`. The post-push CI run `26198709669` is in progress.
+
+Commits pushed:
+- `src/agent-doc`: `9c01f9a1 fix: clean duplicate prompt comments`, pushed to `origin/20260422/codex-agent-backend`.
+- root repo: `582d3807c chore: update agent-doc submodule`, pushed to `origin/main`.
+<!-- agent:boundary:c15dec51 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -85,6 +113,8 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#r7k8] [recommended] Incorporate tsift #pwcm planner conflict-matrix report into lower-agent orchestration before enabling parallel worker dispatch: use graph/context/diff/impact outputs to rank worker scopes, flag shared file/symbol/test/config conflicts, and emit fail-closed ownership blocks. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
+- [ ] [#pwcm] [recommended] Incorporate tsift's planner conflict-matrix report into lower-agent orchestration before enabling parallel worker dispatch: use graph/context/diff/impact outputs to rank worker scopes, flag shared file/symbol/test/config conflicts, and emit fail-closed ownership blocks. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

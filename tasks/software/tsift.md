@@ -19,7 +19,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Agent-orchestration acceptance regeneration complete; tsift backlog is clear.
+Added graph/orchestration next steps; top tsift backlog item: #orchdog.
 <!-- /agent:status -->
 
 ## Spec
@@ -36,13 +36,21 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): do #aorp
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:c822d408 -->
+❯ Update #next-steps in agent-doc-bugs2.md with latest tsift features.
+❯ Add #next-steps to tsift.md for agent orchestration and graphdb features.
+### Re: next steps — gpt-5
+
+Captured the requested `#next-steps` backlog updates.
+
+For `tasks/agent-doc/agent-doc-bugs2.md`, I added top item `#aggtp` for an agent-doc graph-backed orchestration acceptance gate using the latest tsift evidence, conflict-matrix, dispatch-trace, worker-result, and job-packet contracts.
+
+For `tasks/software/tsift.md`, I added `#orchdog` and `#gdbhard`. The top tsift backlog item is `#orchdog`; the top agent-doc-bugs2 backlog item is `#aggtp`.
+
+No code or test files changed in this cycle.
+<!-- agent:boundary:21063abc -->
 <!-- /agent:exchange -->
 ###
-<!--
-Update #next-steps in agent-doc-bugs2.md with latest tsift features.
-Add #next-steps to tsift.md for agent orchestration and graphdb features.
--->
+
 
 
 <!-- agent:queue -->
@@ -55,6 +63,8 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps.
+- [ ] [#gdbhard] [recommended] Harden graph-db operator docs/fixtures around the current feature set: refresh/status/doctor/evidence/drift/convex-sync replay paths, stale Convex repair commands, and real agent-loop session examples that can be regenerated in CI.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

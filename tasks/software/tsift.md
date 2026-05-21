@@ -52,7 +52,20 @@ Recommendation: keep SQLite as the default correctness backend and fix `#gdblock
 Sources checked: [DuckDB concurrency](https://duckdb.org/docs/current/connect/concurrency), [DuckDB graph queries / DuckPGQ](https://duckdb.org/docs/lts/guides/sql_features/graph_queries.html), [Ladybug overview](https://docs.ladybugdb.com/), [Ladybug concurrency](https://docs.ladybugdb.com/concurrency/), [Ladybug Rust API](https://docs.ladybugdb.com/client-apis/rust/), [Ladybug DuckDB extension](https://docs.ladybugdb.com/extensions/attach/duckdb/).
 
 Closeout: no repo files changed for this response; no tests run because this was an evaluation-only prompt. Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, targeted `rg`/`sed` inspection, and current primary docs lookup. Preflight warning noted: one legacy gated backlog item remains in `agent:backlog` and can be migrated separately with `agent-doc migrate`.
-<!-- agent:boundary:5a728a16 -->
+❯ do [#gdblock]. #spec-test-build-install-commit-push
+❯ Would the https://github.com/Vela-Engineering/kuzu be a viable alternative to Ladybug since it supports multiple writers?
+### Re: #gdblock and Vela Kuzu — gpt-5
+
+I stopped before source edits because `agent-doc plan` failed closed on the tsift graph orchestration contract: `conflict-matrix` is missing evidence packet `gevd-6d1a7e9566` for target `gdblock`. That means `#gdblock` stays open; I did not run the spec/test/build/install path or mark the item done.
+
+On Kuzu: yes, Vela-Engineering/kuzu is more interesting than Ladybug for this exact concurrency problem, but I would treat it as an evaluation candidate rather than a default replacement. As of May 21, 2026, the Vela fork README explicitly says it adds concurrent multi-writer support for multi-agent systems, while the Vela writeup contrasts that with original Kuzu and Ladybug as single-writer options. The repo also shows a March 2026 `0.12.0-vela` release with Python wheels, so this is not just a stale announcement.
+
+The catch is maturity and blast radius. `#gdblock` is currently a local SQLite lock/recovery problem in tsift's correctness store. The low-risk repair path is still WAL/busy-timeout/read-only snapshot fallback/runbook diagnostics. Replacing the graph store with Vela Kuzu would be a larger storage contract migration: schema mapping, Cypher query layer, deterministic ordering checks, crash recovery behavior, packaged binary/wheel availability for the local install path, and concurrent process stress tests. It may be the best non-SQLite backend to benchmark because its advertised multi-writer model directly targets this workflow; it is not yet evidence that tsift should skip the SQLite repair.
+
+Sources checked: [Vela-Engineering/kuzu README](https://github.com/Vela-Engineering/kuzu), [Vela KuzuDB writeup](https://vela.partners/blog/kuzudb-ai-agent-memory-graph-database), [Vela-Engineering/kuzu releases](https://github.com/Vela-Engineering/kuzu/releases).
+
+Closeout evidence: changed paths: none; commands: `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, current upstream source lookup; verification evidence - not run because planning reported a blocker before repo work; escalation: none; non-session repo commit/push: none.
+<!-- agent:boundary:af4b9198 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +77,6 @@ preset #spec-test-build-install-commit-push
 - do [#impactdag]
 - do [#dagfix]
 - do [#cmgrwres]
-- do [#gdblock]
 <!-- /agent:queue -->
 
 ## Backlog

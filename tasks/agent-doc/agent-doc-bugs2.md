@@ -29,35 +29,12 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-042016.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-043857.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #gxct/#wpkm tsift graph orchestration contracts; closeout repair; #dxtr/#wrcx tsift dispatch-trace closeout audit
+- Archived 1 response topic(s): lower-agent orchestration
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: lower-agent orchestration — gpt-5
-
-Implemented the lower-agent orchestration MVP in `src/agent-doc`.
-
-What changed:
-- `agent-doc plan` now emits deterministic lower-agent routing fields: dispatch candidacy, task class, risk, parallelism, model tier, context budgets, write scope, required proof, dispatch mode, and tsift context commands/fallback policy.
-- Added `agent_doc_dispatch` frontmatter support.
-- Added `agent-doc jobs create/list/status/collect` with `agent-doc-job-packet-v1` markdown packets, optional operation docs, tsift context sidecars, and `agent-doc-worker-result-v1` result collection.
-- Added `runbooks/manual-job-packets.md`, updated orchestration specs, README, SPEC, command autocomplete metadata, and changelog.
-
-Verification:
-- `cargo test jobs::tests`
-- `cargo test build_plan_emits_lower_agent_routing_fields`
-- `make check`
-- `cargo install --path . --force`
-- Installed-binary smoke: `agent-doc --version`, `agent-doc jobs --help`, and `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`
-- Latest GitHub Actions CI run `26205142943` was green, including `Run make tmux-ci`.
-
-Commits:
-- `src/agent-doc`: `7c3063e feat: add lower-agent job packets`
-- superproject: `ab919fa7b chore: update agent-doc submodule`
-
-The concurrently added `#rvel` backlog item was already committed in the session document history and remains open.
-<!-- agent:boundary:73aff3f8 -->
+<!-- agent:boundary:d7cdea62 -->
 <!-- /agent:exchange -->
 ###
 <!--

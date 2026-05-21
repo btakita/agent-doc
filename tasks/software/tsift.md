@@ -85,20 +85,51 @@ CI/tmux review: `btakita/tsift` has no `tmux-ci` / `tmux-test` target or CI leg.
 Pushed commits:
 - `btakita/tsift` `038cd07 feat: add planner conflict matrix`
 - `btakita/agent-loop` `1ec0b85da chore: update tsift submodule`
-<!-- agent:boundary:83d76368 -->
+### Re: release publishing — gpt-5
+
+Completed `#atvp` and `#g6kf`.
+
+For crates.io readiness, I removed the git-only upstream `sift` dependency and added an in-tree lexical search adapter that preserves the `sift`-shaped response/types used by the CLI. `Cargo.lock` no longer contains the `github.com/rupurt/sift` git source, and a clean `cargo publish --dry-run --locked` passes.
+
+For the stalled release, the old `v0.1.42` run `25886542050` had cancelled after the `build x86_64-apple-darwin` job sat without steps for 24 hours. I removed that Intel macOS matrix target, updated installer/docs to direct macOS x86_64 users to `cargo install tsift`, retagged `v0.1.42` to the fixed commit, and confirmed Release run `26197985565` completed successfully. The GitHub Release is published: https://github.com/btakita/tsift/releases/tag/v0.1.42
+
+Verification passed:
+
+- `cargo check`
+- targeted search/conflict-matrix tests
+- `make ci-full`
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.42`
+- `cargo publish --dry-run --locked`
+- `btakita/tsift` CI run `26197980692` succeeded
+- `btakita/tsift` Release run `26197985565` succeeded
+
+CI/tmux note: `btakita/tsift` has no `tmux-ci` / `tmux-test` target. The parent `btakita/agent-loop` `Agent Doc` workflow run `26197999353` failed before any job steps or logs were created (`log not found` for `check` / `tmux-ci`), so I classified it as an external CI-start failure rather than a code or tmux regression.
+
+Pushed commits:
+
+- `btakita/tsift` `342e804 fix: unblock tsift release publishing`
+- `btakita/agent-loop` `e9b474f chore: update tsift submodule`
+- `v0.1.42` now points to `342e804`
+
+I left `TSIFT_ENABLE_CRATES_PUBLISH` unset because `gh variable list` and `gh secret list` show no publish variable or `CARGO_REGISTRY_TOKEN` secret. I added a recommended backlog item for that external publishing switch.
+<!-- agent:boundary:86f72fc7 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- do [#atvp]
+- do [#g6kf]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
-- [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
+- [ ] [#802b] [recommended] Add a CARGO_REGISTRY_TOKEN repo secret and set TSIFT_ENABLE_CRATES_PUBLISH=true when ready to publish tsift to crates.io from the release workflow.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

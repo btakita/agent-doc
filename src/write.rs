@@ -4324,7 +4324,7 @@ fn comment_body_duplicates_prompt_candidates(body: &str, candidates: &[String]) 
     })
 }
 
-fn remove_duplicate_post_exchange_prompt_comments(
+pub(crate) fn remove_duplicate_post_exchange_prompt_comments(
     content: &str,
     prompt_source: Option<&str>,
     file: &Path,

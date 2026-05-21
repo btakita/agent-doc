@@ -962,6 +962,56 @@ fn enforce_no_uncommitted_closeout_drift(file: &Path) -> Result<()> {
     Ok(())
 }
 
+fn preflight_debounce_ms(file: &Path) -> u64 {
+    std::fs::read_to_string(file)
+        .ok()
+        .and_then(|content| {
+            frontmatter::parse(&content)
+                .ok()
+                .and_then(|(fm, _)| fm.debounce_ms)
+        })
+        .unwrap_or(2000)
+}
+
+fn preflight_debounce_max_wait(debounce_ms: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(if debounce_ms > 3000 {
+        (debounce_ms / 1000) + 1
+    } else {
+        3
+    })
+}
+
+fn wait_for_typing_idle_before_mutation(file: &Path, debounce_ms: u64) -> Result<()> {
+    let max_wait = preflight_debounce_max_wait(debounce_ms);
+    let poll = std::time::Duration::from_millis(100);
+    let start = std::time::Instant::now();
+    let file_str = file.to_string_lossy();
+
+    loop {
+        let typing_active = agent_doc::debounce::is_typing_via_file(&file_str, debounce_ms);
+        if !typing_active {
+            return Ok(());
+        }
+        if start.elapsed() >= max_wait {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "preflight_visible_mutation_deferred_active_typing file={} debounce_ms={} timeout_ms={}",
+                    file.display(),
+                    debounce_ms,
+                    max_wait.as_millis()
+                ),
+            );
+            anyhow::bail!(
+                "preflight deferred for {}: editor typing did not settle within {}ms; retry after typing stops",
+                file.display(),
+                max_wait.as_millis()
+            );
+        }
+        std::thread::sleep(poll);
+    }
+}
+
 pub fn run(file: &Path) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -1024,6 +1074,13 @@ pub fn run(file: &Path) -> Result<()> {
             }
         }
     }
+
+    // Pre-mutation debounce: recovery, pending maintenance, commit, and
+    // duplicate-residue cleanup all write the visible document or its sidecars.
+    // Do not let those paths race an editor buffer that is still publishing a
+    // prompt.
+    let debounce_ms = preflight_debounce_ms(file);
+    wait_for_typing_idle_before_mutation(file, debounce_ms)?;
 
     // Step 0-pre: interrupted-cycle guard (#cyc1). Use exact persisted cycle
     // state instead of inferring solely from `ops.log`.
@@ -1170,11 +1227,6 @@ pub fn run(file: &Path) -> Result<()> {
         recovered = true;
     }
 
-    // Step 2b/2c: Save the baseline after commit and pre-diff prompt cleanup so
-    // response merges start from the actual visible document. Preflight no longer
-    // auto-compacts exchanges.
-    let baseline_file = save_baseline_file(file);
-
     // Step 2d: Cross-document sweep (Fix 5) — commit any other tracked docs in the same
     // project that have uncommitted snapshot content. Turns preflight into a catch-all
     // backstop: even if a previous session's commit was skipped, the next preflight
@@ -1281,20 +1333,9 @@ pub fn run(file: &Path) -> Result<()> {
     // (buffer-level) to avoid picking up mid-typing edits.
     // Default: 2000ms (configurable via `agent_doc_debounce` frontmatter field).
     {
-        let debounce_ms = std::fs::read_to_string(file)
-            .ok()
-            .and_then(|content| {
-                frontmatter::parse(&content)
-                    .ok()
-                    .and_then(|(fm, _)| fm.debounce_ms)
-            })
-            .unwrap_or(2000);
+        let debounce_ms = preflight_debounce_ms(file);
         let debounce = std::time::Duration::from_millis(debounce_ms);
-        let max_wait = std::time::Duration::from_secs(if debounce_ms > 3000 {
-            (debounce_ms / 1000) + 1
-        } else {
-            3
-        });
+        let max_wait = preflight_debounce_max_wait(debounce_ms);
         let poll = std::time::Duration::from_millis(100);
         let start = std::time::Instant::now();
         let file_str = file.to_string_lossy();
@@ -1361,7 +1402,13 @@ pub fn run(file: &Path) -> Result<()> {
 
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
-    let raw_diff = diff::compute(file)?;
+    let diff_result_with_current = diff::compute_with_current(file)?;
+    // Save the response baseline from the exact stable document projection used
+    // for the diff. This keeps the merge baseline, visible file, and prompt
+    // contract in one transaction even if an editor replay lands during the
+    // earlier debounce window.
+    let baseline_file = save_baseline_content(file, &diff_result_with_current.current);
+    let raw_diff = diff_result_with_current.diff;
     let harness_diff = crate::harness_prompt::synthetic_diff_for_file(file)?;
     let initial_diff = raw_diff.clone().or(harness_diff.clone());
 
@@ -2948,7 +2995,7 @@ fn recent_commit_summary(file: &Path, since: Option<std::time::SystemTime>) -> S
     }
 }
 
-fn save_baseline_file(file: &Path) -> Option<String> {
+fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
     let baseline_path = match snapshot::baseline_path_for(file) {
         Ok(path) => path,
         Err(e) => {
@@ -2959,9 +3006,8 @@ fn save_baseline_file(file: &Path) -> Option<String> {
     if let Some(parent) = baseline_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    match std::fs::read_to_string(file) {
-        Ok(content) => {
-            let _ = std::fs::write(&baseline_path, &content);
+    match std::fs::write(&baseline_path, content) {
+        Ok(()) => {
             eprintln!("[preflight] baseline saved: {}", baseline_path.display());
             Some(baseline_path.to_string_lossy().to_string())
         }
@@ -4469,6 +4515,80 @@ mod tests {
         assert!(
             !snapshot_after.contains(prompt),
             "snapshot must not absorb the live prompt during preflight:\n{snapshot_after}"
+        );
+    }
+
+    #[test]
+    fn preflight_waits_for_typing_before_duplicate_prompt_comment_cleanup() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push";
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_debounce: 3000\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_debounce: 3000\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n",
+                "Done.\n",
+                "<!-- agent:boundary:head -->\n",
+                "❯ {prompt}\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "{prompt}\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+        std::fs::write(&doc, &live).unwrap();
+
+        let doc_for_thread = doc.clone();
+        let doc_str = doc.to_string_lossy().to_string();
+        agent_doc::debounce::document_changed(&doc_str);
+        let handle = std::thread::spawn(move || run(&doc_for_thread));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let during_debounce = std::fs::read_to_string(&doc).unwrap();
+        let result = handle.join().unwrap();
+        result.unwrap();
+
+        let duplicate_comment = format!("<!--\n{prompt}\n-->");
+        assert!(
+            during_debounce.contains(&duplicate_comment),
+            "preflight must not mutate duplicate prompt comments while the editor typing indicator is active:\n{during_debounce}"
+        );
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !file_after.contains(&duplicate_comment),
+            "preflight should clean the duplicate only after typing settles:\n{file_after}"
         );
     }
 

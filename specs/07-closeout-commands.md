@@ -123,8 +123,10 @@ This file covers binary-owned response persistence: commit boundaries, patch/wri
 - If the file diff is empty but the active harness prompt still contains body text after `agent-doc <FILE>`, preflight synthesizes an in-memory diff from that prompt body.
 - Preflight must fail closed before diffing when the snapshot/file pair already looks like an uncommitted assistant closeout with no recoverable cycle left to explain it.
 - Explicit backlog targets extracted from prompt presets are resolved relative to the project root. If a relative target begins with the current project directory name, that redundant prefix is stripped before falling back to a non-existent doubled path.
+- Before any document-mutating recovery, pending maintenance, commit, or duplicate-residue cleanup, preflight must wait for the shared editor typing indicator to become idle. If the indicator remains active through the bounded wait, preflight fails closed instead of writing a cleaned document or sidecar state over a live editor buffer.
 - Prompt-tail relocation before diff must ignore ordinary HTML comment bodies after `agent:exchange`, even when those comments contain prompt-looking text or preset names. Scratch-comment text must remain outside exchange instead of being moved into the live prompt tail.
-- Before saving the response baseline, preflight removes ordinary post-exchange HTML comments whose body duplicates or near-duplicates a prompt already present in `agent:exchange`. It must preserve unrelated scratch comments, must not move comment text into exchange, and must not advance the snapshot to include a live prompt.
+- Preflight removes ordinary post-exchange HTML comments whose body duplicates or near-duplicates a prompt already present in `agent:exchange`. It must preserve unrelated scratch comments, must not move comment text into exchange, and must not advance the snapshot to include a live prompt.
+- The `baseline_file` emitted by preflight must be written from the same stable visible-document content used to compute the diff. A response baseline captured before final debounce/stability checks is invalid because editor replay can otherwise leave `baseline_file` cleaner or older than the prompt-bearing document the agent is answering.
 
 ## session-check
 

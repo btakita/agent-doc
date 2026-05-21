@@ -2076,11 +2076,17 @@ fn starts_with_imperative_verb(line: &str) -> bool {
     matches!((first, words.next()), ("clean", Some("up")))
 }
 
-/// Compute a unified diff between the snapshot and the current document.
-/// Returns None if there are no changes.
+/// Diff result plus the stable current document content used to compute it.
+pub struct ComputeResult {
+    pub diff: Option<String>,
+    pub current: String,
+}
+
+/// Compute a unified diff between the snapshot and the current document, and
+/// return the stable current content used to compute it.
 ///
 /// Both snapshot and current content are comment-stripped before comparison.
-pub fn compute(doc: &Path) -> Result<Option<String>> {
+pub fn compute_with_current(doc: &Path) -> Result<ComputeResult> {
     let t_total = std::time::Instant::now();
 
     let previous = snapshot::resolve(doc)?.unwrap_or_default();
@@ -2124,7 +2130,10 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
         if elapsed_total > 0 {
             eprintln!("[perf] diff.compute total: {}ms", elapsed_total);
         }
-        return Ok(None);
+        return Ok(ComputeResult {
+            diff: None,
+            current,
+        });
     };
 
     // Stale snapshot recovery: if the diff is only completed assistant/user
@@ -2149,7 +2158,10 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
             if elapsed_total > 0 {
                 eprintln!("[perf] diff.compute total: {}ms", elapsed_total);
             }
-            return Ok(None);
+            return Ok(ComputeResult {
+                diff: None,
+                current,
+            });
         }
     }
 
@@ -2160,7 +2172,18 @@ pub fn compute(doc: &Path) -> Result<Option<String>> {
         eprintln!("[perf] diff.compute total: {}ms", elapsed_total);
     }
 
-    Ok(Some(output))
+    Ok(ComputeResult {
+        diff: Some(output),
+        current,
+    })
+}
+
+/// Compute a unified diff between the snapshot and the current document.
+/// Returns None if there are no changes.
+///
+/// Both snapshot and current content are comment-stripped before comparison.
+pub fn compute(doc: &Path) -> Result<Option<String>> {
+    Ok(compute_with_current(doc)?.diff)
 }
 
 /// Wait for stable content by detecting truncated lines and rechecking.

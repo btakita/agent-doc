@@ -91,6 +91,8 @@ Two modes:
 
 `agent-doc preflight <FILE>` emits non-blocking `warnings[]` in its JSON contract. When frontmatter `agent:` is set and differs from the active harness detected from Claude Code, Codex, or OpenCode environment markers after alias normalization, preflight emits `code: "harness_mismatch"` and keeps running; the skill surfaces the warning and continues with the active harness attribution and closeout path.
 
+Before preflight performs document-mutating recovery, commit, pending maintenance, or duplicate-residue cleanup, it waits for the shared editor typing indicator to become idle. The emitted `baseline_file` is captured from the same stable visible content used for diff computation, not from an earlier pre-debounce cleanup projection.
+
 ## audit-docs
 
 `agent-doc audit-docs [--root DIR]`

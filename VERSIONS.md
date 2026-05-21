@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Preflight baseline capture is tied to the stable visible diff.** Preflight
+  now waits for the shared editor typing indicator before any document-mutating
+  recovery, commit, pending maintenance, or duplicate prompt residue cleanup.
+  The emitted baseline is saved from the same stable visible content used for
+  diff computation, preventing cleaned baselines from diverging from editor
+  replayed prompt/comment content.
+
 - **Post-exchange duplicate prompt comments are cleaned.** Preflight,
   editor-visible normalization, IPC snapshot dedupe, and final template
   reconciliation now remove ordinary HTML comment bodies after `agent:exchange`

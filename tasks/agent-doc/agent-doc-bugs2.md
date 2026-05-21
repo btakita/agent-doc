@@ -34,7 +34,24 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 Compacted content:
 - Archived 1 response topic(s): duplicate prompt/comment cleanup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:e0bb3462 -->
+### Re: #gxct/#wpkm tsift graph orchestration contracts — gpt-5
+
+Implemented and pushed the graph-backed orchestration contract work.
+
+- Added strict validation in the shared tsift graph collection path used by `agent-doc plan` and `agent-doc orchestrate`: graph status must be `current`; evidence packets must be `graph-db-evidence-v1` with `packet_id`, `projection_hash`, `replay_commands`, and `repair_commands`; conflict matrices must be `conflict-matrix-v1`; worker prompt packets must be `worker-prompt-packet-v1` with packet ids, projection hashes, token budgets, and explicit fail-closed prompt text.
+- Added a normalized `lower_agent_job_packet` to the prompt context, derived from tsift `worker_prompt_packets`, preserving owned files/symbols, read-only context, forbidden files, expected tests, expansion commands, token budget, semantic ranking fields, and fail-closed instructions for lower-agent work.
+- Updated `SPEC.md`, `specs/07-orchestration-commands.md`, and `VERSIONS.md`, with regressions covering missing graph contract fields and lower-agent job packet rendering.
+
+Verification:
+- Red-first targeted tests failed before the fix: `collect_for_do_items_fails_closed_on_missing_graph_contract_fields` and `sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt`.
+- Green after fix: `cargo fmt --check`, `git diff --check`, `cargo test collect_for_do_items`, `cargo test graph_context`, full `cargo test`, `make check`, `cargo build`, `cargo install --path . --force`, `agent-doc --version`, and installed `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`.
+- CI/tmux evidence: latest GitHub Actions CI run `26203567540` was green, including the `Run make tmux-ci` step, so no local tmux retry was needed.
+
+Commit / push:
+- agent-doc subrepo: `ab9129dd` (`feat: validate tsift graph job packets`) pushed to `btakita/agent-doc` branch `20260422/codex-agent-backend`.
+- superproject pointer: `195517e0c` (`chore: update agent-doc graph packet validation`) pushed to `btakita/agent-loop` `main`.
+- Follow-up already captured in backlog: `#dxtr` for dispatch-trace-backed closeout/job packet audit evidence.
+<!-- agent:boundary:b9897228 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -42,7 +59,7 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 -->
 
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - do [#gxct]
 - do [#wpkm]
@@ -51,7 +68,8 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#dxtr] [recommended] Consume tsift dispatch-trace outputs in agent-doc plan/orchestrate closeout: attach evidence packet ids, worker_feedback summaries, graph links, replay/repair commands, and freshness/projection hashes to lower-agent job packets and parent closeouts so graph-backed dispatch can be audited without scraping CLI output.
+- [ ] [#gxct] [recommended] Validate tsift graph orchestration contracts in agent-doc plan/orchestrate: require contract_version, packet_id, projection_hash, freshness=current, replay_commands, and repair_commands before dispatching lower-agent work.
+- [ ] [#wpkm] [recommended] Map tsift worker_prompt_packets into lower-agent job packets: preserve owned_files, read_only_context, forbidden_files, expected_tests, expansion_commands, token budgets, and fail-closed prompt text.
 - [ ] [#wrcx] [recommended] Collect lower-agent closeouts into worker_result lines that tsift can project back into graph evidence, including status, touched files, tests, and follow-up ids.
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

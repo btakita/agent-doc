@@ -93,7 +93,17 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): doc upload Drive OAuth
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:e10240b0 -->
+❯ do [#sheets-scope]. #spec-test-build-install-commit-push
+### Re: sheets scope blocker — gpt-5
+
+I could not start `#sheets-scope` because the planning gate failed closed before repository work. The blocker was required `tsift` graph evidence collection timing out for:
+
+```bash
+tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/corky.md --json evidence sheets --depth 3 --limit 8
+```
+
+No code, spec, or test files were changed. I did not run build/install, commit, or push for Corky. The `#sheets-scope` backlog item remains open because implementation did not begin.
+<!-- agent:boundary:95caf7ac -->
 <!-- /agent:exchange -->
 ###
 <!--

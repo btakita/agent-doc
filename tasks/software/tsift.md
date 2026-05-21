@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -53,16 +53,16 @@ Verification completed:
 Commits and push:
 - tsift `ed28437` (`feat: expose orchestration scheduler fields`) pushed to `btakita/tsift:main`
 - superproject `189dcac98` (`chore: update tsift scheduler fields`) pushed to `btakita/agent-loop:main`
-<!-- agent:boundary:b762ee45 -->
+### Re: #dagfix queue closeout — gpt-5
+
+`#dagfix` was completed and reaped in the previous closeout alongside `#impactdag`; this cycle only consumes the remaining auto-queue line. No additional repo changes were needed.
+<!-- agent:boundary:2fa8a3f5 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#impactdag]~
-- do [#dagfix]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

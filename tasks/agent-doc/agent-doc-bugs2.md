@@ -33,13 +33,36 @@ FlowCore refactor is in maintenance mode; top backlog item: #y9kk.
 Compacted content:
 - Archived 1 response topic(s): do [#fcmt]
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d2105d27 -->
+❯ JB `Interrupt and Clear Session Context` causes the Codex session to open nvim.
+❯ #spec-test-build-install-commit-push
+### Re: JB Interrupt and Clear Session Context — gpt-5
+
+Implemented and pushed the fix for the JetBrains `Interrupt and Clear Session Context` path.
+
+What changed:
+- `agent-doc session interrupt-clear` now checks live pane evidence before sending interrupt keys. If the pane is already `alive-idle` with `prompt_ready=true`, it logs `session_interrupt_clear_skip_interrupt ... reason=already_idle`, reconciles stale projection if needed, and goes directly to the normal `/clear` path. Busy panes still take the explicit interrupt/discard path.
+- Updated the JetBrains spec so the idle-prompt skip is part of the IDE action contract.
+- Hardened the live tmux mock-agent launch helper because the first local tmux sweep exposed a drafted long `exec ... <absolute path>` launch under load.
+
+Regression proof:
+- Added Rust coverage for idle vs busy `interrupt-clear` initial action.
+- Reproduced the bug first: `cargo test interrupt_clear_initial_action_skips_interrupt_keys_for_idle_pane` failed with `left: SendInterrupt`; after the fix, `cargo test interrupt_clear_initial_action` passed.
+
+Verification:
+- `make check` passed after the final edits.
+- `/usr/bin/zsh -lc "GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin"` passed.
+- `make install` installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so` locally.
+- `agent-doc plugin install --local jetbrains` installed `agent-doc-jetbrains-0.2.127.zip` to `/home/brian/.local/share/JetBrains/IntelliJIdea2026.1`.
+- Latest completed GitHub CI before this push was green, including `Run make tmux-ci` (`26196808428`). The new post-push CI run is in progress (`26197772085`).
+- Local `make tmux-ci` initially caught the mock-launch helper failure; after hardening the helper, the targeted live test passed and the full local `make tmux-ci` passed.
+
+Commits:
+- `src/agent-doc`: `5936228f fix: skip interrupt-clear keys on idle panes`, pushed to `origin/20260422/codex-agent-backend`.
+- root superproject: `1875e6de3 chore: update agent-doc submodule`, pushed to `origin/main`.
+<!-- agent:boundary:eec05bf0 -->
 <!-- /agent:exchange -->
 ###
 <!--
-JB `Interrupt and Clear Session Context` causes the Codex session to open nvim.
-#spec-test-build-install-commit-push
----
 The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push 
 -->
 

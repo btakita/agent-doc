@@ -19,7 +19,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Completed #gdbhard; pushed tsift ef49229 and parent 4dc52dbab.
+Blocked before #tsdag/#impactdag/#dagfix: graph-db evidence for #tsdag timed out during planning.
 <!-- /agent:status -->
 
 ## Spec
@@ -36,7 +36,14 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): graph-db operator hardening
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:c91f146d -->
+### Re: dependency DAG queue blocker — gpt-5
+
+I did not start `#tsdag`, `#impactdag`, or `#dagfix` because the `agent-doc plan` contract returned a blocker before repo work:
+
+`tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --json evidence tsdag --depth 3 --limit 8` timed out after 30 seconds while collecting graph evidence for `#tsdag`.
+
+Because the planning record failed closed before implementation, the three backlog items remain open. I did not make new code changes, run the spec/test/build/install preset, or create additional commits for this queue batch.
+<!-- agent:boundary:0d488970 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,6 +51,9 @@ Compacted content:
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
+- do [#tsdag]
+- do [#impactdag]
+- do [#dagfix]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -52,7 +62,9 @@ preset #spec-test-build-install-commit-push
 - [ ] [#tsdag] [recommended] Add graph-level dependency DAG extraction for agent-doc work: derive explicit and implicit edges among backlog ids from file/symbol/test/config overlap, semantic relations, worker_result follow-up ids, and depends-on text; emit nodes, edges, cycle diagnostics, topo batches, replay commands, and repair commands as a versioned JSON contract.
 - [ ] [#impactdag] [recommended] Extend conflict-matrix and dispatch-trace with scheduler fields: parallel_safe, blocks, blocked_by, required_context, expected_tests, and stable graph handles so agent-doc can run topological antichains without scraping prose.
 - [ ] [#dagfix] [recommended] Add regeneration fixtures for real agent-doc queue DAGs: refresh -> evidence -> conflict-matrix -> dependency-dag -> dispatch-trace, asserting projection freshness, packet ids, worker_result closure, cycle detection, and stale graph fail-closed behavior.
-- [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.**
+- [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
+- [ ] [#cmgrwres] [recommended] `tsift conflict-matrix` should downgrade per-target `fail_closed` when the target has a non-zero `worker_result` row count in graph-db. Observed 2026-05-21 dogfood against `tsift.md`: `gdbevid`, `cmgr`, `gdbidx` all have completed `worker_result` rows (1 per item, single-hop path from backlog node) but conflict-matrix still reported `fail_closed: 3 target(s)` because the items lacked live `source_handles`/`owned_files`. A completed worker_result IS evidence the item was successfully dispatched; the dogfood path otherwise cannot re-dispatch a completed item. Fix: downgrade `fail_closed` to a soft `info` signal when `worker_result_count > 0`; surface a new `previously_completed: bool` field per target so operators see both signals.
+- [ ] [#gdblock] [recommended] Graph-db lock recovery path. Observed 2026-05-21 dogfood: `agent-doc jobs create tasks/software/tsift.md --audit` failed with `Error code 5: The database file is locked` because `tsift graph-db --json status` was blocked by a concurrent writer (hot journal + SQLite read-only condition). Operator has no documented way to release the lock short of finding/killing the holder. Same root cause as `agent-doc-bugs2.md` `#w25k`. Fix options: (a) add `tsift graph-db --release-lock` recovery command that inspects pid + hot-journal and rolls back safely; (b) add a documented runbook step ("when locked, check `lsof .tsift/graph.db` and wait for writer to exit"); (c) switch graph-db SQLite to WAL mode so readers don't block on writer journal. Surfaces in any concurrent-agent workflow (codex + claude-code running side-by-side on the same checkout).
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

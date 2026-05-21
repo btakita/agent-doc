@@ -123,7 +123,7 @@ Top agent-doc backlog item added to `tasks/agent-doc/agent-doc-bugs2.md`: `#gxct
 Top tsift backlog item added here: `#gcfx` — add compiled contract-parity fixtures comparing the documented graph orchestration contracts with live CLI JSON output.
 
 I kept agent-doc-owned work in `agent-doc-bugs2.md` and tsift-owned graph/reporting work in `tsift.md`. No code changes or tests were run; this was backlog triage only.
-<!-- agent:boundary:dd38b881 -->
+<!-- agent:boundary:789b7b50 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -141,9 +141,9 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdtr] [recommended] Add graph-backed dispatch trace exports: compact JSON/HTML views linking backlog, job_packet, worker_result, source_handle, semantic rows, evidence packet ids, and worker_prompt_packets for operator review.
-- [ ] [#wrfb] [recommended] Add worker-result feedback reports: summarize completed/blocked worker_result rows, touched files/tests, follow-up ids, and outcome history so conflict-matrix can warn about repeated blockage without weakening hard conflict gates.
 - [ ] [#gcfx] [recommended] Add compiled contract-parity fixtures comparing graph-orchestration-contracts.json with live graph-db evidence, conflict-matrix, context-pack, and session-review JSON output, including contract_version, packet_id, projection_hash, replay_commands, and repair_commands.
+- [ ] [#wrfb] [recommended] Add worker-result feedback reports: summarize completed/blocked worker_result rows, touched files/tests, follow-up ids, and outcome history so conflict-matrix can warn about repeated blockage without weakening hard conflict gates.
+- [ ] [#gdtr] [recommended] Add graph-backed dispatch trace exports: compact JSON/HTML views linking backlog, job_packet, worker_result, source_handle, semantic rows, evidence packet ids, and worker_prompt_packets for operator review.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

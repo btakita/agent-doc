@@ -47,7 +47,7 @@ Top tsift backlog item: `#dtrc` — add dispatch-trace replay/contract fixture c
 Top agent-doc backlog item added to `tasks/agent-doc/agent-doc-bugs2.md`: `#dxtr` — consume tsift dispatch-trace outputs in agent-doc plan/orchestrate closeout.
 
 The queued `#wrfb` / `#gdtr` tsift work is already implemented and pushed in the compacted graph orchestration contracts turn (`btakita/tsift` `9728ade`, parent submodule pointer `39117c97b`). This cycle only records the next follow-ups and queue bookkeeping. I did not rerun tests because no code changed in this cycle; the implementation turn already recorded `make check`, `cargo build`, local install, and green tsift CI for those features.
-<!-- agent:boundary:7fc124cd -->
+<!-- agent:boundary:9ff1d717 -->
 <!-- /agent:exchange -->
 ###
 
@@ -58,9 +58,9 @@ The queued `#wrfb` / `#gdtr` tsift work is already implemented and pushed in the
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#wfcl] [recommended] Add worker-feedback closure ranking controls to conflict-matrix and dispatch-trace: deterministic warnings for repeated blockage, stale expected tests, and follow-up debt that can reorder otherwise safe candidates without weakening file/symbol/test/config hard gates.
-- [ ] [#gafe] [recommended] Add an agent-orchestration acceptance pack in tsift fixtures: sample agent-doc job packets, worker_result rows, conflict-matrix output, dispatch-trace export, and context-pack/session-review follow-up commands that agent-doc can consume as golden contracts.
 - [ ] [#dtrc] [recommended] Add dispatch-trace replay/contract fixture coverage over a real agent-doc queue run: refresh -> evidence -> conflict-matrix -> dispatch-trace JSON/HTML, then assert trace links, worker_feedback summaries, packet ids, and repair/replay commands stay consistent with graph.db.
+- [ ] [#gafe] [recommended] Add an agent-orchestration acceptance pack in tsift fixtures: sample agent-doc job packets, worker_result rows, conflict-matrix output, dispatch-trace export, and context-pack/session-review follow-up commands that agent-doc can consume as golden contracts.
+- [ ] [#wfcl] [recommended] Add worker-feedback closure ranking controls to conflict-matrix and dispatch-trace: deterministic warnings for repeated blockage, stale expected tests, and follow-up debt that can reorder otherwise safe candidates without weakening file/symbol/test/config hard gates.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

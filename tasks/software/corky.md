@@ -88,36 +88,12 @@ prompt_presets:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260521-002350.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc180ec90ce4bbb9c2bdb013766843d9a8224cac4431150341ae259853-20260521-003938.md`*
 
 Compacted content:
-- Archived 2 response topic(s): #pypi-trusted-publisher; PyPI trusted publisher setup
+- Archived 1 response topic(s): #release-status-cleanup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-❯ do [#release-status-cleanup]. #spec-test-build-install-commit-push
-### Re: #release-status-cleanup — gpt-5
-
-Completed and pushed Corky commit `9d5f183` (`docs: clarify release status reconciliation`).
-
-What changed:
-- Updated `SPEC.md` §21 with a release-status reconciliation rule that keeps registry parity separate from trusted-publisher workflow health.
-- Added `tests/test_release_workflows.rs` coverage so the spec continues to say crates.io completion does not automatically close a failing PyPI trusted-publishing workflow.
-- Reconciled this session status: crates.io publish is complete for v0.28.2, v0.28.1 is superseded, and PyPI trusted publishing remains the blocker because the workflow still fails `invalid-publisher`.
-
-Live release checks used:
-- crates.io API reports `corky` `max_version` / `max_stable_version` as `0.28.2`: https://crates.io/api/v1/crates/corky
-- PyPI JSON reports `corky` `0.28.2` artifacts are present: https://pypi.org/pypi/corky/0.28.2/json
-- GitHub release `v0.28.2` is published: https://github.com/btakita/corky/releases/tag/v0.28.2
-- Latest checked PyPI workflow run `26195923707` failed with `invalid-publisher`, so trusted publishing setup remains open.
-
-Verification:
-- `cargo fmt`
-- `make check` (green; clippy + full test suite)
-- `make release` (green; `.bin/corky` -> `target/release/corky`)
-- `make install` (green; GPU `transcribe-cuda` install)
-- `.bin/corky --version` -> `corky 0.28.2`
-- `corky --version` -> `corky 0.28.2`
-- Corky has no tmux CI workflow or `make tmux-ci`; pushed CI run `26197993227` passed (`cargo clippy --features vendored-openssl -- -D warnings` and `cargo test --features vendored-openssl`).
-<!-- agent:boundary:70918e01 -->
+<!-- agent:boundary:0c242667 -->
 <!-- /agent:exchange -->
 ###
 <!--

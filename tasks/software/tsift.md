@@ -73,7 +73,23 @@ Verification:
 Commits:
 - `btakita/tsift` pushed `f0b1582` (`feat: add graph-backed worker prompt packets`).
 - Superproject submodule pointer committed as `f3c227010` (`chore: update tsift submodule`); root push follows the document closeout ordering.
-<!-- agent:boundary:0b10a738 -->
+❯ What are #next-steps for agent orchestration and graph db features?
+### Re: next graph orchestration steps — gpt-5
+
+The next useful work is to harden the contract between tsift's graph outputs and agent orchestration, then add feedback loops so completed worker dispatch becomes graph evidence for later cycles.
+
+I added the tsift-owned follow-ups in priority order. Top tsift backlog item: `#gsch`.
+
+1. `#gsch` — stabilize versioned JSON contracts for `graph-db evidence`, `conflict-matrix` worker prompt packets, `context-pack` graph orchestration, and `session-review` follow-up commands.
+2. `#grev` — add replay/freshness fixtures proving evidence packet ids, projection hashes, stale graph DBs, and conflict-matrix inputs fail closed with repair commands.
+3. `#wres` — add `worker_result` graph rows so completed/blocked worker packets become queryable evidence linked to backlog/job/source handles.
+4. `#srnk` — calibrate semantic dispatch ranking with fixtures and explanations so semantic relevance improves ordering without weakening hard conflict gates.
+5. `#gops` — add end-to-end operator examples for the graph-backed dispatch path: refresh, evidence, conflict-matrix, context-pack, and session-review.
+
+Agent-doc-owned orchestration work is already transferred to `tasks/agent-doc/agent-doc-bugs2.md`; top agent-doc item remains `#agbr`.
+
+No code changes or tests were run for this cycle; this was backlog triage only.
+<!-- agent:boundary:4a52b431 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -90,6 +106,11 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gsch] [recommended] Stabilize graph orchestration JSON contracts: publish schema/versioned examples for graph-db evidence, conflict-matrix worker_prompt_packets, context-pack graph_orchestration, and session-review follow-up commands so agent-doc can consume them without scraping.
+- [ ] [#grev] [recommended] Add graph evidence replay/freshness fixtures: persist evidence packet ids/projection hashes for queued backlog runs and prove stale graph.db/conflict-matrix inputs fail closed with repair commands.
+- [ ] [#wres] [recommended] Add worker-result rows to the graph projection: ingest completed/blocked worker packets as worker_result nodes linked to backlog/job/source handles, including touched files/tests and follow-up ids.
+- [ ] [#srnk] [recommended] Calibrate semantic dispatch ranking: add fixture-driven weights/explanations for semantic_concept/entity matches so semantic relevance improves ordering without overriding file/symbol/test conflict gates.
+- [ ] [#gops] [recommended] Add operator examples for graph-backed dispatch: end-to-end docs/fixtures showing refresh -> evidence -> conflict-matrix -> context-pack/session-review commands for a multi-worker session.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

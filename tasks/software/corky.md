@@ -82,7 +82,7 @@ prompt_presets:
 - [x] Google Docs/Sheets integration — main 9e67e35
 - [x] crates.io publish — v0.28.2; v0.28.1 superseded by v0.28.2
 - [ ] PyPI trusted publishing — remaining blocker: workflow run 26195923707 still fails `invalid-publisher`; PyPI 0.28.2 artifacts are present but do not close the trusted-publisher setup item.
-- [ ] `corky doc upload` — deferred (Google Drive OAuth design)
+- [x] `corky doc upload` — main 5bbd614
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -93,7 +93,29 @@ prompt_presets:
 Compacted content:
 - Archived 1 response topic(s): #release-status-cleanup
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/3fe810fc...
-<!-- agent:boundary:0c242667 -->
+❯ do [#doc-upload-drive-oauth]. #spec-test-build-install-commit-push
+### Re: doc upload Drive OAuth — gpt-5
+
+Implemented and pushed `#doc-upload-drive-oauth`.
+
+Corky commit: `5bbd614` (`feat: finish Drive upload workflow`). Parent `agent-loop` submodule pointer commit: `364e93407` (`chore: update corky submodule`). Both are pushed to `origin/main`.
+
+What changed:
+- Added `corky doc upload --folder <FOLDER>` for a Drive folder ID or folder URL, sent as Drive `parents` metadata.
+- Kept account-targeted Drive OAuth through the existing `--account EMAIL` flow and `DRIVE_FILE_SCOPE`.
+- Added testable upload request construction plus mocked coverage for conversion, folder parent metadata, multipart upload, and `--share` permission creation.
+- Updated `SPEC.md`, `README.md`, `docs/guide/commands.md`, and the Google Workspace integration task notes.
+
+Verification:
+- `cargo test doc::upload`
+- `cargo test test_cli_doc_upload_convert_help`
+- `make check`
+- `cargo run --quiet -- audit-docs`
+- `make release`
+- `make install` (installed with `transcribe-cuda`)
+- `corky doc upload --help` shows `--folder`
+- Latest upstream Corky CI run `26197993227` is green; no separate tmux CI workflow/leg is listed for this repo.
+<!-- agent:boundary:401b58cd -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -103,7 +125,6 @@ Compacted content:
 
 <!-- agent:backlog -->
 - [/] [#pypi-trusted-publisher] Configure PyPI trusted publishing for btakita/corky workflow .github/workflows/pypi.yml with environment pypi. Repo workflow is configured and pushed in Corky commit feb074e; PyPI run 26195923707 now builds all artifacts but is blocked by PyPI invalid-publisher until the project has a trusted publisher matching repo:btakita/corky:environment:pypi.
-- [ ] [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
 <!-- /agent:backlog -->
 
 ## Completed / Reaped
@@ -118,4 +139,5 @@ Compacted content:
 - 2026-05-20 [#enable-docs-api-corky-oauth] Enable Google Docs API for Corky's configured Gmail OAuth project 873280095295, then rerun Google Docs read/write live tests for brian.takita@gmail.com.
 - 2026-05-20 [#75d8] [recommended] Add the missing Corky PyPI 0.28.2 Linux x86_64 and macOS x86_64 wheels after fixing the tag workflow build failures (OpenSSL/manylinux Linux and MACOSX_DEPLOYMENT_TARGET macOS).
 - 2026-05-20 [#release-status-cleanup] Reconcile the Corky session/status notes after v0.28.2: mark crates.io publish complete, note v0.28.1 as superseded, and keep PyPI as the remaining publish blocker.
+- 2026-05-20 [#doc-upload-drive-oauth] Implement corky doc upload with Google Drive OAuth design, upload behavior, docs, and tests.
 <!-- /agent:done -->

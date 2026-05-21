@@ -34,7 +34,30 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 Compacted content:
 - Archived 3 response topic(s): #gxct/#wpkm tsift graph orchestration contracts; closeout repair; #dxtr/#wrcx tsift dispatch-trace closeout audit
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:35914f69 -->
+### Re: lower-agent orchestration — gpt-5
+
+Implemented the lower-agent orchestration MVP in `src/agent-doc`.
+
+What changed:
+- `agent-doc plan` now emits deterministic lower-agent routing fields: dispatch candidacy, task class, risk, parallelism, model tier, context budgets, write scope, required proof, dispatch mode, and tsift context commands/fallback policy.
+- Added `agent_doc_dispatch` frontmatter support.
+- Added `agent-doc jobs create/list/status/collect` with `agent-doc-job-packet-v1` markdown packets, optional operation docs, tsift context sidecars, and `agent-doc-worker-result-v1` result collection.
+- Added `runbooks/manual-job-packets.md`, updated orchestration specs, README, SPEC, command autocomplete metadata, and changelog.
+
+Verification:
+- `cargo test jobs::tests`
+- `cargo test build_plan_emits_lower_agent_routing_fields`
+- `make check`
+- `cargo install --path . --force`
+- Installed-binary smoke: `agent-doc --version`, `agent-doc jobs --help`, and `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`
+- Latest GitHub Actions CI run `26205142943` was green, including `Run make tmux-ci`.
+
+Commits:
+- `src/agent-doc`: `7c3063e feat: add lower-agent job packets`
+- superproject: `ab919fa7b chore: update agent-doc submodule`
+
+The concurrently added `#rvel` backlog item was already committed in the session document history and remains open.
+<!-- agent:boundary:73aff3f8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -55,11 +78,6 @@ preset #spec-test-build-install-commit-push
 
 <!-- agent:backlog -->
 - [ ] [#rvel] [recommended] Add `agent:review` document element for the review-then-done lifecycle (Rob-review rule in session-share). Move `[/]` (gated) items out of `agent:backlog` into a dedicated `<!-- agent:review -->` block; retarget `--pending-gate` to move items there; teach `--done` to accept both sources with new `review_done_guard` frontmatter switch (default off). Auto-migrate legacy `[/]` items via `agent-doc migrate`. Use case: session-share `tasks/root.md` has `#vtvc`/`#vtas`/`#vtmgr`/`#wdmgr`/`#lk2a`/`#vtbs`/`#qew8` floating as `[/]` in the backlog today, conflating queued work with review-pending. Plan: tasks/agent-doc/plan-agent-review-element.md
-- [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
-- [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
-- [ ] [#ffsm] [recommended] Phase 3 for lower-agent orchestration: extend agent-doc plan with task_class, dispatch_candidate, model tier, context budget, write scope, required proof, and tsift missing/stale fallback behavior. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
-- [ ] [#rafe] [recommended] Phase 4 for lower-agent orchestration: implement agent-doc jobs create/list/status/collect plus optional operation-doc generation and closeout links. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
-- [ ] [#ek86] Implement the lower-agent orchestration MVP from tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md, starting with manual job packets plus tsift context packets.
 - [ ] [#fwjw] Define the agent-doc taxonomy for agent docs, job packets, operation docs, runbooks, and plans.
 - [ ] [#0fcx] Specify operation docs/opdocs as retained audit artifacts and how they relate to job packets.
 <!-- /agent:backlog -->

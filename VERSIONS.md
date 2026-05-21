@@ -11,10 +11,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   parallelism, model tier, context budgets, write scope, proof requirements,
   dispatch mode, and tsift context commands). New `agent-doc jobs
   create/list/status/collect` commands generate `agent-doc-job-packet-v1`
-  markdown packets under `.agent-doc/jobs/<cycle>/`, optionally write operation
-  docs, attach tsift context sidecars when `tsift context-pack --json` is
-  available, and collect `agent-doc-worker-result-v1` envelopes for parent
-  review without applying patches or bypassing finalize.
+  markdown packets under `.agent-doc/jobs/<cycle>/`, expand compound `do`
+  directives into one packet per target, derive target-specific write scopes
+  from backlog path references, optionally write operation docs, attach tsift
+  context and bounded graph acceptance evidence when available, and collect
+  validated `agent-doc-worker-result-v1` envelopes for parent review without
+  applying patches or bypassing finalize.
 
 - **tsift dispatch-trace audit data now rides with graph-backed orchestration.**
   `agent-doc plan` / `orchestrate` now collect `dispatch-trace-v1` alongside

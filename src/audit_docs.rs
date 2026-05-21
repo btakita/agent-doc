@@ -208,11 +208,20 @@ fn resolve_git_superproject_root() -> Option<PathBuf> {
 
 fn fallback_root_without_marker(config: &AuditConfig) -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?.canonicalize().ok()?;
-    if find_project_marker_root_from(&cwd, config).is_some() {
+    if let Some(root) = find_project_marker_root_from(&cwd, config)
+        && !is_ambient_temp_root_marker(&cwd, &root)
+    {
         return None;
     }
     eprintln!("Warning: no project root marker found, using current directory");
     Some(cwd)
+}
+
+fn is_ambient_temp_root_marker(cwd: &Path, marker_root: &Path) -> bool {
+    let Ok(temp_root) = std::env::temp_dir().canonicalize() else {
+        return false;
+    };
+    marker_root == temp_root && cwd != marker_root && cwd.starts_with(&temp_root)
 }
 
 fn find_project_marker_root_from(start: &Path, config: &AuditConfig) -> Option<PathBuf> {
@@ -362,6 +371,15 @@ mod tests {
         );
 
         assert_eq!(roots, vec![submodule.canonicalize().unwrap()]);
+    }
+
+    #[test]
+    fn ambient_temp_root_marker_does_not_claim_child_tempdirs() {
+        let temp_root = std::env::temp_dir().canonicalize().unwrap();
+        let child = temp_root.join("agent-doc-audit-child");
+
+        assert!(is_ambient_temp_root_marker(&child, &temp_root));
+        assert!(!is_ambient_temp_root_marker(&temp_root, &temp_root));
     }
 
     #[test]

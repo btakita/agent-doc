@@ -14,8 +14,11 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 const TSIFT_BIN_ENV: &str = "AGENT_DOC_TSIFT_BIN";
+const TSIFT_GRAPH_TIMEOUT_ENV: &str = "AGENT_DOC_TSIFT_GRAPH_TIMEOUT_SECS";
+const DEFAULT_TSIFT_GRAPH_TIMEOUT_SECS: u64 = 30;
 const GRAPH_DB_EVIDENCE_CONTRACT_VERSION: &str = "graph-db-evidence-v1";
 const CONFLICT_MATRIX_CONTRACT_VERSION: &str = "conflict-matrix-v1";
 const WORKER_PROMPT_PACKET_CONTRACT_VERSION: &str = "worker-prompt-packet-v1";
@@ -512,6 +515,10 @@ fn collect_dispatch_trace(file: &Path, targets: &[String]) -> Result<TsiftDispat
 }
 
 pub(crate) fn extract_do_target(text: &str) -> Option<String> {
+    extract_do_targets(text).into_iter().next()
+}
+
+pub(crate) fn extract_do_targets(text: &str) -> Vec<String> {
     let mut normalized = text.trim().trim_start_matches('❯').trim();
     if normalized.starts_with('[')
         && let Some(closing) = normalized.find(']')
@@ -519,14 +526,35 @@ pub(crate) fn extract_do_target(text: &str) -> Option<String> {
         normalized = normalized[closing + 1..].trim();
     }
     let lower = normalized.to_ascii_lowercase();
-    let rest = lower.strip_prefix("do ")?;
-    let hash_idx = rest.find('#')?;
-    let id_start = hash_idx + 1;
-    let id: String = rest[id_start..]
-        .chars()
-        .take_while(|ch| ch.is_ascii_alphanumeric())
-        .collect();
-    (!id.is_empty()).then_some(id)
+    let Some(rest) = lower.strip_prefix("do ") else {
+        return Vec::new();
+    };
+    extract_hash_ids(rest)
+}
+
+fn extract_hash_ids(text: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut idx = 0usize;
+    while idx < chars.len() {
+        if chars[idx] != '#' {
+            idx += 1;
+            continue;
+        }
+        idx += 1;
+        let start = idx;
+        while idx < chars.len() && chars[idx].is_ascii_alphanumeric() {
+            idx += 1;
+        }
+        if start == idx {
+            continue;
+        }
+        let id = chars[start..idx].iter().collect::<String>();
+        if !ids.iter().any(|existing| existing == &id) {
+            ids.push(id);
+        }
+    }
+    ids
 }
 
 impl TsiftGraphEvidencePlan {
@@ -793,22 +821,60 @@ fn collect_do_items(prompt_targets: &[String]) -> Vec<DoItem> {
 
 fn run_tsift_json(args: &[&str]) -> Result<Value> {
     let bin = std::env::var(TSIFT_BIN_ENV).unwrap_or_else(|_| "tsift".to_string());
-    let output = Command::new(&bin)
+    let mut child = Command::new(&bin)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
+        .spawn()
         .with_context(|| format!("failed to launch {bin}"))?;
+    let command = std::iter::once(bin.as_str())
+        .chain(args.iter().copied())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let timeout = tsift_graph_timeout();
+    let start = Instant::now();
+    loop {
+        if child
+            .try_wait()
+            .with_context(|| format!("failed to poll `{command}`"))?
+            .is_some()
+        {
+            break;
+        }
+        if start.elapsed() >= timeout {
+            if let Err(err) = child.kill() {
+                eprintln!("[tsift_graph] warning: failed to kill timed out `{command}`: {err}");
+            }
+            let output = child
+                .wait_with_output()
+                .with_context(|| format!("failed to collect timed out `{command}`"))?;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            anyhow::bail!(
+                "`{}` timed out after {}s: {}{}{}",
+                command,
+                timeout.as_secs(),
+                stderr.trim(),
+                if stderr.trim().is_empty() || stdout.trim().is_empty() {
+                    ""
+                } else {
+                    "\n"
+                },
+                stdout.trim()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let output = child
+        .wait_with_output()
+        .with_context(|| format!("failed to collect `{command}`"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         anyhow::bail!(
             "`{}` exited with status {}: {}{}{}",
-            std::iter::once(bin.as_str())
-                .chain(args.iter().copied())
-                .collect::<Vec<_>>()
-                .join(" "),
+            command,
             output.status,
             stderr.trim(),
             if stderr.trim().is_empty() || stdout.trim().is_empty() {
@@ -825,6 +891,15 @@ fn run_tsift_json(args: &[&str]) -> Result<Value> {
             args.to_vec().join(" ")
         )
     })
+}
+
+fn tsift_graph_timeout() -> Duration {
+    let secs = std::env::var(TSIFT_GRAPH_TIMEOUT_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_TSIFT_GRAPH_TIMEOUT_SECS);
+    Duration::from_secs(secs)
 }
 
 fn find_materialized_graph_db(file: &Path) -> Option<PathBuf> {
@@ -1016,6 +1091,9 @@ fn validate_graph_contracts(plan: &TsiftGraphEvidencePlan) -> Result<()> {
         if packet.token_budget.is_none() {
             errors.push(format!("{packet_label} missing token_budget"));
         }
+        if let Some(feedback) = &packet.worker_feedback {
+            validate_worker_feedback_contract(&mut errors, &packet_label, feedback);
+        }
     }
 
     if errors.is_empty() {
@@ -1102,9 +1180,40 @@ fn validate_dispatch_trace_contract(plan: &TsiftGraphEvidencePlan) -> Result<()>
             packet.contract_version.as_deref(),
             WORKER_PROMPT_PACKET_CONTRACT_VERSION,
         );
+        require_nonempty(
+            &mut errors,
+            &packet_label,
+            "packet_id",
+            packet.packet_id.as_deref(),
+        );
+        require_nonempty(
+            &mut errors,
+            &packet_label,
+            "projection_hash",
+            packet.projection_hash.as_deref(),
+        );
+        require_nonempty_list(
+            &mut errors,
+            &packet_label,
+            "expansion_commands",
+            &packet.expansion_commands,
+        );
+        if packet.token_budget.is_none() {
+            errors.push(format!("{packet_label} missing token_budget"));
+        }
         if packet.worker_feedback.is_none() {
             errors.push(format!("{packet_label} missing worker_feedback"));
+        } else if let Some(feedback) = &packet.worker_feedback {
+            validate_worker_feedback_contract(&mut errors, &packet_label, feedback);
         }
+    }
+
+    for (idx, feedback) in trace.worker_feedback.iter().enumerate() {
+        validate_worker_feedback_contract(
+            &mut errors,
+            &format!("dispatch-trace worker_feedback {}", idx + 1),
+            feedback,
+        );
     }
 
     if errors.is_empty() {
@@ -1142,6 +1251,21 @@ fn require_nonempty(errors: &mut Vec<String>, subject: &str, field: &str, actual
 fn require_nonempty_list(errors: &mut Vec<String>, subject: &str, field: &str, actual: &[String]) {
     if actual.is_empty() {
         errors.push(format!("{subject} missing {field}"));
+    }
+}
+
+fn validate_worker_feedback_contract(
+    errors: &mut Vec<String>,
+    subject: &str,
+    feedback: &TsiftWorkerFeedbackSummary,
+) {
+    if feedback.total == 0 {
+        return;
+    }
+    for warning in &feedback.warnings {
+        if warning.starts_with("missing worker_result field ") {
+            errors.push(format!("{subject} {warning}"));
+        }
     }
 }
 
@@ -1248,6 +1372,12 @@ fn parse_worker_prompt_packets(value: Option<&Value>) -> Vec<TsiftWorkerPromptPa
 }
 
 fn parse_worker_feedback_summary(value: &Value) -> TsiftWorkerFeedbackSummary {
+    let mut warnings = string_array(value.pointer("/warnings"));
+    for field in ["touched_files", "expected_tests", "follow_up_ids"] {
+        if value.pointer(&format!("/{field}")).is_none() {
+            warnings.push(format!("missing worker_result field {field}"));
+        }
+    }
     TsiftWorkerFeedbackSummary {
         total: usize_at(value, "/total"),
         completed: usize_at(value, "/completed"),
@@ -1264,7 +1394,7 @@ fn parse_worker_feedback_summary(value: &Value) -> TsiftWorkerFeedbackSummary {
         follow_up_debt: string_array(value.pointer("/follow_up_debt")),
         closure_rank_score: usize_at(value, "/closure_rank_score"),
         closure_rank_reasons: string_array(value.pointer("/closure_rank_reasons")),
-        warnings: string_array(value.pointer("/warnings")),
+        warnings,
     }
 }
 
@@ -1654,6 +1784,10 @@ esac
             Some("agbr".to_string())
         );
         assert_eq!(extract_do_target("run tests"), None);
+        assert_eq!(
+            extract_do_targets("do [#x63e] [#v4v0]. spec-test"),
+            vec!["x63e".to_string(), "v4v0".to_string()]
+        );
     }
 
     #[cfg(unix)]

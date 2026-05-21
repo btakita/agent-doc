@@ -13,7 +13,7 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -90,6 +90,12 @@ struct ContextSidecar {
     command: Vec<String>,
     report: Value,
     estimated_tokens: usize,
+}
+
+#[derive(Debug, Clone)]
+struct JobTarget {
+    target: String,
+    action: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,14 +195,16 @@ fn create_index(file: &Path, options: CreateOptions) -> Result<JobsIndex> {
         .map(|mutation| (mutation.id.to_ascii_lowercase(), mutation.text.clone()))
         .collect::<BTreeMap<_, _>>();
 
-    for (idx, action) in dispatch_plan.repo_actions.iter().enumerate() {
-        let Some(target) = crate::tsift_graph::extract_do_target(action) else {
-            continue;
-        };
+    let job_targets = job_targets_from_plan(&dispatch_plan);
+    for (idx, job_target) in job_targets.iter().enumerate() {
+        let target = &job_target.target;
         let description = pending_by_id
             .get(&target.to_ascii_lowercase())
             .cloned()
-            .unwrap_or_else(|| action.clone());
+            .or_else(|| job_target.action.clone())
+            .unwrap_or_else(|| format!("do #{target}"));
+        let write_scope = write_scope_for_target(&description, &dispatch_plan.write_scope);
+        let graph_acceptance_context = graph_acceptance_context(&dispatch_plan, target)?;
         let job_id = format!("job-{}-{:02}", target, idx + 1);
         let job_path = jobs_dir.join(format!("{job_id}.md"));
         let result_path = jobs_dir.join(format!("{job_id}.result.json"));
@@ -205,7 +213,7 @@ fn create_index(file: &Path, options: CreateOptions) -> Result<JobsIndex> {
             file,
             &root,
             &job_id,
-            &target,
+            target,
             &dispatch_plan,
             &context_path,
             options.budget,
@@ -222,7 +230,7 @@ fn create_index(file: &Path, options: CreateOptions) -> Result<JobsIndex> {
             path: relative_to(&root, &job_path),
             result_path: relative_to(&root, &result_path),
             context_path: tsift_context.context_path.clone(),
-            write_scope: dispatch_plan.write_scope.clone(),
+            write_scope: write_scope.clone(),
             required_proof: dispatch_plan.required_proof.clone(),
             tsift_status: tsift_context.status.clone(),
         };
@@ -230,12 +238,14 @@ fn create_index(file: &Path, options: CreateOptions) -> Result<JobsIndex> {
             file,
             cycle_id: &cycle_id,
             job_id: &job_id,
-            target: &target,
+            target,
             title: &title,
             description: &description,
+            write_scope: &write_scope,
             source_snapshot: &source_snapshot,
             dispatch_plan: &dispatch_plan,
             tsift_context: &tsift_context,
+            graph_acceptance_context: graph_acceptance_context.as_deref(),
             result_path: &record.result_path,
         });
         std::fs::write(&job_path, packet)
@@ -450,9 +460,12 @@ fn select_index(mut indexes: Vec<JobsIndex>, cycle: Option<&str>) -> Option<Jobs
 
 fn read_result_json(path: &Path) -> Result<Option<Value>> {
     match std::fs::read_to_string(path) {
-        Ok(text) => Ok(Some(serde_json::from_str(&text).with_context(|| {
-            format!("failed to parse worker result {}", path.display())
-        })?)),
+        Ok(text) => {
+            let value: Value = serde_json::from_str(&text)
+                .with_context(|| format!("failed to parse worker result {}", path.display()))?;
+            validate_worker_result_contract(path, &value)?;
+            Ok(Some(value))
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
     }
@@ -488,9 +501,220 @@ fn read_embedded_worker_result(path: &Path) -> Result<Option<Value>> {
     if body.trim().is_empty() {
         return Ok(None);
     }
-    Ok(Some(serde_json::from_str(body.trim()).with_context(
-        || format!("failed to parse embedded worker result {}", path.display()),
-    )?))
+    let value = serde_json::from_str(body.trim())
+        .with_context(|| format!("failed to parse embedded worker result {}", path.display()))?;
+    validate_worker_result_contract(path, &value)?;
+    Ok(Some(value))
+}
+
+fn job_targets_from_plan(dispatch_plan: &plan::DispatchPlan) -> Vec<JobTarget> {
+    let mut seen = BTreeSet::new();
+    let mut targets = Vec::new();
+
+    for action in &dispatch_plan.repo_actions {
+        for target in crate::tsift_graph::extract_do_targets(action) {
+            if seen.insert(target.to_ascii_lowercase()) {
+                targets.push(JobTarget {
+                    target,
+                    action: Some(action.clone()),
+                });
+            }
+        }
+    }
+
+    for mutation in dispatch_plan
+        .pending_mutations
+        .iter()
+        .filter(|mutation| mutation.kind == plan::PendingMutationKind::ResolveExisting)
+    {
+        if seen.insert(mutation.id.to_ascii_lowercase()) {
+            targets.push(JobTarget {
+                target: mutation.id.clone(),
+                action: None,
+            });
+        }
+    }
+
+    targets
+}
+
+fn write_scope_for_target(description: &str, default_scope: &[String]) -> Vec<String> {
+    let labeled = extract_labeled_path_refs(description);
+    if !labeled.is_empty() {
+        return labeled;
+    }
+
+    let paths = extract_path_refs(description);
+    if !paths.is_empty() {
+        return paths;
+    }
+
+    default_scope.to_vec()
+}
+
+fn extract_labeled_path_refs(text: &str) -> Vec<String> {
+    let tokens = text.split_whitespace().collect::<Vec<_>>();
+    let mut paths = Vec::new();
+    for (idx, token) in tokens.iter().enumerate() {
+        let label = token
+            .trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
+                )
+            })
+            .to_ascii_lowercase();
+        if !matches!(
+            label.as_str(),
+            "scope:" | "write_scope:" | "write-scope:" | "write" | "write_scope"
+        ) {
+            continue;
+        }
+        for candidate in tokens.iter().skip(idx + 1).take(4) {
+            if let Some(path) = normalize_path_candidate(candidate) {
+                push_unique(&mut paths, path);
+                break;
+            }
+        }
+    }
+    paths
+}
+
+fn extract_path_refs(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for token in text.split_whitespace() {
+        if let Some(path) = normalize_path_candidate(token) {
+            push_unique(&mut paths, path);
+        }
+    }
+    paths
+}
+
+fn normalize_path_candidate(token: &str) -> Option<String> {
+    let mut candidate = token
+        .trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
+            )
+        })
+        .trim_start_matches("](")
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .to_string();
+    while candidate.ends_with(|ch: char| {
+        matches!(
+            ch,
+            '.' | ',' | ';' | ':' | ')' | ']' | '}' | '`' | '"' | '\''
+        )
+    }) {
+        candidate.pop();
+    }
+    if let Some((path, line)) = candidate.rsplit_once(':')
+        && !path.is_empty()
+        && line.chars().all(|ch| ch.is_ascii_digit())
+    {
+        candidate = path.to_string();
+    }
+    if candidate.is_empty()
+        || candidate.starts_with('/')
+        || candidate.starts_with('#')
+        || candidate.contains("://")
+        || !candidate.contains('/')
+    {
+        return None;
+    }
+    if !candidate
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | '+' | '@'))
+    {
+        return None;
+    }
+    Some(candidate)
+}
+
+fn push_unique(items: &mut Vec<String>, item: String) {
+    if !items.iter().any(|existing| existing == &item) {
+        items.push(item);
+    }
+}
+
+fn graph_acceptance_context(
+    dispatch_plan: &plan::DispatchPlan,
+    target: &str,
+) -> Result<Option<String>> {
+    let Some(graph_evidence) = &dispatch_plan.graph_evidence else {
+        return Ok(None);
+    };
+    let task_label = format!("do #{target}");
+    let context = graph_evidence
+        .prompt_context_for_task(&task_label)?
+        .with_context(|| format!("tsift graph evidence missing target #{target}"))?;
+    if !context.contains("\"lower_agent_job_packet\"") {
+        bail!("tsift graph evidence for #{target} missing lower_agent_job_packet");
+    }
+    Ok(Some(context))
+}
+
+fn validate_worker_result_contract(path: &Path, value: &Value) -> Result<()> {
+    let mut errors = Vec::new();
+    require_json_string(
+        &mut errors,
+        value,
+        "contract_version",
+        Some(WORKER_RESULT_CONTRACT_VERSION),
+    );
+    require_json_string(&mut errors, value, "status", None);
+    if let Some(status) = value.get("status").and_then(Value::as_str)
+        && !matches!(status, "complete" | "blocked" | "escalate")
+    {
+        errors.push(format!("unsupported status `{status}`"));
+    }
+    for field in [
+        "changed_paths",
+        "commands_run",
+        "touched_files",
+        "expected_tests",
+        "follow_up_ids",
+        "findings",
+        "proof",
+        "needs_parent_attention",
+    ] {
+        require_json_array(&mut errors, value, field);
+    }
+    require_json_string(&mut errors, value, "confidence", None);
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        bail!(
+            "worker result {} violates {}: {}",
+            path.display(),
+            WORKER_RESULT_CONTRACT_VERSION,
+            errors.join("; ")
+        )
+    }
+}
+
+fn require_json_string(
+    errors: &mut Vec<String>,
+    value: &Value,
+    field: &str,
+    expected: Option<&str>,
+) {
+    match value.get(field).and_then(Value::as_str) {
+        Some(actual) if expected.is_none_or(|expected| expected == actual) => {}
+        Some(actual) => errors.push(format!("{field}={actual}, expected {}", expected.unwrap())),
+        None => errors.push(format!("missing string field {field}")),
+    }
+}
+
+fn require_json_array(errors: &mut Vec<String>, value: &Value, field: &str) {
+    match value.get(field) {
+        Some(Value::Array(_)) => {}
+        Some(_) => errors.push(format!("{field} must be an array")),
+        None => errors.push(format!("missing array field {field}")),
+    }
 }
 
 struct JobPacketRender<'a> {
@@ -500,17 +724,23 @@ struct JobPacketRender<'a> {
     target: &'a str,
     title: &'a str,
     description: &'a str,
+    write_scope: &'a [String],
     source_snapshot: &'a str,
     dispatch_plan: &'a plan::DispatchPlan,
     tsift_context: &'a TsiftContextSummary,
+    graph_acceptance_context: Option<&'a str>,
     result_path: &'a str,
 }
 
 fn render_job_packet(input: JobPacketRender<'_>) -> String {
-    let write_scope = yaml_list(&input.dispatch_plan.write_scope);
+    let write_scope = yaml_list(input.write_scope);
     let required_proof = yaml_list(&input.dispatch_plan.required_proof);
     let tsift_json =
         serde_json::to_string_pretty(input.tsift_context).unwrap_or_else(|_| "{}".to_string());
+    let graph_acceptance = input
+        .graph_acceptance_context
+        .map(|context| format!("\n## tsift Graph Acceptance Gate\n\n```text\n{context}\n```\n"))
+        .unwrap_or_default();
     format!(
         r#"---
 contract_version: {job_contract}
@@ -555,12 +785,14 @@ Complete `#{target}` only: {description}
 ```json
 {tsift_json}
 ```
+{graph_acceptance}
 
 ## Acceptance Criteria
 
 - The job goal is complete or explicitly blocked.
 - Changed paths stay inside `write_scope`.
 - Verification commands and their outcomes are listed.
+- Touched files, expected tests, and follow-up ids are present in the worker result, even when empty.
 - Any stale/missing tsift context is called out in `needs_parent_attention`.
 
 ## Output Schema
@@ -573,6 +805,9 @@ Save a JSON object to `{result_path}` or paste it under `## Worker Result`:
   "status": "complete|blocked|escalate",
   "changed_paths": [],
   "commands_run": [],
+  "touched_files": [],
+  "expected_tests": [],
+  "follow_up_ids": [],
   "findings": [],
   "proof": [],
   "confidence": "low|medium|high",
@@ -609,6 +844,7 @@ Save a JSON object to `{result_path}` or paste it under `## Worker Result`:
         description = input.description,
         required_proof = required_proof,
         tsift_json = tsift_json,
+        graph_acceptance = graph_acceptance,
         worker_contract = WORKER_RESULT_CONTRACT_VERSION,
     )
 }
@@ -972,6 +1208,62 @@ agent_doc_dispatch: auto
     }
 
     #[test]
+    fn create_expands_compound_do_directive_and_derives_target_write_scope() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+agent_doc_dispatch: auto
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+<!-- agent:backlog -->
+- [ ] [#x63e] Implement the knowledge layer (scope: `build-party/specs/convex-knowledge-layer.md`) with tests.
+- [ ] [#v4v0] Add the session-share route packet.
+<!-- /agent:backlog -->
+"#;
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "do [#x63e] [#v4v0]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+        let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", "/no/such/tsift");
+
+        let index = create_index(
+            &doc,
+            CreateOptions {
+                operation_doc: false,
+                audit: false,
+                budget: 512,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            index
+                .jobs
+                .iter()
+                .map(|job| job.target.as_str())
+                .collect::<Vec<_>>(),
+            vec!["x63e", "v4v0"]
+        );
+        assert_eq!(
+            index.jobs[0].write_scope,
+            vec!["build-party/specs/convex-knowledge-layer.md"]
+        );
+        let packet = std::fs::read_to_string(dir.path().join(&index.jobs[0].path)).unwrap();
+        assert!(packet.contains("build-party/specs/convex-knowledge-layer.md"));
+    }
+
+    #[test]
     fn collect_reads_result_sidecars() {
         let (dir, doc) = setup_doc();
         let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", "/no/such/tsift");
@@ -990,6 +1282,18 @@ agent_doc_dispatch: auto
             &result_path,
             format!(
                 r#"{{"contract_version":"{}","status":"complete","changed_paths":[],"commands_run":[],"findings":[],"proof":[],"confidence":"high","needs_parent_attention":[]}}"#,
+                WORKER_RESULT_CONTRACT_VERSION
+            ),
+        )
+        .unwrap();
+
+        let err = read_result_json(&result_path).unwrap_err().to_string();
+        assert!(err.contains("missing array field touched_files"));
+
+        std::fs::write(
+            &result_path,
+            format!(
+                r#"{{"contract_version":"{}","status":"complete","changed_paths":[],"commands_run":[],"touched_files":[],"expected_tests":[],"follow_up_ids":[],"findings":[],"proof":[],"confidence":"high","needs_parent_attention":[]}}"#,
                 WORKER_RESULT_CONTRACT_VERSION
             ),
         )

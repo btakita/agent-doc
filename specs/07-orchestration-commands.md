@@ -128,23 +128,39 @@ Additional rules:
 `agent-doc jobs create <FILE> [--operation-doc] [--audit] [--budget N]`
 
 - Reads the current `agent-doc plan` record and emits one markdown job packet
-  per supported `do #id` / `do [#id]` repo action.
+  per distinct target in the union of `resolve_existing` pending mutations and
+  all `#id` references inside supported `do #id` / `do [#id]` repo actions.
+  A compound directive such as `do [#a] [#b]` therefore creates packets for both
+  targets instead of silently dropping the later ids.
 - Packets live under `.agent-doc/jobs/<cycle>/<job-id>.md` and are ignored by
   default. `--audit` records the preservation intent in the cycle index.
 - Each packet carries the `agent-doc-job-packet-v1` contract in frontmatter:
   parent document, cycle id, job id, prompt target, task class, model tier,
   risk, write scope, context budget, source snapshot, tsift status, and result
   sidecar path.
+- Packet `write_scope` is target-specific: explicit `scope:` /
+  `write_scope:` path references in the target backlog text win over the
+  broader planning default, so cross-repo operation documents can dispatch
+  packets to the files the item actually names.
 - Packet body sections are stable: Goal, Allowed Commands, Required Context,
   tsift Handles, Acceptance Criteria, Output Schema, Escalation Conditions, and
   Worker Result.
 - The worker result schema is `agent-doc-worker-result-v1` with:
-  `status`, `changed_paths`, `commands_run`, `findings`, `proof`,
-  `confidence`, and `needs_parent_attention`.
+  `status`, `changed_paths`, `commands_run`, `touched_files`,
+  `expected_tests`, `follow_up_ids`, `findings`, `proof`, `confidence`, and
+  `needs_parent_attention`. Collection fails closed when required fields are
+  absent.
 - When `tsift status --json` and `tsift context-pack --json` are available,
   create writes a compact `<job-id>.context.json` sidecar and links it from the
   packet. If tsift is missing or fails, the packet records the diagnostic and
   remains manual-review only.
+- When a materialized tsift graph projection is available, packet creation runs
+  the graph orchestration gate from `agent-doc plan`: `graph-db evidence`,
+  `conflict-matrix`, `dispatch-trace`, worker prompt packets, worker-result
+  feedback, replay commands, and repair commands must carry their contract
+  fields before packets are written. Graph collection is bounded by
+  `AGENT_DOC_TSIFT_GRAPH_TIMEOUT_SECS` (default 30 seconds per tsift command)
+  and timeout is a fail-closed graph evidence blocker.
 - `--operation-doc` writes a retained operation note under
   `tasks/agent-doc/operations/` when that tracked directory exists, otherwise
   under `.agent-doc/operations/`.

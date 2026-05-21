@@ -218,7 +218,12 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &fm,
     );
     let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
-    let graph_evidence = match crate::tsift_graph::collect_for_do_items(file, &prompt_targets) {
+    let graph_targets = prompt_targets
+        .iter()
+        .chain(repo_actions.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    let graph_evidence = match crate::tsift_graph::collect_for_do_items(file, &graph_targets) {
         Ok(graph_evidence) => graph_evidence,
         Err(err) => {
             blockers.push(format!("tsift graph evidence failed closed: {err:#}"));
@@ -603,26 +608,25 @@ fn pending_mutations_for_doc(
     let mut pending_mutations: Vec<PendingMutationPlan> = Vec::new();
 
     for action in repo_actions {
-        let Some(id) = extract_do_pending_id(action) else {
-            continue;
-        };
-        let Some(item) = items.iter().find(|item| {
-            item.id.eq_ignore_ascii_case(&id) && item.state != pending::PendingState::Done
-        }) else {
-            continue;
-        };
-        if pending_mutations
-            .iter()
-            .any(|mutation| mutation.id == item.id)
-        {
-            continue;
+        for id in extract_do_pending_ids(action) {
+            let Some(item) = items.iter().find(|item| {
+                item.id.eq_ignore_ascii_case(&id) && item.state != pending::PendingState::Done
+            }) else {
+                continue;
+            };
+            if pending_mutations
+                .iter()
+                .any(|mutation| mutation.id == item.id)
+            {
+                continue;
+            }
+            pending_mutations.push(PendingMutationPlan {
+                kind: PendingMutationKind::ResolveExisting,
+                id: item.id.clone(),
+                text: item.text.clone(),
+                target_files: Vec::new(),
+            });
         }
-        pending_mutations.push(PendingMutationPlan {
-            kind: PendingMutationKind::ResolveExisting,
-            id: item.id.clone(),
-            text: item.text.clone(),
-            target_files: Vec::new(),
-        });
     }
 
     if crate::prompt_contract::prompt_requests_backlog_work(
@@ -695,16 +699,8 @@ fn truncate_for_plan_log(text: &str) -> String {
     out
 }
 
-fn extract_do_pending_id(action: &str) -> Option<String> {
-    let lower = action.to_ascii_lowercase();
-    let rest = lower.strip_prefix("do ")?;
-    let hash_idx = rest.find('#')?;
-    let id_start = hash_idx + 1;
-    let id: String = rest[id_start..]
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric())
-        .collect();
-    (!id.is_empty()).then_some(id)
+fn extract_do_pending_ids(action: &str) -> Vec<String> {
+    crate::tsift_graph::extract_do_targets(action)
 }
 
 fn shared_doc_security_blockers(
@@ -1026,6 +1022,56 @@ do [#dodone]. spec-test-build-install-commit-push
                     && cmd.contains("--done dodone")
                     && cmd.contains("--stream")),
             "expected finalize command to carry --done, got: {:?}",
+            plan.required_commands
+        );
+    }
+
+    #[test]
+    fn build_plan_resolves_each_id_in_compound_do_directive() {
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Pending
+
+<!-- agent:pending -->
+- [ ] [#x63e] First packet target
+- [ ] [#v4v0] Second packet target
+<!-- /agent:pending -->
+"#;
+
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "do [#x63e] [#v4v0]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->",
+        );
+
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(
+            plan.pending_mutations
+                .iter()
+                .map(|mutation| mutation.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["x63e", "v4v0"]
+        );
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|cmd| cmd.contains("--done x63e") && cmd.contains("--done v4v0")),
+            "expected finalize command to carry both --done flags, got: {:?}",
             plan.required_commands
         );
     }

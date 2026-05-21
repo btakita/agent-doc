@@ -57,7 +57,7 @@ agent-doc has a broad feature surface because the README doubles as a user guide
 
 - **Document model** — template components, backlog archival, exchange boundaries, snapshots, durable captures, and component-aware baseline guards.
 - **Write and merge pipeline** — IPC-first editor writes, CRDT/3-way merge, template patching, response replay, strict finalize/write closeout, and selective git commits.
-- **Agent orchestration** — harness-specific routing for Claude, Codex, and OpenCode, prompt contracts, model attribution, direct-run dispatch, sequential/parallel/DAG orchestration, and lower-agent job packets with tsift context sidecars.
+- **Agent orchestration** — harness-specific routing for Claude, Codex, and OpenCode, prompt contracts, model attribution, direct-run dispatch, sequential/parallel/DAG orchestration, and lower-agent job packets with target write scopes plus tsift context/graph acceptance sidecars.
 - **Tmux and editor coordination** — route/sync/start/claim, project-controller actor state, session drift repair, startup-miss handling, passive sync, stash/rescue, and editor plugins.
 - **Operational safety** — preflight recovery, session-check guards, hooks, Codex stop-hook recovery, required-SSH/network capability proofs, accretion context, and explicit manual-repair rules.
 

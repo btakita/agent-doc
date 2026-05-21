@@ -29,60 +29,12 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-033622.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-042016.md`*
 
 Compacted content:
-- Archived 1 response topic(s): duplicate prompt/comment cleanup
+- Archived 3 response topic(s): #gxct/#wpkm tsift graph orchestration contracts; closeout repair; #dxtr/#wrcx tsift dispatch-trace closeout audit
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: #gxct/#wpkm tsift graph orchestration contracts — gpt-5
-
-Implemented and pushed the graph-backed orchestration contract work.
-
-- Added strict validation in the shared tsift graph collection path used by `agent-doc plan` and `agent-doc orchestrate`: graph status must be `current`; evidence packets must be `graph-db-evidence-v1` with `packet_id`, `projection_hash`, `replay_commands`, and `repair_commands`; conflict matrices must be `conflict-matrix-v1`; worker prompt packets must be `worker-prompt-packet-v1` with packet ids, projection hashes, token budgets, and explicit fail-closed prompt text.
-- Added a normalized `lower_agent_job_packet` to the prompt context, derived from tsift `worker_prompt_packets`, preserving owned files/symbols, read-only context, forbidden files, expected tests, expansion commands, token budget, semantic ranking fields, and fail-closed instructions for lower-agent work.
-- Updated `SPEC.md`, `specs/07-orchestration-commands.md`, and `VERSIONS.md`, with regressions covering missing graph contract fields and lower-agent job packet rendering.
-
-Verification:
-- Red-first targeted tests failed before the fix: `collect_for_do_items_fails_closed_on_missing_graph_contract_fields` and `sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt`.
-- Green after fix: `cargo fmt --check`, `git diff --check`, `cargo test collect_for_do_items`, `cargo test graph_context`, full `cargo test`, `make check`, `cargo build`, `cargo install --path . --force`, `agent-doc --version`, and installed `agent-doc plan tasks/agent-doc/agent-doc-bugs2.md`.
-- CI/tmux evidence: latest GitHub Actions CI run `26203567540` was green, including the `Run make tmux-ci` step, so no local tmux retry was needed.
-
-Commit / push:
-- agent-doc subrepo: `ab9129dd` (`feat: validate tsift graph job packets`) pushed to `btakita/agent-doc` branch `20260422/codex-agent-backend`.
-- superproject pointer: `195517e0c` (`chore: update agent-doc graph packet validation`) pushed to `btakita/agent-loop` `main`.
-- Follow-up already captured in backlog: `#dxtr` for dispatch-trace-backed closeout/job packet audit evidence.
-### Re: closeout repair — gpt-5
-
-Reopened closeout to persist the pending-state repair that was left as local drift after the earlier response write. The prior implementation response is present in the exchange, `#gxct` and `#wpkm` are reaped from backlog into the done archive, and `#dxtr` remains open as the already captured follow-up.
-
-### Re: #dxtr/#wrcx tsift dispatch-trace closeout audit — gpt-5
-
-Implemented both queue items.
-
-For `#dxtr`, graph-backed plan/orchestrate now collects and validates `tsift dispatch-trace --json` output, carries dispatch trace contract/version data, worker feedback, graph node/edge links, replay and repair commands, and projection freshness/hash details into lower-agent prompt packets and parent FlowCore audit proofs.
-
-For `#wrcx`, ordered lower-agent closeouts now receive a hidden `worker_result` line before finalize, including status, touched files, test commands, and follow-up ids so tsift can project child results back into graph evidence.
-
-Updated specs/version notes in `SPEC.md`, `specs/07-orchestration-commands.md`, and `VERSIONS.md`. Manual commits:
-
-- `src/agent-doc` commit `f726e82e` (`feat: attach tsift dispatch trace audit`)
-- outer repo pointer commit `81d3ee989` (`chore: update agent-doc dispatch trace audit`)
-
-Verification completed before closeout:
-
-- Red-first targeted tests failed on the missing dispatch-trace and `worker_result` behavior.
-- `cargo test collect_for_do_items_attaches_graph_handles`
-- `cargo test sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt`
-- `cargo fmt --check`
-- `git diff --check`
-- full `cargo test`
-- `make check`
-- `cargo build`
-- `cargo install --path . --force`
-- installed `agent-doc --version` -> `agent-doc 0.33.16`
-- installed `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`
-- CI/tmux evidence: GitHub Actions CI run `26204266575` completed successfully, including job `check` step `Run make tmux-ci`.
-<!-- agent:boundary:44b181fb -->
+<!-- agent:boundary:35914f69 -->
 <!-- /agent:exchange -->
 ###
 <!--

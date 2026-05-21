@@ -74,10 +74,14 @@ Committed and pushed:
 
 No feature removal was needed.
 <!-- agent:boundary:48784fd3 -->
+The finalize step of turns should not delete the html comment under agent:exchange. Please identify the root cause. Make a failing test to surface the bug first. Fix. #spec-test-build-install-commit-push
+
+The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push
 <!-- /agent:exchange -->
 ###
-
-
+<!--
+The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push
+-->
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
@@ -90,6 +94,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#missedpb] Missed-patchback false-positive in finalize / write --commit cycle. REPRO: prior turn's finalize lands a commit but the response body (patch:exchange block) never materializes in the file. Subsequent agent-doc finalize reports 'rejecting late fallback patch: cycle <id> already committed for <file>' AND agent-doc write --commit reports 'staged snapshot already matches HEAD for <file> — closing cycle as already committed' + 'detected post-commit local drift', yet session-check correctly detects 'live exchange ends with unresolved prompt-only closeout tail and no assistant response'. Net: state machine thinks the cycle closed when the visible response was never inserted. WORKAROUND: direct Edit + git commit. EVIDENCE: tasks/root.md cycle on 2026-05-21 ~17:23 EDT, commit 521ab300 in session-share landed a finalize commit with NO response body in the file; required manual repair via commit 98ff9008 ('agent-doc(root): manual repair — inject missing response body'). FIX PLAN: (1) in write --stream, detect when IPC delivery completed but the patch:exchange materialization step was skipped (sidecar normalization fallback path) and surface a hard error instead of silently committing; (2) in commit/finalize, treat 'snapshot already matches HEAD' as success ONLY when the snapshot itself contains the expected response body — currently the check passes on equality without verifying the response is present; (3) when session-check INTERRUPTED is raised post-commit, automatically open a write --commit-repair cycle that re-delivers the response from the last captured cycle state instead of returning success. DO NOT IMPLEMENT THE FIX.
 - [ ] [#autodag] [recommended] Add an agent-doc auto-DAG planner for queued do/compound directives: parse explicit depends-on text, backlog ids, graph/conflict evidence, and job packets into a topological schedule; fail closed on cycles, missing ids, stale graph evidence, or ambiguous ownership before dispatch.
 - [ ] [#dagdispatch] [recommended] Execute auto-DAG batches through agent-doc orchestrate/jobs: run parallel-safe antichain batches, collect worker_result proof, unblock downstream nodes only after required proof/session-check passes, and stop deterministically on failed/gated nodes without launching dependents.
 - [ ] [#dagrecover] [recommended] Add auto-DAG persistence/recovery semantics: write operation docs/job packets with schedule id, node state, attempt count, replay commands, and repair commands so interrupted DAG runs can resume idempotently after compact/finalize/restart.

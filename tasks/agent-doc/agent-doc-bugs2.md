@@ -46,7 +46,7 @@ do [#jobslock]. #spec-test-build-install-commit-push
 I retried the `#jobslock` cycle. `agent-doc plan` still stops before repo work with the same planner blocker: `tsift conflict-matrix --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json jobslock` timed out after 30 seconds while gathering tsift graph evidence.
 
 I did not edit code, specs, or tests, and I did not build, install, commit, or push. `#jobslock` stays open because implementation did not begin; this was a planning-stage blocker, not a code-complete external gate.
-<!-- agent:boundary:19004063 -->
+<!-- agent:boundary:d0eb55ac -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,7 +69,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#dagdispatch] [recommended] Execute auto-DAG batches through agent-doc orchestrate/jobs: run parallel-safe antichain batches, collect worker_result proof, unblock downstream nodes only after required proof/session-check passes, and stop deterministically on failed/gated nodes without launching dependents.
 - [ ] [#dagrecover] [recommended] Add auto-DAG persistence/recovery semantics: write operation docs/job packets with schedule id, node state, attempt count, replay commands, and repair commands so interrupted DAG runs can resume idempotently after compact/finalize/restart.
 - [ ] [#daglogs] [recommended] Use session-review guardrails as scheduler input: classify prompt-budget/cache-resend/restart-loop/noop-closeout log families before auto-DAG start and gate large or looping runs into compact/restart/fixture-fix steps.
-- [ ] [#jobslock] `agent-doc jobs create` fails when `tsift graph-db status` returns the SQLite hot-journal/read-only error (recurrence of `#w25k`). Observed 2026-05-21 second-cycle `#dogfood-tsift` run: `agent-doc jobs create tasks/software/tsift.md --audit` exited with `plan has blocker(s); refusing to create jobs: tsift graph evidence failed closed: ... Error code 5: The database file is locked`. Fix on the agent-doc side: when `tsift graph-db` is locked, fall back to a soft warning + `manual_packet_only: true` flag in the planning record rather than refusing job creation entirely. tsift-side root-cause fix lives at `tasks/software/tsift.md` `#gdblock`.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

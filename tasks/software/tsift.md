@@ -31,29 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-003846.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-014846.md`*
 
 Compacted content:
-- Archived 4 response topic(s): parallel planning with tsift; next steps; #pwcm conflict matrix; 1 more
+- Archived 1 response topic(s): do #802b
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: do #802b — gpt-5
-
-Completed `#802b`.
-
-- Set the `CARGO_REGISTRY_TOKEN` Actions secret for `btakita/tsift` from local Cargo credentials, and set `TSIFT_ENABLE_CRATES_PUBLISH=true` as the repo variable.
-- Added `cargo publish --locked --dry-run` to the release workflow verification path, updated `SPEC.md`, `README.md`, and `VERSIONS.md`, and added a regression test that locks the workflow variable/secret/dry-run contract.
-- Committed and pushed the tsift submodule commit `cb1fb1c fix: enable tsift crates publishing`; committed the root submodule pointer as `b87fed8c chore: update tsift submodule`. The root push runs after this `agent-doc` closeout so the session document stays on the binary-owned finalize path.
-- CI evidence: `btakita/tsift` CI run `26198547413` completed successfully. The repo has `CI` and `Release` workflows only; there is no tmux-test workflow to inspect. CI annotations were non-code warnings/notices: GitHub's Node 20 action deprecation notice and the documented live Convex deployment skip notice.
-
-Verification run in `src/tsift`:
-
-- `cargo fmt --check`
-- `make ci-full`
-- `cargo build --release`
-- `cargo install --path . --force`
-- `cargo publish --locked --dry-run` after commit; also `cargo publish --locked --dry-run --allow-dirty` before commit to verify the patched working tree package shape
-- `gh secret list --repo btakita/tsift` showed `CARGO_REGISTRY_TOKEN`; `gh variable list --repo btakita/tsift` showed `TSIFT_ENABLE_CRATES_PUBLISH true`
-<!-- agent:boundary:aa1998e0 -->
+<!-- agent:boundary:1d51841f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,8 +51,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-
-do [#802b]. #spec-test-build-install-commit-push
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

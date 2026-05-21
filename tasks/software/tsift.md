@@ -80,7 +80,32 @@ Verification:
 Commits pushed:
 - agent-doc: `e17bf1f` (`20260422/codex-agent-backend`)
 - agent-loop gitlink: `7680e03cf` (`main`)
-<!-- agent:boundary:36f4c028 -->
+❯ do [#tsdag]. #spec-test-build-install-commit-push
+### Re: #tsdag — gpt-5
+
+Completed `#tsdag`.
+
+Implemented in `src/tsift`:
+- Added `tsift dependency-dag --path <session> [target...] --json` with the `dependency-dag-v1` contract.
+- The DAG report resolves agent-doc backlog ids, derives explicit `depends on` / `after` / `blocked by` / `before` edges, shared file/symbol/test/config and semantic overlap edges, and `worker_result` follow-up edges.
+- It emits graph-backed nodes, edges, deterministic topological batches, cycle diagnostics, replay commands, and repair commands.
+- Updated the tsift spec, README, version notes, graph orchestration contract fixture, operator examples, CLI parsing tests, unit coverage, and graph conformance coverage.
+
+Verification:
+- `cargo test dependency_dag`
+- `cargo test graph_orchestration_contract_fixture_matches_live_reports`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- Latest `tsift` GitHub CI run `26232896258` was green.
+- Latest root `agent-loop` Agent Doc run `26243042143` had empty-step `check` and `tmux-ci` jobs with no logs, so I treated it as an external CI-start blocker rather than a code/tmux regression.
+
+Commits prepared:
+- tsift: `18ae92c` (`feat: add agent-doc dependency dag`)
+- agent-loop gitlink: `561f7b08e` (`chore: bump tsift dependency dag`)
+
+Per the session closeout rule, push happens after this `agent-doc finalize` commit succeeds.
+<!-- agent:boundary:b8e1447e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -88,7 +113,6 @@ Commits pushed:
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#tsdag]
 - do [#impactdag]
 - do [#dagfix]
 <!-- /agent:queue -->
@@ -96,7 +120,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#tsdag] [recommended] Add graph-level dependency DAG extraction for agent-doc work: derive explicit and implicit edges among backlog ids from file/symbol/test/config overlap, semantic relations, worker_result follow-up ids, and depends-on text; emit nodes, edges, cycle diagnostics, topo batches, replay commands, and repair commands as a versioned JSON contract.
 - [ ] [#impactdag] [recommended] Extend conflict-matrix and dispatch-trace with scheduler fields: parallel_safe, blocks, blocked_by, required_context, expected_tests, and stable graph handles so agent-doc can run topological antichains without scraping prose.
 - [ ] [#dagfix] [recommended] Add regeneration fixtures for real agent-doc queue DAGs: refresh -> evidence -> conflict-matrix -> dependency-dag -> dispatch-trace, asserting projection freshness, packet ids, worker_result closure, cycle detection, and stale graph fail-closed behavior.
 - [ ] [#dbbench] [recommended] Add an experimental GraphStore backend evaluation for DuckDB/DuckPGQ and Ladybug: prototype read-only adapters behind the existing contract, benchmark refresh/status/evidence/conflict-matrix/dispatch-trace on real and synthetic projections, and only promote if it beats SQLite without worsening multi-process lock behavior or install portability.

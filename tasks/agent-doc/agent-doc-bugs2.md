@@ -34,7 +34,33 @@ Added auto-DAG next steps; top backlog item: #autodag.
 Compacted content:
 - Archived 2 response topic(s): duplicate prompt corruption; duplicate prompt comment shell
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f4046930 -->
+❯ do [#missedpb]. #spec-test-build-install-commit-push
+### Re: #missedpb missed patchback closeout — gpt-5
+
+Implemented #missedpb.
+
+What changed:
+- `src/agent-doc/src/write.rs` now treats IPC ACK/sidecar/file consumption as insufficient unless the materialized candidate contains the expected response-body probe. Prompt-only, unrelated, or partial-heading materialization logs `ipc_materialization_missing_response` and falls back before snapshot/commit can mark the response committed.
+- `src/agent-doc/src/git.rs` now blocks the `snapshot == HEAD` already-current no-op when an active captured response is absent from the staged snapshot/HEAD, leaving the cycle recoverable via `agent-doc write --commit <FILE>`.
+- `src/agent-doc/specs/07-closeout-commands.md`, `src/agent-doc/VERSIONS.md`, and `src/agent-doc/tests/test_cli.rs` were updated for the new invariant and audited FlowCore guard token.
+
+Verification run:
+- `cargo fmt`
+- `cargo test commit_blocks_head_current_noop_when_active_capture_response_missing`
+- `cargo test try_ipc_rejects_consumed_partial_response_materialization`
+- `cargo test try_ipc_routes_to_submodule_root_not_superproject`
+- `cargo test try_ipc_routes_to_git_toplevel_for_non_submodule`
+- `make check`
+- `make install`
+- GitHub `Agent Doc` run `26255697164` was red before runner steps were created: both `tmux-ci` and `check` jobs had empty step lists and completed in ~2s, so I classified it as an external CI-start blocker rather than a code/tmux regression.
+- `make tmux-ci` passed locally: 228 ignored/live tmux tests passed.
+
+Commits:
+- `src/agent-doc`: `c5d396d9 fix: guard missed response materialization`, pushed to `origin/20260422/codex-agent-backend`.
+- root submodule pointer: `d1f0b2d9c agent-doc(root): bump agent-doc for materialization guard`, committed locally before this finalize. Per the session closeout ordering, I will push root `main` after this `finalize` creates the session-document commit.
+
+Confidence: high. The regression now has both direct unit coverage and full default/live verification. No escalation was needed.
+<!-- agent:boundary:3302a7c8 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,7 +77,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#missedpb] Missed-patchback false-positive in finalize / write --commit cycle. REPRO: prior turn's finalize lands a commit but the response body (patch:exchange block) never materializes in the file. Subsequent agent-doc finalize reports 'rejecting late fallback patch: cycle <id> already committed for <file>' AND agent-doc write --commit reports 'staged snapshot already matches HEAD for <file> — closing cycle as already committed' + 'detected post-commit local drift', yet session-check correctly detects 'live exchange ends with unresolved prompt-only closeout tail and no assistant response'. Net: state machine thinks the cycle closed when the visible response was never inserted. WORKAROUND: direct Edit + git commit. EVIDENCE: tasks/root.md cycle on 2026-05-21 ~17:23 EDT, commit 521ab300 in session-share landed a finalize commit with NO response body in the file; required manual repair via commit 98ff9008 ('agent-doc(root): manual repair — inject missing response body'). FIX PLAN: (1) in write --stream, detect when IPC delivery completed but the patch:exchange materialization step was skipped (sidecar normalization fallback path) and surface a hard error instead of silently committing; (2) in commit/finalize, treat 'snapshot already matches HEAD' as success ONLY when the snapshot itself contains the expected response body — currently the check passes on equality without verifying the response is present; (3) when session-check INTERRUPTED is raised post-commit, automatically open a write --commit-repair cycle that re-delivers the response from the last captured cycle state instead of returning success. DO NOT IMPLEMENT THE FIX.
 - [ ] [#autodag] [recommended] Add an agent-doc auto-DAG planner for queued do/compound directives: parse explicit depends-on text, backlog ids, graph/conflict evidence, and job packets into a topological schedule; fail closed on cycles, missing ids, stale graph evidence, or ambiguous ownership before dispatch.
 - [ ] [#dagdispatch] [recommended] Execute auto-DAG batches through agent-doc orchestrate/jobs: run parallel-safe antichain batches, collect worker_result proof, unblock downstream nodes only after required proof/session-check passes, and stop deterministically on failed/gated nodes without launching dependents.
 - [ ] [#dagrecover] [recommended] Add auto-DAG persistence/recovery semantics: write operation docs/job packets with schedule id, node state, attempt count, replay commands, and repair commands so interrupted DAG runs can resume idempotently after compact/finalize/restart.

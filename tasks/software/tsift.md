@@ -36,7 +36,18 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): dependency DAG queue blocker; post-closeout queue additions
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:1e32829f -->
+❯ do [#bfd1] [#w94s]
+❯ #spec-test-build-install-commit-push
+### Re: graph evidence blocker — gpt-5
+
+I ran preflight and planning for `do [#bfd1] [#w94s]` with `#spec-test-build-install-commit-push`. Planning failed closed before repo edits because graph evidence collection timed out for `#bfd1`:
+
+`tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --json evidence bfd1 --depth 3 --limit 8`
+
+That timeout is the active blocker, so I did not update spec/tests, build, install, commit, or push code changes in this cycle. I am leaving `#bfd1` and `#w94s` open because implementation was blocked before any repo work could start.
+
+Preflight also reported one legacy gated backlog item still in `agent:backlog`; I did not migrate it because this cycle was scoped to `#bfd1` and `#w94s`.
+<!-- agent:boundary:48db32eb -->
 <!-- /agent:exchange -->
 ###
 <!--

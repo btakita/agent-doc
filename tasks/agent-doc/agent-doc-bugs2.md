@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -43,7 +43,18 @@ tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-
 ```
 
 No code changes were made, and the backlog item remains open rather than being marked done. The next cycle should retry after `tsift` graph evidence is available or fix the timeout/blocker first.
-<!-- agent:boundary:6edcf9e4 -->
+### Re: queued auto-DAG retry — gpt-5
+
+The interrupted cycle was recovered, but the queue head was locally changed back from consumed `~do [#autodag]~` to active `do [#autodag]`, so `agent-doc plan` routed this cycle to `#autodag` again.
+
+I did not make repo changes. Planning still fails closed before implementation because required `tsift` graph evidence times out:
+
+```bash
+tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json evidence autodag --depth 3 --limit 8
+```
+
+`#autodag` remains open. The blocker to resolve first is the `tsift graph-db` evidence timeout or the local queue-head drift that is reactivating `#autodag`.
+<!-- agent:boundary:5646741e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,9 +62,9 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 -->
 
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#autodag]~
+- do [#autodag]
 - do [#dagdispatch]
 - do [#dagrecover]
 - do [#daglogs]

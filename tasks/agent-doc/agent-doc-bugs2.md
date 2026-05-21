@@ -29,38 +29,12 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-025059.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-031105.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #agbr tsift graph evidence
+- Archived 1 response topic(s): do #r7k8
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#r7k8]. #spec-test-build-install-commit-push
-### Re: do #r7k8 — gpt-5
-
-Implemented `#r7k8`.
-
-The agent-doc side now preserves the full `conflict-matrix-v1` planner contract from tsift: context-pack summary, cached diff and impact commands, ranked candidates, shared file/symbol/test/config conflicts, worker prompt packet ownership prompts, token budgets, semantic ranking reasons, replay/repair commands, and warnings. Parallel orchestration now blocks unless tsift explicitly reports `can_parallel=true` and `fail_closed=false`, so high-risk shared-symbol/test cases cannot slip through just because they are not file-level fail-closed conflicts.
-
-Changed paths:
-- `src/agent-doc/src/tsift_graph.rs`
-- `src/agent-doc/src/orchestrate.rs`
-- `src/agent-doc/specs/07-orchestration-commands.md`
-- `src/agent-doc/VERSIONS.md`
-
-Verification passed:
-- `cargo test tsift_graph`
-- `make check`
-- `cargo build`
-- `cargo install --path . --force`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- Latest GitHub CI run `26202438433` succeeded, including the `Run make tmux-ci` step.
-
-Commits created locally:
-- `src/agent-doc` submodule: `a919134e` (`feat: carry tsift conflict matrix contract`)
-- superproject: `318d0ad` (`chore: update agent-doc conflict matrix integration`)
-
-Push follows this document closeout so the session-document commit is included by the normal agent-doc path rather than the manual repo commit.
-<!-- agent:boundary:fc836e48 -->
+<!-- agent:boundary:7661c56f -->
 <!-- /agent:exchange -->
 ###
 

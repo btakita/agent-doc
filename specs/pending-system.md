@@ -44,13 +44,13 @@ Every bullet in `agent:backlog` carries a 4-char base32 hash as a visible prefix
 
 Hash generation: `base32(blake3(text + doc_id + monotonic_counter))[:4]`. Collision handling: on collision within the component, extend to 5 chars and retry; documented ceiling at 8 chars.
 
-### 2. GFM task-list checkboxes with Gated lifecycle state
+### 2. GFM task-list checkboxes with review lifecycle state
 
 Every bullet carries a GFM-style checkbox that encodes a three-state lifecycle:
 
 ```
 - [ ] [#a3f2] open — not started or in progress
-- [/] [#b1c4] gated — code-complete, awaiting release / telemetry / verification
+- [/] [#b1c4] review — code-complete, awaiting release / telemetry / human review
 - [x] [#c9e0] done — reaped next preflight cycle
 ```
 
@@ -59,7 +59,7 @@ Every bullet carries a GFM-style checkbox that encodes a three-state lifecycle:
 ```
 ┌─────┐   --pending-gate     ┌─────┐   --done     ┌─────┐
 │ [ ] │ ───────────────────► │ [/] │ ───────────────────► │ [x] │ ──► (reaped)
-│ open│                      │gated│                      │ done│
+│backlog                     │review                     │ done│
 └─────┘                      └─────┘                      └─────┘
    ▲                            │
    │     --pending-ungate       │
@@ -69,17 +69,22 @@ Direct path (no gating needed):
 [ ] ──── --done ────► [x] ──► (reaped)
 ```
 
-**State semantics:**
+**State and container semantics:**
 
 | State | Char | Meaning | Reaped? |
 |-------|------|---------|---------|
 | `Open` | `[ ]` | active work or not started | No |
-| `Gated` | `[/]` | code-complete, awaiting external gate (release, telemetry, field validation) | **No** |
+| `Gated` | `[/]` | code-complete, awaiting external gate or human review | **No** |
 | `Done` | `[x]` | fully complete; user or agent signals reap | Yes (next preflight) |
+
+`agent:backlog` holds open work, `agent:review` holds gated review work, and
+`agent:icebox` holds parked tracked work. Legacy documents may still have `[/]`
+items inside `agent:backlog`; preflight reports `legacy_gated_in_backlog` and
+`agent-doc migrate` moves those items into `agent:review`.
 
 **Why three states instead of a prose suffix:**
 
-- **Machine-readable.** Preflight can emit `pending_gated_count` alongside existing counts; release workflow can query gated items programmatically.
+- **Machine-readable.** Preflight emits `pending_gated_count`, `review_count`, and `review_gated_count`; release workflow can query gated items programmatically.
 - **Prevents accidental reap.** A `[/]` item is explicitly not reapable — releasing v0.32.5 cannot prematurely erase `#a002` just because its prose said "landed."
 - **Matches observed reality.** `code-landed ≠ done` is how the agent-doc project is actually run. Encoding it in the data model stops every response cycle from re-explaining "why isn't this checked."
 
@@ -103,11 +108,13 @@ Gate names live in the bullet text suffix. No parser support for a structured ga
 
 ### 3. Lazy backfill in preflight
 
-Preflight is the single upgrade path. No separate `agent-doc migrate` command.
+Preflight is the single lazy-backfill and reap path. Structural migrations that
+move legacy gated backlog items into `agent:review` live in `agent-doc migrate`.
 
 On every preflight run:
 
-1. Scan the `agent:backlog` component for list items.
+1. Scan tracked-work components (`agent:backlog` / legacy `agent:pending`,
+   `agent:review`, and `agent:icebox`) for list items.
 2. For each bullet:
    - No hash prefix → generate and insert a hash.
    - No checkbox → insert `- [ ] ` before the hash.
@@ -127,14 +134,14 @@ On every preflight run:
      accepted as archive aliases; run `agent-doc migrate` to rewrite them to
      `agent:done`. Completed tracked work must remain grep-visible in either the
      session document or its explicit external done archive instead of
-     disappearing from the live backlog without a local record.
-   - Persistence invariant: the reap must land in both the working tree document and the snapshot that the commit boundary stages. If preflight cannot persist that synchronized reap safely, it must fail closed instead of continuing with completed tracked-work items still present in backlog or icebox.
+     disappearing from live tracked work without a local record.
+   - Persistence invariant: the reap must land in both the working tree document and the snapshot that the commit boundary stages. If preflight cannot persist that synchronized reap safely, it must fail closed instead of continuing with completed tracked-work items still present in backlog, review, or icebox.
 - The standalone `agent-doc backlog <file> reap` command follows the same
   visibility rule for direct maintenance: it removes completed items from live
   tracked work, creates `agent:done` when needed, and appends each removed item
   there or to its explicit `archive=...done.md` target instead of silently
   deleting it.
-- Same-cycle resurrection invariant: once a cycle reaps a tracked `[#id]`, closeout must fail closed if that same id reappears in the live `agent:backlog` or `agent:icebox` before commit. Do not silently treat the stale rewrite as generic local drift.
+- Same-cycle resurrection invariant: once a cycle reaps a tracked `[#id]`, closeout must fail closed if that same id reappears in live tracked work before commit. Do not silently treat the stale rewrite as generic local drift.
 - Same-cycle completion invariant: when preflight/repair reap a user-authored `[x]` tracked item directly from the document, that id counts as intentionally resolved for the current cycle's history-replay guards even if no explicit `--done <id>` flag was recorded. Do not restore the older `[ ]` or `[/]` history entry just because the completion came from a manual document edit.
 - External archive invariant: preflight and session-check must treat IDs found
   in the `agent:done archive=...done.md` target as completed-history proof for
@@ -142,7 +149,11 @@ On every preflight run:
 - No-partial-reap invariant: if a completed tracked item is followed by malformed flush-left spill such as pasted command/diff transcript lines, reap/archive the whole logical block with that parent item. Do not delete only the tracked parent line and leave orphan prose behind in the live backlog.
 4. Commit the rewritten component as part of the existing boundary-maintenance commit.
 
-**Migration of existing items:** No auto-migration. Existing `[ ]` items with "✅ landed" / "shipped" / "awaiting release" prose stay as-is until touched manually. Auto-classifying prose is fuzzy (what counts?); blast radius is unclear. With only a handful of real gated items in-tree, retagging by hand via `--pending-gate` is faster and safer than writing a heuristic.
+**Migration of existing items:** `agent-doc migrate` is deterministic only: it
+moves already-explicit `[/]` items from `agent:backlog` into `agent:review` and
+inserts the review block when missing. It does not auto-classify prose such as
+"landed", "shipped", or "awaiting release"; those remain `[ ]` until touched
+manually via `--pending-gate`.
 
 A doc that never gets opened again never migrates — fine, because IDs only matter when the skill/runbook is actively managing the list.
 
@@ -156,12 +167,14 @@ The skill/runbook **never** writes a `replace:pending` (or the deprecated `patch
 |------|----------|
 | `--pending-add "text"` | Add new item at the beginning of the list. Binary assigns hash and `[ ]` unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is accepted as compatibility input. When repeated in one command, all added items are inserted as one ordered batch: the first flag appears above the second, and the full batch appears above existing backlog items. |
 | `--pending-add-to <file> "text"` | Add a new `[ ]` item to another document's backlog. The target file must exist and contain an `agent:backlog` / legacy `agent:pending` component; missing targets fail closed instead of falling back to the current document. Repeated pairs are grouped per target and preserve caller order at the top of each target backlog. |
-| `--done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). If the id is already present in canonical `agent:done` or the current cycle's resolved-id ledger, treat it as an idempotent resolution warning rather than a fatal missing-id error. |
-| `--pending-gate <id>` | Mark `[/]` — code-complete, awaiting gate. Valid from `[ ]`. No-op (logged) if already `[/]`. Error if source is `[x]`. |
-| `--pending-ungate <id>` | Return `[/]` → `[ ]` — gate failed, back to active. Error if source is `[ ]` or `[x]`. |
+| `--done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending`, `agent:review`, or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). If the id is already present in canonical `agent:done` or the current cycle's resolved-id ledger, treat it as an idempotent resolution warning rather than a fatal missing-id error. |
+| `--pending-gate <id>` | Move a backlog item to `agent:review` as `[/]` — code-complete, awaiting review/gate. Valid from `[ ]`. No-op if already in `agent:review`. Error if source is `[x]`. |
+| `--pending-ungate <id>` | Move an `agent:review` item back to backlog as `[ ]` — review failed, back to active. Legacy gated backlog items still ungate in place until migrated. Error if source is `[ ]` or `[x]`. |
 | `--pending-edit <id> "new text"` | Rewrite text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. |
 | `--pending-clear` | Remove all items. |
 | `--pending-reorder <id1,id2,...>` | Reorder items by ID. Missing IDs keep their relative order after the listed prefix. |
+| `--review-add "text"` | Add a new `[/]` item directly to `agent:review`. Rare; normal code-complete flow should use `--pending-gate`. |
+| `--review-edit <id> "new text"` | Rewrite text in `agent:review`, preserving hash and state. |
 
 For every id-based pending flag except `--pending-add`, the binary normalizes
 the id by trimming whitespace, stripping one optional leading `#`, and
@@ -169,6 +182,12 @@ lowercasing before lookup. `--done 4qja` and `--done #4QJA`
 must therefore resolve the same tracked item.
 `--pending-done` and `--backlog-done` are deprecated command-line aliases for
 `--done`; generated plans and closeout guidance must use `--done`.
+
+`review_done_guard` is a frontmatter/project guard for review-then-done
+projects. Default `off` keeps direct backlog-to-done closeouts valid. `warn`
+prints a warning when `--done <id>` resolves an item outside `agent:review`;
+`strict` (alias `error`) fails that mutation until the same cycle first runs
+`--pending-gate <id>`.
 
 **Plan-backed item rule:** when a pending bullet depends on a dedicated plan
 document, the operator must create that plan file before adding the pending

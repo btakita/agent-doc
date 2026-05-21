@@ -30,13 +30,19 @@ fn setup_doc(body: &str) -> (TempDir, PathBuf) {
 }
 
 fn component_body<'a>(content: &'a str, name: &str) -> &'a str {
-    let open = format!("<!-- agent:{} -->\n", name);
-    let close = format!("\n<!-- /agent:{} -->", name);
-    content
-        .split(&open)
-        .nth(1)
-        .and_then(|rest| rest.split(&close).next())
-        .unwrap_or("")
+    let open = format!("<!-- agent:{} -->", name);
+    let close = format!("<!-- /agent:{} -->", name);
+    let Some(open_start) = content.find(&open) else {
+        return "";
+    };
+    let mut body_start = open_start + open.len();
+    if content[body_start..].starts_with('\n') {
+        body_start += 1;
+    }
+    let Some(close_rel) = content[body_start..].find(&close) else {
+        return "";
+    };
+    content[body_start..body_start + close_rel].trim_end_matches('\n')
 }
 
 #[test]
@@ -797,12 +803,20 @@ fn write_pending_gate_open_to_gated() {
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("- [/] [#abcd]"), "got: {}", content);
+    let backlog = component_body(&content, "pending");
+    let review = component_body(&content, "review");
+    assert!(!backlog.contains("[#abcd] task"), "got: {}", content);
+    assert!(review.contains("- [/] [#abcd] task"), "got: {}", content);
 }
 
 #[test]
 fn write_pending_gate_idempotent_on_gated() {
-    let (_tmp, doc) = setup_doc("- [/] [#abcd] task");
+    let (_tmp, doc) = setup_doc("");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:pending -->\n",
+        "<!-- /agent:pending -->\n\n## Review\n\n<!-- agent:review -->\n- [/] [#abcd] task\n<!-- /agent:review -->\n",
+    );
+    fs::write(&doc, content).unwrap();
     agent_doc()
         .args([
             "write",
@@ -815,7 +829,8 @@ fn write_pending_gate_idempotent_on_gated() {
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("- [/] [#abcd]"));
+    assert_eq!(content.matches("[#abcd] task").count(), 1);
+    assert!(component_body(&content, "review").contains("- [/] [#abcd] task"));
 }
 
 #[test]
@@ -842,7 +857,12 @@ fn write_pending_gate_done_errors() {
 
 #[test]
 fn write_pending_ungate_gated_to_open() {
-    let (_tmp, doc) = setup_doc("- [/] [#abcd] task");
+    let (_tmp, doc) = setup_doc("");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:pending -->\n",
+        "<!-- /agent:pending -->\n\n## Review\n\n<!-- agent:review -->\n- [/] [#abcd] task\n<!-- /agent:review -->\n",
+    );
+    fs::write(&doc, content).unwrap();
     agent_doc()
         .args([
             "write",
@@ -855,7 +875,8 @@ fn write_pending_ungate_gated_to_open() {
         .assert()
         .success();
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("- [ ] [#abcd]"));
+    assert!(component_body(&content, "pending").contains("- [ ] [#abcd] task"));
+    assert!(!component_body(&content, "review").contains("[#abcd] task"));
 }
 
 #[test]
@@ -896,6 +917,76 @@ fn write_pending_gate_then_done_in_one_call() {
         .success();
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("- [x] [#abcd]"), "got: {}", content);
+}
+
+#[test]
+fn write_review_add_and_edit_mutate_review_component() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--review-add",
+            "id=rvw1 needs review",
+            "--review-edit",
+            "rvw1=review text updated",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    let review = component_body(&content, "review");
+    assert!(review.contains("- [/] [#rvw1] review text updated"));
+}
+
+#[test]
+fn write_review_done_guard_strict_blocks_backlog_done() {
+    let (_tmp, doc) = setup_doc("- [ ] [#abcd] task");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "agent_doc_format: template\n",
+        "agent_doc_format: template\nreview_done_guard: error\n",
+    );
+    fs::write(&doc, content).unwrap();
+    let assert_result = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "abcd",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
+    assert!(stderr.contains("review_done_guard"), "stderr: {}", stderr);
+    assert!(stderr.contains("agent:pending"), "stderr: {}", stderr);
+}
+
+#[test]
+fn write_review_done_guard_strict_allows_gate_then_done() {
+    let (_tmp, doc) = setup_doc("- [ ] [#abcd] task");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "agent_doc_format: template\n",
+        "agent_doc_format: template\nreview_done_guard: error\n",
+    );
+    fs::write(&doc, content).unwrap();
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-gate",
+            "abcd",
+            "--done",
+            "abcd",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(component_body(&content, "review").contains("- [x] [#abcd] task"));
 }
 
 #[test]
@@ -953,6 +1044,54 @@ fn preflight_emits_pending_gated_count() {
         Some(2),
         "expected pending_gated_count: 2, full output: {}",
         stdout
+    );
+}
+
+#[test]
+fn preflight_emits_review_counts() {
+    let (_tmp, doc) = setup_doc("- [ ] [#aaaa] open");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:pending -->\n",
+        "<!-- /agent:pending -->\n\n## Review\n\n<!-- agent:review -->\n- [/] [#bbbb] review one\n- [/] [#cccc] review two\n<!-- /agent:review -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+
+    let output = agent_doc()
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("preflight output should be JSON");
+    assert_eq!(parsed.get("review_count").and_then(|v| v.as_u64()), Some(2));
+    assert_eq!(
+        parsed.get("review_gated_count").and_then(|v| v.as_u64()),
+        Some(2)
+    );
+}
+
+#[test]
+fn preflight_warns_for_legacy_gated_backlog_items() {
+    let (_tmp, doc) = setup_doc("- [/] [#bbbb] legacy gated");
+    let output = agent_doc()
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("preflight output should be JSON");
+    let warnings = parsed
+        .get("warnings")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.get("code").and_then(|v| v.as_str())
+                == Some("legacy_gated_in_backlog")),
+        "warnings: {}",
+        serde_json::Value::Array(warnings)
     );
 }
 

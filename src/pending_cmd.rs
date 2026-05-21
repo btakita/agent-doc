@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::component;
-use crate::component::{is_backlog_component, is_tracked_work_component};
+use crate::component::{is_backlog_component, is_review_component, is_tracked_work_component};
 use crate::pending;
 use crate::snapshot;
 
@@ -57,6 +57,37 @@ fn find_pending_component(file: &Path) -> Result<(String, component::Component)>
     Ok((content, comp))
 }
 
+fn find_review_component_in_content(content: &str) -> Result<Option<component::Component>> {
+    let components = component::parse(content).context("failed to parse components")?;
+    Ok(components
+        .into_iter()
+        .find(|c| is_review_component(&c.name)))
+}
+
+fn insert_empty_review_after_backlog(content: &str) -> Result<String> {
+    let components = component::parse(content).context("failed to parse components")?;
+    if components.iter().any(|c| is_review_component(&c.name)) {
+        return Ok(content.to_string());
+    }
+    let backlog = components
+        .iter()
+        .find(|c| is_backlog_component(&c.name))
+        .context("document has no backlog/pending component for review insertion")?;
+    let insert = "\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n";
+    let mut out = String::with_capacity(content.len() + insert.len());
+    out.push_str(&content[..backlog.close_end]);
+    out.push_str(insert);
+    out.push_str(&content[backlog.close_end..]);
+    Ok(out)
+}
+
+fn ensure_review_component(content: &str) -> Result<(String, component::Component)> {
+    let content = insert_empty_review_after_backlog(content)?;
+    let comp = find_review_component_in_content(&content)?
+        .context("document has no review component after insertion")?;
+    Ok((content, comp))
+}
+
 fn find_component_containing_open_id(
     file: &Path,
     id: &str,
@@ -77,6 +108,25 @@ fn find_component_containing_open_id(
         })
         .with_context(|| format!("id not found in backlog/icebox: {}", id))?;
     Ok((content, comp))
+}
+
+pub fn open_item_component_name(file: &Path, id: &str) -> Result<Option<String>> {
+    let id = pending::normalize_pending_id(id);
+    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let components = component::parse(&content).context("failed to parse components")?;
+    for comp in components {
+        if !is_tracked_work_component(&comp.name) {
+            continue;
+        }
+        let (_, items, _) = pending::parse_items(comp.content(&content));
+        if items
+            .into_iter()
+            .any(|item| item.id == id && item.state != pending::PendingState::Done)
+        {
+            return Ok(Some(comp.name));
+        }
+    }
+    Ok(None)
 }
 
 fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
@@ -138,7 +188,7 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
-    println!("{}", id);
+    let _ = id;
     Ok(())
 }
 
@@ -201,11 +251,65 @@ pub fn done(file: &Path, id: &str) -> Result<()> {
 pub fn gate(file: &Path, id: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let new_content = pending::op_gate(existing, id)?;
-    if new_content == existing {
-        // No-op (already gated). Skip the disk write so we don't churn mtime.
-        return Ok(());
+    let (new_backlog, mut item) = match pending::op_take_item(existing, id) {
+        Ok(found) => found,
+        Err(_) => {
+            if let Some(review_comp) = find_review_component_in_content(&full_content)? {
+                let (_, review_items, _) = pending::parse_items(review_comp.content(&full_content));
+                let normalized = pending::normalize_pending_id(id);
+                if review_items
+                    .into_iter()
+                    .any(|item| item.id == normalized && !item.is_done())
+                {
+                    return Ok(());
+                }
+            }
+            return gate_in_place(file, id);
+        }
+    };
+
+    match pending::validate_transition(item.state, pending::PendingOp::Gate)? {
+        pending::TransitionResult::Transition(state) => item.state = state,
+        pending::TransitionResult::NoOp => {}
     }
+    item.gate_type = None;
+
+    let mut new_doc = comp.replace_content(
+        &full_content,
+        &canonicalize_component_content(file, &new_backlog),
+    );
+    let (content_with_review, review_comp) = ensure_review_component(&new_doc)?;
+    new_doc = content_with_review;
+    let review_body = review_comp.content(&new_doc);
+    let new_review = pending::op_insert_item_first(review_body, item);
+    let review_comp = find_review_component_in_content(&new_doc)?
+        .context("document has no review component after insertion")?;
+    let new_doc =
+        review_comp.replace_content(&new_doc, &canonicalize_component_content(file, &new_review));
+    std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Add a new review item directly to `agent:review`.
+pub fn review_add(file: &Path, item: &str) -> Result<()> {
+    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let (full_content, comp) = ensure_review_component(&full_content)?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let doc_id = doc_id_for(file);
+    let (new_content, _id) = pending::op_add(existing, item, &doc_id, true)?;
+    let canonical = canonicalize_component_content(file, &new_content);
+    let new_doc = comp.replace_content(&full_content, &canonical);
+    std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Edit a review item's text, preserving its hash id.
+pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
+    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let comp = find_review_component_in_content(&full_content)?
+        .context("document has no review component")?;
+    let existing = &full_content[comp.open_end..comp.close_start];
+    let new_content = pending::op_edit(existing, id, text)?;
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;
@@ -215,9 +319,64 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
 /// Transition an item back to `Open` (`[ ]`) by id.
 /// Errors on `Open` or `Done` items — the source must be `[/]`.
 pub fn ungate(file: &Path, id: &str) -> Result<()> {
+    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let Some(review_comp) = find_review_component_in_content(&full_content)? else {
+        let (full_content, comp) = find_pending_component(file)?;
+        let existing = &full_content[comp.open_end..comp.close_start];
+        let new_content = pending::op_ungate(existing, id)?;
+        let canonical = canonicalize_component_content(file, &new_content);
+        let new_doc = comp.replace_content(&full_content, &canonical);
+        std::fs::write(file, &new_doc)?;
+        return Ok(());
+    };
+    let review_body = review_comp.content(&full_content);
+    let (new_review, mut item) = match pending::op_take_item(review_body, id) {
+        Ok(found) => found,
+        Err(_) => {
+            let (full_content, comp) = find_pending_component(file)?;
+            let existing = &full_content[comp.open_end..comp.close_start];
+            let new_content = pending::op_ungate(existing, id)?;
+            let canonical = canonicalize_component_content(file, &new_content);
+            let new_doc = comp.replace_content(&full_content, &canonical);
+            std::fs::write(file, &new_doc)?;
+            return Ok(());
+        }
+    };
+
+    match pending::validate_transition(item.state, pending::PendingOp::Ungate)? {
+        pending::TransitionResult::Transition(state) => item.state = state,
+        pending::TransitionResult::NoOp => {}
+    }
+    item.gate_type = None;
+
+    let new_doc = review_comp.replace_content(
+        &full_content,
+        &canonicalize_component_content(file, &new_review),
+    );
+    let components = component::parse(&new_doc).context("failed to parse components")?;
+    let backlog_comp = components
+        .into_iter()
+        .find(|c| is_backlog_component(&c.name))
+        .context("document has no backlog/pending component")?;
+    let backlog_body = backlog_comp.content(&new_doc);
+    let new_backlog = pending::op_insert_item_first(backlog_body, item);
+    let new_doc = backlog_comp.replace_content(
+        &new_doc,
+        &canonicalize_component_content(file, &new_backlog),
+    );
+    std::fs::write(file, &new_doc)?;
+    Ok(())
+}
+
+/// Legacy in-place gated-state transition retained for tests and old docs that
+/// do not yet have a review component.
+fn gate_in_place(file: &Path, id: &str) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
     let existing = &full_content[comp.open_end..comp.close_start];
-    let new_content = pending::op_ungate(existing, id)?;
+    let new_content = pending::op_gate(existing, id)?;
+    if new_content == existing {
+        return Ok(());
+    }
     let canonical = canonicalize_component_content(file, &new_content);
     let new_doc = comp.replace_content(&full_content, &canonical);
     std::fs::write(file, &new_doc)?;

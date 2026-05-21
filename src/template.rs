@@ -192,7 +192,7 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
         {
             Some(("patch", rest))
         } else if let Some(rest) = trimmed.strip_prefix("replace:") {
-            // Only `replace:pending` and `replace:icebox` are accepted. Other
+            // Only tracked-work replace forms are accepted. Other
             // `replace:*` names fall through as unmatched to avoid silently
             // broadening the grammar.
             let rest_trim = rest.trim_start();
@@ -200,7 +200,10 @@ pub fn parse_patches(response: &str) -> Result<(Vec<PatchBlock>, String)> {
                 .find(|c: char| c.is_whitespace())
                 .unwrap_or(rest_trim.len());
             let name = &rest_trim[..name_end];
-            if is_backlog_component(name) || name == component::ICEBOX_COMPONENT {
+            if is_backlog_component(name)
+                || name == component::ICEBOX_COMPONENT
+                || name == component::REVIEW_COMPONENT
+            {
                 Some(("replace", rest))
             } else {
                 None

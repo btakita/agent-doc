@@ -78,6 +78,9 @@ pub const BACKLOG_ALIAS: &str = "pending";
 /// Canonical component name for the completed/reaped backlog archive.
 pub const BACKLOG_DONE_COMPONENT: &str = "done";
 
+/// Canonical component name for tracked work awaiting human review.
+pub const REVIEW_COMPONENT: &str = "review";
+
 /// Canonical component name for the icebox component.
 pub const ICEBOX_COMPONENT: &str = "icebox";
 
@@ -92,15 +95,21 @@ pub fn is_backlog_done_component(name: &str) -> bool {
     name == BACKLOG_DONE_COMPONENT
 }
 
+/// Check whether a component name refers to the review component.
+pub fn is_review_component(name: &str) -> bool {
+    name == REVIEW_COMPONENT
+}
+
 /// Check whether a component name refers to the icebox component.
 pub fn is_icebox_component(name: &str) -> bool {
     name == ICEBOX_COMPONENT
 }
 
 /// Check whether a component name refers to tracked work that participates in
-/// `do #id` closeout (`agent:backlog` / legacy `agent:pending` and `agent:icebox`).
+/// `do #id` closeout (`agent:backlog` / legacy `agent:pending`,
+/// `agent:review`, and `agent:icebox`).
 pub fn is_tracked_work_component(name: &str) -> bool {
-    is_backlog_component(name) || is_icebox_component(name)
+    is_backlog_component(name) || is_review_component(name) || is_icebox_component(name)
 }
 
 /// Strip deprecated `patch=...` (and legacy `mode=...`) attributes from
@@ -1550,11 +1559,27 @@ Fix applied to skip non-agent <!-- sequences.
     }
 
     #[test]
+    fn is_review_component_accepts_name() {
+        assert!(is_review_component("review"));
+        assert!(!is_review_component("backlog"));
+        assert!(!is_review_component("icebox"));
+    }
+
+    #[test]
     fn is_icebox_component_accepts_name() {
         assert!(is_icebox_component("icebox"));
         assert!(!is_icebox_component("backlog"));
         assert!(!is_icebox_component("exchange"));
         assert!(!is_icebox_component("icebox-archive"));
+    }
+
+    #[test]
+    fn tracked_work_component_includes_review() {
+        assert!(is_tracked_work_component("backlog"));
+        assert!(is_tracked_work_component("pending"));
+        assert!(is_tracked_work_component("review"));
+        assert!(is_tracked_work_component("icebox"));
+        assert!(!is_tracked_work_component("done"));
     }
 
     #[test]

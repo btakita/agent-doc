@@ -256,6 +256,8 @@ pub struct CommandOptions {
     pub pending_ungate: Vec<String>,
     pub pending_resolve_gate: Vec<String>,
     pub pending_set_gate_type: Vec<String>,
+    pub review_add: Vec<String>,
+    pub review_edit: Vec<String>,
     pub allow_replace_pending: bool,
     pub pending_only: bool,
     pub status: Option<String>,
@@ -668,6 +670,14 @@ fn build_rerun_command_base(options: &CommandOptions, commit_mode: CommitMode) -
         args.push("--pending-set-gate-type".to_string());
         args.push(value.clone());
     }
+    for value in &options.review_add {
+        args.push("--review-add".to_string());
+        args.push(value.clone());
+    }
+    for value in &options.review_edit {
+        args.push("--review-edit".to_string());
+        args.push(value.clone());
+    }
     if options.allow_replace_pending {
         args.push("--allow-replace-pending".to_string());
     }
@@ -835,6 +845,11 @@ fn pending_kept_open_ids_from_options(options: &CommandOptions) -> Vec<String> {
             ids.push(id.to_string());
         }
     }
+    for pair in &options.review_edit {
+        if let Some((id, _)) = pair.split_once('=') {
+            ids.push(id.to_string());
+        }
+    }
     if let Some(order) = &options.pending_reorder {
         ids.extend(
             order
@@ -845,6 +860,41 @@ fn pending_kept_open_ids_from_options(options: &CommandOptions) -> Vec<String> {
     }
 
     ids
+}
+
+fn enforce_review_done_guard(file: &Path, id: &str) -> Result<()> {
+    let mode = crate::session_check::resolve_review_done_guard_mode(file)?;
+    if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
+        return Ok(());
+    }
+    let Some(component_name) = crate::pending_cmd::open_item_component_name(file, id)? else {
+        return Ok(());
+    };
+    if crate::component::is_review_component(&component_name) {
+        return Ok(());
+    }
+
+    let normalized = crate::pending::normalize_pending_id(id);
+    let message = format!(
+        "review_done_guard: --done #{} resolved from agent:{} instead of agent:review; run --pending-gate {} first or set review_done_guard = \"off\"",
+        normalized, component_name, normalized
+    );
+    match mode {
+        crate::frontmatter::PendingCaptureGuardMode::Warn => {
+            eprintln!("[write] warning: {}", message);
+            Ok(())
+        }
+        crate::frontmatter::PendingCaptureGuardMode::Strict => {
+            log_closeout_guard(
+                file,
+                crate::flow::types::FlowStage::PreWriteGuard,
+                crate::flow::types::FlowOutcome::Blocked,
+                crate::flow::closeout::CloseoutGuardReason::ReviewDoneSourceNotReviewed,
+            );
+            anyhow::bail!("{}", message)
+        }
+        crate::frontmatter::PendingCaptureGuardMode::Off => Ok(()),
+    }
 }
 
 pub fn guard_no_exchange_compaction_request_for_diff(file: &Path, diff_text: &str) -> Result<()> {
@@ -896,7 +946,9 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         || !options.pending_gate.is_empty()
         || !options.pending_ungate.is_empty()
         || !options.pending_resolve_gate.is_empty()
-        || !options.pending_set_gate_type.is_empty();
+        || !options.pending_set_gate_type.is_empty()
+        || !options.review_add.is_empty()
+        || !options.review_edit.is_empty();
 
     if options.pending_only && !has_pending_ops {
         anyhow::bail!("--pending-only requires at least one --pending-* flag");
@@ -960,6 +1012,15 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             })?;
             crate::pending_cmd::set_gate_type(file, id, gt)?;
         }
+        for value in &options.review_add {
+            crate::pending_cmd::review_add(file, value)?;
+        }
+        for pair in &options.review_edit {
+            let (id, text) = pair
+                .split_once('=')
+                .with_context(|| format!("--review-edit expects 'id=text', got: {}", pair))?;
+            crate::pending_cmd::review_edit(file, id, text)?;
+        }
         for id in &options.pending_ungate {
             crate::pending_cmd::ungate(file, id)?;
         }
@@ -967,6 +1028,7 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
             crate::pending_cmd::resolve_gate(file, gt)?;
         }
         for id in &options.pending_done {
+            enforce_review_done_guard(file, id)?;
             crate::pending_cmd::done(file, id)?;
         }
         if !options.pending_done.is_empty() {
@@ -1000,7 +1062,8 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         allow_replace_pending: options.allow_replace_pending,
         has_pending_add: !options.pending_add.is_empty()
             || !options.pending_add_to.is_empty()
-            || !options.pending_add_gated.is_empty(),
+            || !options.pending_add_gated.is_empty()
+            || !options.review_add.is_empty(),
         has_pending_done: !options.pending_done.is_empty(),
         has_pending_mutation: has_pending_ops,
         pending_done_ids: options.pending_done.clone(),
@@ -2161,9 +2224,12 @@ pub(crate) fn enforce_no_replace_pending(
     if allow_canonical || allow_legacy {
         return Ok(());
     }
-    if patches.iter().any(|p| is_backlog_component(&p.name)) {
+    if patches
+        .iter()
+        .any(|p| is_backlog_component(&p.name) || crate::component::is_review_component(&p.name))
+    {
         anyhow::bail!(
-            "ERR: replace:pending block forbidden — use --pending-add/done/edit/clear/reorder. \
+            "ERR: replace:pending/review block forbidden — use --pending-add/done/edit/clear/reorder or --review-add/edit. \
              See specs/pending-system.md."
         );
     }
@@ -2257,6 +2323,7 @@ fn template_response_write_proof(
             .iter()
             .filter(|patch| patch.name != "frontmatter")
             .filter(|patch| !is_backlog_component(&patch.name))
+            .filter(|patch| !crate::component::is_review_component(&patch.name))
             .filter(|patch| !patch.content.trim().is_empty())
             .map(|patch| patch.name.clone())
             .collect(),

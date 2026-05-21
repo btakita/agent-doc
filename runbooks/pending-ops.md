@@ -1,7 +1,7 @@
 # Pending ops — granular contract
 
 When a template-mode document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -->`) component, the agent mutates it
-through **granular flags** on `agent-doc write`. Full-replace via `<!-- replace:backlog -->`
+through **granular flags** on `agent-doc write`. The optional `<!-- agent:review -->` component holds code-complete work waiting for human review. Full-replace via `<!-- replace:backlog -->`
 (or the deprecated `<!-- patch:pending -->` / `<!-- replace:pending -->`) is **forbidden** in normal response cycles — the
 binary rejects those blocks with a clear error. Compatibility note: the binary may normalize one accidental
 list-shaped `replace:pending` / `patch:pending` block internally before capture/replay so the cycle is not stranded,
@@ -45,12 +45,14 @@ Combine any number of flags in one `agent-doc write` call:
 | Flag | Purpose |
 |------|---------|
 | `--pending-add "text"` | Add a new item at the beginning of the list. Binary assigns the hash unless the text starts with canonical `id=<custom> ` syntax. Leading `[#custom] ` is also accepted as compatibility input. Bare `[#]` and stacked prefixes such as `[#a] [#b] ...` fail closed. Repeat for multiple adds; repeated flags keep caller order at the top of the backlog. |
-| `--done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending` or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
+| `--done <id>` | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending`, `agent:review`, or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle. Repeat for multiple ids. |
 | `--pending-edit "id=new text"` | Rewrite text, preserve hash. Repeat as needed. |
 | `--pending-clear` | Drop all items. |
 | `--pending-reorder <id1,id2,...>` | Reorder by id. Missing ids keep their relative order. |
-| `--pending-gate <id>` | Transition to `[/]` gated state. Reaper skips gated items. |
-| `--pending-ungate <id>` | Return `[/]` to `[ ]`. |
+| `--pending-gate <id>` | Move a backlog item to `agent:review` as `[/]`. If `agent:review` is missing, the binary inserts it after the backlog. |
+| `--pending-ungate <id>` | Move a review item back to `agent:backlog` as `[ ]`. Legacy gated backlog items still ungate in place until migrated. |
+| `--review-add "text"` | Add a new `[/]` item directly to `agent:review`; usually prefer `--pending-gate`. |
+| `--review-edit "id=new text"` | Rewrite a review item's text, preserve hash. |
 
 `--pending-done <id>` and `--backlog-done <id>` are deprecated aliases for
 `--done <id>`; new guidance, plans, and recovery hints must emit `--done`.
@@ -58,6 +60,12 @@ Combine any number of flags in one `agent-doc write` call:
 `agent:icebox` is not populated by `--pending-add`. When the response needs to
 rewrite the icebox component, use a template patch block in the response body:
 `<!-- replace:icebox --> ... <!-- /replace:icebox -->`.
+
+`review_done_guard` is an optional frontmatter/project guard. Default `off`
+preserves existing behavior. With `warn`, `--done <id>` emits a warning when the
+item is still in backlog or icebox instead of `agent:review`. With `strict` (or
+alias `error`), that `--done` fails until the cycle first gates the item through
+`--pending-gate <id>`.
 
 Completed/reaped items are archived under canonical `agent:done`. To keep a
 long-running session document small, use

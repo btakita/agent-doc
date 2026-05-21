@@ -869,6 +869,70 @@ pub fn render_items(prelude: &str, items: &[PendingItem], postlude: &str) -> Str
     out
 }
 
+/// Remove a tracked item by id and return the updated body plus the removed item.
+pub fn op_take_item(body: &str, id: &str) -> Result<(String, PendingItem)> {
+    let id = normalize_pending_id(id);
+    let layout = PendingLayout::parse(body);
+    let mut taken = None;
+    let rewritten = layout.replace_items(|item| {
+        if item.id == id {
+            taken = Some(item.clone());
+            None
+        } else {
+            Some(item.clone())
+        }
+    });
+    let Some(item) = taken else {
+        bail!("id not found in pending list: {}", id);
+    };
+    Ok((rewritten.render(), item))
+}
+
+/// Insert an existing tracked item at the first item slot of a component body.
+pub fn op_insert_item_first(body: &str, item: PendingItem) -> String {
+    let mut layout = PendingLayout::parse(body);
+    layout.insert_first_item(item);
+    layout.render()
+}
+
+/// Append existing tracked items after the current item list, preserving order.
+pub fn op_append_items(body: &str, items: &[PendingItem]) -> String {
+    let mut layout = PendingLayout::parse(body);
+    let mut insert_at = layout
+        .segments
+        .iter()
+        .rposition(|segment| matches!(segment, PendingSegment::Item { .. }))
+        .map(|idx| idx + 1)
+        .unwrap_or_else(|| layout.first_item_index().unwrap_or(layout.segments.len()));
+    layout.ensure_separator_before(insert_at);
+    for item in items {
+        layout.segments.insert(
+            insert_at,
+            PendingSegment::Item {
+                item: item.clone(),
+                has_newline: true,
+            },
+        );
+        insert_at += 1;
+    }
+    layout.render()
+}
+
+/// Extract all items matching `state`, returning the updated body and removed items.
+pub fn op_take_items_by_state(body: &str, state: PendingState) -> (String, Vec<PendingItem>) {
+    let layout = PendingLayout::parse(body);
+    let mut taken = Vec::new();
+    let rewritten = layout.replace_items(|item| {
+        if item.state == state {
+            taken.push(item.clone());
+            None
+        } else {
+            Some(item.clone())
+        }
+    });
+    (rewritten.render(), taken)
+}
+
 pub(crate) fn canonicalize_preserving_non_item_lines(body: &str) -> String {
     PendingLayout::parse(body).render()
 }
@@ -973,10 +1037,7 @@ pub fn detect_shadow_open_items(doc: &str) -> Result<ShadowPendingReport> {
 
     let excluded_ranges: Vec<(usize, usize)> = components
         .iter()
-        .filter(|component| {
-            crate::component::is_backlog_component(&component.name)
-                || crate::component::is_icebox_component(&component.name)
-        })
+        .filter(|component| crate::component::is_tracked_work_component(&component.name))
         .map(|component| (component.open_start, component.close_end))
         .chain(compact_exchange_summary_ranges(doc, &components))
         .collect();
@@ -1141,9 +1202,7 @@ pub fn detect_dropped_from_history_with_extra_current_ids(
     let mut current_ids: HashSet<String> = HashSet::new();
 
     for comp in &current_components {
-        if crate::component::is_backlog_component(&comp.name)
-            || crate::component::is_icebox_component(&comp.name)
-        {
+        if crate::component::is_tracked_work_component(&comp.name) {
             let (_, items, _) = parse_items(comp.content(current_doc));
             for item in items {
                 if !item.id.is_empty() {
@@ -1158,10 +1217,7 @@ pub fn detect_dropped_from_history_with_extra_current_ids(
 
     let excluded_ranges: Vec<(usize, usize)> = current_components
         .iter()
-        .filter(|c| {
-            crate::component::is_backlog_component(&c.name)
-                || crate::component::is_icebox_component(&c.name)
-        })
+        .filter(|c| crate::component::is_tracked_work_component(&c.name))
         .map(|c| (c.open_start, c.close_end))
         .collect();
     let code_ranges = crate::component::find_code_ranges(current_doc);

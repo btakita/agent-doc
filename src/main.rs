@@ -272,6 +272,12 @@ struct WriteArgs {
     /// Set a typed gate on a gated item: `id=gate_type` (e.g., `gqep=release`).
     #[arg(long = "pending-set-gate-type")]
     pending_set_gate_type: Vec<String>,
+    /// Add a new gated item directly to the review list (repeatable).
+    #[arg(long = "review-add")]
+    review_add: Vec<String>,
+    /// Edit a review item: `id=new text` (repeatable).
+    #[arg(long = "review-edit")]
+    review_edit: Vec<String>,
     /// Allow `replace:pending` blocks in stdin (escape hatch, hidden).
     /// `--allow-patch-pending` is accepted as a deprecated alias (#25ag).
     #[arg(
@@ -1751,6 +1757,8 @@ fn main() -> anyhow::Result<()> {
                 pending_ungate: args.pending_ungate,
                 pending_resolve_gate: args.pending_resolve_gate,
                 pending_set_gate_type: args.pending_set_gate_type,
+                review_add: args.review_add,
+                review_edit: args.review_edit,
                 allow_replace_pending: args.allow_replace_pending,
                 pending_only: args.pending_only,
                 status: args.status,
@@ -1781,6 +1789,8 @@ fn main() -> anyhow::Result<()> {
                 pending_ungate: args.pending_ungate,
                 pending_resolve_gate: args.pending_resolve_gate,
                 pending_set_gate_type: args.pending_set_gate_type,
+                review_add: args.review_add,
+                review_edit: args.review_edit,
                 allow_replace_pending: args.allow_replace_pending,
                 pending_only: args.pending_only,
                 status: args.status,

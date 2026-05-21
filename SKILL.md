@@ -89,7 +89,7 @@ After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execut
 
 ### 1b. Update pending (template mode)
 
-If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only through granular `agent-doc write` flags: `--pending-add`, `--done <id>`, `--pending-edit "id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`. Full-replace via `<!-- patch:backlog -->` is rejected; see [runbooks/pending-ops.md](runbooks/pending-ops.md). For `<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
+If `<!-- agent:backlog -->` (or legacy `agent:pending`) exists, mutate it only through granular `agent-doc write` flags: `--pending-add`, `--done <id>`, `--pending-edit "id=text"`, `--pending-reorder`, `--pending-gate`, `--pending-ungate`, `--review-add`, `--review-edit`. Full-replace via `<!-- patch:backlog -->` / `<!-- patch:review -->` is rejected; see [runbooks/pending-ops.md](runbooks/pending-ops.md). For `<!-- agent:icebox -->`, use `<!-- replace:icebox -->`.
 
 Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent:backlog-done` and `agent:pending-done` tags require `agent-doc migrate`.
 
@@ -99,7 +99,7 @@ Completed/reaped items live under canonical `<!-- agent:done -->`; legacy `agent
 
 **Plan-backed pending items:** create the plan file first and include that exact plan file path in the pending text.
 
-**`do #id` closeout rule:** when the user directs `do #id ...`, record the pending outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if code-complete but externally blocked, or explain concretely why it stays open. `session-check` enforces the `pending_done_guard`.
+**`do #id` closeout rule:** when the user directs `do #id ...`, record the pending outcome before persistence: `--done <id>` if completed, `--pending-gate <id>` if code-complete but awaiting review/external validation, or explain concretely why it stays open. `session-check` enforces the `pending_done_guard`; projects may opt into `review_done_guard` when review must precede done.
 
 ### 2. Persist the response (MANDATORY — never skip)
 

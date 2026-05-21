@@ -106,7 +106,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::component::{is_backlog_component, is_tracked_work_component};
+use crate::component::{is_backlog_component, is_review_component, is_tracked_work_component};
 use crate::{config, diff, frontmatter, git, repair, resync, sessions, snapshot, sync};
 
 /// A change detected in a related document since the last cycle.
@@ -240,6 +240,12 @@ pub struct PreflightOutput {
     /// JSON to keep the common case quiet.
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub pending_gated_count: usize,
+    /// Count of non-done items currently in `agent:review`.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub review_count: usize,
+    /// Count of review items currently in `[/]` gated state.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub review_gated_count: usize,
     /// Canonical ordered list of user-authored changes that need prompt-aware handling.
     /// `prompt_target` items require a response, `content_edit` items are corrections
     /// the agent must incorporate, and `recovery_artifact` / `boundary_artifact`
@@ -1115,7 +1121,21 @@ pub fn run(file: &Path) -> Result<()> {
     // Maintenance applies its mutations to BOTH the working tree file AND the
     // snapshot (surgically, via component replace), so the upcoming step-2
     // commit which stages from snapshot picks them up atomically.
-    let (pending_reordered, pending_gated_count) = run_pending_maintenance(file)?;
+    let pending_report = run_pending_maintenance(file)?;
+    let pending_reordered = pending_report.reordered;
+    let pending_gated_count = pending_report.pending_gated_count;
+    if pending_report.legacy_gated_in_backlog_count > 0 {
+        warnings.push(PreflightWarning {
+            code: "legacy_gated_in_backlog".to_string(),
+            message: format!(
+                "{} gated item(s) still live in agent:backlog; run `agent-doc migrate {}` to move them into agent:review.",
+                pending_report.legacy_gated_in_backlog_count,
+                file.display()
+            ),
+            document_agent: None,
+            active_harness: None,
+        });
+    }
     enforce_no_shadow_open_backlog(file)?;
     enforce_no_dropped_backlog(file)?;
 
@@ -1704,6 +1724,8 @@ pub fn run(file: &Path) -> Result<()> {
         env: frontmatter_env,
         pending_reordered,
         pending_gated_count,
+        review_count: pending_report.review_count,
+        review_gated_count: pending_report.review_gated_count,
         agent_model,
         queue_prompts: queue_state.queue_prompts,
         queue_active: queue_state.queue_active,
@@ -1721,22 +1743,27 @@ pub fn run(file: &Path) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PendingMaintenanceReport {
+    pub reordered: bool,
+    pub pending_gated_count: usize,
+    pub review_count: usize,
+    pub review_gated_count: usize,
+    pub legacy_gated_in_backlog_count: usize,
+}
+
 /// Run pending-component maintenance: lazy backfill, reap `[x]`, and reorder detection.
 ///
-/// Returns `(reordered, gated_count)`:
-/// - `reordered` is `true` when a reorder was detected (same ids, different order).
-/// - `gated_count` is the number of items currently in `[/]` state after backfill+reap.
-///
 /// Any write-through (backfill / reap) is persisted and committed in the same pass.
-/// Silent no-op when the document has no `agent:pending` component.
-pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
+/// Silent no-op when the document has no tracked-work component.
+pub(crate) fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceReport> {
     let content = match std::fs::read_to_string(file) {
         Ok(c) => c,
-        Err(_) => return Ok((false, 0)),
+        Err(_) => return Ok(PendingMaintenanceReport::default()),
     };
     let components = match crate::component::parse(&content) {
         Ok(cs) => cs,
-        Err(_) => return Ok((false, 0)),
+        Err(_) => return Ok(PendingMaintenanceReport::default()),
     };
     let tracked_surfaces: Vec<String> = components
         .iter()
@@ -1744,7 +1771,7 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
         .map(|c| c.name.clone())
         .collect();
     if tracked_surfaces.is_empty() {
-        return Ok((false, 0));
+        return Ok(PendingMaintenanceReport::default());
     }
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
@@ -1881,8 +1908,8 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
         eprintln!("[preflight] pending: reorder detected (skill must not reorder this cycle)");
     }
 
-    // 5. Count gated items in the post-maintenance body.
-    let gated_count = current_body
+    // 5. Count legacy gated items in backlog and review items in review.
+    let pending_gated_count = current_body
         .map(|body| {
             let (_, items, _) = crate::pending::parse_items(body);
             items
@@ -1891,11 +1918,25 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<(bool, usize)> {
                 .count()
         })
         .unwrap_or(0);
-    if gated_count > 0 {
-        eprintln!("[preflight] pending: {} gated item(s)", gated_count);
+    if pending_gated_count > 0 {
+        eprintln!("[preflight] pending: {} gated item(s)", pending_gated_count);
     }
 
-    Ok((reordered, gated_count))
+    let (review_count, review_gated_count) = review_counts(&current_content);
+    if review_count > 0 {
+        eprintln!(
+            "[preflight] review: {} item(s), {} gated",
+            review_count, review_gated_count
+        );
+    }
+
+    Ok(PendingMaintenanceReport {
+        reordered,
+        pending_gated_count,
+        review_count,
+        review_gated_count,
+        legacy_gated_in_backlog_count: pending_gated_count,
+    })
 }
 
 fn component_matches_tracked_surface(name: &str, surface: &str) -> bool {
@@ -1921,6 +1962,24 @@ fn tracked_body_for_reorder(content: &str) -> Option<&str> {
             .find(|component| is_backlog_component(&component.name))
             .map(|component| component.content(content))
     })
+}
+
+fn review_counts(content: &str) -> (usize, usize) {
+    let Some(body) = crate::component::parse(content).ok().and_then(|comps| {
+        comps
+            .into_iter()
+            .find(|component| is_review_component(&component.name))
+            .map(|component| component.content(content).to_string())
+    }) else {
+        return (0, 0);
+    };
+    let (_, items, _) = crate::pending::parse_items(&body);
+    let review_items: Vec<_> = items.into_iter().filter(|item| !item.is_done()).collect();
+    let gated = review_items
+        .iter()
+        .filter(|item| matches!(item.state, crate::pending::PendingState::Gated))
+        .count();
+    (review_items.len(), gated)
 }
 
 fn ensure_no_completed_tracked_items(content: &str, surface: &str) -> Result<()> {
@@ -3481,9 +3540,9 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let (reordered, gated_count) = run_pending_maintenance(&doc).unwrap();
-        assert!(!reordered);
-        assert_eq!(gated_count, 0);
+        let report = run_pending_maintenance(&doc).unwrap();
+        assert!(!report.reordered);
+        assert_eq!(report.pending_gated_count, 0);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let file_backlog_after = crate::component::parse(&file_after)
@@ -3735,9 +3794,9 @@ mod tests {
         std::fs::write(&doc, current).unwrap();
         crate::cycle_state::start_preflight(&doc, Some(baseline), Some(current)).unwrap();
 
-        let (reordered, gated_count) = run_pending_maintenance(&doc).unwrap();
-        assert!(!reordered);
-        assert_eq!(gated_count, 0);
+        let report = run_pending_maintenance(&doc).unwrap();
+        assert!(!report.reordered);
+        assert_eq!(report.pending_gated_count, 0);
         enforce_no_dropped_backlog(&doc)
             .expect("same-cycle reap should count as intentional completion");
     }
@@ -3761,9 +3820,9 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         snapshot::save(&doc, content).unwrap();
 
-        let (reordered, gated_count) = run_pending_maintenance(&doc).unwrap();
-        assert!(!reordered);
-        assert_eq!(gated_count, 0);
+        let report = run_pending_maintenance(&doc).unwrap();
+        assert!(!report.reordered);
+        assert_eq!(report.pending_gated_count, 0);
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let file_icebox_after = crate::component::parse(&file_after)

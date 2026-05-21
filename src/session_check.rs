@@ -1014,6 +1014,23 @@ pub(crate) fn resolve_pending_done_guard_mode(
     Ok(crate::frontmatter::PendingCaptureGuardMode::Warn)
 }
 
+pub(crate) fn resolve_review_done_guard_mode(
+    file: &Path,
+) -> Result<crate::frontmatter::PendingCaptureGuardMode> {
+    let content = std::fs::read_to_string(file)?;
+    let (fm, _) = crate::frontmatter::parse(&content)?;
+    if let Some(mode) = fm.review_done_guard {
+        return Ok(mode);
+    }
+    if let Some(mode) = crate::project_config::load_project_for_doc(file)
+        .guards
+        .review_done
+    {
+        return Ok(mode);
+    }
+    Ok(crate::frontmatter::PendingCaptureGuardMode::Off)
+}
+
 fn check_pending_done_guard(file: &Path) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode(file)?;
     if mode == crate::frontmatter::PendingCaptureGuardMode::Off {
@@ -1141,7 +1158,10 @@ pub(crate) fn response_text_for_guards(response: &str) -> String {
 
     let fallback: Vec<String> = patches
         .iter()
-        .filter(|patch| !is_backlog_component(&patch.name))
+        .filter(|patch| {
+            !is_backlog_component(&patch.name)
+                && !crate::component::is_review_component(&patch.name)
+        })
         .map(|patch| patch.content.trim().to_string())
         .filter(|text| !text.is_empty())
         .collect();

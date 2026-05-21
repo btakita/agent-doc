@@ -28,6 +28,8 @@ pub struct GuardConfig {
     pub pending_capture: Option<crate::frontmatter::PendingCaptureGuardMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_done: Option<crate::frontmatter::PendingCaptureGuardMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_done: Option<crate::frontmatter::PendingCaptureGuardMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

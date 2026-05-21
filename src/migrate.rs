@@ -119,8 +119,50 @@ fn migrate_content(content: &str) -> String {
         }
     }
 
-    // Also strip any remaining patch/mode attrs from already-canonical backlog tags
-    component::strip_backlog_patch_attr(&result)
+    // Also strip any remaining patch/mode attrs from already-canonical backlog tags,
+    // then split legacy gated backlog items into the canonical review component.
+    let result = component::strip_backlog_patch_attr(&result);
+    migrate_legacy_gated_backlog_items(&result).unwrap_or(result)
+}
+
+fn migrate_legacy_gated_backlog_items(content: &str) -> Result<String> {
+    let components = component::parse(content).context("failed to parse components")?;
+    let Some(backlog) = components
+        .iter()
+        .find(|c| component::is_backlog_component(&c.name))
+    else {
+        return Ok(content.to_string());
+    };
+    let backlog_body = backlog.content(content);
+    let (new_backlog, gated_items) =
+        crate::pending::op_take_items_by_state(backlog_body, crate::pending::PendingState::Gated);
+    if gated_items.is_empty() {
+        return Ok(content.to_string());
+    }
+
+    let mut result = backlog.replace_content(content, &new_backlog);
+    let review = component::parse(&result)?
+        .into_iter()
+        .find(|c| component::is_review_component(&c.name));
+    if review.is_none() {
+        let backlog = component::parse(&result)?
+            .into_iter()
+            .find(|c| component::is_backlog_component(&c.name))
+            .context("backlog missing after gated-item migration")?;
+        let insert = "\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n";
+        let mut with_review = String::with_capacity(result.len() + insert.len());
+        with_review.push_str(&result[..backlog.close_end]);
+        with_review.push_str(insert);
+        with_review.push_str(&result[backlog.close_end..]);
+        result = with_review;
+    }
+    let review = component::parse(&result)?
+        .into_iter()
+        .find(|c| component::is_review_component(&c.name))
+        .context("review missing after gated-item migration")?;
+    let review_body = review.content(&result);
+    let new_review = crate::pending::op_append_items(review_body, &gated_items);
+    Ok(review.replace_content(&result, &new_review))
 }
 
 fn migrate_comment(comment: &str) -> String {
@@ -357,6 +399,38 @@ mod tests {
         let input = "<!-- agent:backlog -->\nContent\n<!-- /agent:backlog -->\n";
         let result = migrate_content(input);
         assert_eq!(result, input);
+    }
+
+    #[test]
+    fn gated_backlog_items_move_to_review() {
+        let input = concat!(
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#open1] Open item\n",
+            "- [/] [#gate1] Awaiting review\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Completed / Reaped\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let result = migrate_content(input);
+        let backlog = result
+            .split("<!-- agent:backlog -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n<!-- /agent:backlog -->").next())
+            .unwrap();
+        let review = result
+            .split("<!-- agent:review -->\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n<!-- /agent:review -->").next())
+            .unwrap();
+        assert!(backlog.contains("[#open1] Open item"));
+        assert!(!backlog.contains("[#gate1] Awaiting review"));
+        assert!(review.contains("- [/] [#gate1] Awaiting review"));
+        assert!(
+            result.find("<!-- /agent:backlog -->").unwrap()
+                < result.find("<!-- agent:review -->").unwrap()
+        );
     }
 
     #[test]

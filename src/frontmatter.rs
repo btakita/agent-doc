@@ -237,6 +237,7 @@ pub struct StreamConfig {
 pub enum PendingCaptureGuardMode {
     #[default]
     Warn,
+    #[serde(alias = "error")]
     Strict,
     Off,
 }
@@ -388,6 +389,10 @@ pub struct Frontmatter {
     /// Values: `warn` (default when absent), `strict`, `off`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_done_guard: Option<PendingCaptureGuardMode>,
+    /// Review-done guard mode for `--done`.
+    /// Values: `off` (default when absent), `warn`, `strict`/`error`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_done_guard: Option<PendingCaptureGuardMode>,
     /// Document-level lifecycle hooks: shell commands executed at key events.
     ///
     /// Supported events: `session_start`, `post_write`, `post_commit`.
@@ -696,6 +701,14 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                         serde_yaml::from_str::<PendingCaptureGuardMode>(&format!("\"{}\"", s))
                 {
                     fm.pending_done_guard = Some(mode);
+                }
+            }
+            "review_done_guard" => {
+                if let Some(s) = value.as_str()
+                    && let Ok(mode) =
+                        serde_yaml::from_str::<PendingCaptureGuardMode>(&format!("\"{}\"", s))
+                {
+                    fm.review_done_guard = Some(mode);
                 }
             }
             "prompt_presets" => {
@@ -1161,6 +1174,7 @@ mod tests {
             model_tier: None,
             pending_capture_guard: None,
             pending_done_guard: None,
+            review_done_guard: None,
             hooks: std::collections::HashMap::new(),
             env: indexmap::IndexMap::new(),
             prompt_presets: indexmap::IndexMap::new(),
@@ -1368,6 +1382,28 @@ mod tests {
         let (parsed, _) = parse(&written).unwrap();
         assert_eq!(
             parsed.pending_done_guard,
+            Some(PendingCaptureGuardMode::Strict)
+        );
+    }
+
+    #[test]
+    fn parse_review_done_guard_error_alias() {
+        let content = "---\nreview_done_guard: error\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.review_done_guard, Some(PendingCaptureGuardMode::Strict));
+    }
+
+    #[test]
+    fn write_review_done_guard_roundtrip() {
+        let fm = Frontmatter {
+            review_done_guard: Some(PendingCaptureGuardMode::Strict),
+            ..Default::default()
+        };
+        let written = write(&fm, "body\n").unwrap();
+        assert!(written.contains("review_done_guard: strict"));
+        let (parsed, _) = parse(&written).unwrap();
+        assert_eq!(
+            parsed.review_done_guard,
             Some(PendingCaptureGuardMode::Strict)
         );
     }

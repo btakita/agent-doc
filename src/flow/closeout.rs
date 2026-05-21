@@ -14,6 +14,7 @@ pub(crate) enum CloseoutGuardReason {
     PendingCaptureRecommendations,
     PendingDoneMalformedTrackedItem,
     PendingDoneMissing,
+    ReviewDoneSourceNotReviewed,
     AlreadyCommitted,
     SnapshotDiffersFromHead,
     ParentPointerStale,
@@ -36,6 +37,7 @@ impl CloseoutGuardReason {
             Self::PendingCaptureRecommendations => "pending_capture_recommendations",
             Self::PendingDoneMalformedTrackedItem => "pending_done_malformed_tracked_item",
             Self::PendingDoneMissing => "pending_done_missing",
+            Self::ReviewDoneSourceNotReviewed => "review_done_source_not_reviewed",
             Self::AlreadyCommitted => "already_committed",
             Self::SnapshotDiffersFromHead => "snapshot_differs_from_head",
             Self::ParentPointerStale => "parent_pointer_stale",
@@ -330,6 +332,23 @@ mod tests {
         assert_eq!(
             event.reason.as_deref(),
             Some("pending_capture_recommendations")
+        );
+    }
+
+    #[test]
+    fn closeout_guard_event_carries_review_done_reason() {
+        let event = closeout_guard_event(
+            FlowStage::PreWriteGuard,
+            FlowOutcome::Blocked,
+            CloseoutGuardReason::ReviewDoneSourceNotReviewed,
+        );
+
+        assert_eq!(event.flow, FlowName::Closeout);
+        assert_eq!(event.stage, FlowStage::PreWriteGuard);
+        assert_eq!(event.outcome, FlowOutcome::Blocked);
+        assert_eq!(
+            event.reason.as_deref(),
+            Some("review_done_source_not_reviewed")
         );
     }
 

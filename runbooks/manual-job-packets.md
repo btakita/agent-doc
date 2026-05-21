@@ -17,6 +17,22 @@ agent-doc jobs create <FILE> --operation-doc
 Packets are written under `.agent-doc/jobs/<cycle>/`. The optional operation
 doc records the parent decision and collection commands.
 
+## Taxonomy
+
+- **Job packet:** a worker-facing contract for one bounded task. It owns write
+  scope, context handles, required proof, and the worker result schema.
+- **Operation doc / opdoc:** a parent-facing audit artifact for the whole
+  operation. It references the generated packets, records why dispatch was used,
+  preserves collection commands, and captures verification plus parent review.
+- **Plan:** a design note linked from backlog work. A plan can justify a packet,
+  but it is not itself a worker contract unless copied into a job packet.
+- **Runbook:** reusable procedure for humans or harnesses. This file is a
+  runbook; generated packets and opdocs are per-cycle artifacts.
+
+Keep opdocs. They are retained evidence, not scratch space: after workers finish,
+the parent should collect results into the opdoc and cite the verification used
+to accept, revise, or reject each packet result.
+
 ## Packet Rules
 
 - Treat the packet frontmatter as the worker contract.

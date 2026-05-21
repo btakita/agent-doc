@@ -56,7 +56,24 @@ Transferred the agent-doc-owned work out of this tsift backlog and into `tasks/a
 I treated `#agbr` as the agent-doc-codebase item because it changes `agent-doc plan/orchestrate` behavior. The remaining items stay here because they are tsift-owned graph/reporting work: `#wctx`, `#mxfx`, `#gobx`, and `#semx`.
 
 Top tsift backlog item is now `#wctx`. Top transferred agent-doc item id is `#agbr`.
-<!-- agent:boundary:b0467a9e -->
+### Re: graph-backed worker dispatch — gpt-5
+Completed `#wctx`, `#mxfx`, `#gobx`, and `#semx`.
+
+Implemented first-class conflict-matrix worker prompt packets in `src/tsift`: owned files/symbols, read-only context, forbidden files, expected tests, expansion commands, and token budgets now flow from graph-db evidence into conflict-matrix output and worker ownership blocks. Graph evidence now includes semantic concept/entity rows, semantic refs contribute to dispatch ranking after hard conflict gates, and session-level graph orchestration observability is surfaced through context-pack/session-review follow-up commands.
+
+Added deterministic multi-worker conformance coverage for overlapping vs. non-overlapping backlog targets, including prompt packet fields and fail-closed shared-file decisions. Updated `README.md`, `SPEC.md`, and `VERSIONS.md` for the new graph evidence, worker packet, semantic ranking, and observability behavior.
+
+Verification:
+- `make check` passed: clippy, unit tests, exit-code tests, and graph-db conformance.
+- `cargo test --test graph_db_conformance conflict_matrix_multi_worker_fixture_blocks_shared_files_and_emits_prompt_packets` passed after fixture whitespace cleanup.
+- `cargo build` passed.
+- `cargo install --path .` replaced local `tsift`; `tsift --version` reports `tsift 0.1.42`.
+- Latest GitHub Actions `CI` run for `main` was `completed/success` at `2026-05-21T00:44:42Z`.
+
+Commits:
+- `btakita/tsift` pushed `f0b1582` (`feat: add graph-backed worker prompt packets`).
+- Superproject submodule pointer committed as `f3c227010` (`chore: update tsift submodule`); root push follows the document closeout ordering.
+<!-- agent:boundary:0b10a738 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,17 +81,15 @@ Top tsift backlog item is now `#wctx`. Top transferred agent-doc item id is `#ag
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#atvp]
-- do [#g6kf]
+- do [#wctx]
+- do [#mxfx]
+- do [#gobx]
+- do [#semx]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#wctx] [recommended] Make worker prompt packets first-class: emit owned files/symbols, read-only context, forbidden files, expected tests, expansion commands, and token budgets from conflict-matrix so subagents can start with bounded graph-backed context.
-- [ ] [#mxfx] [recommended] Add a deterministic multi-worker acceptance fixture for subagent support: seed overlapping and non-overlapping backlog targets, run graph-db evidence plus conflict-matrix, and prove the generated worker prompts prevent shared-file/test conflicts.
-- [ ] [#gobx] [recommended] Add session-level graph orchestration observability: record graph projection freshness, evidence packet ids, conflict-matrix decisions, worker ownership blocks, and follow-up commands in context-pack/session-review output.
-- [ ] [#semx] [recommended] Use semantic graph rows in dispatch ranking: combine semantic_concept/entity edges with code/route/backlog paths so conflict-matrix can recommend related-but-safe follow-up worker scopes.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

@@ -59,7 +59,33 @@ The important limit is that `tsift` can identify likely overlap from source stru
 I added one follow-up item for parallel-agent planning: `#pwcm`, a conflict-matrix/report item that uses `graph-db evidence`, `context-pack`, `diff-digest --cached`, and `impact` to assign worker scopes and fail closed on overlap.
 
 Backlog priority is now: `#atvp`, `#g6kf`, `#pwcm`. The top backlog item is `#atvp`.
-<!-- agent:boundary:c128f57a -->
+❯ do [#pwcm]. #spec-test-build-install-commit-push
+### Re: #pwcm conflict matrix — gpt-5
+
+Completed `#pwcm` and pushed the change.
+
+Implemented `tsift conflict-matrix --path <session-or-repo> <target...>` as a planner gate for parallel worker dispatch. The report refreshes graph evidence, composes `graph-db evidence` for each backlog/job target, summarizes `context-pack`, consumes `diff-digest --cached` and cached `impact`, ranks candidate worker scopes, flags shared files/symbols/tests/config, and emits fail-closed worker ownership prompt blocks.
+
+Updated docs and coverage:
+- `src/tsift/SPEC.md` and `src/tsift/README.md` document the new command and planning contract.
+- `src/tsift/tests/graph_db_conformance.rs` covers the compiled CLI path and ownership block output.
+- Parser coverage was added for the new command in `src/tsift/src/main.rs`.
+
+Verification passed:
+- `cargo test conflict_matrix_cli_composes_planner_evidence_and_worker_ownership --test graph_db_conformance`
+- `cargo test cli_parses_conflict_matrix_command`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- `tsift --version` -> `tsift 0.1.42`
+- `make ci-full`
+
+CI/tmux review: `btakita/tsift` has no `tmux-ci` / `tmux-test` target or CI leg. Latest GitHub Actions `CI` run `26196265078` was green, including `Full CI suite` and live Convex acceptance.
+
+Pushed commits:
+- `btakita/tsift` `038cd07 feat: add planner conflict matrix`
+- `btakita/agent-loop` `1ec0b85da chore: update tsift submodule`
+<!-- agent:boundary:83d76368 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,7 +99,6 @@ Backlog priority is now: `#atvp`, `#g6kf`, `#pwcm`. The top backlog item is `#at
 <!-- agent:backlog -->
 - [ ] [#atvp] Unblock crates.io publication for tsift by replacing the upstream git-only sift dependency, publishing a compatible upstream crate, or vendoring a small stable search adapter; rerun cargo publish --dry-run before enabling TSIFT_ENABLE_CRATES_PUBLISH.
 - [ ] [#g6kf] Confirm the v0.1.42 GitHub release completes after the macOS x86_64 Actions runner leaves the queue; if it remains stuck, remove or replace that matrix target and retag a fixed release.
-- [ ] [#pwcm] Add a planner conflict-matrix report that consumes `graph-db evidence`, `context-pack`, `diff-digest --cached`, and `impact` outputs to rank candidate worker scopes, flag shared files/symbols/tests/config, and emit fail-closed worker prompt ownership blocks for parallel dispatch.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

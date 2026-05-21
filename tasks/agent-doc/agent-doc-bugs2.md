@@ -20,7 +20,8 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-FlowCore refactor is in maintenance mode; top backlog item: #y9kk.
+
+FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 <!-- /agent:status -->
 
 ## Exchange
@@ -121,7 +122,15 @@ The stronger version is an in-memory normalized diff:
 - otherwise continue through the existing merge path.
 
 That is basically the same class of check as `response_already_in_current`, but a hunk/delta containment check would be more defensible than the current line-overlap heuristic. It would also let the IPC path emit a precise diagnostic like “response delta already present in current file” rather than only inferring from matching lines. I would keep raw git diff as a logged/debugging artifact, not the duplicate gate.
-<!-- agent:boundary:4bd6ac89 -->
+❯ What are the #next-steps?
+### Re: next steps — gpt-5
+
+Top backlog item: `#ipcd`.
+
+I added `#ipcd` as the new first backlog item because it is the direct next step from the IPC duplicate-write discussion: replace the current line-overlap duplicate inference with a normalized response-delta containment guard, then pin it with regressions around ack-content and socket-timeout fallback paths.
+
+The backlog priority now starts with `#ipcd`, followed by the existing lower-agent orchestration items. This cycle only updates backlog/accounting; it does not implement the guard.
+<!-- agent:boundary:af899d39 -->
 <!-- /agent:exchange -->
 ###
 
@@ -132,6 +141,7 @@ That is basically the same class of check as `response_already_in_current`, but 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#ipcd] [recommended] Implement normalized IPC response-delta containment for duplicate write detection: compare base->content_ours against base->content_current at the exchange/component hunk level, adopt current when the response delta is already present, keep raw git diff as diagnostics only, and add regressions for ack-content plus socket timeout fallback paths.
 - [ ] [#r7k8] [recommended] Incorporate tsift #pwcm planner conflict-matrix report into lower-agent orchestration before enabling parallel worker dispatch: use graph/context/diff/impact outputs to rank worker scopes, flag shared file/symbol/test/config conflicts, and emit fail-closed ownership blocks. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

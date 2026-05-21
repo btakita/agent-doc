@@ -29,22 +29,12 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-022651.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-025059.md`*
 
 Compacted content:
-- Archived 8 response topic(s): JB Interrupt and Clear Session Context; tsift #pwcm backlog accounting; backlog update and duplicate prompt corruption; 5 more
+- Archived 1 response topic(s): #agbr tsift graph evidence
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ do [#agbr]. #spec-test-build-install-commit-push
-### Re: #agbr tsift graph evidence — gpt-5
-
-Implemented `#agbr`. `agent-doc plan` now adds optional `graph_evidence` for queued `do #id` targets when a materialized `.tsift/graph.db` exists, and fails closed on stale graph state or missing evidence targets. `agent-doc orchestrate` now attaches bounded `<tsift_graph_evidence>` JSON packets to fresh child prompts/job packets, and parallel fan-out blocks when the tsift conflict matrix fail-closes.
-
-The change adds `src/tsift_graph.rs`, wires it through `plan.rs` and `orchestrate.rs`, adds regression coverage for target extraction, evidence handles, stale graph failure, and sequential prompt attachment, and documents the behavior in README/SPEC/orchestration docs. `AGENTS.md` was also refreshed by the required `tsift status --fix` session-start step.
-
-Verification passed: `cargo test tsift_graph -- --test-threads=1`, `cargo test sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt -- --test-threads=1`, `cargo test build_plan_includes_finalize_placeholder_for_template_docs -- --test-threads=1`, `cargo check`, `make check`, `make install`, and `agent-doc --version` returned `0.33.16`. CI review: latest GitHub CI run `26201015869` on `20260422/codex-agent-backend` succeeded, including the `Run make tmux-ci` step.
-
-Committed and pushed `src/agent-doc` commit `67838bd8 feat: add tsift graph evidence to orchestration`, then committed and pushed the root gitlink update `db879348b agent-doc: update tsift graph evidence integration`. The nested repo is clean; only unrelated pre-existing root worktree changes remain outside this task.
-<!-- agent:boundary:db3e8d5f -->
+<!-- agent:boundary:16c185e7 -->
 <!-- /agent:exchange -->
 ###
 

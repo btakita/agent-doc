@@ -13,7 +13,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,15 +36,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): graph db features & subagent support; transfer agent-doc backlog; graph-backed worker dispatch; 3 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:cc6397e0 -->
+### Re: graph orchestration contracts — gpt-5
+Completed `#gcfx`, `#wrfb`, and `#gdtr`.
+
+Implemented and pushed tsift graph orchestration updates:
+- contract parity coverage now compares `fixtures/graph-db-operator-examples/graph-orchestration-contracts.json` against live `graph-db evidence`, `conflict-matrix`, `context-pack`, `session-review`, and `dispatch-trace` JSON output.
+- `conflict-matrix` now includes worker-result feedback summaries and repeated-blockage warnings without weakening hard conflict gates.
+- added `tsift dispatch-trace --format json|html` for operator review of backlog, job packet, worker result, source handle, semantic, evidence packet, and worker prompt packet links.
+
+Verification:
+- `make check`
+- `cargo build`
+- `cargo install --path . --locked`
+- tsift GitHub Actions CI run `26203831313` passed (`clippy + test`, `live Convex graph acceptance`).
+- agent-loop GitHub Actions run `26203839021` failed before job logs/steps were available (`tmux-ci` and `check` empty-step failures), so I classified it as an external CI-start blocker rather than a code or tmux regression.
+
+Pushed commits:
+- `btakita/tsift` `9728ade` (`feat: add dispatch trace graph reports`)
+- agent-loop submodule pointer `39117c97b` (`chore: update tsift submodule`)
+<!-- agent:boundary:28cf808f -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#gcfx]
+- ~do [#gcfx]~
 - do [#wrfb]
 - do [#gdtr]
 <!-- /agent:queue -->
@@ -52,9 +70,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gcfx] [recommended] Add compiled contract-parity fixtures comparing graph-orchestration-contracts.json with live graph-db evidence, conflict-matrix, context-pack, and session-review JSON output, including contract_version, packet_id, projection_hash, replay_commands, and repair_commands.
-- [ ] [#wrfb] [recommended] Add worker-result feedback reports: summarize completed/blocked worker_result rows, touched files/tests, follow-up ids, and outcome history so conflict-matrix can warn about repeated blockage without weakening hard conflict gates.
-- [ ] [#gdtr] [recommended] Add graph-backed dispatch trace exports: compact JSON/HTML views linking backlog, job_packet, worker_result, source_handle, semantic rows, evidence packet ids, and worker_prompt_packets for operator review.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

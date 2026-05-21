@@ -1024,14 +1024,29 @@ fn launch_mock_agent_doc_without_file_arg(iso: &IsolatedTmux, pane: &str, script
 }
 
 fn wait_for_mock_agent_prompt(iso: &IsolatedTmux, pane: &str, launch_command: &str) -> String {
-    let mut content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(10));
-    if content.lines().any(|line| line.trim() == ">") || !content.contains(launch_command) {
-        return content;
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(20);
+    let poll = std::time::Duration::from_millis(100);
+    let mut last_submit = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(1))
+        .unwrap_or_else(std::time::Instant::now);
+    let mut last = String::new();
+
+    while start.elapsed() < timeout {
+        last = sessions::capture_pane(iso, pane).unwrap_or_default();
+        if last.lines().any(|line| line.trim() == ">") {
+            return last;
+        }
+        if last.contains(launch_command)
+            && last_submit.elapsed() >= std::time::Duration::from_millis(500)
+        {
+            let _ = iso.send_keys_raw(pane, "Enter");
+            last_submit = std::time::Instant::now();
+        }
+        std::thread::sleep(poll);
     }
 
-    let _ = iso.send_keys_raw(pane, "Enter");
-    content = wait_for_pane_contains(iso, pane, "\n>", std::time::Duration::from_secs(10));
-    content
+    last
 }
 
 fn wait_for_process_pid(pattern: &str, timeout: std::time::Duration) -> u32 {

@@ -707,6 +707,24 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
         return clear(file);
     }
 
+    match interrupt_clear_initial_action(&evidence) {
+        InterruptClearInitialAction::SkipInterruptAlreadyIdle => {
+            let _ = reconcile_idle_projection_from_evidence(&ctx, &evidence);
+            crate::ops_log::log_op(
+                &ctx.canonical_file,
+                &format!(
+                    "session_interrupt_clear_skip_interrupt file={} pane={} reason=already_idle prompt_ready={} tail={:?}",
+                    ctx.canonical_file.display(),
+                    pane,
+                    evidence.prompt_ready.unwrap_or(false),
+                    evidence.tail.as_deref().unwrap_or("unknown")
+                ),
+            );
+            return clear(file);
+        }
+        InterruptClearInitialAction::SendInterrupt => {}
+    }
+
     send_operator_interrupt_sequence(&tmux, pane, &ctx.harness)?;
     let outcome = wait_for_interrupt_clear_settle(&ctx, &tmux, pane, Duration::from_secs(10));
     crate::ops_log::log_op(
@@ -739,6 +757,20 @@ pub fn interrupt_clear(file: &Path) -> Result<()> {
                 editor_recovery_attempted
             )
         ),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InterruptClearInitialAction {
+    SendInterrupt,
+    SkipInterruptAlreadyIdle,
+}
+
+fn interrupt_clear_initial_action(evidence: &LivePaneEvidence) -> InterruptClearInitialAction {
+    if evidence.state == LivePaneState::AliveIdle && evidence.prompt_ready == Some(true) {
+        InterruptClearInitialAction::SkipInterruptAlreadyIdle
+    } else {
+        InterruptClearInitialAction::SendInterrupt
     }
 }
 
@@ -2237,6 +2269,40 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(message.contains("prompt_ready=false"));
         assert!(message.contains("tail=\"⏵⏵ bypass permissions on\""));
         assert!(message.contains("agent-doc session status /tmp/doc.md"));
+    }
+
+    #[test]
+    fn interrupt_clear_initial_action_skips_interrupt_keys_for_idle_pane() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveIdle,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(true),
+            tail: Some("gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used".to_string()),
+        };
+
+        assert_eq!(
+            interrupt_clear_initial_action(&evidence),
+            InterruptClearInitialAction::SkipInterruptAlreadyIdle
+        );
+    }
+
+    #[test]
+    fn interrupt_clear_initial_action_keeps_interrupt_for_busy_pane() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveBusy,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: Some(false),
+            tail: Some("Working...".to_string()),
+        };
+
+        assert_eq!(
+            interrupt_clear_initial_action(&evidence),
+            InterruptClearInitialAction::SendInterrupt
+        );
     }
 
     #[test]

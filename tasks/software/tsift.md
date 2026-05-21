@@ -1,6 +1,5 @@
 ---
 agent_doc_session: tsift-v0.1
-resume: 019dd526-7958-77e3-9a41-92b8944fc550
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -13,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -48,12 +47,12 @@ Top tsift backlog item: `#dtrc` — add dispatch-trace replay/contract fixture c
 Top agent-doc backlog item added to `tasks/agent-doc/agent-doc-bugs2.md`: `#dxtr` — consume tsift dispatch-trace outputs in agent-doc plan/orchestrate closeout.
 
 The queued `#wrfb` / `#gdtr` tsift work is already implemented and pushed in the compacted graph orchestration contracts turn (`btakita/tsift` `9728ade`, parent submodule pointer `39117c97b`). This cycle only records the next follow-ups and queue bookkeeping. I did not rerun tests because no code changed in this cycle; the implementation turn already recorded `make check`, `cargo build`, local install, and green tsift CI for those features.
-<!-- agent:boundary:74841584 -->
+<!-- agent:boundary:7fc124cd -->
 <!-- /agent:exchange -->
 ###
 
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

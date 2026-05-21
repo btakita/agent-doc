@@ -34,7 +34,24 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 Compacted content:
 - Archived 1 response topic(s): do #r7k8
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7661c56f -->
+❯ The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push
+### Re: duplicate prompt/comment cleanup — gpt-5
+
+Reproduced the duplicate prompt comment before fixing it. The new preflight regression starts with the prompt already in `agent:exchange` and the same text left in the ordinary HTML comment below `&lt;!-- /agent:exchange --&gt;`; it failed before the implementation change and now passes.
+
+Implemented a narrow preflight cleanup that runs before the previous-cycle commit/baseline capture: it removes only ordinary post-exchange HTML comments whose body duplicates or near-duplicates a prompt already present in `agent:exchange`. Unrelated scratch comments stay outside exchange, and the snapshot still excludes the live prompt.
+
+Updated the implementation, regression coverage, closeout spec, README capability summary, and changelog. The submodule commit is `83e9d379` (`fix: clean duplicate prompt comments in preflight`) and it has been pushed to `origin/20260422/codex-agent-backend`. The parent gitlink commit is `dca587df0` (`agent-doc: clean duplicate prompt comments`) and will be pushed after this session response commit completes.
+
+Verification run:
+- `cargo test preflight_removes_duplicate_post_exchange_prompt_comment_before_diff -- --nocapture` (failed first, then passed after the fix)
+- `cargo test preflight_ -- --nocapture`
+- `cargo test duplicate_prompt_html_comment -- --nocapture`
+- `make check`
+- `cargo build`
+- `cargo install --path . --force`
+- Latest GitHub CI run `26203057180` was successful, including `Run make tmux-ci`.
+<!-- agent:boundary:21e21d3b -->
 <!-- /agent:exchange -->
 ###
 

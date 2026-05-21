@@ -10,8 +10,8 @@
 //!   resolved this cycle, a handoff target, and concrete blockers.
 //! - Does not fail closed solely on session-accretion heuristics; accretion
 //!   remains advisory while planning still derives prompt targets and actions.
-//! - Downgrades recoverable tsift graph database access failures to
-//!   `manual_packet_only` warnings so job packet creation can continue without
+//! - Downgrades tsift graph evidence collection failures to `manual_packet_only`
+//!   warnings so agent-doc turns and job packet creation can continue without
 //!   graph acceptance evidence.
 //! - Uses the same deterministic diff classifiers as preflight (`prompt_bearing_changes`,
 //!   imperative-directive extraction, slash-command parsing, orchestration detection)
@@ -236,14 +236,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let graph_evidence = match crate::tsift_graph::collect_for_do_items(file, &graph_targets) {
         Ok(graph_evidence) => graph_evidence,
         Err(err) => {
-            if crate::tsift_graph::is_recoverable_graph_db_access_error(&err) {
-                manual_packet_only = true;
-                warnings.push(format!(
-                    "tsift graph evidence unavailable; manual_packet_only=true: {err:#}"
-                ));
-            } else {
-                blockers.push(format!("tsift graph evidence failed closed: {err:#}"));
-            }
+            manual_packet_only = true;
+            warnings.push(crate::tsift_graph::manual_packet_fallback_warning(&err));
             None
         }
     };
@@ -579,7 +573,7 @@ fn tsift_context_plan(file: &Path) -> TsiftContextPlan {
         source_read_command: "tsift source-read <handle>".to_string(),
         diff_digest_command: format!("tsift diff-digest --cached {root_arg} --json"),
         test_digest_command: format!("tsift test-digest --path {root_arg} --input <test.log> --json"),
-        stale_fallback: "fail closed before automatic lower-agent dispatch; for manual packets, include the diagnostic and require parent review".to_string(),
+        stale_fallback: "skip tsift graph/context evidence, continue with parent-owned execution or manual packets, and carry the diagnostic for review".to_string(),
     }
 }
 
@@ -1041,6 +1035,76 @@ agent_doc_write: crdt
         assert_eq!(
             plan.repo_actions,
             vec!["do [#jobslock]. spec-test-build-install-commit-push"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_plan_downgrades_stale_graph_db_to_manual_packet_only_warning() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = setup_project();
+        std::fs::create_dir_all(dir.path().join(".tsift")).unwrap();
+        std::fs::write(dir.path().join(".tsift/graph.db"), "fake").unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#staleg] Keep turns running when graph.db is stale.
+<!-- /agent:backlog -->
+"#;
+
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "do [#staleg]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let script = dir.path().join("fake-tsift-stale.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+if echo "$*" | grep -q 'graph-db.*--json status'; then
+  cat <<'JSON'
+{"root":"/tmp/repo","graph_db":"/tmp/repo/.tsift/graph.db","freshness":{"status":"stale","fail_closed":true,"diagnostics":["graph.db is stale"]}}
+JSON
+  exit 0
+fi
+echo "unexpected fake tsift args: $*" >&2
+exit 2
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", script.to_str().unwrap());
+
+        let plan = build(&doc).unwrap();
+
+        assert!(plan.blockers.is_empty(), "unexpected blockers: {:?}", plan);
+        assert!(plan.manual_packet_only);
+        assert!(plan.graph_evidence.is_none());
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|warning| warning.contains("graph.db is stale")
+                    && warning.contains("manual_packet_only=true")),
+            "expected stale graph warning, got {:?}",
+            plan.warnings
         );
     }
 

@@ -52,11 +52,11 @@ This file covers binary-owned planning/orchestration and the queue surface that 
 - `tsift_context` records the stable JSON handoff commands used by job packets:
   `tsift status --json`, `tsift context-pack <FILE> --json --budget normal`,
   `tsift source-read <handle>`, `tsift diff-digest --cached`, and
-  `tsift test-digest --input`. Missing or stale context gates automatic
-  lower-agent dispatch; manual packets may still be generated, but the stale or
-  missing status must remain visible to workers and parent review.
+  `tsift test-digest --input`. Missing, stale, or failing context is advisory at
+  the agent-doc turn boundary: continue without tsift graph/context evidence,
+  but keep the diagnostic visible to workers and parent review.
 - Copied `prompt_presets` frontmatter defines reusable prompts but does not invoke them; plan/preflight must ignore preset definition lines when expanding preset references from added diff text.
-- When graph evidence is active, `plan` calls `tsift graph-db --path <FILE> --json status`, `tsift graph-db --path <FILE> --json evidence <id> --depth 3 --limit 8`, `tsift conflict-matrix --path <FILE> --json <id...>`, and `tsift dispatch-trace --path <FILE> --json <id...> --depth 3 --limit 8`. A stale/fail-closed graph freshness report or an unresolved target id becomes a blocker instead of an advisory warning. The emitted `graph_evidence` record carries the `conflict-matrix-v1` and `dispatch-trace-v1` planner contracts: evidence packet ids, graph node handles and edges, context-pack summary, cached diff and impact commands, ranked candidates, shared file/symbol/test/config conflicts, worker ownership block labels, worker feedback summaries, first-class worker prompt packets, token budgets, semantic ranking reasons, projection hashes, replay/repair commands, and warnings.
+- When graph evidence is active, `plan` calls `tsift graph-db --path <FILE> --json status`, refreshes the projection with `tsift graph-db --path <FILE> --json refresh`, then calls `tsift graph-db --path <FILE> --json evidence <id> --depth 3 --limit 8`, `tsift conflict-matrix --path <FILE> --json <id...>`, and `tsift dispatch-trace --path <FILE> --json <id...> --depth 3 --limit 8`. Stale/fail-closed graph freshness, unresolved targets, bad JSON, timeouts, or missing contract fields produce warnings and a no-graph/manual-packet fallback instead of blocking the whole turn. When collection succeeds, the emitted `graph_evidence` record carries the `conflict-matrix-v1` and `dispatch-trace-v1` planner contracts: evidence packet ids, graph node handles and edges, context-pack summary, cached diff and impact commands, ranked candidates, shared file/symbol/test/config conflicts, worker ownership block labels, worker feedback summaries, first-class worker prompt packets, token budgets, semantic ranking reasons, projection hashes, replay/repair commands, and warnings.
 
 ## orchestrate
 
@@ -113,7 +113,7 @@ Additional rules:
 
 - Resolves tasks and presets first, then hands them to the existing worktree fan-out backend.
 - The legacy `agent-doc parallel` entry is only a compatibility wrapper over this same dispatch path.
-- If a materialized tsift graph database exists and resolved tasks include `do #id` / `do [#id]` items, orchestration collects the same graph evidence, conflict matrix, and dispatch trace as `plan`. Sequential and DAG child prompts receive a bounded `<tsift_graph_evidence>` JSON block outside the document mutation so the graph handles are available to the fresh agent without being injected into `agent:exchange`. Parallel worktree job packets receive the same block in the task prompt, including a normalized `lower_agent_job_packet` derived from the worker prompt packet's owned files, read-only context, forbidden files, expected tests, expansion commands, token budget, fail-closed prompt text, dispatch-trace graph links, worker feedback, projection hashes, and replay/repair commands. Parallel mode fails closed unless the conflict matrix explicitly reports `can_parallel=true` and `fail_closed=false`; all modes fail closed on stale graph freshness, non-current status, missing evidence targets, or missing versioned graph contract fields (`contract_version`, `packet_id`, `projection_hash`, replay commands, repair commands, worker packet token budgets, worker feedback, dispatch-trace projection hashes, graph links, and fail-closed prompt text).
+- If a materialized tsift graph database exists and resolved tasks include `do #id` / `do [#id]` items, orchestration attempts to collect the same graph evidence, conflict matrix, and dispatch trace as `plan`. Sequential and DAG child prompts receive a bounded `<tsift_graph_evidence>` JSON block outside the document mutation only when graph evidence is available. Parallel worktree job packets receive the same block in the task prompt when available, including a normalized `lower_agent_job_packet` derived from the worker prompt packet's owned files, read-only context, forbidden files, expected tests, expansion commands, token budget, fail-closed prompt text, dispatch-trace graph links, worker feedback, projection hashes, and replay/repair commands. If graph collection fails, orchestration warns and continues without the graph block; if collection succeeds, parallel mode still fails closed when the conflict matrix reports `can_parallel=false` or `fail_closed=true`.
 
 ## `--mode dag`
 
@@ -158,9 +158,10 @@ Additional rules:
   the graph orchestration gate from `agent-doc plan`: `graph-db evidence`,
   `conflict-matrix`, `dispatch-trace`, worker prompt packets, worker-result
   feedback, replay commands, and repair commands must carry their contract
-  fields before packets are written. Graph collection is bounded by
-  `AGENT_DOC_TSIFT_GRAPH_TIMEOUT_SECS` (default 30 seconds per tsift command)
-  and timeout is a fail-closed graph evidence blocker.
+  fields before graph acceptance evidence is attached. Graph collection is
+  bounded by `AGENT_DOC_TSIFT_GRAPH_TIMEOUT_SECS` (default 30 seconds per tsift
+  command); timeout or any other tsift failure falls back to
+  `manual_packet_only=true` with the diagnostic preserved.
 - `--operation-doc` writes a retained operation note under
   `tasks/agent-doc/operations/` when that tracked directory exists, otherwise
   under `.agent-doc/operations/`.

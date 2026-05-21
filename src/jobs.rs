@@ -9,7 +9,7 @@
 //! - tsift context is optional in the MVP: packet creation records status,
 //!   replay commands, and a context sidecar when `tsift context-pack --json`
 //!   succeeds; missing/stale context stays visible and requires parent review.
-//! - When the plan downgrades recoverable graph database access failures to
+//! - When the plan downgrades tsift graph evidence failures to
 //!   `manual_packet_only`, packet creation continues and the warning is carried
 //!   into the job index and packet body.
 

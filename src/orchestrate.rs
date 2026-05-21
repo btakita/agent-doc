@@ -1588,7 +1588,16 @@ fn collect_graph_evidence_for_tasks(
     tasks: &[String],
     fail_on_conflict_matrix: bool,
 ) -> Result<Option<crate::tsift_graph::TsiftGraphEvidencePlan>> {
-    let graph_evidence = crate::tsift_graph::collect_for_do_items(file, tasks)?;
+    let graph_evidence = match crate::tsift_graph::collect_for_do_items(file, tasks) {
+        Ok(graph_evidence) => graph_evidence,
+        Err(err) => {
+            eprintln!(
+                "[orchestrate] warning: {}",
+                crate::tsift_graph::graph_unavailable_warning(&err)
+            );
+            None
+        }
+    };
     if let Some(graph_evidence) = &graph_evidence {
         eprintln!(
             "[orchestrate] tsift graph evidence targets: {}",
@@ -2040,6 +2049,35 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use tempfile::TempDir;
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let lock = crate::harness_prompt::TEST_ENV_LOCK.lock().unwrap();
+            let prev = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                prev,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.prev {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
 
     struct FakeLifecycleOps {
         baseline_file: String,
@@ -3367,6 +3405,83 @@ mod tests {
         assert!(calls[0].6);
         assert!(lifecycle.finalize_calls.borrow().is_empty());
         assert!(agent.prompts.borrow().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parallel_mode_continues_without_graph_evidence_when_tsift_is_stale() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".tsift")).unwrap();
+        std::fs::write(dir.path().join(".tsift/graph.db"), "fake").unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(&doc, template_doc()).unwrap();
+
+        let script = dir.path().join("fake-tsift-stale.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+if echo "$*" | grep -q 'graph-db.*--json status'; then
+  cat <<'JSON'
+{"root":"/tmp/repo","graph_db":"/tmp/repo/.tsift/graph.db","freshness":{"status":"stale","fail_closed":true,"diagnostics":["graph.db is stale"]}}
+JSON
+  exit 0
+fi
+echo "unexpected fake tsift args: $*" >&2
+exit 2
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", script.to_str().unwrap());
+
+        let lifecycle = FakeLifecycleOps {
+            baseline_file: "unused".to_string(),
+            preflight_calls: RefCell::new(0),
+            finalize_calls: RefCell::new(Vec::new()),
+            session_checks: RefCell::new(0),
+        };
+        let agent = FakeAgentRunner {
+            prompts: RefCell::new(Vec::new()),
+            envs: RefCell::new(Vec::new()),
+            fresh_calls: RefCell::new(0),
+            streaming_calls: RefCell::new(0),
+            response: "unused".to_string(),
+            streaming_chunks: None,
+        };
+        let parallel_runner = FakeParallelRunner::default();
+
+        run_with_dependencies(
+            &doc,
+            OrchestrateConfig {
+                mode: OrchestrateMode::Parallel,
+                tasks_explicit: vec!["do #gkke".to_string()],
+                from_file: None,
+                from_exchange: false,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: false,
+                plan: false,
+            },
+            &Config::default(),
+            &lifecycle,
+            &agent,
+            &parallel_runner,
+            false,
+        )
+        .unwrap();
+
+        let calls = parallel_runner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1[0].description, "do #gkke");
+        assert_eq!(calls[0].1[0].prompt, "do #gkke");
+        assert!(!calls[0].1[0].prompt.contains("<tsift_graph_evidence>"));
     }
 
     #[test]

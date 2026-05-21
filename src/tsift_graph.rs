@@ -6,10 +6,9 @@
 //!   and `tsift conflict-matrix` JSON, then expose compact graph handles for
 //!   planning and orchestration prompts.
 //! - The integration is active only when an ancestor `.tsift/graph.db` exists.
-//!   Once active, stale graph freshness or unresolved targets fail closed.
-//! - Recoverable SQLite graph database access errors, such as locked,
-//!   hot-journal, or read-only failures, are classified for the planner so it
-//!   can keep manual job packets available without graph acceptance evidence.
+//!   Once active, successful graph reports still enforce their safety
+//!   contracts, but callers may treat collection/query/validation failures as
+//!   advisory and continue without graph evidence.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -421,12 +420,23 @@ pub(crate) fn collect_for_do_items(
     let status_json =
         run_tsift_json(&["graph-db", "--path", file_arg.as_str(), "--json", "status"])
             .context("running tsift graph-db status")?;
-    let graph_db_status = parse_graph_db_status(&status_json);
     if fail_closed_freshness(&status_json) {
         anyhow::bail!(
             "tsift graph.db is not current for {}: {}",
             file.display(),
             freshness_diagnostics(&status_json).join("; ")
+        );
+    }
+
+    let refresh_json =
+        run_tsift_json(&["graph-db", "--path", file_arg.as_str(), "--json", "refresh"])
+            .context("refreshing tsift graph-db projection before evidence collection")?;
+    let graph_db_status = parse_graph_db_status(&refresh_json);
+    if fail_closed_freshness(&refresh_json) || graph_db_status.status != "current" {
+        anyhow::bail!(
+            "tsift graph.db refresh is not current for {}: {}",
+            file.display(),
+            freshness_diagnostics(&refresh_json).join("; ")
         );
     }
 
@@ -467,6 +477,9 @@ pub(crate) fn collect_for_do_items(
     for command in string_array(status_json.pointer("/next_commands")) {
         next_commands.insert(command);
     }
+    for command in string_array(refresh_json.pointer("/next_commands")) {
+        next_commands.insert(command);
+    }
     for handle in &handles {
         for command in &handle.next_commands {
             next_commands.insert(command.clone());
@@ -500,10 +513,23 @@ pub(crate) fn collect_for_do_items(
     Ok(Some(plan))
 }
 
-pub(crate) fn is_recoverable_graph_db_access_error(error: &anyhow::Error) -> bool {
+pub(crate) fn graph_unavailable_warning(error: &anyhow::Error) -> String {
+    format!("tsift graph evidence unavailable; continuing without tsift graph evidence: {error:#}")
+}
+
+pub(crate) fn manual_packet_fallback_warning(error: &anyhow::Error) -> String {
+    format!(
+        "{}; manual_packet_only=true",
+        graph_unavailable_warning(error)
+    )
+}
+
+#[cfg(test)]
+fn is_recoverable_graph_db_access_error(error: &anyhow::Error) -> bool {
     is_recoverable_graph_db_access_message(&format!("{error:#}"))
 }
 
+#[cfg(test)]
 fn is_recoverable_graph_db_access_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("database file is locked")
@@ -1756,10 +1782,21 @@ case "$*" in
 {}
 JSON
     ;;
-  *"graph-db"*"--json evidence agbr"*)
+  *"graph-db"*"--json refresh"*)
     cat <<'JSON'
+{{"root":"/tmp/repo","graph_db":"/tmp/repo/.tsift/graph.db","operation":"refresh","status":"current","freshness":{{"status":"current","fail_closed":false,"content_hash":"abc","source_watermark":"abc","diagnostics":[]}},"next_commands":["tsift graph-db --path /tmp/repo doctor --json"]}}
+JSON
+    ;;
+  *"graph-db"*"--json evidence agbr"*)
+    if grep -q -- '--json refresh' "{}"; then
+      cat <<'JSON'
 {{"contract_version":"graph-db-evidence-v1","root":"/tmp/repo","backend":"sqlite","target":"agbr","packet_id":"gevd-agbr","projection_hash":"abc","freshness":{{"status":"current","fail_closed":false,"diagnostics":[]}},"target_node":{{"id":"gbak-agbr","kind":"backlog","label":"#agbr"}},"worker_context":[{{"id":"wctx-agbr"}}],"source_handles":[{{"id":"src-agbr"}}],"semantic_related":[{{"id":"sem-agbr"}}],"next_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"],"replay_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"],"repair_commands":["tsift graph-db --path /tmp/repo refresh --json"]}}
 JSON
+    else
+      cat <<'JSON'
+{{"contract_version":"graph-db-evidence-v1","root":"/tmp/repo","backend":"sqlite","target":"agbr","packet_id":"gevd-old","projection_hash":"old","freshness":{{"status":"current","fail_closed":false,"diagnostics":[]}},"target_node":{{"id":"gbak-agbr","kind":"backlog","label":"#agbr"}},"worker_context":[{{"id":"wctx-agbr"}}],"source_handles":[{{"id":"src-agbr"}}],"semantic_related":[{{"id":"sem-agbr"}}],"next_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"],"replay_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"],"repair_commands":["tsift graph-db --path /tmp/repo refresh --json"]}}
+JSON
+    fi
     ;;
   *"conflict-matrix"*)
     cat <<'JSON'
@@ -1778,7 +1815,8 @@ JSON
 esac
 "##,
             log.display(),
-            status
+            status,
+            log.display()
         );
         std::fs::write(&script, script_body).unwrap();
         let mut perms = std::fs::metadata(&script).unwrap().permissions();
@@ -1888,6 +1926,7 @@ esac
 
         let calls = std::fs::read_to_string(log).unwrap();
         assert!(calls.contains("graph-db"));
+        assert!(calls.contains("refresh"));
         assert!(calls.contains("evidence agbr"));
         assert!(calls.contains("conflict-matrix"));
         assert!(calls.contains("dispatch-trace"));
@@ -1927,6 +1966,11 @@ case "$*" in
   *"graph-db"*"--json status"*)
     cat <<'JSON'
 {{"root":"/tmp/repo","graph_db":"/tmp/repo/.tsift/graph.db","freshness":{{"status":"current","fail_closed":false,"content_hash":"abc","source_watermark":"abc","diagnostics":[]}}}}
+JSON
+    ;;
+  *"graph-db"*"--json refresh"*)
+    cat <<'JSON'
+{{"root":"/tmp/repo","graph_db":"/tmp/repo/.tsift/graph.db","operation":"refresh","status":"current","freshness":{{"status":"current","fail_closed":false,"content_hash":"abc","source_watermark":"abc","diagnostics":[]}}}}
 JSON
     ;;
   *"graph-db"*"--json evidence agbr"*)

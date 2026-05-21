@@ -40,12 +40,13 @@ to accept, revise, or reject each packet result.
 - `write_scope` is target-specific. When the backlog item names an explicit
   `scope:` or `write_scope:` path, that path is the packet boundary even if the
   parent planning record has broader defaults.
-- Missing or stale tsift context is not permission to guess; the worker records
-  it in `needs_parent_attention` or escalates.
+- Missing, stale, or failing tsift context is not permission to guess; the
+  worker records it in `needs_parent_attention` or escalates.
 - When graph evidence is available, the packet includes a tsift graph acceptance
   gate with evidence packet ids, projection hashes, replay/repair commands, and
   worker feedback. Missing contract fields, stale graph freshness, or graph
-  command timeouts block packet creation.
+  command timeouts fall back to manual-packet review with the diagnostic
+  preserved instead of blocking packet creation.
 - The parent reviews all worker results and runs required verification before
   finalizing the session document.
 

@@ -34,7 +34,32 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 Compacted content:
 - Archived 1 response topic(s): lower-agent orchestration
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d7cdea62 -->
+### Re: review backlog lifecycle — gpt-5
+
+Implemented #rvel, #fwjw, and #0fcx.
+
+The pending system now has a first-class `agent:review` component. `--pending-gate` moves backlog items into review, `--pending-ungate` moves them back to backlog, `agent-doc migrate` moves legacy `[/]` backlog items into review, and preflight reports `review_count` / `review_gated_count` plus a warning for legacy gated backlog entries. I also added `--review-add` and `--review-edit` for direct review-list mutations, and `review_done_guard` as an opt-in closeout guard that can require gated review before `--done` completes a tracked item.
+
+I updated the docs and specs to describe the new review lifecycle, the agent-doc / job packet / opdoc / runbook / plan taxonomy, and the retained-audit role of opdocs. The FlowCore guard budget was updated only after adding a typed closeout reason for strict `review_done_guard` blocks.
+
+Verification completed:
+
+- `cargo test --test pending_integration`
+- `cargo test component::`
+- `cargo test migrate::`
+- `cargo test frontmatter::`
+- `cargo test --test finalize_integration`
+- `cargo test skill::`
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
+- `cargo fmt --check`
+- `git diff --check`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- GitHub CI run `26205740633` was green; its `Run make tmux-ci` step completed successfully at `2026-05-21T04:46:44Z`.
+
+Committed implementation in `src/agent-doc` as `171f7939 feat: add review backlog lifecycle`, then committed the parent submodule pointer as `843d1c8c4 agent-doc: update review lifecycle`.
+<!-- agent:boundary:132fec51 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,20 +69,15 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#y9kk]
-- do [#v44k]
-- do [#ffsm]
-- do [#rafe]
-- do [#ek86]
+- do [#rvel]
+- do [#fwjw]
+- do [#0fcx]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
 - [ ] [#aggtp] Add an agent-doc graph-backed orchestration acceptance gate that dogfoods the latest tsift graph-db evidence, conflict-matrix, dispatch-trace, worker_result, and job packet contracts against agent-doc jobs create/collect; fail closed when packet ids, projection hashes, replay/repair commands, touched files/tests, or follow-up ids are missing.
-- [ ] [#rvel] [recommended] Add `agent:review` document element for the review-then-done lifecycle (Rob-review rule in session-share). Move `[/]` (gated) items out of `agent:backlog` into a dedicated `<!-- agent:review -->` block; retarget `--pending-gate` to move items there; teach `--done` to accept both sources with new `review_done_guard` frontmatter switch (default off). Auto-migrate legacy `[/]` items via `agent-doc migrate`. Use case: session-share `tasks/root.md` has `#vtvc`/`#vtas`/`#vtmgr`/`#wdmgr`/`#lk2a`/`#vtbs`/`#qew8` floating as `[/]` in the backlog today, conflating queued work with review-pending. Plan: tasks/agent-doc/plan-agent-review-element.md
-- [ ] [#fwjw] Define the agent-doc taxonomy for agent docs, job packets, operation docs, runbooks, and plans.
-- [ ] [#0fcx] Specify operation docs/opdocs as retained audit artifacts and how they relate to job packets.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

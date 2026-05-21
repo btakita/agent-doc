@@ -48,18 +48,12 @@ Top tsift backlog item: `#dtrc` — add dispatch-trace replay/contract fixture c
 Top agent-doc backlog item added to `tasks/agent-doc/agent-doc-bugs2.md`: `#dxtr` — consume tsift dispatch-trace outputs in agent-doc plan/orchestrate closeout.
 
 The queued `#wrfb` / `#gdtr` tsift work is already implemented and pushed in the compacted graph orchestration contracts turn (`btakita/tsift` `9728ade`, parent submodule pointer `39117c97b`). This cycle only records the next follow-ups and queue bookkeeping. I did not rerun tests because no code changed in this cycle; the implementation turn already recorded `make check`, `cargo build`, local install, and green tsift CI for those features.
-<!-- agent:boundary:8734bfef -->
+<!-- agent:boundary:74841584 -->
 <!-- /agent:exchange -->
 ###
 
 
 <!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- do [#wfcl]
-- do [#gafe]
-- do [#dtrc]
-- Update #next-steps in agent-doc-bugs2.md with latest tsift features.
-  Add #next-steps to tsift.md for agent orchestration and graphdb features.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -36,15 +36,33 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 4 response topic(s): next steps; dogfood #orchdog; simpler #orchdog options; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:1df3b3ed -->
+### Re: graph-db queue — gpt-5
+
+Completed `#gdbevid`, `#cmgr`, and `#gdbidx`.
+
+Implemented in `src/tsift` commit `8349ca9` and recorded from the root repo in `108977f79`.
+
+What changed:
+- `graph-db evidence` now gives backlog/job targets without code-token matches a bounded session-line `worker_context` + `source_handle`, so a known backlog id no longer looks like a broken empty projection. Evidence still warns if a resolved target truly has no projection-linked rows.
+- `conflict-matrix` now separates per-target fail-closed state from cross-target overlap with `per_target_fail_closed` and `cross_target_parallel_safe`, while keeping legacy `can_parallel` conservative.
+- `graph-db refresh` now warns clearly when the summary cache is empty and points operators at `tsift summarize --extract ...` before relying on semantic rows.
+- Updated `SPEC.md`, graph orchestration contract fixtures, and conformance coverage for these behaviors.
+
+Verification:
+- `cargo test --test graph_db_conformance` passed: 25 passed, 1 ignored.
+- `make check` passed: clippy, 642 unit tests with 1 ignored, 108 exit-code/integration tests, and graph conformance.
+- `cargo build` passed.
+- `cargo install --path . --locked` passed and replaced local `tsift 0.1.42`.
+- Latest `btakita/tsift` GitHub `CI` run was green (`26205441698`). Latest root `agent-loop` Agent Doc run had empty-step `tmux-ci` / `check` failures, so I classified it as an external CI-start blocker rather than a tmux regression.
+<!-- agent:boundary:2645272f -->
 <!-- /agent:exchange -->
 ###
+<!--
+-->
 
-
-
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#gdbevid]
+- ~do [#gdbevid]~
 - do [#cmgr]
 - do [#gdbidx]
 <!-- /agent:queue -->
@@ -54,9 +72,6 @@ preset #spec-test-build-install-commit-push
 <!-- agent:backlog -->
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.**
 - [ ] [#gdbhard] [recommended] Harden graph-db operator docs/fixtures around the current feature set: refresh/status/doctor/evidence/drift/convex-sync replay paths, stale Convex repair commands, and real agent-loop session examples that can be regenerated in CI.
-- [ ] [#gdbevid] [recommended] `tsift graph-db evidence <backlog-id>` returns 0 rows for backlog ids present in a session document but lacking projection-linked context (worker_context / source_handle / semantic / worker_result all empty). Observed 2026-05-21 dogfood: `evidence x63e` + `evidence v4v0` both empty despite both items being canonical backlog rows. Likely fix: cross-link from session document `agent:backlog` items into the graph projection when they're first observed, even before any worker run; OR document the expected empty-state and adjust the operator messaging to distinguish "no context yet" from "broken projection."
-- [ ] [#cmgr] `tsift conflict-matrix` defaults to `fail_closed=true` when individual targets lack source-ownership evidence, even when the **inter-target** conflict score is `low` / `0` (no file/symbol/test overlap). This is conservative-correct but operators see a confusing combined verdict: cross-item conflict says "safe to parallel" while per-item fail_closed says "don't dispatch." Suggest: surface the two signals as orthogonal fields in the output envelope (`per_target_fail_closed: [...]` + `cross_target_parallel_safe: bool`) rather than a single `can_parallel` field, OR have `can_parallel=true` once cross-target overlap is `low` and downgrade the per-target signal to a soft warning.
-- [ ] [#gdbidx] tsift session-share workspace has 41 stale files and zero cached summaries — `tsift summarize --extract` has not been run for this submodule. Either auto-run on `graph-db refresh` when staleness exceeds a threshold, or fail-closed the refresh with a clearer "index stale: run `tsift summarize`" actionable message rather than the current warning that ships alongside successful refresh.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

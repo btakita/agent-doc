@@ -16,6 +16,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const TSIFT_BIN_ENV: &str = "AGENT_DOC_TSIFT_BIN";
+const GRAPH_DB_EVIDENCE_CONTRACT_VERSION: &str = "graph-db-evidence-v1";
+const CONFLICT_MATRIX_CONTRACT_VERSION: &str = "conflict-matrix-v1";
+const WORKER_PROMPT_PACKET_CONTRACT_VERSION: &str = "worker-prompt-packet-v1";
+const LOWER_AGENT_JOB_PACKET_CONTRACT_VERSION: &str = "agent-doc-lower-agent-job-v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TsiftGraphEvidencePlan {
@@ -42,6 +46,8 @@ pub(crate) struct TsiftGraphDbStatus {
 pub(crate) struct TsiftPromptTargetHandle {
     pub(crate) prompt_target: String,
     pub(crate) target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) contract_version: Option<String>,
     pub(crate) evidence_packet_id: String,
     pub(crate) target_node_id: String,
     pub(crate) target_kind: String,
@@ -229,6 +235,8 @@ pub(crate) struct TsiftWorkerPromptTokenBudget {
 #[derive(Debug, Serialize)]
 struct TaskGraphPromptContext<'a> {
     target: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    contract_version: Option<&'a str>,
     evidence_packet_id: &'a str,
     target_node_id: &'a str,
     target_kind: &'a str,
@@ -243,6 +251,8 @@ struct TaskGraphPromptContext<'a> {
     conflict_matrix: TaskGraphConflictContext<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
     worker_prompt_packet: Option<&'a TsiftWorkerPromptPacket>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lower_agent_job_packet: Option<LowerAgentJobPacket<'a>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -261,6 +271,29 @@ struct TaskGraphConflictContext<'a> {
     decisions: &'a [String],
     worker_ownership_blocks: &'a [String],
     warnings: &'a [String],
+}
+
+#[derive(Debug, Serialize)]
+struct LowerAgentJobPacket<'a> {
+    contract_version: &'static str,
+    source_contract_version: &'a str,
+    packet_id: &'a str,
+    target: &'a str,
+    rank: usize,
+    risk: &'a str,
+    projection_hash: &'a str,
+    title: &'a str,
+    owned_files: &'a [String],
+    owned_symbols: &'a [String],
+    read_only_context: &'a [String],
+    forbidden_files: &'a [String],
+    expected_tests: &'a [String],
+    expansion_commands: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    token_budget: Option<&'a TsiftWorkerPromptTokenBudget>,
+    semantic_dispatch_score: i64,
+    semantic_dispatch_reasons: &'a [String],
+    fail_closed_prompt: &'a str,
 }
 
 pub(crate) fn collect_for_do_items(
@@ -331,13 +364,15 @@ pub(crate) fn collect_for_do_items(
         next_commands.insert(command.clone());
     }
 
-    Ok(Some(TsiftGraphEvidencePlan {
+    let plan = TsiftGraphEvidencePlan {
         targets: do_items.into_iter().map(|item| item.target).collect(),
         graph_db_status,
         prompt_target_handles: handles,
         conflict_matrix,
         next_commands: next_commands.into_iter().collect(),
-    }))
+    };
+    validate_graph_contracts(&plan)?;
+    Ok(Some(plan))
 }
 
 pub(crate) fn extract_do_target(text: &str) -> Option<String> {
@@ -377,6 +412,7 @@ impl TsiftGraphEvidencePlan {
             .find(|packet| packet.target.eq_ignore_ascii_case(&target));
         let context = TaskGraphPromptContext {
             target: &handle.target,
+            contract_version: handle.contract_version.as_deref(),
             evidence_packet_id: &handle.evidence_packet_id,
             target_node_id: &handle.target_node_id,
             target_kind: &handle.target_kind,
@@ -401,12 +437,39 @@ impl TsiftGraphEvidencePlan {
                 warnings: &self.conflict_matrix.warnings,
             },
             worker_prompt_packet,
+            lower_agent_job_packet: worker_prompt_packet
+                .and_then(TsiftWorkerPromptPacket::as_lower_agent_job_packet),
         };
         Ok(Some(format!(
             "<tsift_graph_evidence>\n{}\n</tsift_graph_evidence>",
             serde_json::to_string_pretty(&context)
                 .context("serializing tsift graph prompt context")?
         )))
+    }
+}
+
+impl TsiftWorkerPromptPacket {
+    fn as_lower_agent_job_packet(&self) -> Option<LowerAgentJobPacket<'_>> {
+        Some(LowerAgentJobPacket {
+            contract_version: LOWER_AGENT_JOB_PACKET_CONTRACT_VERSION,
+            source_contract_version: self.contract_version.as_deref()?,
+            packet_id: self.packet_id.as_deref()?,
+            target: &self.target,
+            rank: self.rank,
+            risk: &self.risk,
+            projection_hash: self.projection_hash.as_deref()?,
+            title: &self.title,
+            owned_files: &self.owned_files,
+            owned_symbols: &self.owned_symbols,
+            read_only_context: &self.read_only_context,
+            forbidden_files: &self.forbidden_files,
+            expected_tests: &self.expected_tests,
+            expansion_commands: &self.expansion_commands,
+            token_budget: self.token_budget.as_ref(),
+            semantic_dispatch_score: self.semantic_dispatch_score,
+            semantic_dispatch_reasons: &self.semantic_dispatch_reasons,
+            fail_closed_prompt: self.prompt.as_deref()?,
+        })
     }
 }
 
@@ -577,12 +640,11 @@ fn parse_evidence_handle(
         .with_context(|| format!("tsift graph-db evidence target not found: {target}"))?;
     let target_kind = string_at(value, "/target_node/kind").unwrap_or_default();
     let target_label = string_at(value, "/target_node/label").unwrap_or_default();
-    let evidence_packet_id =
-        string_at(value, "/packet_id").unwrap_or_else(|| format!("{target}:{target_node_id}"));
     Ok(TsiftPromptTargetHandle {
         prompt_target: prompt_target.to_string(),
         target: target.to_string(),
-        evidence_packet_id,
+        contract_version: string_at(value, "/contract_version"),
+        evidence_packet_id: string_at(value, "/packet_id").unwrap_or_default(),
         target_node_id,
         target_kind,
         target_label,
@@ -594,6 +656,161 @@ fn parse_evidence_handle(
         replay_commands: string_array(value.pointer("/replay_commands")),
         repair_commands: string_array(value.pointer("/repair_commands")),
     })
+}
+
+fn validate_graph_contracts(plan: &TsiftGraphEvidencePlan) -> Result<()> {
+    let mut errors = Vec::new();
+
+    if plan.graph_db_status.status != "current" {
+        errors.push(format!(
+            "graph-db status freshness must be current, got {}",
+            plan.graph_db_status.status
+        ));
+    }
+
+    for handle in &plan.prompt_target_handles {
+        require_version(
+            &mut errors,
+            &format!("graph-db evidence {}", handle.target),
+            "contract_version",
+            handle.contract_version.as_deref(),
+            GRAPH_DB_EVIDENCE_CONTRACT_VERSION,
+        );
+        require_nonempty(
+            &mut errors,
+            &format!("graph-db evidence {}", handle.target),
+            "packet_id",
+            Some(handle.evidence_packet_id.as_str()),
+        );
+        require_nonempty(
+            &mut errors,
+            &format!("graph-db evidence {}", handle.target),
+            "projection_hash",
+            handle.projection_hash.as_deref(),
+        );
+        require_nonempty_list(
+            &mut errors,
+            &format!("graph-db evidence {}", handle.target),
+            "replay_commands",
+            &handle.replay_commands,
+        );
+        require_nonempty_list(
+            &mut errors,
+            &format!("graph-db evidence {}", handle.target),
+            "repair_commands",
+            &handle.repair_commands,
+        );
+    }
+
+    require_version(
+        &mut errors,
+        "conflict-matrix",
+        "contract_version",
+        plan.conflict_matrix.contract_version.as_deref(),
+        CONFLICT_MATRIX_CONTRACT_VERSION,
+    );
+
+    for handle in &plan.prompt_target_handles {
+        if !handle.evidence_packet_id.is_empty()
+            && !plan
+                .conflict_matrix
+                .evidence_packet_ids
+                .iter()
+                .any(|id| id == &handle.evidence_packet_id)
+        {
+            errors.push(format!(
+                "conflict-matrix missing evidence_packet_id {} for target {}",
+                handle.evidence_packet_id, handle.target
+            ));
+        }
+
+        let Some(packet) = plan
+            .conflict_matrix
+            .worker_prompt_packets
+            .iter()
+            .find(|packet| packet.target.eq_ignore_ascii_case(&handle.target))
+        else {
+            errors.push(format!(
+                "conflict-matrix missing worker_prompt_packet for target {}",
+                handle.target
+            ));
+            continue;
+        };
+
+        let packet_label = format!("worker_prompt_packet {}", handle.target);
+        require_version(
+            &mut errors,
+            &packet_label,
+            "contract_version",
+            packet.contract_version.as_deref(),
+            WORKER_PROMPT_PACKET_CONTRACT_VERSION,
+        );
+        require_nonempty(
+            &mut errors,
+            &packet_label,
+            "packet_id",
+            packet.packet_id.as_deref(),
+        );
+        require_nonempty(
+            &mut errors,
+            &packet_label,
+            "projection_hash",
+            packet.projection_hash.as_deref(),
+        );
+        require_nonempty(
+            &mut errors,
+            &packet_label,
+            "prompt",
+            packet.prompt.as_deref(),
+        );
+        if let Some(prompt) = packet.prompt.as_deref()
+            && !prompt.to_ascii_lowercase().contains("fail closed")
+        {
+            errors.push(format!(
+                "{packet_label} prompt missing fail-closed instructions"
+            ));
+        }
+        if packet.token_budget.is_none() {
+            errors.push(format!("{packet_label} missing token_budget"));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "tsift graph orchestration contract invalid: {}",
+            errors.join("; ")
+        )
+    }
+}
+
+fn require_version(
+    errors: &mut Vec<String>,
+    subject: &str,
+    field: &str,
+    actual: Option<&str>,
+    expected: &str,
+) {
+    match actual.filter(|value| !value.trim().is_empty()) {
+        Some(value) if value == expected => {}
+        Some(value) => errors.push(format!(
+            "{subject} unsupported {field}={value}, expected {expected}"
+        )),
+        None => errors.push(format!("{subject} missing {field}")),
+    }
+}
+
+fn require_nonempty(errors: &mut Vec<String>, subject: &str, field: &str, actual: Option<&str>) {
+    if actual.is_none_or(|value| value.trim().is_empty()) {
+        errors.push(format!("{subject} missing {field}"));
+    }
+}
+
+fn require_nonempty_list(errors: &mut Vec<String>, subject: &str, field: &str, actual: &[String]) {
+    if actual.is_empty() {
+        errors.push(format!("{subject} missing {field}"));
+    }
 }
 
 fn parse_conflict_matrix(value: &Value) -> TsiftConflictMatrixSummary {
@@ -871,7 +1088,7 @@ JSON
     ;;
   *"graph-db"*"--json evidence agbr"*)
     cat <<'JSON'
-{{"root":"/tmp/repo","backend":"sqlite","target":"agbr","packet_id":"gevd-agbr","projection_hash":"abc","freshness":{{"status":"current","fail_closed":false,"diagnostics":[]}},"target_node":{{"id":"gbak-agbr","kind":"backlog","label":"#agbr"}},"worker_context":[{{"id":"wctx-agbr"}}],"source_handles":[{{"id":"src-agbr"}}],"semantic_related":[{{"id":"sem-agbr"}}],"next_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"],"replay_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"],"repair_commands":["tsift graph-db --path /tmp/repo refresh --json"]}}
+{{"contract_version":"graph-db-evidence-v1","root":"/tmp/repo","backend":"sqlite","target":"agbr","packet_id":"gevd-agbr","projection_hash":"abc","freshness":{{"status":"current","fail_closed":false,"diagnostics":[]}},"target_node":{{"id":"gbak-agbr","kind":"backlog","label":"#agbr"}},"worker_context":[{{"id":"wctx-agbr"}}],"source_handles":[{{"id":"src-agbr"}}],"semantic_related":[{{"id":"sem-agbr"}}],"next_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"],"replay_commands":["tsift graph-db --path /tmp/repo evidence agbr --json"],"repair_commands":["tsift graph-db --path /tmp/repo refresh --json"]}}
 JSON
     ;;
   *"conflict-matrix"*)
@@ -989,6 +1206,57 @@ esac
         assert!(calls.contains("status"));
         assert!(!calls.contains("evidence agbr"));
         assert!(!calls.contains("conflict-matrix"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn collect_for_do_items_fails_closed_on_missing_graph_contract_fields() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (dir, doc) = setup_doc();
+        let log = dir.path().join("calls.log");
+        let script = dir.path().join("fake-tsift-missing-contracts.sh");
+        let script_body = format!(
+            r##"#!/bin/sh
+printf '%s\n' "$*" >> "{}"
+case "$*" in
+  *"graph-db"*"--json status"*)
+    cat <<'JSON'
+{{"root":"/tmp/repo","graph_db":"/tmp/repo/.tsift/graph.db","freshness":{{"status":"current","fail_closed":false,"content_hash":"abc","source_watermark":"abc","diagnostics":[]}}}}
+JSON
+    ;;
+  *"graph-db"*"--json evidence agbr"*)
+    cat <<'JSON'
+{{"root":"/tmp/repo","backend":"sqlite","target":"agbr","freshness":{{"status":"current","fail_closed":false,"diagnostics":[]}},"target_node":{{"id":"gbak-agbr","kind":"backlog","label":"#agbr"}},"worker_context":[],"source_handles":[]}}
+JSON
+    ;;
+  *"conflict-matrix"*)
+    cat <<'JSON'
+{{"targets":["agbr"],"can_parallel":true,"fail_closed":false,"worker_prompt_packets":[]}}
+JSON
+    ;;
+  *)
+    echo "unexpected fake tsift args: $*" >&2
+    exit 2
+    ;;
+esac
+"##,
+            log.display()
+        );
+        std::fs::write(&script, script_body).unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        let _env = EnvGuard::set(TSIFT_BIN_ENV, script.to_str().unwrap());
+
+        let err = collect_for_do_items(&doc, &["do #agbr".to_string()])
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("graph-db evidence agbr missing contract_version"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

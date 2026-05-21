@@ -2057,6 +2057,7 @@ mod tests {
             prompt_target_handles: vec![crate::tsift_graph::TsiftPromptTargetHandle {
                 prompt_target: "do #gkke".to_string(),
                 target: "gkke".to_string(),
+                contract_version: Some("graph-db-evidence-v1".to_string()),
                 evidence_packet_id: "gevd-gkke".to_string(),
                 target_node_id: "gbak-gkke".to_string(),
                 target_kind: "backlog".to_string(),
@@ -2663,8 +2664,34 @@ mod tests {
         assert!(prompt.contains("\"candidates\""));
         assert!(prompt.contains("Fail closed if the task requires a forbidden/shared file"));
         assert!(prompt.contains("\"token_budget\""));
+        assert!(prompt.contains("\"lower_agent_job_packet\""));
+        assert!(prompt.contains("\"owned_files\": ["));
+        assert!(prompt.contains("\"read_only_context\": ["));
+        assert!(prompt.contains("\"forbidden_files\": []"));
+        assert!(prompt.contains("\"expected_tests\": ["));
+        assert!(prompt.contains("\"expansion_commands\": ["));
+        assert!(prompt.contains("\"fail_closed_prompt\""));
         let final_doc = fs::read_to_string(&doc).unwrap();
         assert!(!final_doc.contains("<tsift_graph_evidence>"));
+    }
+
+    #[test]
+    fn parallel_graph_context_maps_worker_packet_to_lower_agent_job_packet() {
+        let graph_evidence = test_graph_evidence_plan();
+        let prompt =
+            apply_parallel_graph_context("do #gkke", "do #gkke".to_string(), Some(&graph_evidence));
+
+        assert!(prompt.contains("\"lower_agent_job_packet\""));
+        assert!(prompt.contains("\"contract_version\": \"agent-doc-lower-agent-job-v1\""));
+        assert!(prompt.contains("\"source_contract_version\": \"worker-prompt-packet-v1\""));
+        assert!(prompt.contains("\"packet_id\": \"wpp-gkke\""));
+        assert!(prompt.contains("\"owned_files\": ["));
+        assert!(prompt.contains("\"read_only_context\": ["));
+        assert!(prompt.contains("\"forbidden_files\": []"));
+        assert!(prompt.contains("\"expected_tests\": ["));
+        assert!(prompt.contains("\"expansion_commands\": ["));
+        assert!(prompt.contains("\"fail_closed_prompt\""));
+        assert!(prompt.contains("Fail closed if the task requires a forbidden/shared file"));
     }
 
     #[test]

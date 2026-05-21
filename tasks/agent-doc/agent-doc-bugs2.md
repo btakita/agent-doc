@@ -54,6 +54,7 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#aggtp] Add an agent-doc graph-backed orchestration acceptance gate that dogfoods the latest tsift graph-db evidence, conflict-matrix, dispatch-trace, worker_result, and job packet contracts against agent-doc jobs create/collect; fail closed when packet ids, projection hashes, replay/repair commands, touched files/tests, or follow-up ids are missing.
 - [ ] [#rvel] [recommended] Add `agent:review` document element for the review-then-done lifecycle (Rob-review rule in session-share). Move `[/]` (gated) items out of `agent:backlog` into a dedicated `<!-- agent:review -->` block; retarget `--pending-gate` to move items there; teach `--done` to accept both sources with new `review_done_guard` frontmatter switch (default off). Auto-migrate legacy `[/]` items via `agent-doc migrate`. Use case: session-share `tasks/root.md` has `#vtvc`/`#vtas`/`#vtmgr`/`#wdmgr`/`#lk2a`/`#vtbs`/`#qew8` floating as `[/]` in the backlog today, conflating queued work with review-pending. Plan: tasks/agent-doc/plan-agent-review-element.md
 - [ ] [#fwjw] Define the agent-doc taxonomy for agent docs, job packets, operation docs, runbooks, and plans.
 - [ ] [#0fcx] Specify operation docs/opdocs as retained audit artifacts and how they relate to job packets.

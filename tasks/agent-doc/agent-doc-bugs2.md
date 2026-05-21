@@ -106,8 +106,22 @@ I repaired the pre-fix closeout residue from the earlier IPC write: the hidden d
 ### Re: repair boundary closeout — gpt-5
 
 Closed the post-repair boundary drift through `agent-doc write --commit`; no additional implementation changes were made in this document-only closeout.
+❯ Can we use the git diff to help determine if the ipc write is a duplicate?
+### Re: ipc duplicate detection — gpt-5
 
-<!-- agent:boundary:b2d8920a -->
+Yes, but I would use diff logic as a content-level guard, not raw `git diff HEAD` as the source of truth.
+
+The duplicate decision needs to compare the cycle baseline, the agent-applied document (`content_ours`), and the live editor/disk document (`content_current`). Raw git diff is too broad there because it is relative to `HEAD`, includes unrelated user edits/status/pending mutations, and may see the session document after an editor-side IPC apply but before closeout has normalized snapshots. That makes it good diagnostics, but too noisy for the actual guard.
+
+The stronger version is an in-memory normalized diff:
+
+- compute the exchange delta from `base -> content_ours`, after stripping boundary markers and ordinary comments where appropriate;
+- compute the exchange delta from `base -> content_current`;
+- if the response delta from `content_ours` is already present in `content_current`, adopt current and skip CRDT merge/fallback write;
+- otherwise continue through the existing merge path.
+
+That is basically the same class of check as `response_already_in_current`, but a hunk/delta containment check would be more defensible than the current line-overlap heuristic. It would also let the IPC path emit a precise diagnostic like “response delta already present in current file” rather than only inferring from matching lines. I would keep raw git diff as a logged/debugging artifact, not the duplicate gate.
+<!-- agent:boundary:4bd6ac89 -->
 <!-- /agent:exchange -->
 ###
 

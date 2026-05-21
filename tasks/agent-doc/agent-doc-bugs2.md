@@ -34,7 +34,16 @@ Added auto-DAG next steps; top backlog item: #autodag.
 Compacted content:
 - Archived 1 response topic(s): auto-DAG next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:7265d908 -->
+### Re: queued auto-DAG work — gpt-5
+
+I could not start the `autodag` backlog item safely because planning failed closed before repo work. `agent-doc plan` required fresh `tsift` graph evidence, but the graph evidence command timed out:
+
+```bash
+tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json evidence autodag --depth 3 --limit 8
+```
+
+No code changes were made, and the backlog item remains open rather than being marked done. The next cycle should retry after `tsift` graph evidence is available or fix the timeout/blocker first.
+<!-- agent:boundary:6edcf9e4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +53,7 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#autodag]
+- ~do [#autodag]~
 - do [#dagdispatch]
 - do [#dagrecover]
 - do [#daglogs]

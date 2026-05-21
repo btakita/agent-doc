@@ -130,7 +130,38 @@ Top backlog item: `#ipcd`.
 I added `#ipcd` as the new first backlog item because it is the direct next step from the IPC duplicate-write discussion: replace the current line-overlap duplicate inference with a normalized response-delta containment guard, then pin it with regressions around ack-content and socket-timeout fallback paths.
 
 The backlog priority now starts with `#ipcd`, followed by the existing lower-agent orchestration items. This cycle only updates backlog/accounting; it does not implement the guard.
-<!-- agent:boundary:af899d39 -->
+❯ do #[#ipcd]. #spec-test-build-install-commit-push
+### Re: #ipcd — gpt-5
+
+Implemented and pushed `#ipcd`.
+
+What changed:
+- Replaced the IPC duplicate-response inference in `src/agent-doc/src/write.rs` with normalized `base -> content_ours` response-delta containment inside `agent:exchange`.
+- The guard now ignores boundary/comment churn and prompt-prefix-only normalization, but requires each actionable response insertion hunk to be present contiguously in the current document before adopting editor-applied content.
+- Applied the same guard before the ack-content normalization fallback CRDT merge, so a plugin-written response already visible on disk is adopted instead of replayed.
+- Updated `SPEC.md`, `specs/07-closeout-commands.md`, and `VERSIONS.md` with the new closeout contract.
+
+Regression proof:
+- Added failing tests first for the old line-overlap false positive: `response_already_in_current_rejects_partial_line_overlap` and `adopt_current_response_without_duplication_rejects_partial_line_overlap` both failed before the fix.
+- Added ack-content fallback coverage: `normalization_fallback_adopts_ack_content_response_delta_before_merge` failed before the fix by producing two response headings.
+
+Verification:
+- `cargo test response_already_in_current`
+- `cargo test adopt_current_response_without_duplication`
+- `cargo test normalization_fallback_adopts_ack_content_response_delta_before_merge`
+- `cargo test --test test_cli flowcore_hot_path_guard_and_proof_tokens_are_budgeted`
+- `make check`
+- `make install`
+- `agent-doc --version` reports `agent-doc 0.33.16`
+- `git diff --check`
+- Latest completed GitHub CI before this push was green: run `26199199170`, including `Run make tmux-ci`. The new post-push CI run is in progress: `26201015869` on commit `82f6cfa8`; at inspection time `Run make check` was running and `Run make tmux-ci` was pending.
+
+Commits pushed:
+- `src/agent-doc`: `82f6cfa8 fix: use response delta for ipc dedupe`, pushed to `origin/20260422/codex-agent-backend`.
+- root repo: `996d30808 chore: update agent-doc submodule`, pushed to `origin/main`.
+
+No follow-up backlog item came out of this change.
+<!-- agent:boundary:ea170e74 -->
 <!-- /agent:exchange -->
 ###
 
@@ -141,7 +172,7 @@ The backlog priority now starts with `#ipcd`, followed by the existing lower-age
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#ipcd] [recommended] Implement normalized IPC response-delta containment for duplicate write detection: compare base->content_ours against base->content_current at the exchange/component hunk level, adopt current when the response delta is already present, keep raw git diff as diagnostics only, and add regressions for ack-content plus socket timeout fallback paths.
+- [ ] [#agbr] [recommended] Wire tsift graph evidence into agent-doc planning/orchestration: have agent-doc plan/orchestrate call tsift graph-db evidence and tsift conflict-matrix for queued do-items, attach graph handles to prompt_targets/job packets, and fail closed on stale graph.db or missing targets.
 - [ ] [#r7k8] [recommended] Incorporate tsift #pwcm planner conflict-matrix report into lower-agent orchestration before enabling parallel worker dispatch: use graph/context/diff/impact outputs to rank worker scopes, flag shared file/symbol/test/config conflicts, and emit fail-closed ownership blocks. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#y9kk] [recommended] Phase 1 for lower-agent orchestration: define job packet + worker result schemas, add the manual job-packet runbook, and include examples for search, test triage, small patch, and spec update jobs. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md
 - [ ] [#v44k] [recommended] Phase 2 for lower-agent orchestration: add tsift JSON contracts for context-pack, source-read, diff-digest, test-digest, index-status, stable handles, freshness checks, and token estimates. Plan: tasks/agent-doc/plan-lower-agent-orchestration-token-savings.md

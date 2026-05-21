@@ -19,7 +19,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Blocked before #tsdag/#impactdag/#dagfix: graph-db evidence for #tsdag timed out during planning.
+Blocked: graph-db evidence for #tsdag timed out; queued DAG/lock follow-ups remain open.
 <!-- /agent:status -->
 
 ## Spec
@@ -43,7 +43,12 @@ I did not start `#tsdag`, `#impactdag`, or `#dagfix` because the `agent-doc plan
 `tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --json evidence tsdag --depth 3 --limit 8` timed out after 30 seconds while collecting graph evidence for `#tsdag`.
 
 Because the planning record failed closed before implementation, the three backlog items remain open. I did not make new code changes, run the spec/test/build/install preset, or create additional commits for this queue batch.
-<!-- agent:boundary:e124291a -->
+### Re: post-closeout queue additions — gpt-5
+
+After the blocked `#tsdag` / `#impactdag` / `#dagfix` response, the document queued `#cmgrwres` and `#gdblock` as additional dogfood follow-ups.
+
+I did not start those new items in this cycle. The active batch is still blocked at planning time because graph-db evidence for `#tsdag` timed out, so the later queue additions remain open for a fresh cycle after that graph-db evidence blocker is resolved. No additional repo edits, tests, installs, commits, or pushes were performed for `#cmgrwres` / `#gdblock`.
+<!-- agent:boundary:a53b205a -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,6 +59,8 @@ preset #spec-test-build-install-commit-push
 - do [#tsdag]
 - do [#impactdag]
 - do [#dagfix]
+- do [#cmgrwres]
+- do [#gdblock]
 <!-- /agent:queue -->
 
 ## Backlog

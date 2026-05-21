@@ -34,7 +34,19 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 Compacted content:
 - Archived 1 response topic(s): review backlog lifecycle
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:459d57ed -->
+❯ do [#aggtp]. #spec-test-build-install-commit-push
+### Re: graph acceptance gate — gpt-5
+
+I could not start `#aggtp` yet because `agent-doc plan` failed closed on the required tsift graph evidence step:
+
+```text
+tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json status
+Error: attempt to write a readonly database
+Caused by: Error code 776: Database has hot journal that must be rolled back (requires write access)
+```
+
+No repo edits, tests, build, install, commit, or push were performed. `#aggtp` remains open because implementation did not begin; I added a blocker follow-up for repairing the tsift graph DB state before rerunning the work.
+<!-- agent:boundary:9d88b3a4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,7 +64,10 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#w25k] Resolve the tsift graph-db hot-journal/read-only blocker for tasks/agent-doc/agent-doc-bugs2.md so #aggtp can run through graph evidence, implementation, verification, install, commit, and push.
 - [ ] [#aggtp] Add an agent-doc graph-backed orchestration acceptance gate that dogfoods the latest tsift graph-db evidence, conflict-matrix, dispatch-trace, worker_result, and job packet contracts against agent-doc jobs create/collect; fail closed when packet ids, projection hashes, replay/repair commands, touched files/tests, or follow-up ids are missing.
+- [ ] [#jpktscope] [recommended] `agent-doc jobs create` derives the packet set from `agent-doc plan`'s `pending_mutations`, not from the full `repo_actions` text or `prompt_target` set. Observed 2026-05-21 dogfood: a session prompt `do [#x63e] [#v4v0] ...` produced exactly one packet (#x63e) because only x63e was a `pending_mutation` in the planning record. Result: queued items that aren't already backlog-tracked silently drop out of the job-packet workflow. Fix: have `jobs create` expand from the union of `pending_mutations` ∪ `prompt_target` ids referenced in `repo_actions`, or document the constraint that only `pending_mutations`-tracked ids are dispatchable.
+- [ ] [#jpktwsmis] Job packet `write_scope` mis-attribution for cross-repo session documents. Observed 2026-05-21: dogfood against `session-share/tasks/root.md` produced a packet for `#x63e` (scope: `build-party/specs/convex-knowledge-layer.md`) with `write_scope: ["src/agent-doc/specs/", "src/agent-doc/src/", "src/agent-doc/tests/", "src/tsift/"]` — the agent-doc/tsift defaults rather than the build-party path the backlog item names. Worker honoring this scope would refuse to touch build-party. Fix: derive `write_scope` from the backlog item's file references (use path-extraction heuristic over the item text) instead of defaulting to the document's own repo.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

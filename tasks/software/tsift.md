@@ -54,6 +54,8 @@ preset #spec-test-build-install-commit-push
 - do [#tsdag]
 - do [#impactdag]
 - do [#dagfix]
+- do [#cmgrwres]
+- do [#gdblock]
 <!-- /agent:queue -->
 
 ## Backlog

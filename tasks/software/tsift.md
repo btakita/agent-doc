@@ -52,7 +52,7 @@ Recommendation: keep SQLite as the default correctness backend and fix `#gdblock
 Sources checked: [DuckDB concurrency](https://duckdb.org/docs/current/connect/concurrency), [DuckDB graph queries / DuckPGQ](https://duckdb.org/docs/lts/guides/sql_features/graph_queries.html), [Ladybug overview](https://docs.ladybugdb.com/), [Ladybug concurrency](https://docs.ladybugdb.com/concurrency/), [Ladybug Rust API](https://docs.ladybugdb.com/client-apis/rust/), [Ladybug DuckDB extension](https://docs.ladybugdb.com/extensions/attach/duckdb/).
 
 Closeout: no repo files changed for this response; no tests run because this was an evaluation-only prompt. Commands used: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, targeted `rg`/`sed` inspection, and current primary docs lookup. Preflight warning noted: one legacy gated backlog item remains in `agent:backlog` and can be migrated separately with `agent-doc migrate`.
-<!-- agent:boundary:84b279e0 -->
+<!-- agent:boundary:5a728a16 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,6 +70,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#dbbench] [recommended] Add an experimental GraphStore backend evaluation for DuckDB/DuckPGQ and Ladybug: prototype read-only adapters behind the existing contract, benchmark refresh/status/evidence/conflict-matrix/dispatch-trace on real and synthetic projections, and only promote if it beats SQLite without worsening multi-process lock behavior or install portability.
 - [ ] [#tsdag] [recommended] Add graph-level dependency DAG extraction for agent-doc work: derive explicit and implicit edges among backlog ids from file/symbol/test/config overlap, semantic relations, worker_result follow-up ids, and depends-on text; emit nodes, edges, cycle diagnostics, topo batches, replay commands, and repair commands as a versioned JSON contract.
 - [ ] [#impactdag] [recommended] Extend conflict-matrix and dispatch-trace with scheduler fields: parallel_safe, blocks, blocked_by, required_context, expected_tests, and stable graph handles so agent-doc can run topological antichains without scraping prose.
 - [ ] [#dagfix] [recommended] Add regeneration fixtures for real agent-doc queue DAGs: refresh -> evidence -> conflict-matrix -> dependency-dag -> dispatch-trace, asserting projection freshness, packet ids, worker_result closure, cycle detection, and stale graph fail-closed behavior.

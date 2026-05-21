@@ -89,7 +89,30 @@ Priority order applied:
 7. `#orchdog` — already gated by prior dogfood runs; keep it behind the active repair and feature backlog.
 
 Changed paths: session document backlog order only. Commands: `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc finalize --pending-reorder ...`. Checks run: no project test suite, because this was a document-only backlog reorder. Escalation: none.
-<!-- agent:boundary:ecd17a42 -->
+### Re: #gdblock graph-db lock recovery — gpt-5
+
+Implemented the graph-db SQLite lock recovery path and marked `#gdblock` done.
+
+What changed:
+- `SqliteGraphStore` now opens writable `graph.db` with WAL mode, a 5s busy timeout, and a bounded WAL autocheckpoint budget.
+- Read-only graph-db paths now use resilient read-only opens. If the live SQLite DB reports a rollback-journal or WAL-sidecar lock, tsift copies the DB plus `-wal` / `-shm` sidecars to a temporary snapshot and keeps `status`, `doctor`, `evidence`, query, conflict-matrix, dispatch-trace, context-pack, Convex sync/drift, and semantic-related reads available.
+- `graph-db status --json` now surfaces `recovery`, and human/doctor/warning paths report the snapshot fallback so operators can distinguish a wedged writer from stale graph evidence.
+- `SPEC.md` now records WAL/busy-timeout/snapshot fallback as part of the graph-db contract.
+
+Commits:
+- `src/tsift`: `5128c46` (`fix: recover graph-db reads from sqlite locks`) pushed to `origin/main`.
+- Superproject gitlink: `66cd04534` (`chore: bump tsift graph-db lock fix`) created; push follows this document closeout boundary.
+
+Verification:
+- `cargo check`
+- `cargo test graph_db_status`
+- `cargo test graph_db_evidence_uses_snapshot_fallback_when_graph_db_is_locked`
+- `make check` (`cargo clippy --all-targets -- -D warnings` plus full non-ignored test suite; 645 unit tests, 108 exit-code tests, 27 graph-db conformance tests passed; 2 ignored live/wide jobs remained ignored)
+- `cargo build`
+- `cargo install --path .`; installed `tsift 0.1.42`
+- Latest `btakita/tsift` CI run `26209859223` was green for `clippy + test` and live Convex acceptance.
+- Latest root `Agent Doc` run `26210824562` had empty-step `tmux-ci` and `check` jobs, so I classified it as an external CI-start blocker rather than a tmux/code regression.
+<!-- agent:boundary:93b37eba -->
 <!-- /agent:exchange -->
 ###
 <!--

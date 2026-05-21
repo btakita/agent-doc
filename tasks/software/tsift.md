@@ -30,55 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-033842.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-040851.md`*
 
 Compacted content:
-- Archived 1 response topic(s): graph orchestration contracts
+- Archived 3 response topic(s): graph orchestration next steps; worker-feedback closure contracts; graph orchestration next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ Update #next-steps in agent-doc-bugs2.md with latest tsift features.
-❯ Add #next-steps to tsift.md for agent orchestration and graphdb features.
-### Re: graph orchestration next steps — gpt-5
-
-I updated the next-step backlog split after the latest tsift graph orchestration features.
-
-Top tsift backlog item: `#dtrc` — add dispatch-trace replay/contract fixture coverage over a real agent-doc queue run.
-
-Top agent-doc backlog item added to `tasks/agent-doc/agent-doc-bugs2.md`: `#dxtr` — consume tsift dispatch-trace outputs in agent-doc plan/orchestrate closeout.
-
-The queued `#wrfb` / `#gdtr` tsift work is already implemented and pushed in the compacted graph orchestration contracts turn (`btakita/tsift` `9728ade`, parent submodule pointer `39117c97b`). This cycle only records the next follow-ups and queue bookkeeping. I did not rerun tests because no code changed in this cycle; the implementation turn already recorded `make check`, `cargo build`, local install, and green tsift CI for those features.
-### Re: worker-feedback closure contracts — gpt-5
-
-Completed `#dtrc`, `#gafe`, and `#wfcl`.
-
-Implemented in `btakita/tsift` commit `3560d68` and updated/pushed the parent submodule pointer in `btakita/agent-loop` commit `a5c464241`.
-
-What changed:
-- `conflict-matrix` now carries worker-feedback closure controls: stale expected tests, follow-up debt, closure rank scores/reasons, and warnings that can reorder equal-risk safe candidates without modifying hard file/symbol/test/config gates.
-- `worker_prompt_packets` and `dispatch-trace` include the worker-feedback closure summary, and the HTML trace shows closure/stale/debt signals.
-- Added `fixtures/graph-db-operator-examples/agent-orchestration-acceptance-pack.json` plus conformance coverage for a real queue replay path: `refresh -> evidence -> conflict-matrix -> dispatch-trace` JSON/HTML, packet/replay/repair command consistency, and graph.db link checks.
-- Updated `SPEC.md`, README, and graph orchestration contract fixtures.
-
-Verification:
-- `cargo test --test graph_db_conformance` — 22 passed, 1 ignored
-- `make ci-full` — clippy, normal tests, ignored deterministic SimWorld coverage, and the env-gated live Convex path passed
-- `cargo build`
-- `cargo install --path .`
-- `tsift --version` -> `tsift 0.1.42`
-- GitHub Actions `CI` run `26204657736` — green after push; annotations were the existing Node 20 deprecation notice and the documented live Convex URL configuration note.
-
-Pushed:
-- `btakita/tsift` `main`: `3560d68`
-- `btakita/agent-loop` `main`: `a5c464241`
-❯ Update #next-steps in agent-doc-bugs2.md with latest tsift features.
-❯ Add #next-steps to tsift.md for agent orchestration and graphdb features.
-### Re: graph orchestration next steps — gpt-5
-
-I refreshed the tsift next-step queue after the worker-feedback closure contract work.
-
-Top tsift backlog item: `#aorp` — add a fixture-regeneration acceptance harness that derives graph-db evidence, conflict-matrix, dispatch-trace JSON/HTML, context-pack, and session-review samples from a real queue fixture, then fails CI if checked-in contracts drift from regenerated output.
-
-The agent-doc follow-up list is already current for the latest tsift features: `tasks/agent-doc/agent-doc-bugs2.md` still has `#dxtr` at the top, covering dispatch-trace outputs, worker_feedback summaries, graph links, replay/repair commands, freshness, and projection hashes for plan/orchestrate closeout. I did not add a duplicate agent-doc item.
-<!-- agent:boundary:7fff021d -->
+<!-- agent:boundary:4e4853ff -->
 <!-- /agent:exchange -->
 ###
 

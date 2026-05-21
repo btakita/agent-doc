@@ -31,40 +31,19 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-050641.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-052911.md`*
 
 Compacted content:
-- Archived 4 response topic(s): next steps; dogfood #orchdog; simpler #orchdog options; 1 more
+- Archived 1 response topic(s): graph-db queue
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: graph-db queue — gpt-5
-
-Completed `#gdbevid`, `#cmgr`, and `#gdbidx`.
-
-Implemented in `src/tsift` commit `8349ca9` and recorded from the root repo in `108977f79`.
-
-What changed:
-- `graph-db evidence` now gives backlog/job targets without code-token matches a bounded session-line `worker_context` + `source_handle`, so a known backlog id no longer looks like a broken empty projection. Evidence still warns if a resolved target truly has no projection-linked rows.
-- `conflict-matrix` now separates per-target fail-closed state from cross-target overlap with `per_target_fail_closed` and `cross_target_parallel_safe`, while keeping legacy `can_parallel` conservative.
-- `graph-db refresh` now warns clearly when the summary cache is empty and points operators at `tsift summarize --extract ...` before relying on semantic rows.
-- Updated `SPEC.md`, graph orchestration contract fixtures, and conformance coverage for these behaviors.
-
-Verification:
-- `cargo test --test graph_db_conformance` passed: 25 passed, 1 ignored.
-- `make check` passed: clippy, 642 unit tests with 1 ignored, 108 exit-code/integration tests, and graph conformance.
-- `cargo build` passed.
-- `cargo install --path . --locked` passed and replaced local `tsift 0.1.42`.
-- Latest `btakita/tsift` GitHub `CI` run was green (`26205441698`). Latest root `agent-loop` Agent Doc run had empty-step `tmux-ci` / `check` failures, so I classified it as an external CI-start blocker rather than a tmux regression.
-<!-- agent:boundary:2645272f -->
+<!-- agent:boundary:4f6c293b -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- ~do [#gdbevid]~
-- do [#cmgr]
-- do [#gdbidx]
 <!-- /agent:queue -->
 
 ## Backlog

@@ -48,7 +48,15 @@ I added the follow-up backlog in priority order. Top backlog item: `#agbr`.
 3. `#mxfx` — add a deterministic multi-worker acceptance fixture proving overlapping targets are blocked and non-overlapping worker prompts are safe to dispatch.
 4. `#gobx` — expose graph orchestration observability through `context-pack` / `session-review`, including freshness, evidence ids, dispatch decisions, and next commands.
 5. `#semx` — fold semantic graph rows into dispatch ranking so related concept/entity paths improve worker-scope recommendations without replacing hard file/symbol conflict gates.
-<!-- agent:boundary:bc719507 -->
+❯ Any backlog work that should be done on the agent-doc codebase should be transferred to agent-doc-bugs2.md
+### Re: transfer agent-doc backlog — gpt-5
+
+Transferred the agent-doc-owned work out of this tsift backlog and into `tasks/agent-doc/agent-doc-bugs2.md` as `#agbr`.
+
+I treated `#agbr` as the agent-doc-codebase item because it changes `agent-doc plan/orchestrate` behavior. The remaining items stay here because they are tsift-owned graph/reporting work: `#wctx`, `#mxfx`, `#gobx`, and `#semx`.
+
+Top tsift backlog item is now `#wctx`. Top transferred agent-doc item id is `#agbr`.
+<!-- agent:boundary:b0467a9e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -63,7 +71,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#agbr] [recommended] Wire tsift graph evidence into agent-doc planning/orchestration: have agent-doc plan/orchestrate call graph-db evidence and conflict-matrix for queued do-items, attach handles to prompt_targets, and fail closed on stale graph.db or missing targets.
 - [ ] [#wctx] [recommended] Make worker prompt packets first-class: emit owned files/symbols, read-only context, forbidden files, expected tests, expansion commands, and token budgets from conflict-matrix so subagents can start with bounded graph-backed context.
 - [ ] [#mxfx] [recommended] Add a deterministic multi-worker acceptance fixture for subagent support: seed overlapping and non-overlapping backlog targets, run graph-db evidence plus conflict-matrix, and prove the generated worker prompts prevent shared-file/test conflicts.
 - [ ] [#gobx] [recommended] Add session-level graph orchestration observability: record graph projection freshness, evidence packet ids, conflict-matrix decisions, worker ownership blocks, and follow-up commands in context-pack/session-review output.

@@ -138,7 +138,27 @@ If you want agent-doc to batch it like the `root.md` queue style, add only this 
 ```
 
 I would use the one-shot option first. It is short enough for Claude Code and Codex, keeps the work bound to `#orchdog`, and still asks for the required spec/test/build/install/commit/push closeout.
-<!-- agent:boundary:11370240 -->
+❯ What is the recommended prompt_preset to dogfood tsift.md in root.md?
+### Re: root.md preset for tsift dogfood — gpt-5
+
+Use `#spec-test-commit-push` if you want to use an existing `root.md` preset today. `root.md` does not currently define `#spec-test-build-install-commit-push`, so that name should stay a `tsift.md` preset unless you intentionally add root-specific semantics for it.
+
+For repeatable root-driven tsift dogfooding, the cleaner preset to add later would be a dedicated one:
+
+```yaml
+'#dogfood-tsift': Dogfood tsift graph-backed orchestration against /home/brian/work/btakita/agent-loop/tasks/software/tsift.md using the smallest useful agent-doc path: plan, graph-db evidence, conflict-matrix, dispatch-trace, jobs create/collect, worker_prompt_packet/worker_result comparison, and capture tsift fixture gaps. Do not deploy.
+```
+
+Then `root.md` can stay compact:
+
+```markdown
+do [#x63e] [#v4v0] #dogfood-tsift
+```
+
+For completing `tsift.md` item `#orchdog` directly from the tsift session, keep using `tsift.md`'s own `#spec-test-build-install-commit-push` preset.
+
+No backlog mutation is needed for this answer-only cycle.
+<!-- agent:boundary:20daa104 -->
 <!-- /agent:exchange -->
 ###
 

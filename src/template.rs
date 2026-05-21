@@ -965,6 +965,7 @@ fn append_tail_to_exchange_end(prefix: &str, tail: &str) -> Result<String> {
 /// mixed user text remains an error so the editor can refuse the visible write.
 pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> {
     let mut normalized = crate::component::strip_backlog_patch_attr(doc);
+    normalized = remove_duplicate_post_exchange_prompt_comments(&normalized);
     while let Some(merged) = repair_duplicate_exchange_opener(&normalized)? {
         normalized = merged;
     }
@@ -1077,6 +1078,169 @@ fn strip_html_comments(text: &str) -> String {
         rest = &after_start[end + 3..];
     }
     result
+}
+
+fn html_comment_body(comment: &str) -> Option<&str> {
+    let trimmed = comment.trim();
+    if !trimmed.starts_with("<!--") || !trimmed.ends_with("-->") {
+        return None;
+    }
+    Some(trimmed[4..trimmed.len() - 3].trim())
+}
+
+fn is_markdown_heading_line(trimmed: &str) -> bool {
+    let hashes = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    (1..=6).contains(&hashes) && trimmed.as_bytes().get(hashes) == Some(&b' ')
+}
+
+fn normalized_prompt_comment_text(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("<!--")
+        || is_exchange_turn_heading(trimmed)
+        || is_markdown_heading_line(trimmed)
+    {
+        return None;
+    }
+    Some(
+        trimmed
+            .strip_prefix('❯')
+            .unwrap_or(trimmed)
+            .trim()
+            .to_string(),
+    )
+}
+
+fn last_boundary_tail_start(text: &str) -> Option<usize> {
+    let boundary_prefix = "<!-- agent:boundary:";
+    let mut offset = 0usize;
+    let mut tail_start = None;
+    for segment in text.split_inclusive('\n') {
+        let line = segment.trim_end_matches('\n');
+        if line.trim().starts_with(boundary_prefix) {
+            tail_start = Some(offset + segment.len());
+        }
+        offset += segment.len();
+    }
+    tail_start
+}
+
+fn prompt_comment_candidates(exchange: &str, unresolved_tail_only: bool) -> Vec<String> {
+    let text = if unresolved_tail_only {
+        match last_boundary_tail_start(exchange) {
+            Some(tail_start) => &exchange[tail_start..],
+            None => return Vec::new(),
+        }
+    } else {
+        exchange
+    };
+    text.lines()
+        .filter_map(normalized_prompt_comment_text)
+        .filter(|line| !line.trim().is_empty())
+        .collect()
+}
+
+fn common_prefix_char_count(left: &str, right: &str) -> usize {
+    left.chars()
+        .zip(right.chars())
+        .take_while(|(left, right)| left == right)
+        .count()
+}
+
+fn probable_prompt_prefix_variant(shorter: &str, longer: &str) -> bool {
+    let shorter = shorter.trim();
+    let longer = longer.trim();
+    if shorter.len() < 16 || longer.len() <= shorter.len() + 2 {
+        return false;
+    }
+    if !longer.starts_with(shorter) || !longer.is_char_boundary(shorter.len()) {
+        return false;
+    }
+    !matches!(
+        shorter.chars().last(),
+        Some('.' | '!' | '?' | ':' | ';' | ')' | ']')
+    )
+}
+
+fn prompt_comment_near_duplicate(left: &str, right: &str) -> bool {
+    let left = left.trim();
+    let right = right.trim();
+    if left.is_empty() || right.is_empty() {
+        return false;
+    }
+    if left == right
+        || probable_prompt_prefix_variant(left, right)
+        || probable_prompt_prefix_variant(right, left)
+    {
+        return true;
+    }
+
+    let shorter_len = left.chars().count().min(right.chars().count());
+    let common = common_prefix_char_count(left, right);
+    common >= 80 && common * 100 >= shorter_len * 70
+}
+
+fn comment_body_duplicates_prompt_candidates(body: &str, candidates: &[String]) -> bool {
+    let lines = body
+        .lines()
+        .filter_map(normalized_prompt_comment_text)
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return false;
+    }
+    lines.iter().all(|line| {
+        candidates
+            .iter()
+            .any(|candidate| prompt_comment_near_duplicate(line, candidate))
+    })
+}
+
+/// Remove ordinary post-exchange HTML comments that duplicate a prompt already
+/// present in `agent:exchange`.
+///
+/// This is intentionally narrow: agent component comments are never removed,
+/// unrelated scratch comments are preserved, and every non-empty line in the
+/// comment body must match an exchange prompt candidate.
+pub fn remove_duplicate_post_exchange_prompt_comments(doc: &str) -> String {
+    let Ok(components) = component::parse(doc) else {
+        return doc.to_string();
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return doc.to_string();
+    };
+
+    let exchange_body = exchange.content(doc);
+    let mut prompt_candidates = prompt_comment_candidates(exchange_body, true);
+    if prompt_candidates.is_empty() {
+        prompt_candidates = prompt_comment_candidates(exchange_body, false);
+    }
+    if prompt_candidates.is_empty() {
+        return doc.to_string();
+    }
+
+    let mut remove_ranges = component::find_non_agent_html_comment_ranges(doc)
+        .into_iter()
+        .filter(|(start, _)| *start >= exchange.close_end)
+        .filter(|(start, end)| {
+            html_comment_body(&doc[*start..*end]).is_some_and(|body| {
+                comment_body_duplicates_prompt_candidates(body, &prompt_candidates)
+            })
+        })
+        .collect::<Vec<_>>();
+    if remove_ranges.is_empty() {
+        return doc.to_string();
+    }
+
+    remove_ranges.sort_by_key(|range| std::cmp::Reverse(range.0));
+    let mut repaired = doc.to_string();
+    for (start, end) in remove_ranges {
+        repaired.replace_range(start..end, "");
+    }
+    repaired
 }
 
 /// Merge duplicate `<!-- agent:exchange -->` openers into a single exchange block.
@@ -4503,6 +4667,49 @@ Existing answer.
         assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
         assert_eq!(repaired.matches("<!-- agent:backlog -->").count(), 1);
         guard_no_conversation_tail_outside_exchange(&repaired).unwrap();
+    }
+
+    #[test]
+    fn normalize_editor_visible_template_structure_removes_duplicate_prompt_comment() {
+        let prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push";
+        let doc = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n",
+                "Done.\n",
+                "<!-- agent:boundary:head -->\n",
+                "{prompt}\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "{prompt}\n",
+                "-->\n\n",
+                "<!--\n",
+                "Keep this unrelated scratch note hidden.\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+
+        let repaired = normalize_editor_visible_template_structure(&doc)
+            .expect("editor-visible normalization should repair prompt comment residue");
+
+        let duplicate_comment = format!("\n<!--\n{prompt}\n-->\n");
+        assert!(
+            !repaired.contains(&duplicate_comment),
+            "editor-visible normalization must drop duplicate prompt comments:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"),
+            "tracked-work scaffold should remain intact:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("Keep this unrelated scratch note hidden."),
+            "unrelated scratch comments must stay outside exchange:\n{repaired}"
+        );
     }
 
     #[test]

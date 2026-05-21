@@ -898,22 +898,21 @@ pub fn op_insert_item_first(body: &str, item: PendingItem) -> String {
 /// Append existing tracked items after the current item list, preserving order.
 pub fn op_append_items(body: &str, items: &[PendingItem]) -> String {
     let mut layout = PendingLayout::parse(body);
-    let mut insert_at = layout
+    let insert_at = layout
         .segments
         .iter()
         .rposition(|segment| matches!(segment, PendingSegment::Item { .. }))
         .map(|idx| idx + 1)
         .unwrap_or_else(|| layout.first_item_index().unwrap_or(layout.segments.len()));
     layout.ensure_separator_before(insert_at);
-    for item in items {
+    for (offset, item) in items.iter().enumerate() {
         layout.segments.insert(
-            insert_at,
+            insert_at + offset,
             PendingSegment::Item {
                 item: item.clone(),
                 has_newline: true,
             },
         );
-        insert_at += 1;
     }
     layout.render()
 }
@@ -2385,6 +2384,50 @@ mod tests {
         assert!(lines[2].contains("existing task"), "got: {}", new_body);
         assert_eq!(lines[3], "### Later");
         assert!(lines[4].contains("later task"), "got: {}", new_body);
+    }
+
+    #[test]
+    fn op_append_items_preserves_order_after_existing_items() {
+        let body = concat!(
+            "### Active\n",
+            "- [ ] [#a1b2] existing task\n",
+            "\n",
+            "### Notes\n",
+            "Keep this note.\n",
+        );
+        let appended = vec![
+            PendingItem {
+                marker: PendingListMarker::Bullet,
+                id: "b2c3".to_string(),
+                state: PendingState::Open,
+                gate_type: None,
+                text: "first appended task".to_string(),
+                continuation: String::new(),
+            },
+            PendingItem {
+                marker: PendingListMarker::Bullet,
+                id: "d4e5".to_string(),
+                state: PendingState::Gated,
+                gate_type: Some("release".to_string()),
+                text: "second appended task".to_string(),
+                continuation: String::new(),
+            },
+        ];
+
+        let new_body = op_append_items(body, &appended);
+
+        assert_eq!(
+            new_body,
+            concat!(
+                "### Active\n",
+                "- [ ] [#a1b2] existing task\n",
+                "- [ ] [#b2c3] first appended task\n",
+                "- [/release] [#d4e5] second appended task\n",
+                "\n",
+                "### Notes\n",
+                "Keep this note.\n",
+            )
+        );
     }
 
     #[test]

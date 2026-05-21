@@ -89,7 +89,31 @@ I added the tsift-owned follow-ups in priority order. Top tsift backlog item: `#
 Agent-doc-owned orchestration work is already transferred to `tasks/agent-doc/agent-doc-bugs2.md`; top agent-doc item remains `#agbr`.
 
 No code changes or tests were run for this cycle; this was backlog triage only.
-<!-- agent:boundary:4a52b431 -->
+### Re: graph orchestration implementation — gpt-5
+Completed `#gsch`, `#grev`, `#wres`, `#srnk`, and `#gops`.
+
+Implemented versioned graph orchestration contracts across the tsift surfaces agent-doc needs to consume directly: `graph-db evidence` now emits `contract_version`, `packet_id`, `projection_hash`, replay commands, repair commands, and reachable `worker_result` rows; `conflict-matrix` now carries evidence packet summaries, packet ids on candidates, contract-marked `worker_prompt_packets`, projection hashes, and semantic ranking explanations; `context-pack` and `session-review --next-context` now expose explicit contract versions for orchestration/follow-up payloads.
+
+Added worker-result graph projection support by parsing completed/blocked agent-doc response lines into `worker_result` nodes linked back to backlog/job/source context. Those rows preserve status, touched files, expected tests, and follow-up ids so later graph evidence can reason over completed or blocked worker packets.
+
+Calibrated semantic dispatch ranking so semantic concept/entity matches produce score explanations such as owned-file/owned-symbol relevance, while the hard file/symbol/test/config conflict gates still control fail-closed dispatch. Added replay/freshness coverage proving stale evidence freshness fails closed with repair commands.
+
+Updated operator docs and fixtures, including `fixtures/graph-db-operator-examples/graph-orchestration-contracts.json`, plus end-to-end refresh -> evidence -> conflict-matrix -> context-pack -> session-review examples.
+
+Verification:
+- `cargo check` passed.
+- Targeted graph orchestration tests passed for evidence packets, worker prompt packets, semantic ranking, stale freshness repair, worker-result projection, and context-pack observability.
+- `jq . fixtures/graph-db-operator-examples/graph-orchestration-contracts.json` passed.
+- `git diff --check` passed.
+- `make check` passed: clippy, unit tests, exit-code tests, and graph-db conformance.
+- `cargo build` passed.
+- `cargo install --path .` replaced the local binary; `tsift --version` reports `tsift 0.1.42`.
+- Latest GitHub Actions `CI` run for `btakita/tsift` was `completed/success` at `2026-05-21T02:33:47Z`; jobs were `clippy + test` and `live Convex graph acceptance`. This repo has no tmux CI workflow or `tmux-ci` target.
+
+Commits:
+- `btakita/tsift` pushed `dbac74c` (`feat: version graph orchestration packets`).
+- Superproject submodule pointer committed locally as `6c6a39ec1` (`chore: update tsift submodule`); the root push follows this document closeout boundary.
+<!-- agent:boundary:2c7d7017 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -97,20 +121,16 @@ No code changes or tests were run for this cycle; this was backlog triage only.
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#wctx]
-- do [#mxfx]
-- do [#gobx]
-- do [#semx]
+- do [#gsch]
+- do [#grev]
+- do [#wres]
+- do [#srnk]
+- do [#gops]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gsch] [recommended] Stabilize graph orchestration JSON contracts: publish schema/versioned examples for graph-db evidence, conflict-matrix worker_prompt_packets, context-pack graph_orchestration, and session-review follow-up commands so agent-doc can consume them without scraping.
-- [ ] [#grev] [recommended] Add graph evidence replay/freshness fixtures: persist evidence packet ids/projection hashes for queued backlog runs and prove stale graph.db/conflict-matrix inputs fail closed with repair commands.
-- [ ] [#wres] [recommended] Add worker-result rows to the graph projection: ingest completed/blocked worker packets as worker_result nodes linked to backlog/job/source handles, including touched files/tests and follow-up ids.
-- [ ] [#srnk] [recommended] Calibrate semantic dispatch ranking: add fixture-driven weights/explanations for semantic_concept/entity matches so semantic relevance improves ordering without overriding file/symbol/test conflict gates.
-- [ ] [#gops] [recommended] Add operator examples for graph-backed dispatch: end-to-end docs/fixtures showing refresh -> evidence -> conflict-matrix -> context-pack/session-review commands for a multi-worker session.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

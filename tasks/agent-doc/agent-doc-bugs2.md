@@ -59,7 +59,20 @@ Verification:
 Commits:
 - `src/agent-doc`: `5936228f fix: skip interrupt-clear keys on idle panes`, pushed to `origin/20260422/codex-agent-backend`.
 - root superproject: `1875e6de3 chore: update agent-doc submodule`, pushed to `origin/main`.
-<!-- agent:boundary:eec05bf0 -->
+❯ Update backlog accounting tsift.md implementation of [#pwcm].
+### Re: tsift #pwcm backlog accounting — gpt-5
+
+Updated the tsift backlog accounting for `#pwcm`. `tasks/software/tsift.done.md` now records `#pwcm` in the external completed-work archive, along with the other completed tsift graph items that had already been reaped out of the live backlog.
+
+Committed root repo change:
+- `9a270dbfc agent-doc(tsift): archive completed backlog items`
+
+Verification:
+- `git diff --check -- tasks/software/tsift.done.md`
+- Confirmed `git show HEAD:tasks/software/tsift.done.md` contains `[#pwcm]`.
+
+I left the unrelated existing working-tree changes, including the `tasks/software/tsift.md` queue edits, untouched. No new backlog item came out of this change.
+<!-- agent:boundary:ffe8d904 -->
 <!-- /agent:exchange -->
 ###
 <!--

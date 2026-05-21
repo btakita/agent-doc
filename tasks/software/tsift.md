@@ -18,7 +18,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Worker-feedback closure contracts implemented and pushed; queued #dtrc, #gafe, and #wfcl complete.
+Worker-feedback closure contracts complete; top tsift backlog item: #aorp.
 <!-- /agent:status -->
 
 ## Spec
@@ -69,7 +69,16 @@ Verification:
 Pushed:
 - `btakita/tsift` `main`: `3560d68`
 - `btakita/agent-loop` `main`: `a5c464241`
-<!-- agent:boundary:04a024b6 -->
+❯ Update #next-steps in agent-doc-bugs2.md with latest tsift features.
+❯ Add #next-steps to tsift.md for agent orchestration and graphdb features.
+### Re: graph orchestration next steps — gpt-5
+
+I refreshed the tsift next-step queue after the worker-feedback closure contract work.
+
+Top tsift backlog item: `#aorp` — add a fixture-regeneration acceptance harness that derives graph-db evidence, conflict-matrix, dispatch-trace JSON/HTML, context-pack, and session-review samples from a real queue fixture, then fails CI if checked-in contracts drift from regenerated output.
+
+The agent-doc follow-up list is already current for the latest tsift features: `tasks/agent-doc/agent-doc-bugs2.md` still has `#dxtr` at the top, covering dispatch-trace outputs, worker_feedback summaries, graph links, replay/repair commands, freshness, and projection hashes for plan/orchestrate closeout. I did not add a duplicate agent-doc item.
+<!-- agent:boundary:7fff021d -->
 <!-- /agent:exchange -->
 ###
 
@@ -84,6 +93,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#aorp] [recommended] Add a fixture-regeneration acceptance harness for the agent-orchestration pack: derive graph-db evidence, conflict-matrix, dispatch-trace JSON/HTML, context-pack, and session-review samples from a real queue fixture and fail CI when checked-in contracts drift from regenerated output.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

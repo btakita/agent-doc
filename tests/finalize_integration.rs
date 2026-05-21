@@ -1389,6 +1389,58 @@ fn finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted() {
         .success();
 }
 
+#[test]
+fn finalize_preserves_prompt_like_html_comment_tail_in_closeout_commit() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let prompt = "The post-exchange HTML comment block should survive finalize. #spec-test-build-install-commit-push";
+    let shaped = fs::read_to_string(&doc)
+        .unwrap()
+        .replace("❯ Please reply", &format!("❯ {prompt}"))
+        .replace(
+            "<!-- /agent:exchange -->\n\n<!-- agent:pending -->",
+            &format!(
+                "<!-- /agent:exchange -->\n###\n\n<!--\n{prompt}\n-->\n\n<!-- agent:pending -->"
+            ),
+        );
+    fs::write(&doc, shaped).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--stream",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: comment retention — gpt-5\nPreserved the post-exchange comment.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let expected_comment = format!("<!--\n{prompt}\n-->");
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains(&expected_comment),
+        "finalize must preserve prompt-like ordinary HTML comments in the working tree:\n{content}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains(&expected_comment),
+        "finalize must preserve prompt-like ordinary HTML comments in the closeout commit:\n{head}"
+    );
+}
+
 // --- Phase 3: Queue consumption integration tests ---
 
 fn queue_doc_content() -> String {

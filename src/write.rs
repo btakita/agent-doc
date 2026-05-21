@@ -3827,7 +3827,6 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
         &crate::component::strip_backlog_patch_attr(&deduped_openers),
         file,
     );
-    let normalized = remove_duplicate_post_exchange_prompt_comments(&normalized, None, file);
     let (normalized, _) = dedupe_live_prompt_prefix_variants_in_tail(&normalized, file);
     match crate::template::guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
@@ -4318,130 +4317,6 @@ fn exchange_prompt_reconciliation_infos(
     }
 
     infos
-}
-
-fn exchange_prompt_candidates_for_duplicate_comments(
-    content: &str,
-    unresolved_tail_only: bool,
-) -> Vec<String> {
-    let Some(exchange) = exchange_content(content) else {
-        return Vec::new();
-    };
-    let text = if unresolved_tail_only {
-        match last_exchange_boundary_tail_start(exchange) {
-            Some(tail_start) => &exchange[tail_start..],
-            None => return Vec::new(),
-        }
-    } else {
-        exchange
-    };
-    exchange_prompt_reconciliation_infos(text, None)
-        .into_iter()
-        .filter_map(|info| info.normalized)
-        .filter(|text| !text.trim().is_empty())
-        .collect()
-}
-
-fn html_comment_body(comment: &str) -> Option<&str> {
-    let trimmed = comment.trim();
-    if !trimmed.starts_with("<!--") || !trimmed.ends_with("-->") {
-        return None;
-    }
-    Some(trimmed[4..trimmed.len() - 3].trim())
-}
-
-fn common_prefix_char_count(left: &str, right: &str) -> usize {
-    left.chars()
-        .zip(right.chars())
-        .take_while(|(left, right)| left == right)
-        .count()
-}
-
-fn prompt_text_near_duplicate(left: &str, right: &str) -> bool {
-    let left = left.trim();
-    let right = right.trim();
-    if left.is_empty() || right.is_empty() {
-        return false;
-    }
-    if left == right
-        || probable_live_prompt_prefix_variant(left, right)
-        || probable_live_prompt_prefix_variant(right, left)
-    {
-        return true;
-    }
-
-    let shorter_len = left.chars().count().min(right.chars().count());
-    let common = common_prefix_char_count(left, right);
-    common >= 80 && common * 100 >= shorter_len * 70
-}
-
-fn comment_body_duplicates_prompt_candidates(body: &str, candidates: &[String]) -> bool {
-    let lines = body
-        .lines()
-        .filter_map(normalized_prompt_text)
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        return false;
-    }
-    lines.iter().all(|line| {
-        candidates
-            .iter()
-            .any(|candidate| prompt_text_near_duplicate(line, candidate))
-    })
-}
-
-pub(crate) fn remove_duplicate_post_exchange_prompt_comments(
-    content: &str,
-    prompt_source: Option<&str>,
-    file: &Path,
-) -> String {
-    let Ok(components) = component::parse(content) else {
-        return content.to_string();
-    };
-    let Some(exchange) = components
-        .iter()
-        .find(|component| component.name == "exchange")
-    else {
-        return content.to_string();
-    };
-
-    let source = prompt_source.unwrap_or(content);
-    let mut prompt_candidates = exchange_prompt_candidates_for_duplicate_comments(source, true);
-    if prompt_candidates.is_empty() {
-        prompt_candidates = exchange_prompt_candidates_for_duplicate_comments(source, false);
-    }
-    if prompt_candidates.is_empty() {
-        return content.to_string();
-    }
-
-    let mut remove_ranges = component::find_non_agent_html_comment_ranges(content)
-        .into_iter()
-        .filter(|(start, _)| *start >= exchange.close_end)
-        .filter(|(start, end)| {
-            let comment = &content[*start..*end];
-            html_comment_body(comment).is_some_and(|body| {
-                comment_body_duplicates_prompt_candidates(body, &prompt_candidates)
-            })
-        })
-        .collect::<Vec<_>>();
-    if remove_ranges.is_empty() {
-        return content.to_string();
-    }
-
-    remove_ranges.sort_by_key(|range| std::cmp::Reverse(range.0));
-    let mut repaired = content.to_string();
-    for (start, end) in remove_ranges {
-        repaired.replace_range(start..end, "");
-    }
-    crate::ops_log::log_op(
-        file,
-        &format!(
-            "duplicate_post_exchange_prompt_comment_removed file={} before_commit=true",
-            file.display()
-        ),
-    );
-    repaired
 }
 
 fn prompt_reconciliation_counts(exchange: &str) -> HashMap<String, usize> {
@@ -6550,11 +6425,6 @@ pub(crate) fn dedupe_ipc_snapshot_content(
         if prompt_changed {
             deduped = prompt_deduped;
         }
-        let comment_deduped =
-            remove_duplicate_post_exchange_prompt_comments(&deduped, Some(before), file);
-        if comment_deduped != deduped {
-            deduped = comment_deduped;
-        }
     }
     let (prefix_deduped, prefix_changed) =
         dedupe_live_prompt_prefix_variants_in_tail(&deduped, file);
@@ -8159,12 +8029,6 @@ fn normalize_final_template_content(
     if let Some(snapshot_doc) = snapshot {
         normalized = normalize_user_prompts_in_exchange_safe(&normalized, base, snapshot_doc, file);
     }
-    let prompt_comment_source = before_current.unwrap_or(base);
-    normalized = remove_duplicate_post_exchange_prompt_comments(
-        &normalized,
-        Some(prompt_comment_source),
-        file,
-    );
     normalized = normalize_template_structure_or_fail(&normalized, file)?;
     if let Some(before) = before_current {
         let (deduped, changed) = dedupe_prompt_lines_against_before(before, &normalized, file);
@@ -10141,7 +10005,7 @@ scratch
     }
 
     #[test]
-    fn ipc_snapshot_dedupes_duplicate_prompt_html_comment_against_before_content() {
+    fn ipc_snapshot_preserves_post_exchange_prompt_like_html_comment() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("diag.md");
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -10169,17 +10033,15 @@ scratch
         let (repaired, changed) =
             dedupe_ipc_snapshot_content(&doc, Some(before), &after, "test_ipc");
 
-        assert!(changed);
+        assert!(!changed);
         assert!(
-            !repaired.contains(
+            repaired.contains(
                 "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
             ),
-            "IPC ack-content dedupe must remove the duplicate prompt comment:\n{repaired}"
+            "IPC ack-content dedupe must preserve ordinary post-exchange HTML comments:\n{repaired}"
         );
         assert!(repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"));
-        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("duplicate_post_exchange_prompt_comment_removed"));
-        assert!(log.contains("ipc_snapshot_deduped"));
+        assert!(!dir.path().join(".agent-doc/logs/ops.log").exists());
     }
 
     #[test]
@@ -13406,7 +13268,7 @@ Verification:
     }
 
     #[test]
-    fn normalize_final_template_content_removes_duplicate_prompt_html_comment_tail() {
+    fn normalize_final_template_content_preserves_prompt_like_html_comment_tail() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("doc.md");
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -13450,10 +13312,10 @@ Verification:
             "live prompt should remain in exchange and be normalized:\n{repaired}"
         );
         assert!(
-            !repaired.contains(
+            repaired.contains(
                 "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
             ),
-            "duplicate prompt scratch comment should be removed:\n{repaired}"
+            "post-exchange HTML comment scratch content should be preserved:\n{repaired}"
         );
         assert!(
             repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"),
@@ -13490,7 +13352,7 @@ Verification:
     }
 
     #[test]
-    fn normalize_template_structure_removes_answered_prompt_html_comment_tail() {
+    fn normalize_template_structure_preserves_answered_prompt_html_comment_tail() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("doc.md");
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -13520,10 +13382,10 @@ Verification:
             "answered exchange turn should remain:\n{repaired}"
         );
         assert!(
-            !repaired.contains(
+            repaired.contains(
                 "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
             ),
-            "answered prompt duplicate comment should be removed:\n{repaired}"
+            "answered prompt-like HTML comment should remain outside exchange:\n{repaired}"
         );
     }
 

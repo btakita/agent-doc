@@ -347,21 +347,6 @@ fn relocate_out_of_exchange_prompt_before_diff(
     Ok((repaired != doc_content).then_some(repaired))
 }
 
-fn remove_duplicate_post_exchange_prompt_comments_before_diff(
-    file: &Path,
-    doc_content: &str,
-) -> Result<Option<String>> {
-    let (frontmatter, _) = frontmatter::parse(doc_content)
-        .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
-    if !frontmatter.resolve_mode().is_template() {
-        return Ok(None);
-    }
-
-    let repaired =
-        crate::write::remove_duplicate_post_exchange_prompt_comments(doc_content, None, file);
-    Ok((repaired != doc_content).then_some(repaired))
-}
-
 fn tracked_work_component_fingerprint(
     content: &str,
 ) -> Result<(Option<String>, Option<String>, Vec<String>)> {
@@ -1138,27 +1123,6 @@ pub fn run(file: &Path) -> Result<()> {
     }
     enforce_no_shadow_open_backlog(file)?;
     enforce_no_dropped_backlog(file)?;
-
-    // Step 1d: Clean prompt-residue that is already duplicated inside exchange.
-    // Run before commit, while the boundary still marks the live prompt tail.
-    if let Some(repaired_doc) = remove_duplicate_post_exchange_prompt_comments_before_diff(
-        file,
-        &std::fs::read_to_string(file)?,
-    )? {
-        crate::write::atomic_write_pub(file, &repaired_doc)?;
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "preflight_remove_duplicate_post_exchange_prompt_comment file={}",
-                file.display()
-            ),
-        );
-        eprintln!(
-            "[preflight] removed duplicate post-exchange prompt comment in {}",
-            file.display()
-        );
-        recovered = true;
-    }
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
@@ -4415,7 +4379,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_removes_duplicate_post_exchange_prompt_comment_before_diff() {
+    fn preflight_preserves_post_exchange_prompt_like_html_comment_before_diff() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("session.md");
@@ -4477,8 +4441,8 @@ mod tests {
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let duplicate_comment = format!("\n<!--\n{prompt}\n-->\n");
         assert!(
-            !file_after.contains(&duplicate_comment),
-            "preflight should remove the duplicated prompt comment before diffing:\n{file_after}"
+            file_after.contains(&duplicate_comment),
+            "preflight should preserve ordinary post-exchange HTML comments before diffing:\n{file_after}"
         );
         assert!(
             file_after.contains("Keep this unrelated scratch note hidden."),
@@ -4487,7 +4451,7 @@ mod tests {
         let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(
             !snapshot_after.contains(prompt),
-            "snapshot must not absorb the live prompt during preflight cleanup:\n{snapshot_after}"
+            "snapshot must not absorb the live prompt during preflight:\n{snapshot_after}"
         );
     }
 

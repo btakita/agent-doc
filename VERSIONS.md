@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Post-exchange HTML comments stay user-owned.** Preflight, editor-visible
+  normalization, IPC snapshot dedupe, and final template reconciliation now
+  preserve ordinary HTML comment blocks after `agent:exchange`, even when the
+  comment body looks like the prompt being answered. Escaped conversation text
+  still fails closed or repairs through the existing exchange-tail guards.
+
 - **Lower-agent job packet MVP.** `agent-doc plan` now emits deterministic
   lower-agent routing fields (`dispatch_candidate`, task class, risk,
   parallelism, model tier, context budgets, write scope, proof requirements,

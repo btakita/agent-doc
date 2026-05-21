@@ -45,7 +45,7 @@ I could not start `#tsdag` because `agent-doc plan` stopped the cycle before imp
 `tsift graph orchestration contract invalid: conflict-matrix missing evidence_packet_id gevd-8fb9f57781 for target tsdag`
 
 No repo edits, tests, build, install, manual commit, or push were performed. I am not marking `#tsdag` done or gated because implementation did not begin; it stays open until the graph evidence / conflict-matrix state for this document is repaired or regenerated, then this same `do [#tsdag]. #spec-test-build-install-commit-push` request can be rerun.
-<!-- agent:boundary:7b240a67 -->
+<!-- agent:boundary:4b0a348f -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -61,6 +61,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#cmgevfix] [recommended] Resolve the missing conflict-matrix evidence packet that blocks #tsdag: detect conflict-matrix entries whose evidence_packet_id is absent (including gevd-8fb9f57781), regenerate evidence before conflict-matrix/dispatch-trace, and add regression coverage proving agent-doc plan proceeds after repair.
 - [ ] [#tsdag] [recommended] Add graph-level dependency DAG extraction for agent-doc work: derive explicit and implicit edges among backlog ids from file/symbol/test/config overlap, semantic relations, worker_result follow-up ids, and depends-on text; emit nodes, edges, cycle diagnostics, topo batches, replay commands, and repair commands as a versioned JSON contract.
 - [ ] [#impactdag] [recommended] Extend conflict-matrix and dispatch-trace with scheduler fields: parallel_safe, blocks, blocked_by, required_context, expected_tests, and stable graph handles so agent-doc can run topological antichains without scraping prose.
 - [ ] [#dagfix] [recommended] Add regeneration fixtures for real agent-doc queue DAGs: refresh -> evidence -> conflict-matrix -> dependency-dag -> dispatch-trace, asserting projection freshness, packet ids, worker_result closure, cycle detection, and stale graph fail-closed behavior.

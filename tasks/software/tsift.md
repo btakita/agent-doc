@@ -45,7 +45,12 @@ I could not start `#tsdag` because `agent-doc plan` stopped the cycle before imp
 `tsift graph orchestration contract invalid: conflict-matrix missing evidence_packet_id gevd-8fb9f57781 for target tsdag`
 
 No repo edits, tests, build, install, manual commit, or push were performed. I am not marking `#tsdag` done or gated because implementation did not begin; it stays open until the graph evidence / conflict-matrix state for this document is repaired or regenerated, then this same `do [#tsdag]. #spec-test-build-install-commit-push` request can be rerun.
-<!-- agent:boundary:4b0a348f -->
+### Re: next steps for missing evidence packet — gpt-5
+
+Added `#cmgevfix` as the new top backlog item to resolve the missing `evidence_packet_id` failure that blocked `#tsdag`.
+
+Top of backlog: `#cmgevfix`
+<!-- agent:boundary:0cb57351 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -29,41 +29,12 @@ Added auto-DAG next steps; top backlog item: #autodag.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-054855.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260521-061501.md`*
 
 Compacted content:
-- Archived 1 response topic(s): auto-DAG next steps
+- Archived 3 response topic(s): queued auto-DAG work; queued auto-DAG retry; tsift backlog capture
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: queued auto-DAG work — gpt-5
-
-I could not start the `autodag` backlog item safely because planning failed closed before repo work. `agent-doc plan` required fresh `tsift` graph evidence, but the graph evidence command timed out:
-
-```bash
-tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json evidence autodag --depth 3 --limit 8
-```
-
-No code changes were made, and the backlog item remains open rather than being marked done. The next cycle should retry after `tsift` graph evidence is available or fix the timeout/blocker first.
-### Re: queued auto-DAG retry — gpt-5
-
-The interrupted cycle was recovered, but the queue head was locally changed back from consumed `~do [#autodag]~` to active `do [#autodag]`, so `agent-doc plan` routed this cycle to `#autodag` again.
-
-I did not make repo changes. Planning still fails closed before implementation because required `tsift` graph evidence times out:
-
-```bash
-tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --json evidence autodag --depth 3 --limit 8
-```
-
-`#autodag` remains open. The blocker to resolve first is the `tsift graph-db` evidence timeout or the local queue-head drift that is reactivating `#autodag`.
-❯ Add to tsift.md backlog fixes for `tsift graph-db` evidence timeout and the local queue-head drift that is reactivating `#autodag`.
-### Re: tsift backlog capture — gpt-5
-
-Added the requested follow-up work to `tasks/software/tsift.md` rather than editing code in this cycle:
-
-- `tsift graph-db evidence` timeout on agent-doc backlog ids, with bounded traversal/target-resolution regression coverage.
-- Queue-head drift coverage for consumed prompts reverting from completed queue text back to active `do #id` text, with non-reactivating repair guidance.
-
-No code or spec files were changed here; this cycle only records the backlog work in the named target document.
-<!-- agent:boundary:01c9a14e -->
+<!-- agent:boundary:6c21487b -->
 <!-- /agent:exchange -->
 ###
 <!--

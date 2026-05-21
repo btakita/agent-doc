@@ -10032,7 +10032,7 @@ scratch
     }
 
     #[test]
-    fn ipc_snapshot_removes_post_exchange_duplicate_prompt_html_comment() {
+    fn ipc_snapshot_scrubs_post_exchange_duplicate_prompt_html_comment_body() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("diag.md");
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -10065,7 +10065,11 @@ scratch
             !repaired.contains(
                 "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
             ),
-            "IPC ack-content dedupe must remove duplicate post-exchange prompt comments:\n{repaired}"
+            "IPC ack-content dedupe must scrub duplicate post-exchange prompt text:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n<!--\n-->\n\n<!-- agent:backlog -->"),
+            "IPC ack-content dedupe must preserve the ordinary HTML comment shell:\n{repaired}"
         );
         assert!(repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"));
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -13296,7 +13300,7 @@ Verification:
     }
 
     #[test]
-    fn normalize_final_template_content_removes_duplicate_prompt_html_comment_tail() {
+    fn normalize_final_template_content_scrubs_duplicate_prompt_html_comment_body() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("doc.md");
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -13343,7 +13347,11 @@ Verification:
             !repaired.contains(
                 "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
             ),
-            "duplicate post-exchange prompt comments should be removed:\n{repaired}"
+            "duplicate post-exchange prompt text should be scrubbed from comments:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n<!--\n-->\n\n<!-- agent:backlog -->"),
+            "duplicate prompt cleanup must preserve the ordinary HTML comment shell:\n{repaired}"
         );
         assert!(
             repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"),
@@ -13380,7 +13388,7 @@ Verification:
     }
 
     #[test]
-    fn normalize_template_structure_removes_answered_prompt_html_comment_tail() {
+    fn normalize_template_structure_scrubs_answered_prompt_html_comment_body() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("doc.md");
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -13413,7 +13421,11 @@ Verification:
             !repaired.contains(
                 "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
             ),
-            "answered duplicate prompt HTML comment should be removed:\n{repaired}"
+            "answered duplicate prompt text should be scrubbed from the HTML comment:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n<!--\n-->\n\n<!-- agent:backlog -->"),
+            "answered duplicate prompt cleanup must preserve the ordinary HTML comment shell:\n{repaired}"
         );
     }
 

@@ -1221,7 +1221,7 @@ pub fn run(file: &Path) -> Result<()> {
             ),
         );
         eprintln!(
-            "[preflight] removed duplicate prompt comment after exchange in {}",
+            "[preflight] scrubbed duplicate prompt text from comment after exchange in {}",
             file.display()
         );
         recovered = true;
@@ -4442,7 +4442,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_removes_post_exchange_duplicate_prompt_comment_before_diff() {
+    fn preflight_scrubs_post_exchange_duplicate_prompt_comment_before_diff() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("session.md");
@@ -4505,7 +4505,11 @@ mod tests {
         let duplicate_comment = format!("\n<!--\n{prompt}\n-->\n");
         assert!(
             !file_after.contains(&duplicate_comment),
-            "preflight should remove duplicate post-exchange prompt comments before diffing:\n{file_after}"
+            "preflight should scrub duplicate post-exchange prompt text before diffing:\n{file_after}"
+        );
+        assert!(
+            file_after.contains("\n<!--\n-->\n\n<!--\nKeep this unrelated scratch note hidden."),
+            "preflight should preserve the ordinary HTML comment shell after scrubbing duplicate prompt text:\n{file_after}"
         );
         assert!(
             file_after.contains("Keep this unrelated scratch note hidden."),

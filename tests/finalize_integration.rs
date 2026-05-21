@@ -1390,7 +1390,7 @@ fn finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted() {
 }
 
 #[test]
-fn finalize_removes_duplicate_prompt_html_comment_tail_in_closeout_commit() {
+fn finalize_scrubs_duplicate_prompt_html_comment_body_preserving_shell() {
     let (tmp, doc) = setup_session_stream_doc();
     let prompt = "The post-exchange HTML comment block should survive finalize. #spec-test-build-install-commit-push";
     let shaped = fs::read_to_string(&doc)
@@ -1422,22 +1422,31 @@ fn finalize_removes_duplicate_prompt_html_comment_tail_in_closeout_commit() {
             "--stream",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: comment cleanup — gpt-5\nRemoved the duplicate post-exchange prompt comment.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: comment cleanup — gpt-5\nScrubbed the duplicate post-exchange prompt residue.\n<!-- /patch:exchange -->\n",
         )
         .assert()
         .success();
 
     let expected_comment = format!("<!--\n{prompt}\n-->");
+    let scrubbed_comment_shell = "<!--\n-->\n\n<!-- agent:pending -->";
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
         !content.contains(&expected_comment),
-        "finalize must remove duplicate prompt ordinary HTML comments in the working tree:\n{content}"
+        "finalize must scrub duplicate prompt text from ordinary HTML comments in the working tree:\n{content}"
+    );
+    assert!(
+        content.contains(scrubbed_comment_shell),
+        "finalize must preserve the ordinary HTML comment shell in the working tree:\n{content}"
     );
 
     let head = head_blob(tmp.path());
     assert!(
         !head.contains(&expected_comment),
-        "finalize must remove duplicate prompt ordinary HTML comments in the closeout commit:\n{head}"
+        "finalize must scrub duplicate prompt text from ordinary HTML comments in the closeout commit:\n{head}"
+    );
+    assert!(
+        head.contains(scrubbed_comment_shell),
+        "finalize must preserve the ordinary HTML comment shell in the closeout commit:\n{head}"
     );
 }
 

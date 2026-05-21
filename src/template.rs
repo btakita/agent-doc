@@ -1044,7 +1044,7 @@ pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<Strin
         }
         let body = &doc[start + 4..end - 3];
         let Some(cleaned_body) = strip_duplicate_prompt_comment_body(body, &prompts) else {
-            replacements.push((start, end, String::new()));
+            replacements.push((start, end, empty_html_comment_like(body)));
             continue;
         };
         if cleaned_body != body {
@@ -1061,6 +1061,14 @@ pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<Strin
         cleaned.replace_range(start..end, &replacement);
     }
     Some(cleaned)
+}
+
+fn empty_html_comment_like(body: &str) -> String {
+    if body.contains('\n') {
+        "<!--\n-->".to_string()
+    } else {
+        "<!-- -->".to_string()
+    }
 }
 
 fn strip_duplicate_prompt_comment_body(body: &str, prompts: &[String]) -> Option<String> {
@@ -4734,7 +4742,7 @@ Existing answer.
     }
 
     #[test]
-    fn normalize_editor_visible_template_structure_removes_duplicate_prompt_html_comment() {
+    fn normalize_editor_visible_template_structure_scrubs_duplicate_prompt_html_comment_body() {
         let prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push";
         let doc = format!(
             concat!(
@@ -4759,12 +4767,16 @@ Existing answer.
         );
 
         let repaired = normalize_editor_visible_template_structure(&doc)
-            .expect("editor-visible normalization should remove duplicate prompt residue");
+            .expect("editor-visible normalization should scrub duplicate prompt residue");
 
         let duplicate_comment = format!("\n<!--\n{prompt}\n-->\n");
         assert!(
             !repaired.contains(&duplicate_comment),
-            "editor-visible normalization must remove duplicate post-exchange prompt comments:\n{repaired}"
+            "editor-visible normalization must scrub duplicate post-exchange prompt text:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("\n<!--\n-->\n\n<!--\nKeep this unrelated scratch note hidden."),
+            "editor-visible normalization must preserve the ordinary HTML comment shell:\n{repaired}"
         );
         assert!(
             repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"),

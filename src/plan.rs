@@ -10,6 +10,9 @@
 //!   resolved this cycle, a handoff target, and concrete blockers.
 //! - Does not fail closed solely on session-accretion heuristics; accretion
 //!   remains advisory while planning still derives prompt targets and actions.
+//! - Downgrades recoverable tsift graph database access failures to
+//!   `manual_packet_only` warnings so job packet creation can continue without
+//!   graph acceptance evidence.
 //! - Uses the same deterministic diff classifiers as preflight (`prompt_bearing_changes`,
 //!   imperative-directive extraction, slash-command parsing, orchestration detection)
 //!   so the planning record is binary-owned rather than free-form skill prose.
@@ -60,6 +63,7 @@ pub struct DispatchPlan {
     pub suggested_parent_tier: String,
     pub model_tier: String,
     pub dispatch_mode: String,
+    pub manual_packet_only: bool,
     pub context_budget_tokens: usize,
     pub job_packet_budget_tokens: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -77,6 +81,8 @@ pub struct DispatchPlan {
     pub handoff: HandoffTarget,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blockers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +174,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             suggested_parent_tier: "low".to_string(),
             model_tier: "low".to_string(),
             dispatch_mode: dispatch_mode(&fm),
+            manual_packet_only: false,
             context_budget_tokens: 0,
             job_packet_budget_tokens: 0,
             write_scope: Vec::new(),
@@ -179,6 +186,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             pending_mutations: Vec::new(),
             handoff: HandoffTarget::None,
             blockers: vec!["No changes detected since the last snapshot.".to_string()],
+            warnings: Vec::new(),
         });
     };
 
@@ -218,6 +226,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         &fm,
     );
     let mut blockers = shared_doc_security_blockers(file, &fm, &pending_mutations);
+    let mut warnings = Vec::new();
+    let mut manual_packet_only = false;
     let graph_targets = prompt_targets
         .iter()
         .chain(repo_actions.iter())
@@ -226,7 +236,14 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     let graph_evidence = match crate::tsift_graph::collect_for_do_items(file, &graph_targets) {
         Ok(graph_evidence) => graph_evidence,
         Err(err) => {
-            blockers.push(format!("tsift graph evidence failed closed: {err:#}"));
+            if crate::tsift_graph::is_recoverable_graph_db_access_error(&err) {
+                manual_packet_only = true;
+                warnings.push(format!(
+                    "tsift graph evidence unavailable; manual_packet_only=true: {err:#}"
+                ));
+            } else {
+                blockers.push(format!("tsift graph evidence failed closed: {err:#}"));
+            }
             None
         }
     };
@@ -296,6 +313,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         suggested_parent_tier: routing.suggested_parent_tier.clone(),
         model_tier: routing.model_tier,
         dispatch_mode: routing.dispatch_mode,
+        manual_packet_only,
         context_budget_tokens: routing.context_budget_tokens,
         job_packet_budget_tokens: routing.job_packet_budget_tokens,
         write_scope: routing.write_scope,
@@ -307,6 +325,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         pending_mutations,
         handoff,
         blockers: std::mem::take(&mut blockers),
+        warnings,
     })
 }
 
@@ -958,6 +977,70 @@ Done.
                 .any(|cmd| cmd.contains("--done oobpmt")),
             "queue do item should require closeout with --done oobpmt: {:?}",
             plan.required_commands
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_plan_downgrades_locked_graph_db_to_manual_packet_only_warning() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = setup_project();
+        std::fs::create_dir_all(dir.path().join(".tsift")).unwrap();
+        std::fs::write(dir.path().join(".tsift/graph.db"), "fake").unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+- [ ] [#jobslock] Create job packets when graph.db is locked.
+<!-- /agent:backlog -->
+"#;
+
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "do [#jobslock]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->",
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let script = dir.path().join("fake-tsift-lock.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nif echo \"$*\" | grep -q 'graph-db.*--json status'; then echo 'Error code 5: The database file is locked' >&2; exit 1; fi\necho \"unexpected fake tsift args: $*\" >&2\nexit 2\n",
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", script.to_str().unwrap());
+
+        let plan = build(&doc).unwrap();
+
+        assert!(plan.blockers.is_empty(), "unexpected blockers: {:?}", plan);
+        assert!(plan.manual_packet_only);
+        assert!(plan.graph_evidence.is_none());
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|warning| warning.contains("database file is locked")),
+            "expected lock warning, got {:?}",
+            plan.warnings
+        );
+        assert_eq!(
+            plan.repo_actions,
+            vec!["do [#jobslock]. spec-test-build-install-commit-push"]
         );
     }
 

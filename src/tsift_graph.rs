@@ -7,6 +7,9 @@
 //!   planning and orchestration prompts.
 //! - The integration is active only when an ancestor `.tsift/graph.db` exists.
 //!   Once active, stale graph freshness or unresolved targets fail closed.
+//! - Recoverable SQLite graph database access errors, such as locked,
+//!   hot-journal, or read-only failures, are classified for the planner so it
+//!   can keep manual job packets available without graph acceptance evidence.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -495,6 +498,21 @@ pub(crate) fn collect_for_do_items(
     plan.next_commands = next_commands.into_iter().collect();
     validate_dispatch_trace_contract(&plan)?;
     Ok(Some(plan))
+}
+
+pub(crate) fn is_recoverable_graph_db_access_error(error: &anyhow::Error) -> bool {
+    is_recoverable_graph_db_access_message(&format!("{error:#}"))
+}
+
+fn is_recoverable_graph_db_access_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("database file is locked")
+        || lower.contains("error code 5")
+        || lower.contains("hot-journal")
+        || lower.contains("hot journal")
+        || lower.contains("read-only")
+        || lower.contains("read only")
+        || lower.contains("readonly database")
 }
 
 fn collect_dispatch_trace(file: &Path, targets: &[String]) -> Result<TsiftDispatchTraceSummary> {
@@ -1788,6 +1806,21 @@ esac
             extract_do_targets("do [#x63e] [#v4v0]. spec-test"),
             vec!["x63e".to_string(), "v4v0".to_string()]
         );
+    }
+
+    #[test]
+    fn classifies_recoverable_graph_db_access_errors() {
+        let locked = anyhow::anyhow!(
+            "`tsift graph-db status` exited: Error code 5: The database file is locked"
+        );
+        assert!(is_recoverable_graph_db_access_error(&locked));
+
+        let hot_journal =
+            anyhow::anyhow!("sqlite hot-journal/read-only recovery prevented graph-db status");
+        assert!(is_recoverable_graph_db_access_error(&hot_journal));
+
+        let stale = anyhow::anyhow!("tsift graph.db is not current: graph.db is stale");
+        assert!(!is_recoverable_graph_db_access_error(&stale));
     }
 
     #[cfg(unix)]

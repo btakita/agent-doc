@@ -9,6 +9,9 @@
 //! - tsift context is optional in the MVP: packet creation records status,
 //!   replay commands, and a context sidecar when `tsift context-pack --json`
 //!   succeeds; missing/stale context stays visible and requires parent review.
+//! - When the plan downgrades recoverable graph database access failures to
+//!   `manual_packet_only`, packet creation continues and the warning is carried
+//!   into the job index and packet body.
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -40,6 +43,10 @@ pub(crate) struct JobsIndex {
     pub(crate) created_at_unix: u64,
     pub(crate) source_snapshot: String,
     pub(crate) preserve_on_success: bool,
+    #[serde(default)]
+    pub(crate) manual_packet_only: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) operation_doc: Option<String>,
     pub(crate) jobs: Vec<JobRecord>,
@@ -265,6 +272,8 @@ fn create_index(file: &Path, options: CreateOptions) -> Result<JobsIndex> {
         created_at_unix: created_at,
         source_snapshot,
         preserve_on_success: options.audit,
+        manual_packet_only: dispatch_plan.manual_packet_only,
+        warnings: dispatch_plan.warnings.clone(),
         operation_doc,
         jobs: records,
     };
@@ -741,6 +750,7 @@ fn render_job_packet(input: JobPacketRender<'_>) -> String {
         .graph_acceptance_context
         .map(|context| format!("\n## tsift Graph Acceptance Gate\n\n```text\n{context}\n```\n"))
         .unwrap_or_default();
+    let manual_packet_warning = render_manual_packet_warning(input.dispatch_plan);
     format!(
         r#"---
 contract_version: {job_contract}
@@ -756,6 +766,7 @@ write_scope:
 context_budget_tokens: {context_budget}
 source_snapshot: {source_snapshot}
 tsift_index: {tsift_status}
+manual_packet_only: {manual_packet_only}
 result_path: {result_path}
 ---
 
@@ -786,6 +797,7 @@ Complete `#{target}` only: {description}
 {tsift_json}
 ```
 {graph_acceptance}
+{manual_packet_warning}
 
 ## Acceptance Criteria
 
@@ -839,13 +851,36 @@ Save a JSON object to `{result_path}` or paste it under `## Worker Result`:
         context_budget = input.dispatch_plan.context_budget_tokens,
         source_snapshot = input.source_snapshot,
         tsift_status = input.tsift_context.status,
+        manual_packet_only = input.dispatch_plan.manual_packet_only,
         result_path = input.result_path,
         title = input.title,
         description = input.description,
         required_proof = required_proof,
         tsift_json = tsift_json,
         graph_acceptance = graph_acceptance,
+        manual_packet_warning = manual_packet_warning,
         worker_contract = WORKER_RESULT_CONTRACT_VERSION,
+    )
+}
+
+fn render_manual_packet_warning(dispatch_plan: &plan::DispatchPlan) -> String {
+    if !dispatch_plan.manual_packet_only {
+        return String::new();
+    }
+
+    let warnings = if dispatch_plan.warnings.is_empty() {
+        "- Graph acceptance evidence is unavailable; parent review must treat this as a manual packet.".to_string()
+    } else {
+        dispatch_plan
+            .warnings
+            .iter()
+            .map(|warning| format!("- {warning}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    format!(
+        "\n## Manual Packet Warning\n\nmanual_packet_only=true. Graph acceptance evidence was not attached.\n\n{warnings}\n"
     )
 }
 
@@ -993,6 +1028,7 @@ fn write_operation_doc(
     };
     std::fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
     let path = dir.join(format!("{cycle_id}.md"));
+    let warnings = yaml_list(&dispatch_plan.warnings);
     let content = format!(
         r#"# Operation: {cycle_id}
 
@@ -1009,6 +1045,9 @@ dispatch_mode: {dispatch_mode}
 - parallelizable: {parallelizable}
 - suggested_parent_tier: {suggested_parent_tier}
 - context_budget_tokens: {context_budget}
+- manual_packet_only: {manual_packet_only}
+- warnings:
+{warnings}
 
 ## Job Packet List
 
@@ -1033,6 +1072,8 @@ Parent review must run required verification before `agent-doc finalize`.
         parallelizable = dispatch_plan.parallelizable,
         suggested_parent_tier = dispatch_plan.suggested_parent_tier,
         context_budget = dispatch_plan.context_budget_tokens,
+        manual_packet_only = dispatch_plan.manual_packet_only,
+        warnings = warnings,
     );
     std::fs::write(&path, content)
         .with_context(|| format!("failed to write {}", path.display()))?;
@@ -1205,6 +1246,70 @@ agent_doc_dispatch: auto
             assert!(text.contains("failed to launch"));
             assert_eq!(job.tsift_status, "unavailable");
         }
+    }
+
+    #[test]
+    fn create_allows_manual_packets_when_graph_db_is_locked() {
+        let (dir, doc) = setup_doc();
+        std::fs::create_dir_all(dir.path().join(".tsift")).unwrap();
+        std::fs::write(dir.path().join(".tsift/graph.db"), "fake").unwrap();
+        let fake = dir.path().join("fake-tsift-lock");
+        let mut script = std::fs::File::create(&fake).unwrap();
+        writeln!(
+            script,
+            r#"#!/bin/sh
+case "$*" in
+  *"graph-db"*"--json status"*)
+    echo 'Error code 5: The database file is locked' >&2
+    exit 1
+    ;;
+  *"status"*"--json"*)
+    printf '{{"index":{{"status":"fresh"}}}}'
+    ;;
+  *"context-pack"*)
+    printf '{{"summary":"manual packet"}}'
+    ;;
+  *)
+    echo "unexpected fake tsift args: $*" >&2
+    exit 2
+    ;;
+esac
+"#
+        )
+        .unwrap();
+        drop(script);
+        let mut perms = std::fs::metadata(&fake).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fake, perms).unwrap();
+        let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", fake.to_str().unwrap());
+
+        let index = create_index(
+            &doc,
+            CreateOptions {
+                operation_doc: true,
+                audit: true,
+                budget: 1024,
+            },
+        )
+        .unwrap();
+
+        assert!(index.manual_packet_only);
+        assert!(
+            index
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("database file is locked")),
+            "expected lock warning, got {:?}",
+            index.warnings
+        );
+        assert_eq!(index.jobs.len(), 2);
+        let packet = std::fs::read_to_string(dir.path().join(&index.jobs[0].path)).unwrap();
+        assert!(packet.contains("manual_packet_only: true"));
+        assert!(packet.contains("## Manual Packet Warning"));
+        assert!(packet.contains("database file is locked"));
+        let operation_doc = index.operation_doc.as_ref().unwrap();
+        let operation_text = std::fs::read_to_string(dir.path().join(operation_doc)).unwrap();
+        assert!(operation_text.contains("- manual_packet_only: true"));
     }
 
     #[test]

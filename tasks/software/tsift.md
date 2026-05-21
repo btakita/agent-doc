@@ -58,7 +58,29 @@ I could not start `#cmgevfix` because `agent-doc plan` stopped the cycle before 
 `tsift graph orchestration contract invalid: conflict-matrix missing evidence_packet_id gevd-d102ace0f7 for target cmgevfix`
 
 No repo edits, tests, build, install, manual commit, or push were performed. `#cmgevfix` stays open because the planner cannot produce a valid execution contract while the conflict-matrix/evidence graph is inconsistent for the target item itself.
-<!-- agent:boundary:d5e3595c -->
+### Re: #cmgevfix — gpt-5
+
+Completed `#cmgevfix`.
+
+Implemented in `src/agent-doc`:
+- `plan` now refreshes the tsift graph projection before collecting per-target evidence, so evidence packet ids align with `conflict-matrix` and `dispatch-trace` instead of validating stale packet ids.
+- tsift graph evidence failures are preserved as warnings/manual review fallback instead of blocking the whole agent-doc turn boundary.
+- Updated the agent-doc spec, README, and manual job packet docs for the refreshed/fallback graph contract.
+
+Verification:
+- `cargo test collect_for_do_items_attaches_graph_handles`
+- `cargo test build_plan_downgrades_stale_graph_db_to_manual_packet_only_warning`
+- `cargo test parallel_mode_continues_without_graph_evidence_when_tsift_is_stale`
+- `cargo test collect_for_do_items_fails_closed_on_missing_graph_contract_fields`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- Latest GitHub CI run `26234146432` was green, including `make tmux-ci`.
+
+Commits pushed:
+- agent-doc: `e17bf1f` (`20260422/codex-agent-backend`)
+- agent-loop gitlink: `7680e03cf` (`main`)
+<!-- agent:boundary:36f4c028 -->
 <!-- /agent:exchange -->
 ###
 <!--

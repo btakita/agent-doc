@@ -103,13 +103,10 @@ Commits pushed:
 ### Re: closeout residue repair — gpt-5
 
 I repaired the pre-fix closeout residue from the earlier IPC write: the hidden duplicate prompt comment below `agent:exchange` is removed, and the accidental duplicate `#pwcm` backlog entry is collapsed into the canonical generated item `#r7k8`. The pushed implementation now also covers the IPC ack-content path that preserved that residue.
-
-<!-- agent:boundary:bfbb52e6 -->
+<!-- agent:boundary:f82e60b7 -->
 <!-- /agent:exchange -->
 ###
-<!--
-The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push 
--->
+
 
 <!-- agent:queue -->
 <!-- /agent:queue -->

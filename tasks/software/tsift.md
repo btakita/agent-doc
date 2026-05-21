@@ -47,7 +47,22 @@ I ran preflight and planning for `do [#bfd1] [#w94s]` with `#spec-test-build-ins
 That timeout is the active blocker, so I did not update spec/tests, build, install, commit, or push code changes in this cycle. I am leaving `#bfd1` and `#w94s` open because implementation was blocked before any repo work could start.
 
 Preflight also reported one legacy gated backlog item still in `agent:backlog`; I did not migrate it because this cycle was scoped to `#bfd1` and `#w94s`.
-<!-- agent:boundary:48db32eb -->
+❯ do [#bfd1] [#w94s]
+❯ #spec-test-build-install-commit-push
+
+❯ Would https://github.com/LadybugDB/ladybug be a good cross-platform replacement to sqlite as the backend
+### Re: LadybugDB backend question — gpt-5
+
+I ran preflight and planning again for `do [#bfd1] [#w94s]` with `#spec-test-build-install-commit-push`. Planning still failed closed before repo edits on the same graph evidence timeout for `#bfd1`, so I did not change spec/tests, build, install, commit, or push code in this cycle. `#bfd1` and `#w94s` stay open.
+
+On LadybugDB: not as a direct replacement for SQLite in tsift. Ladybug looks capable and cross-platform, but it is a graph database with a Cypher/property-graph model, not a drop-in relational embedded store. Current tsift uses bundled `rusqlite` broadly for `index.db`, `summaries.db`, and `.tsift/graph.db`; replacing SQLite globally would mean rewriting storage/query surfaces, not swapping a driver.
+
+It might be worth a narrow backend experiment behind `GraphStore` only, because tsift already has a provider-neutral substrate and Convex snapshot parity path. But I would not expect Ladybug to solve the current lock class by itself: its own docs describe a strict concurrency model where a database can have either one `READ_WRITE` `Database` object or multiple `READ_ONLY` objects, and mixed read-write multi-process access should be routed through one owning server process. That is close to the kind of coordination problem tsift is already hitting.
+
+My judgment: keep SQLite as the local correctness/offline backend and fix the lock behavior directly, probably with WAL/transaction/owned-lock recovery. Treat Ladybug as a possible optional graph projection backend only after a small benchmark proves it improves evidence/path/neighborhood workloads enough to justify the migration cost.
+
+Sources checked: Ladybug GitHub README (`https://github.com/LadybugDB/ladybug`), Ladybug docs overview (`https://docs.ladybugdb.com/`), client APIs (`https://docs.ladybugdb.com/client-apis/`), and concurrency docs (`https://docs.ladybugdb.com/concurrency/`). Local context checked: `src/tsift/Cargo.toml`, `src/tsift/SPEC.md`, `src/tsift/src/substrate.rs`, and `src/tsift/tests/graph_db_conformance.rs`.
+<!-- agent:boundary:7e9b8cd3 -->
 <!-- /agent:exchange -->
 ###
 <!--

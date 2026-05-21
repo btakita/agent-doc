@@ -18,7 +18,8 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Worker-feedback closure contracts complete; top tsift backlog item: #aorp.
+
+Agent-orchestration acceptance regeneration complete; tsift backlog is clear.
 <!-- /agent:status -->
 
 ## Spec
@@ -35,9 +36,40 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 3 response topic(s): graph orchestration next steps; worker-feedback closure contracts; graph orchestration next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:4e4853ff -->
+❯ do [#aorp]. #spec-test-build-install-commit-push
+### Re: do #aorp — gpt-5
+
+Implemented `#aorp`.
+
+What changed:
+- Added a graph conformance acceptance test that regenerates normalized `graph-db refresh`, `graph-db evidence`, `conflict-matrix`, `dispatch-trace` JSON/HTML, `context-pack`, and `session-review` samples from the real queue fixture.
+- Added `regenerated_samples` to `fixtures/graph-db-operator-examples/agent-orchestration-acceptance-pack.json`, so CI fails when checked-in orchestration contracts drift from live regenerated output.
+- Updated the tsift spec and fixture README to document the regeneration contract.
+
+Commits created locally:
+- `src/tsift`: `e7f664b test: add agent orchestration acceptance regeneration`
+- parent repo pointer: `1de98edb3 chore: update tsift acceptance harness`
+
+Verification:
+- `cargo fmt --check`
+- `cargo test --test graph_db_conformance agent_orchestration_acceptance_pack_regenerates_from_real_queue_fixture`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.42`
+
+CI review:
+- `btakita/tsift` latest `CI` run `26204657736` is green for `clippy + test` and `live Convex graph acceptance`.
+- parent `btakita/agent-loop` latest `Agent Doc` run `26205168579` shows empty-step failures for `tmux-ci` and `check`; no job steps started, so I treated it as an external CI-start blocker rather than a tmux/code regression.
+
+Operational note: `agent-doc plan` was attempted after preflight, but the installed pre-change planner stayed CPU-bound inside `tsift conflict-matrix --path ... --json aorp` with no output and had to be interrupted. I executed from the explicit `#aorp` backlog item plus `#spec-test-build-install-commit-push` preset instead.
+<!-- agent:boundary:375e48ac -->
 <!-- /agent:exchange -->
 ###
+<!--
+Update #next-steps in agent-doc-bugs2.md with latest tsift features.
+Add #next-steps to tsift.md for agent orchestration and graphdb features.
+-->
 
 
 <!-- agent:queue -->
@@ -50,7 +82,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#aorp] [recommended] Add a fixture-regeneration acceptance harness for the agent-orchestration pack: derive graph-db evidence, conflict-matrix, dispatch-trace JSON/HTML, context-pack, and session-review samples from a real queue fixture and fail CI when checked-in contracts drift from regenerated output.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

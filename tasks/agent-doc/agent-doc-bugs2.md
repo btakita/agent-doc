@@ -73,14 +73,45 @@ Committed and pushed:
 - Superproject: `67809e59e` (`agent-doc: debounce preflight baseline capture`) pushed to `origin/main`.
 
 No feature removal was needed.
-<!-- agent:boundary:48784fd3 -->
 The finalize step of turns should not delete the html comment under agent:exchange. Please identify the root cause. Make a failing test to surface the bug first. Fix. #spec-test-build-install-commit-push
 
 The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push
+### Re: duplicate prompt comment shell — gpt-5
+
+Root cause: duplicate prompt cleanup treated an HTML comment whose body exactly matched an already-recorded exchange prompt as disposable residue. `strip_duplicate_prompt_comment_body` returned `None`, and `remove_post_exchange_duplicate_prompt_comments` replaced the whole comment range with an empty string. Because that cleanup runs through preflight, final template normalization, IPC snapshot dedupe, and editor-visible normalization, an ordinary comment container under `agent:exchange` could be deleted at several cycle boundaries.
+
+I reproduced the bug with a failing integration test first: `cargo test finalize_scrubs_duplicate_prompt_html_comment_body_preserving_shell --manifest-path src/agent-doc/Cargo.toml` failed before the fix because the working-tree document no longer contained the HTML comment shell.
+
+Fixed by preserving an empty ordinary HTML comment shell when duplicate prompt text is scrubbed from the body. The cleanup now removes the duplicate prompt content while leaving `<!--\n-->` or `<!-- -->` in place, and preflight diagnostics now say duplicate prompt text was scrubbed instead of claiming the whole comment was removed. No feature removal was needed.
+
+Changed paths:
+
+- `src/agent-doc/src/template.rs`
+- `src/agent-doc/src/preflight.rs`
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/tests/finalize_integration.rs`
+- `src/agent-doc/specs/04-diff-computation.md`
+- `src/agent-doc/specs/07-closeout-commands.md`
+
+Verification:
+
+- Failing-first proof: `cargo test finalize_scrubs_duplicate_prompt_html_comment_body_preserving_shell --manifest-path src/agent-doc/Cargo.toml` failed before implementation.
+- Targeted tests passed after the fix: `finalize_scrubs_duplicate_prompt_html_comment_body_preserving_shell`, `normalize_final_template_content_scrubs_duplicate_prompt_html_comment_body`, and `preflight_scrubs_post_exchange_duplicate_prompt_comment_before_diff`.
+- `cargo fmt --manifest-path src/agent-doc/Cargo.toml`
+- `git -C src/agent-doc diff --check`
+- `make check` in `src/agent-doc` passed: 2239 tests passed, 0 failed, plus integration suites.
+- `make install` in `src/agent-doc` passed; `agent-doc --version` reports `agent-doc 0.33.16`.
+- Local `make tmux-ci` in `src/agent-doc` passed: 228 passed, 0 failed.
+- GitHub Actions run `26254360025` passed both `make check` and `make tmux-ci`; it only reported the existing Node.js 20 actions deprecation annotation for `actions/checkout@v4`.
+
+Commits and push:
+
+- `src/agent-doc`: `12746c51` (`fix: preserve duplicate prompt comment shell`) pushed to `origin/20260422/codex-agent-backend`.
+- Superproject: `dc8ee2842` (`agent-doc: preserve duplicate prompt comment shell`) pushed to `origin/main`.
+<!-- agent:boundary:4ba34d1e -->
 <!-- /agent:exchange -->
 ###
 <!--
-The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->

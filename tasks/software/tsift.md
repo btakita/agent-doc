@@ -31,35 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-052911.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260521-054738.md`*
 
 Compacted content:
-- Archived 1 response topic(s): graph-db queue
+- Archived 1 response topic(s): graph-db operator hardening
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ do [#gdbhard]. #spec-test-build-install-commit-push
-### Re: graph-db operator hardening — gpt-5
-
-Completed `#gdbhard`.
-
-Changed `src/tsift` so the graph DB operator replay path is fixture-backed across the current surface: `graph-db refresh`, `status`, `doctor`, `evidence`, stale Convex `drift`, stale `convex-sync`, `conflict-matrix`, `dispatch-trace`, `context-pack`, and `session-review`. The acceptance fixture now records the stale Convex repair path, and the conformance test regenerates those samples from the real queue fixture so CI fails on drift.
-
-Updated docs/spec surfaces: `README.md`, `SPEC.md`, `VERSIONS.md`, and `fixtures/graph-db-operator-examples/README.md`.
-
-Verification completed:
-- `cargo test --test graph_db_conformance agent_orchestration_acceptance_pack_regenerates_from_real_queue_fixture -- --nocapture`
-- `cargo test --test graph_db_conformance`
-- `make check`
-- `cargo build`
-- `cargo install --path .`; installed `tsift --version` reports `0.1.42`
-
-CI evidence:
-- `btakita/tsift` latest CI run `26207248703` is green for `clippy + test` and `live Convex graph acceptance`.
-- Parent `agent-loop` latest Agent Doc run `26207660377` has empty-step `tmux-ci` / `check` failures and `gh run view --log` returns `log not found`, so I classified it as an external CI-start blocker rather than a code/tmux regression.
-
-Commits pushed:
-- `src/tsift`: `ef49229 test: harden graph db operator fixtures`
-- `agent-loop`: `4dc52dbab chore: update tsift graph operator fixtures`
-<!-- agent:boundary:1571e8d4 -->
+<!-- agent:boundary:b1b2aac3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -72,6 +49,9 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#dagfix] [recommended] Add regeneration fixtures for real agent-doc queue DAGs: refresh -> evidence -> conflict-matrix -> dependency-dag -> dispatch-trace, asserting projection freshness, packet ids, worker_result closure, cycle detection, and stale graph fail-closed behavior.
+- [ ] [#impactdag] [recommended] Extend conflict-matrix and dispatch-trace with scheduler fields: parallel_safe, blocks, blocked_by, required_context, expected_tests, and stable graph handles so agent-doc can run topological antichains without scraping prose.
+- [ ] [#tsdag] [recommended] Add graph-level dependency DAG extraction for agent-doc work: derive explicit and implicit edges among backlog ids from file/symbol/test/config overlap, semantic relations, worker_result follow-up ids, and depends-on text; emit nodes, edges, cycle diagnostics, topo batches, replay commands, and repair commands as a versioned JSON contract.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.**
 <!-- /agent:backlog -->
 

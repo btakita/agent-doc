@@ -103,7 +103,11 @@ Commits pushed:
 ### Re: closeout residue repair — gpt-5
 
 I repaired the pre-fix closeout residue from the earlier IPC write: the hidden duplicate prompt comment below `agent:exchange` is removed, and the accidental duplicate `#pwcm` backlog entry is collapsed into the canonical generated item `#r7k8`. The pushed implementation now also covers the IPC ack-content path that preserved that residue.
-<!-- agent:boundary:f82e60b7 -->
+### Re: repair boundary closeout — gpt-5
+
+Closed the post-repair boundary drift through `agent-doc write --commit`; no additional implementation changes were made in this document-only closeout.
+
+<!-- agent:boundary:b2d8920a -->
 <!-- /agent:exchange -->
 ###
 

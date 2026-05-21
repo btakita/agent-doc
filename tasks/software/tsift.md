@@ -96,7 +96,49 @@ agent-doc jobs collect tasks/software/tsift.md --json
 The dogfood comparison should check whether Claude Code and Codex produce the same contract-grade fields: `packet_id`, `projection_hash`, replay/repair commands, owned files/symbols, forbidden files, expected tests, `worker_feedback`, worker result status, touched files/tests, and follow-up ids. Any missing or unstable field becomes the tsift-side fixture gap to add under `#orchdog` rather than an agent-doc routing bug by default.
 
 No repo files needed to change for this answer.
-<!-- agent:boundary:9e4a9ffb -->
+❯ Please provide simpler options to complete [#orchdog] using agent-doc. See root.md
+### Re: simpler #orchdog options — gpt-5
+
+The simpler `root.md` pattern is: put one compact `do [#id] ... #preset` directive in the exchange and let `agent-doc preflight -> plan -> work -> finalize` own the details.
+
+Recommended one-shot option:
+
+```markdown
+do [#orchdog] by dogfooding graph-backed orchestration on a real agent-doc queue run, using the smallest useful path: agent-doc planning/job packets, tsift graph evidence, conflict-matrix, dispatch-trace, jobs create/collect, and fixture/spec updates only for gaps found. #spec-test-build-install-commit-push
+```
+
+Claude Code invocation:
+
+```text
+/agent-doc tasks/software/tsift.md
+```
+
+Codex invocation:
+
+```text
+agent-doc tasks/software/tsift.md
+```
+
+If you want it even smaller, use an evidence-only first pass:
+
+```markdown
+do [#orchdog] evidence-only: run agent-doc planning/job-packet dogfood plus tsift graph evidence/conflict-matrix/dispatch-trace, report the smallest fixture gaps, but do not implement fixes yet.
+```
+
+Then follow with:
+
+```markdown
+do [#orchdog] implement the fixture/spec gaps found in the evidence-only pass. #spec-test-build-install-commit-push
+```
+
+If you want agent-doc to batch it like the `root.md` queue style, add only this queue item under the existing queue preset, then invoke the document normally:
+
+```markdown
+- do [#orchdog]
+```
+
+I would use the one-shot option first. It is short enough for Claude Code and Codex, keeps the work bound to `#orchdog`, and still asks for the required spec/test/build/install/commit/push closeout.
+<!-- agent:boundary:11370240 -->
 <!-- /agent:exchange -->
 ###
 

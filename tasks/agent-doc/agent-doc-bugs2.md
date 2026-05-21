@@ -34,7 +34,34 @@ FlowCore refactor is in maintenance mode; top backlog item: #ipcd.
 Compacted content:
 - Archived 1 response topic(s): graph acceptance gate
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:0c018904 -->
+### Re: job packet graph gate — gpt-5
+
+Done: `#w25k`, `#aggtp`, `#jpktscope`, and `#jpktwsmis` are implemented and marked complete.
+
+For `#w25k`, I repaired the local tsift graph-db blocker by quarantining the hot `graph.db` and journal files, then refreshed the graph. `tsift graph-db status` is current and `tsift graph-db doctor` reports `ok`, so the read-only hot-journal state is cleared.
+
+For `#aggtp`, I added the graph-backed acceptance gate around orchestration/job packet creation and collection. Planning now includes graph evidence for queue-driven `do` targets, worker packet evidence is validated for packet id, projection hash, expansion commands, token budget, and worker feedback, and worker results now fail closed unless they include the expected touched files, expected tests, follow-up ids, changed paths, commands, proof, findings, confidence, and status contract. I also bounded tsift graph subprocesses with `AGENT_DOC_TSIFT_GRAPH_TIMEOUT_SECS` so an expensive graph query fails closed instead of hanging the cycle.
+
+For `#jpktscope`, `jobs create` now expands the union of pending mutations plus all ids from compound `do` directives, so directives like `do [#x63e] [#v4v0]` create one packet per target instead of only the first one.
+
+For `#jpktwsmis`, job packet write scopes are now target-specific. `jobs create` prefers explicit `scope:`, `write_scope:`, or `write-scope:` path refs from each backlog item, then falls back to path-like refs in the item text, and only then uses the broader plan scope.
+
+Verification:
+
+- `tsift graph-db refresh`, `status`, and `doctor` passed after repair.
+- Focused coverage passed for job packets, compound `do` planning, graph target parsing, and the tempdir audit regression.
+- `make check` passed.
+- Latest GitHub CI run `26206558029` had failed at `Run make check` before reaching tmux; local `make check` is now green.
+- `make tmux-ci` passed locally, including 228 ignored/live tmux tests in the main binary suite.
+- `cargo install --path .` completed and the installed binary reports `agent-doc 0.33.16`.
+
+Committed:
+
+- `src/agent-doc`: `9f06a014 feat: tighten job packet graph gate`
+- superproject pointer: `8173512dd chore: update agent-doc submodule`
+
+Per the session commit boundary, I am pushing those commits immediately after this document closeout commit lands.
+<!-- agent:boundary:7cefab95 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,18 +71,15 @@ The duplicate content corrupting document and duplicate prompt issues happened y
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#rvel]
-- do [#fwjw]
-- do [#0fcx]
+- do [#w25k]
+- do [#aggtp]
+- do [#jpktscope]
+- do [#jpktwsmis]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#w25k] Resolve the tsift graph-db hot-journal/read-only blocker for tasks/agent-doc/agent-doc-bugs2.md so #aggtp can run through graph evidence, implementation, verification, install, commit, and push.
-- [ ] [#aggtp] Add an agent-doc graph-backed orchestration acceptance gate that dogfoods the latest tsift graph-db evidence, conflict-matrix, dispatch-trace, worker_result, and job packet contracts against agent-doc jobs create/collect; fail closed when packet ids, projection hashes, replay/repair commands, touched files/tests, or follow-up ids are missing.
-- [ ] [#jpktscope] [recommended] `agent-doc jobs create` derives the packet set from `agent-doc plan`'s `pending_mutations`, not from the full `repo_actions` text or `prompt_target` set. Observed 2026-05-21 dogfood: a session prompt `do [#x63e] [#v4v0] ...` produced exactly one packet (#x63e) because only x63e was a `pending_mutation` in the planning record. Result: queued items that aren't already backlog-tracked silently drop out of the job-packet workflow. Fix: have `jobs create` expand from the union of `pending_mutations` ∪ `prompt_target` ids referenced in `repo_actions`, or document the constraint that only `pending_mutations`-tracked ids are dispatchable.
-- [ ] [#jpktwsmis] Job packet `write_scope` mis-attribution for cross-repo session documents. Observed 2026-05-21: dogfood against `session-share/tasks/root.md` produced a packet for `#x63e` (scope: `build-party/specs/convex-knowledge-layer.md`) with `write_scope: ["src/agent-doc/specs/", "src/agent-doc/src/", "src/agent-doc/tests/", "src/tsift/"]` — the agent-doc/tsift defaults rather than the build-party path the backlog item names. Worker honoring this scope would refuse to touch build-party. Fix: derive `write_scope` from the backlog item's file references (use path-extraction heuristic over the item text) instead of defaulting to the document's own repo.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

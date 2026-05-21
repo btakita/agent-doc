@@ -1390,7 +1390,7 @@ fn finalize_preserves_late_comment_tail_edit_outside_exchange_uncommitted() {
 }
 
 #[test]
-fn finalize_preserves_prompt_like_html_comment_tail_in_closeout_commit() {
+fn finalize_removes_duplicate_prompt_html_comment_tail_in_closeout_commit() {
     let (tmp, doc) = setup_session_stream_doc();
     let prompt = "The post-exchange HTML comment block should survive finalize. #spec-test-build-install-commit-push";
     let shaped = fs::read_to_string(&doc)
@@ -1422,7 +1422,7 @@ fn finalize_preserves_prompt_like_html_comment_tail_in_closeout_commit() {
             "--stream",
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: comment retention — gpt-5\nPreserved the post-exchange comment.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: comment cleanup — gpt-5\nRemoved the duplicate post-exchange prompt comment.\n<!-- /patch:exchange -->\n",
         )
         .assert()
         .success();
@@ -1430,14 +1430,14 @@ fn finalize_preserves_prompt_like_html_comment_tail_in_closeout_commit() {
     let expected_comment = format!("<!--\n{prompt}\n-->");
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains(&expected_comment),
-        "finalize must preserve prompt-like ordinary HTML comments in the working tree:\n{content}"
+        !content.contains(&expected_comment),
+        "finalize must remove duplicate prompt ordinary HTML comments in the working tree:\n{content}"
     );
 
     let head = head_blob(tmp.path());
     assert!(
-        head.contains(&expected_comment),
-        "finalize must preserve prompt-like ordinary HTML comments in the closeout commit:\n{head}"
+        !head.contains(&expected_comment),
+        "finalize must remove duplicate prompt ordinary HTML comments in the closeout commit:\n{head}"
     );
 }
 

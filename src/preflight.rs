@@ -1152,6 +1152,23 @@ pub fn run(file: &Path) -> Result<()> {
         );
         recovered = true;
     }
+    if let Some(cleaned_doc) = crate::template::remove_post_exchange_duplicate_prompt_comments(
+        &std::fs::read_to_string(file)?,
+    ) {
+        crate::write::atomic_write_pub(file, &cleaned_doc)?;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "post_exchange_duplicate_prompt_comment_removed file={} source=preflight",
+                file.display()
+            ),
+        );
+        eprintln!(
+            "[preflight] removed duplicate prompt comment after exchange in {}",
+            file.display()
+        );
+        recovered = true;
+    }
 
     // Step 2b/2c: Save the baseline after commit and pre-diff prompt cleanup so
     // response merges start from the actual visible document. Preflight no longer
@@ -4379,7 +4396,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_preserves_post_exchange_prompt_like_html_comment_before_diff() {
+    fn preflight_removes_post_exchange_duplicate_prompt_comment_before_diff() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("session.md");
@@ -4441,8 +4458,8 @@ mod tests {
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let duplicate_comment = format!("\n<!--\n{prompt}\n-->\n");
         assert!(
-            file_after.contains(&duplicate_comment),
-            "preflight should preserve ordinary post-exchange HTML comments before diffing:\n{file_after}"
+            !file_after.contains(&duplicate_comment),
+            "preflight should remove duplicate post-exchange prompt comments before diffing:\n{file_after}"
         );
         assert!(
             file_after.contains("Keep this unrelated scratch note hidden."),

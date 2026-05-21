@@ -968,6 +968,9 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
     while let Some(merged) = repair_duplicate_exchange_opener(&normalized)? {
         normalized = merged;
     }
+    if let Some(cleaned) = remove_post_exchange_duplicate_prompt_comments(&normalized) {
+        normalized = cleaned;
+    }
 
     match guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
@@ -999,6 +1002,231 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
         }
         Err(err) => Err(err).context("template structure guard failed"),
     }
+}
+
+/// Remove ordinary HTML comments after `agent:exchange` when their body is a
+/// duplicate or near-duplicate of prompt text already present in the exchange.
+///
+/// This keeps unrelated scratch comments user-owned while cleaning stale editor
+/// residue such as a hidden previous copy of the current prompt.
+pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<String> {
+    let components = component::parse(doc).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let prompts = exchange_prompt_comment_targets(exchange.content(doc));
+    if prompts.is_empty() {
+        return None;
+    }
+
+    let protected_ranges = components
+        .iter()
+        .filter(|component| component.name != "exchange")
+        .map(|component| (component.open_start, component.close_end))
+        .collect::<Vec<_>>();
+
+    let mut replacements = Vec::<(usize, usize, String)>::new();
+    for (start, end) in component::find_non_agent_html_comment_ranges(doc) {
+        if start < exchange.close_end {
+            continue;
+        }
+        if protected_ranges
+            .iter()
+            .any(|(protected_start, protected_end)| {
+                start >= *protected_start && end <= *protected_end
+            })
+        {
+            continue;
+        }
+        let original = &doc[start..end];
+        if !original.ends_with("-->") {
+            continue;
+        }
+        let body = &doc[start + 4..end - 3];
+        let Some(cleaned_body) = strip_duplicate_prompt_comment_body(body, &prompts) else {
+            replacements.push((start, end, String::new()));
+            continue;
+        };
+        if cleaned_body != body {
+            replacements.push((start, end, format!("<!--{}-->", cleaned_body)));
+        }
+    }
+
+    if replacements.is_empty() {
+        return None;
+    }
+
+    let mut cleaned = doc.to_string();
+    for (start, end, replacement) in replacements.into_iter().rev() {
+        cleaned.replace_range(start..end, &replacement);
+    }
+    Some(cleaned)
+}
+
+fn strip_duplicate_prompt_comment_body(body: &str, prompts: &[String]) -> Option<String> {
+    if is_duplicate_prompt_comment_text(body, prompts) {
+        return None;
+    }
+
+    let mut changed = false;
+    let mut cleaned = String::new();
+    for segment in body.split_inclusive('\n') {
+        let line = segment.strip_suffix('\n').unwrap_or(segment);
+        if is_duplicate_prompt_comment_text(line, prompts) {
+            changed = true;
+            continue;
+        }
+        cleaned.push_str(segment);
+    }
+
+    if !changed {
+        return Some(body.to_string());
+    }
+    if cleaned.trim().is_empty() {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+fn exchange_prompt_comment_targets(exchange: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    let mut seen = HashSet::new();
+    let mut in_response_block = false;
+    let mut in_fence = false;
+
+    for line in exchange.lines() {
+        let trimmed = line.trim();
+        if is_fence_delimiter(trimmed) {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if trimmed.starts_with("<!-- agent:boundary:") {
+            in_response_block = false;
+            continue;
+        }
+        if trimmed.starts_with("### Re:") || trimmed.starts_with("## Assistant") {
+            in_response_block = true;
+            continue;
+        }
+        let Some(normalized) = normalize_prompt_comment_text(trimmed) else {
+            continue;
+        };
+        if in_response_block && !looks_like_prompt_comment_target(trimmed) {
+            continue;
+        }
+        if in_response_block {
+            in_response_block = false;
+        }
+        if seen.insert(normalized.clone()) {
+            targets.push(normalized);
+        }
+    }
+
+    targets
+}
+
+fn looks_like_prompt_comment_target(text: &str) -> bool {
+    let trimmed = text.trim();
+    let lower = trimmed.to_lowercase();
+    trimmed.starts_with('❯')
+        || trimmed.contains('#')
+        || trimmed.ends_with('?')
+        || lower.starts_with("do ")
+        || lower.starts_with("fix ")
+        || lower.starts_with("run ")
+        || lower.starts_with("please ")
+        || lower.contains(" spec-test-")
+        || lower.contains(" reproduce ")
+}
+
+fn normalize_prompt_comment_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with("<!--")
+        || trimmed.starts_with("### Re:")
+        || trimmed.starts_with("## Assistant")
+        || trimmed.starts_with("## User")
+        || is_markdown_heading(trimmed)
+    {
+        return None;
+    }
+    let unprefixed = trimmed.strip_prefix('❯').unwrap_or(trimmed).trim();
+    let collapsed = unprefixed.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.len() < 32 {
+        None
+    } else {
+        Some(collapsed)
+    }
+}
+
+fn is_markdown_heading(trimmed: &str) -> bool {
+    let hashes = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    (1..=6).contains(&hashes) && trimmed.as_bytes().get(hashes) == Some(&b' ')
+}
+
+fn is_fence_delimiter(trimmed: &str) -> bool {
+    let Some(first) = trimmed.chars().next() else {
+        return false;
+    };
+    if first != '`' && first != '~' {
+        return false;
+    }
+    trimmed.chars().take_while(|ch| *ch == first).count() >= 3
+}
+
+fn is_duplicate_prompt_comment_text(candidate: &str, prompts: &[String]) -> bool {
+    let Some(candidate) = normalize_prompt_comment_text(candidate) else {
+        return false;
+    };
+    let candidate_lower = candidate.to_lowercase();
+    let candidate_tokens = prompt_comment_tokens(&candidate);
+    if candidate_tokens.len() < 8 {
+        return false;
+    }
+
+    prompts.iter().any(|prompt| {
+        let prompt_lower = prompt.to_lowercase();
+        if candidate_lower == prompt_lower
+            || prompt_lower.contains(&candidate_lower)
+            || candidate_lower.contains(&prompt_lower)
+        {
+            return true;
+        }
+
+        let prompt_tokens = prompt_comment_tokens(prompt);
+        if prompt_tokens.len() < 8 {
+            return false;
+        }
+        ordered_token_coverage(&candidate_tokens, &prompt_tokens) >= 0.85
+            || ordered_token_coverage(&prompt_tokens, &candidate_tokens) >= 0.85
+    })
+}
+
+fn prompt_comment_tokens(text: &str) -> Vec<String> {
+    text.split(|ch: char| !ch.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_lowercase())
+        .collect()
+}
+
+fn ordered_token_coverage(needle: &[String], haystack: &[String]) -> f64 {
+    if needle.is_empty() {
+        return 0.0;
+    }
+    let mut matched = 0usize;
+    for token in haystack {
+        if needle.get(matched).is_some_and(|needle| needle == token) {
+            matched += 1;
+            if matched == needle.len() {
+                break;
+            }
+        }
+    }
+    matched as f64 / needle.len() as f64
 }
 
 fn is_safe_duplicate_template_scaffold(segment: &str) -> bool {
@@ -4506,7 +4734,7 @@ Existing answer.
     }
 
     #[test]
-    fn normalize_editor_visible_template_structure_preserves_prompt_like_html_comment() {
+    fn normalize_editor_visible_template_structure_removes_duplicate_prompt_html_comment() {
         let prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push";
         let doc = format!(
             concat!(
@@ -4531,12 +4759,12 @@ Existing answer.
         );
 
         let repaired = normalize_editor_visible_template_structure(&doc)
-            .expect("editor-visible normalization should preserve prompt-like comment residue");
+            .expect("editor-visible normalization should remove duplicate prompt residue");
 
         let duplicate_comment = format!("\n<!--\n{prompt}\n-->\n");
         assert!(
-            repaired.contains(&duplicate_comment),
-            "editor-visible normalization must preserve ordinary post-exchange HTML comments:\n{repaired}"
+            !repaired.contains(&duplicate_comment),
+            "editor-visible normalization must remove duplicate post-exchange prompt comments:\n{repaired}"
         );
         assert!(
             repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"),

@@ -3827,6 +3827,8 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
         &crate::component::strip_backlog_patch_attr(&deduped_openers),
         file,
     );
+    let (normalized, _) =
+        remove_post_exchange_duplicate_prompt_comments_with_log(&normalized, file, "structure");
     let (normalized, _) = dedupe_live_prompt_prefix_variants_in_tail(&normalized, file);
     match crate::template::guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
@@ -4554,6 +4556,26 @@ fn dedupe_prompt_lines_against_before(before: &str, after: &str, file: &Path) ->
         ),
     );
     (repaired, true)
+}
+
+fn remove_post_exchange_duplicate_prompt_comments_with_log(
+    content: &str,
+    file: &Path,
+    source: &str,
+) -> (String, bool) {
+    let Some(cleaned) = crate::template::remove_post_exchange_duplicate_prompt_comments(content)
+    else {
+        return (content.to_string(), false);
+    };
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "post_exchange_duplicate_prompt_comment_removed file={} source={} before_commit=true",
+            file.display(),
+            source
+        ),
+    );
+    (cleaned, true)
 }
 
 fn patch_touches_exchange(patches: &[template::PatchBlock], unmatched: &str) -> bool {
@@ -6419,6 +6441,11 @@ pub(crate) fn dedupe_ipc_snapshot_content(
     source: &str,
 ) -> (String, bool) {
     let mut deduped = dedupe_consecutive_response_blocks(content, file);
+    let (comment_deduped, comment_changed) =
+        remove_post_exchange_duplicate_prompt_comments_with_log(&deduped, file, source);
+    if comment_changed {
+        deduped = comment_deduped;
+    }
     if let Some(before) = before {
         let (prompt_deduped, prompt_changed) =
             dedupe_prompt_lines_against_before(before, &deduped, file);
@@ -10005,7 +10032,7 @@ scratch
     }
 
     #[test]
-    fn ipc_snapshot_preserves_post_exchange_prompt_like_html_comment() {
+    fn ipc_snapshot_removes_post_exchange_duplicate_prompt_html_comment() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("diag.md");
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -10033,15 +10060,16 @@ scratch
         let (repaired, changed) =
             dedupe_ipc_snapshot_content(&doc, Some(before), &after, "test_ipc");
 
-        assert!(!changed);
+        assert!(changed);
         assert!(
-            repaired.contains(
+            !repaired.contains(
                 "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
             ),
-            "IPC ack-content dedupe must preserve ordinary post-exchange HTML comments:\n{repaired}"
+            "IPC ack-content dedupe must remove duplicate post-exchange prompt comments:\n{repaired}"
         );
         assert!(repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"));
-        assert!(!dir.path().join(".agent-doc/logs/ops.log").exists());
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("post_exchange_duplicate_prompt_comment_removed"));
     }
 
     #[test]
@@ -13268,7 +13296,7 @@ Verification:
     }
 
     #[test]
-    fn normalize_final_template_content_preserves_prompt_like_html_comment_tail() {
+    fn normalize_final_template_content_removes_duplicate_prompt_html_comment_tail() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("doc.md");
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -13312,10 +13340,10 @@ Verification:
             "live prompt should remain in exchange and be normalized:\n{repaired}"
         );
         assert!(
-            repaired.contains(
+            !repaired.contains(
                 "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
             ),
-            "post-exchange HTML comment scratch content should be preserved:\n{repaired}"
+            "duplicate post-exchange prompt comments should be removed:\n{repaired}"
         );
         assert!(
             repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"),
@@ -13352,7 +13380,7 @@ Verification:
     }
 
     #[test]
-    fn normalize_template_structure_preserves_answered_prompt_html_comment_tail() {
+    fn normalize_template_structure_removes_answered_prompt_html_comment_tail() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("doc.md");
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -13382,10 +13410,10 @@ Verification:
             "answered exchange turn should remain:\n{repaired}"
         );
         assert!(
-            repaired.contains(
+            !repaired.contains(
                 "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
             ),
-            "answered prompt-like HTML comment should remain outside exchange:\n{repaired}"
+            "answered duplicate prompt HTML comment should be removed:\n{repaired}"
         );
     }
 

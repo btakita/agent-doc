@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -55,18 +55,13 @@ Verification:
 - `cargo install --path .`
 - `agent-doc --version` -> `agent-doc 0.33.16`
 - CI tmux evidence: GitHub CI run `26262547417` succeeded, including `Run make tmux-ci`.
-<!-- agent:boundary:cee16575 -->
+<!-- agent:boundary:842e54b0 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#autodag]~
-- ~do [#dagdispatch]~
-- ~do [#dagrecover]~
-- do [#daglogs]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built

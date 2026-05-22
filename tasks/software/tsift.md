@@ -31,12 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260522-221322.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260522-221617.md`*
 
 Compacted content:
-- Archived 2 response topic(s): graph performance next steps; graph performance queue
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:f40ce2a5 -->
+- Trailing prompt/context: What are #next-steps to improve graph performance?
+<!-- agent:boundary:25af969d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -54,6 +54,11 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gdbpostbase] [recommended] Capture a fresh post-aaac32a graph performance baseline from real backend-eval plus metric-digest, recording current refresh, source_graph_build, projection_rows, sqlite_delta_write, conflict-matrix preparation, status, dispatch-trace, path_max_hops, graph.db size/freelist, and candidate-backend timings so the next tuning pass starts from measured current bottlenecks.
+- [ ] [#gdbrowstream] [recommended] Reduce remaining real graph-db refresh cost by streaming projection rows/source handles/worker-context rows into batched temp-table writes, avoiding repeated session markdown scans and large in-memory row churn, then prove improvement against the fresh #gdbpostbase history.
+- [ ] [#gdbprepstage] [recommended] Make conflict-matrix and dispatch-trace share a prepared graph-evidence stage across backend-eval operations: reuse target resolution, worker_result/source_handle expansion, semantic rows, and candidate ownership inputs instead of rebuilding them per operation.
+- [ ] [#gdbvacproof] [recommended] Run the real Convex reconciliation plus graph-db compact workflow and capture before/after file size, freelist, tombstone counts, status/doctor timings, and scan-cost deltas so compaction policy is backed by operational evidence.
+- [ ] [#gdbenginegate] [recommended] Re-run FalkorDB, DuckDB/DuckPGQ, and Ladybug candidate backend evaluation only after SQLite's refreshed baseline/read paths are stable; require parity plus faster real refresh-equivalent load, evidence, conflict-matrix, dispatch-trace, synthetic high-degree/deep-chain runs, portable install, and no worse lock behavior before promotion.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 ###

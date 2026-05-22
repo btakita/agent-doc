@@ -94,7 +94,15 @@ Yes on raw elapsed time in the latest backend-eval, but no for promotion.
 The latest real run measured SQLite at `29.199s` total after the batching change. The candidate totals were faster: DuckDB/DuckPGQ at `6.529s` and FalkorDB at `6.170s`. So as benchmark candidates, both are currently faster than SQLite on that measured total.
 
 They still cannot replace SQLite because both failed the real parity gate: DuckDB/DuckPGQ differed from SQLite, and FalkorDB also differed from SQLite. Until the parity mismatches are fixed, the correct status is "faster candidate, not promotable backend." SQLite remains the authoritative backend.
-<!-- agent:boundary:976a71b5 -->
+❯ Did you test LadybugDB? Is Vela-Engineering/kuzu a good candidate?
+### Re: LadybugDB and Kuzu candidates — gpt-5
+
+Yes, LadybugDB was tested in the latest `graph-db backend-eval`. It was fast on raw total time: `6.409s` versus SQLite at `29.199s`. It still failed the promotion gate because real parity differed from SQLite, and its `path_max_hops` probe was slightly slower than SQLite: `1.039s` versus `1.029s`. So LadybugDB is in the same bucket as DuckDB/DuckPGQ and FalkorDB: fast candidate, not promotable yet.
+
+`Vela-Engineering/kuzu` looks like a credible candidate to evaluate, but it has not been tested in this tsift backend-eval run. The case for testing it is strong: Kuzu is an embedded property graph database with Cypher, columnar/CSR storage, vectorized execution, Rust bindings, and no server requirement; the current Rust crate docs also show an in-process `kuzu` API. Sources: [Kuzu docs](https://docs.kuzudb.com/get-started/), [kuzu crate](https://docs.rs/kuzu/latest/kuzu/). The Vela fork specifically claims active maintenance, MIT licensing, and concurrent multi-writer support for multi-agent systems, with a latest GitHub release shown as May 19, 2026: [Vela-Engineering/kuzu](https://github.com/Vela-Engineering/kuzu).
+
+My read: Kuzu/Vela is worth benchmarking as a real engine adapter, not just a row-adapter prototype. It is especially interesting if concurrent graph writes become important. The main risks to prove before treating it as better than SQLite are parity against the `GraphStore` contract, install/build portability in Rust, schema mapping for tsift's provider-neutral node/edge/property rows, and multi-process lock behavior under simultaneous agent workflows.
+<!-- agent:boundary:91b10899 -->
 <!-- /agent:exchange -->
 ###
 <!--

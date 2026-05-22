@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Full-content replacements now bind to their computed source buffer.** Compact
+  Exchange and other operator-owned whole-document replacements stamp editor IPC
+  with the exact source buffer used to compute the replacement, not a late disk
+  reread, and direct disk fallback uses the same visible-current compare-and-swap
+  guard. Socket full-content ACKs are also rejected before snapshot save when the
+  materialized document differs from the payload. This closes a live-typing race
+  where a compact/full-content write could accept or persist content derived from
+  an older buffer while the user was typing the next prompt.
+
 - **Dispatch-only editor reroutes recover degraded authoritative panes.** When
   JetBrains `Run Agent Doc` finds an authoritative actor pane whose supervisor
   socket is missing or whose runtime actor state is absent, route now keeps that

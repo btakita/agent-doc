@@ -7323,11 +7323,25 @@ pub enum FullContentIpcMode {
 /// Returns `Ok(true)` if the plugin consumed the patch, `Ok(false)` on timeout.
 #[allow(dead_code)]
 pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
-    try_ipc_full_content_with_mode(file, content, FullContentIpcMode::ResponseFallback)
+    try_ipc_full_content_with_mode(file, content, FullContentIpcMode::ResponseFallback, None)
 }
 
+#[allow(dead_code)]
 pub fn try_ipc_full_content_operator_mutation(file: &Path, content: &str) -> Result<bool> {
-    try_ipc_full_content_with_mode(file, content, FullContentIpcMode::OperatorMutation)
+    try_ipc_full_content_with_mode(file, content, FullContentIpcMode::OperatorMutation, None)
+}
+
+pub fn try_ipc_full_content_operator_mutation_from_source(
+    file: &Path,
+    content: &str,
+    source_content: &str,
+) -> Result<bool> {
+    try_ipc_full_content_with_mode(
+        file,
+        content,
+        FullContentIpcMode::OperatorMutation,
+        Some(source_content),
+    )
 }
 
 fn build_full_content_ipc_payload(
@@ -7370,10 +7384,12 @@ fn try_ipc_full_content_with_mode(
     file: &Path,
     content: &str,
     mode: FullContentIpcMode,
+    source_content: Option<&str>,
 ) -> Result<bool> {
     let canonical = file.canonicalize()?;
     let project_root = resolve_ipc_project_root(&canonical);
     let before_content = std::fs::read_to_string(file).ok();
+    let proof_content = source_content.or(before_content.as_deref());
     let patch_id = uuid::Uuid::new_v4().to_string();
 
     if mode == FullContentIpcMode::ResponseFallback
@@ -7404,13 +7420,8 @@ fn try_ipc_full_content_with_mode(
 
     // Try socket IPC first
     if crate::ipc_socket::is_listener_active(&project_root) {
-        let socket_payload = build_full_content_ipc_payload(
-            &canonical,
-            content,
-            &patch_id,
-            before_content.as_deref(),
-            true,
-        );
+        let socket_payload =
+            build_full_content_ipc_payload(&canonical, content, &patch_id, proof_content, true);
         match crate::ipc_socket::send_message(&project_root, &socket_payload) {
             Ok(Some(_ack)) => {
                 eprintln!("[write] socket IPC full content delivered");
@@ -7423,6 +7434,21 @@ fn try_ipc_full_content_with_mode(
                     Ok(Some(content)) => content,
                     _ => content.to_string(),
                 };
+                if snap_content != content {
+                    eprintln!(
+                        "[write] socket IPC full-content patch consumed but final content does not match payload — falling back to non-socket write"
+                    );
+                    crate::ops_log::log_op(
+                        file,
+                        &format!(
+                            "full_content_ipc_post_apply_mismatch file={} expected_len={} actual_len={} transport=socket",
+                            file.display(),
+                            content.len(),
+                            snap_content.len()
+                        ),
+                    );
+                    return Ok(false);
+                }
                 if let Some(before) = before_content.as_deref() {
                     log_exchange_write_diagnostic(
                         file,
@@ -7465,13 +7491,8 @@ fn try_ipc_full_content_with_mode(
 
     let patch_file = patches_dir.join(format!("{}.json", hash));
 
-    let mut ipc_payload = build_full_content_ipc_payload(
-        &canonical,
-        content,
-        &patch_id,
-        before_content.as_deref(),
-        false,
-    );
+    let mut ipc_payload =
+        build_full_content_ipc_payload(&canonical, content, &patch_id, proof_content, false);
     ipc_payload["baseline"] = serde_json::Value::String(String::new());
 
     write_ipc_and_poll(
@@ -8813,6 +8834,17 @@ fn splice_pending_component(target: &str, source: &str) -> String {
 
 /// Atomic write: write to temp file then rename. Public for use by compact.
 pub fn atomic_write_pub(path: &Path, content: &str) -> Result<()> {
+    atomic_write(path, content)
+}
+
+/// Atomic write guarded by the same visible-buffer proof used by response writes.
+pub fn atomic_write_if_current_pub(
+    path: &Path,
+    content: &str,
+    expected_current: &str,
+    source: &str,
+) -> Result<()> {
+    guard_visible_write_idle_and_current(path, source, expected_current)?;
     atomic_write(path, content)
 }
 
@@ -15639,8 +15671,9 @@ mod pending_patch_normalization_tests {
 mod late_fallback_patch_guard_tests {
     use super::{
         build_full_content_ipc_payload, cleanup_fallback_patch_files, cycle_already_committed,
-        try_ipc, try_ipc_full_content,
+        try_ipc, try_ipc_full_content, try_ipc_full_content_operator_mutation_from_source,
     };
+    use crate::snapshot;
     use std::fs;
     use std::path::Path;
     use tempfile::TempDir;
@@ -15899,5 +15932,135 @@ mod late_fallback_patch_guard_tests {
             payload["expected_content_len"].as_u64(),
             Some("before".len() as u64)
         );
+    }
+
+    #[test]
+    fn full_content_operator_ipc_uses_call_site_source_buffer_identity() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let source = "before\n";
+        let live = "before\nlive prompt\n";
+        let target = "after\n";
+        fs::write(&doc, live).unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let watcher_dir = agent_doc_dir.join("patches");
+        let watcher = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                let Ok(entries) = fs::read_dir(&watcher_dir) else {
+                    std::thread::sleep(Duration::from_millis(20));
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let raw = fs::read_to_string(&path).unwrap();
+                    let payload: serde_json::Value = serde_json::from_str(&raw).unwrap();
+                    fs::remove_file(&path).unwrap();
+                    tx.send(payload).unwrap();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+
+        let result =
+            try_ipc_full_content_operator_mutation_from_source(&doc, target, source).unwrap();
+        watcher.join().unwrap();
+        let payload = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        assert!(
+            !result,
+            "operator full-content IPC must not succeed when the editor/disk still contains live drift"
+        );
+        assert_eq!(payload["fullContent"], target);
+        assert_eq!(
+            payload["expected_content_hash"].as_str(),
+            Some(crate::ops_log::content_hash(source).as_str())
+        );
+        assert_eq!(
+            payload["expected_content_len"].as_u64(),
+            Some(source.len() as u64)
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live,
+            "stale full-content replacement must not overwrite live prompt drift"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "failed full-content IPC must not save a snapshot"
+        );
+    }
+
+    #[test]
+    fn socket_full_content_post_apply_mismatch_does_not_save_snapshot() {
+        use std::time::Duration;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let source = "before\n";
+        let target = "after\n";
+        fs::write(&doc, source).unwrap();
+
+        let root = tmp.path().to_path_buf();
+        let listener_root = root.clone();
+        let ack_root = root.clone();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                let patch_id = payload.get("patch_id")?.as_str()?;
+                let ack_dir = ack_root.join(".agent-doc/ack-content");
+                fs::create_dir_all(&ack_dir).ok()?;
+                fs::write(ack_dir.join(format!("{patch_id}.md")), "wrong\n").ok()?;
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+
+        std::thread::sleep(Duration::from_millis(100));
+        let result =
+            try_ipc_full_content_operator_mutation_from_source(&doc, target, source).unwrap();
+
+        assert!(
+            !result,
+            "socket full-content IPC must reject a post-apply document that differs from the payload"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "mismatched socket ack-content must not become the saved snapshot"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            source,
+            "socket mismatch rejection must leave disk content untouched"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_ipc_post_apply_mismatch")
+                && ops_log.contains("transport=socket"),
+            "socket full-content mismatch should be logged:\n{ops_log}"
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(&root));
+        drop(server);
     }
 }

@@ -188,7 +188,7 @@ pub fn run(
             compacted = reconciled;
         }
 
-        apply_compacted_document(file, &compacted, &compacted, false)?;
+        apply_compacted_document(file, &compacted, &compacted, &content, false)?;
 
         eprintln!(
             "[compact] Archived {} exchange(s) to {}",
@@ -235,10 +235,15 @@ fn apply_compacted_document(
     file: &Path,
     compacted: &str,
     snapshot_content: &str,
+    source_content: &str,
     refresh_crdt: bool,
 ) -> Result<()> {
     let mut applied_via_editor = false;
-    match crate::write::try_ipc_full_content_operator_mutation(file, compacted) {
+    match crate::write::try_ipc_full_content_operator_mutation_from_source(
+        file,
+        compacted,
+        source_content,
+    ) {
         Ok(true) => {
             applied_via_editor = true;
             eprintln!(
@@ -257,7 +262,12 @@ fn apply_compacted_document(
     }
 
     if !applied_via_editor {
-        crate::write::atomic_write_pub(file, compacted)?;
+        crate::write::atomic_write_if_current_pub(
+            file,
+            compacted,
+            source_content,
+            "compact_full_content_fallback",
+        )?;
     }
 
     snapshot::save(file, snapshot_content)?;
@@ -318,7 +328,7 @@ fn run_component_compact(
     if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&compacted)? {
         compacted = reconciled;
     }
-    apply_compacted_document(file, &compacted, &compacted, is_crdt)?;
+    apply_compacted_document(file, &compacted, &compacted, content, is_crdt)?;
 
     let line_count = old_content.lines().count();
     eprintln!(
@@ -443,7 +453,7 @@ fn run_component_compact_partial(
     {
         snapshot_compacted = reconciled;
     }
-    apply_compacted_document(file, &compacted, &snapshot_compacted, is_crdt)?;
+    apply_compacted_document(file, &compacted, &snapshot_compacted, content, is_crdt)?;
 
     eprintln!(
         "[compact] Archived {} topic(s) from component '{}' to {}",
@@ -1401,6 +1411,54 @@ mod tests {
         assert!(
             !ops_log.contains("late_fallback_patch_rejected"),
             "operator compact is not a stale response fallback"
+        );
+    }
+
+    #[test]
+    fn component_compact_direct_fallback_rejects_late_visible_edit() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-compact-cas\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let live = doc.replace(
+            "<!-- /agent:exchange -->",
+            "live prompt typed during compact\n<!-- /agent:exchange -->",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, &live).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("document changed after"),
+            "compact fallback should fail with visible-current CAS error: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            live,
+            "compact fallback must not overwrite a prompt typed after compaction was computed"
+        );
+        assert_eq!(
+            snapshot::load(&file).unwrap().unwrap(),
+            doc,
+            "failed compact fallback must not advance the snapshot"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("visible_write_deferred_current_changed")
+                && ops_log.contains("source=compact_full_content_fallback"),
+            "compact CAS rejection should be logged:\n{ops_log}"
         );
     }
 

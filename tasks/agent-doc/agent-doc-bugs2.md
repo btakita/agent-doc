@@ -28,28 +28,12 @@ Logged three #next-steps bugs from session/log triage. No open backlog items.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-034920.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-214654.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #next-steps bug log triage
+- Archived 1 response topic(s): #nexttop, #followdrift, #liveipc
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: #nexttop, #followdrift, #liveipc — gpt-5
-
-Implemented and pushed all three items.
-
-- `#nexttop`: added generated status reconciliation for `Top backlog item: #id.` across preflight pending maintenance, explicit backlog reap, reap repair, and exchange compaction. Stale status now rewrites to the current open backlog head or to `No open backlog items.` when the backlog is empty.
-- `#followdrift`: HEAD-current post-commit drift now reuses the canonical prompt-bearing classifier, so queue/backlog directives such as `- do [#id]` are classified as `user_follow_up` while inline content corrections stay as working-tree edits.
-- `#liveipc`: file IPC consumption with live exchange drift now requires ack-content proof before snapshot/commit. If the exchange is unchanged and no ack-content sidecar proves editor-applied state, it falls back and logs `file_ipc_live_exchange_unacknowledged`.
-
-Verification:
-- `make check` passed locally.
-- `make install` passed; installed `agent-doc 0.33.16` and `libagent_doc-0.33.16.so`.
-- Current-commit GitHub CI run `26268021723` passed both `Run make check` and `Run make tmux-ci`.
-
-Commits pushed:
-- `btakita/agent-doc@bcb5f776` to `20260422/codex-agent-backend`.
-- `btakita/agent-loop@d6bcb82b6` to `main` for the submodule pointer update.
-<!-- agent:boundary:cdba13d1 -->
+<!-- agent:boundary:97290055 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -102,7 +102,19 @@ Yes, LadybugDB was tested in the latest `graph-db backend-eval`. It was fast on 
 `Vela-Engineering/kuzu` looks like a credible candidate to evaluate, but it has not been tested in this tsift backend-eval run. The case for testing it is strong: Kuzu is an embedded property graph database with Cypher, columnar/CSR storage, vectorized execution, Rust bindings, and no server requirement; the current Rust crate docs also show an in-process `kuzu` API. Sources: [Kuzu docs](https://docs.kuzudb.com/get-started/), [kuzu crate](https://docs.rs/kuzu/latest/kuzu/). The Vela fork specifically claims active maintenance, MIT licensing, and concurrent multi-writer support for multi-agent systems, with a latest GitHub release shown as May 19, 2026: [Vela-Engineering/kuzu](https://github.com/Vela-Engineering/kuzu).
 
 My read: Kuzu/Vela is worth benchmarking as a real engine adapter, not just a row-adapter prototype. It is especially interesting if concurrent graph writes become important. The main risks to prove before treating it as better than SQLite are parity against the `GraphStore` contract, install/build portability in Rust, schema mapping for tsift's provider-neutral node/edge/property rows, and multi-process lock behavior under simultaneous agent workflows.
-<!-- agent:boundary:91b10899 -->
+❯ Looking at how tsift is being used, what data store do you recommend investing development into?
+### Re: datastore investment recommendation — gpt-5
+
+I would invest first in SQLite, then run a focused Vela-Kuzu spike. I would not put more primary effort into DuckDB/DuckPGQ, FalkorDB, or Ladybug until their parity failures are understood.
+
+SQLite should stay the production correctness store because that is how tsift is actually used today: local CLI workflows, offline agent-doc sessions, deterministic fixtures, lock recovery, snapshot fallback, and small portable `.tsift` databases. The latest measured SQLite total is slower than candidates (`29.199s` versus roughly `6.17s` to `6.53s`), but SQLite is the only backend currently carrying the full correctness, install, and operator contract. SQLite WAL also fits the current read-heavy shape: readers and a writer can coexist, with the known limitation that writes still serialize. Source: [SQLite WAL docs](https://www.sqlite.org/wal.html).
+
+The best next investment candidate is Vela-Engineering/kuzu, not FalkorDB or Ladybug. Kuzu's model matches tsift better than the current row-adapter prototypes: embedded graph database, Cypher/property graph semantics, Rust API, and no required server. The Vela fork is specifically positioned for multi-agent concurrent writers, which is the one serious weakness SQLite will hit if several agents start refreshing or materializing graph rows at once. Sources: [Kuzu docs](https://docs.kuzudb.com/), [Kuzu Rust tutorial](https://kuzudb.com/docs/tutorials/rust/), [Vela Kuzu fork rationale](https://www.vela.partners/blog/kuzudb-ai-agent-memory-graph-database).
+
+FalkorDB is still interesting, but it adds Redis/server operational weight, which cuts against tsift's local-first CLI usage; its docs describe it as a Redis module. Source: [FalkorDB docs](https://docs.falkordb.com/). Ladybug was already measured and is fast, but it failed parity and does not address the multi-writer issue as directly as the Vela fork claims to.
+
+So my recommendation is a two-track investment: keep optimizing SQLite's projection/write path as the reliable default, and add one serious Vela-Kuzu backend-eval adapter to answer whether an embedded graph engine can beat SQLite while preserving parity and local install ergonomics. If Kuzu/Vela fails parity or build portability, fall back to SQLite without regret.
+<!-- agent:boundary:917f3ad0 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -114,6 +126,7 @@ My read: Kuzu/Vela is worth benchmarking as a real engine adapter, not just a ro
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gdbkuzu] [recommended] Prototype a Vela-Engineering/kuzu GraphStore adapter behind backend-eval, including parity, Rust build/install portability, projection load, concurrent writer behavior, and real/synthetic performance gates before considering any SQLite replacement.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

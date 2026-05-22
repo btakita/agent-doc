@@ -69,5 +69,14 @@ mod tests {
             proof: child_event.reason.clone(),
         };
         assert!(orchestration_batch::batch_should_continue(false, &child));
+
+        let auto_dag_event = orchestration_batch::auto_dag_schedule_event(
+            orchestration_batch::AutoDagScheduleDecision::SessionReviewBlocked,
+            2,
+            1,
+        );
+        assert_eq!(auto_dag_event.flow, FlowName::OrchestrationBatch);
+        assert_eq!(auto_dag_event.stage, FlowStage::QueueFreeze);
+        assert_eq!(auto_dag_event.outcome, FlowOutcome::Blocked);
     }
 }

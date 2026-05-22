@@ -104,6 +104,53 @@ pub(crate) fn log_child_closeout_event(file: &Path, child: &BatchChildResult) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AutoDagScheduleDecision {
+    Ready,
+    SessionReviewBlocked,
+}
+
+impl AutoDagScheduleDecision {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::SessionReviewBlocked => "session_review_blocked",
+        }
+    }
+}
+
+pub(crate) fn auto_dag_schedule_event(
+    decision: AutoDagScheduleDecision,
+    node_count: usize,
+    batch_count: usize,
+) -> FlowEvent {
+    let outcome = match decision {
+        AutoDagScheduleDecision::Ready => FlowOutcome::Completed,
+        AutoDagScheduleDecision::SessionReviewBlocked => FlowOutcome::Blocked,
+    };
+    FlowEvent::new(
+        FlowName::OrchestrationBatch,
+        FlowStage::QueueFreeze,
+        outcome,
+    )
+    .with_reason(format!(
+        "auto_dag_schedule:{}:nodes:{node_count}:batches:{batch_count}",
+        decision.as_str()
+    ))
+}
+
+pub(crate) fn log_auto_dag_schedule_event(
+    file: &Path,
+    decision: AutoDagScheduleDecision,
+    node_count: usize,
+    batch_count: usize,
+) {
+    super::proof::log_flow_event(
+        file,
+        auto_dag_schedule_event(decision, node_count, batch_count),
+    );
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChildPatchbackNormalizationDecision {
     WrappedPlainResponse,
     KeptExplicitPatch,

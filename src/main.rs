@@ -43,6 +43,7 @@ mod agent;
 mod annotate;
 mod archive_index;
 mod audit_docs;
+mod auto_dag;
 mod autoclaim;
 mod boundary;
 mod callback;
@@ -832,6 +833,12 @@ enum Commands {
         /// Extract the latest task list/code block from the document exchange
         #[arg(long = "from-exchange")]
         from_exchange: bool,
+        /// Extract all active prompts and preset directives from agent:queue
+        #[arg(long = "from-queue")]
+        from_queue: bool,
+        /// Resume a persisted auto-DAG schedule id from .agent-doc/schedules
+        #[arg(long = "resume-schedule")]
+        resume_schedule: Option<String>,
         /// Agent backend override for sequential or DAG execution
         #[arg(long)]
         agent: Option<String>,
@@ -1985,6 +1992,8 @@ fn main() -> anyhow::Result<()> {
             tasks_explicit,
             from_file,
             from_exchange,
+            from_queue,
+            resume_schedule,
             agent,
             model,
             no_git,
@@ -1999,6 +2008,8 @@ fn main() -> anyhow::Result<()> {
                 tasks_explicit,
                 from_file,
                 from_exchange,
+                from_queue,
+                resume_schedule,
                 agent,
                 model,
                 no_git,

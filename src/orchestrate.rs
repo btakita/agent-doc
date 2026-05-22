@@ -85,6 +85,8 @@ pub struct OrchestrateConfig {
     pub tasks_explicit: Vec<String>,
     pub from_file: Option<PathBuf>,
     pub from_exchange: bool,
+    pub from_queue: bool,
+    pub resume_schedule: Option<String>,
     pub agent: Option<String>,
     pub model: Option<String>,
     pub no_git: bool,
@@ -146,6 +148,13 @@ struct OrderedTaskStepOptions<'a> {
     graph_context: Option<&'a str>,
     graph_evidence: Option<&'a crate::tsift_graph::TsiftGraphEvidencePlan>,
     task_label: &'a str,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScheduledDagRunOptions<'a> {
+    prompt_preset_block: Option<&'a str>,
+    ordered: OrderedTaskRunOptions<'a>,
+    graph_evidence: Option<&'a crate::tsift_graph::TsiftGraphEvidencePlan>,
 }
 
 trait LifecycleOps {
@@ -458,6 +467,8 @@ pub fn run_parallel_compat(
                 .collect(),
             from_file: None,
             from_exchange: false,
+            from_queue: false,
+            resume_schedule: None,
             agent: None,
             model: config.model,
             no_git: config.no_git,
@@ -597,6 +608,17 @@ fn run_with_dependencies(
         OrchestrateMode::Dag => {
             let batch = resolve_task_batch(file, &config)?;
             let prompt_preset_block = load_prompt_preset_block(file, &batch.requested_presets)?;
+            if config.from_queue || config.resume_schedule.is_some() {
+                return run_auto_dag_mode(
+                    file,
+                    &config,
+                    batch,
+                    prompt_preset_block.as_deref(),
+                    global_config,
+                    lifecycle,
+                    agent_runner,
+                );
+            }
             let dag_tasks = resolve_dag_tasks(&batch)?;
             if dag_tasks.is_empty() {
                 anyhow::bail!("no orchestration tasks found");
@@ -749,6 +771,251 @@ fn run_ordered_tasks_internal(
             }
         }
     }
+    Ok(())
+}
+
+fn run_auto_dag_mode(
+    file: &Path,
+    config: &OrchestrateConfig,
+    batch: ResolvedTaskBatch,
+    prompt_preset_block: Option<&str>,
+    global_config: &Config,
+    lifecycle: &impl LifecycleOps,
+    agent_runner: &impl FreshAgentRunner,
+) -> Result<()> {
+    if config.no_git {
+        anyhow::bail!(
+            "`agent-doc orchestrate --mode dag --from-queue` requires git-backed finalize"
+        );
+    }
+
+    let graph_evidence = if config.resume_schedule.is_some() {
+        None
+    } else {
+        collect_graph_evidence_for_tasks(file, &batch.tasks, false)?
+    };
+    let schedule = if let Some(schedule_id) = config.resume_schedule.as_deref() {
+        crate::auto_dag::load_schedule(file, schedule_id)?
+    } else {
+        let guard = crate::auto_dag::session_review_guard_for_file(file)?;
+        crate::auto_dag::build_schedule(
+            file,
+            &batch.tasks,
+            graph_evidence.as_ref(),
+            guard,
+            "queue",
+        )?
+    };
+    let schedule_path = crate::auto_dag::write_schedule(file, &schedule)?;
+    eprintln!(
+        "[orchestrate] auto-DAG schedule: {} ({})",
+        schedule.schedule_id,
+        schedule_path.display()
+    );
+    eprintln!("[orchestrate] auto-DAG batches: {}", schedule.batches.len());
+    for (idx, batch) in schedule.batches.iter().enumerate() {
+        eprintln!("[orchestrate]   batch {}: {}", idx + 1, batch.join(", "));
+    }
+
+    let jobs_index = crate::jobs::create_for_schedule(
+        file,
+        &schedule,
+        crate::jobs::CreateOptions {
+            operation_doc: true,
+            audit: true,
+            budget: 6000,
+        },
+    )?;
+    eprintln!(
+        "[orchestrate] auto-DAG job packets: {} job(s) cycle={}",
+        jobs_index.jobs.len(),
+        jobs_index.cycle_id
+    );
+
+    let schedule_blocker = crate::auto_dag::guard_blocker(&schedule);
+    let schedule_decision = if schedule_blocker.is_some() {
+        crate::flow::orchestration_batch::AutoDagScheduleDecision::SessionReviewBlocked
+    } else {
+        crate::flow::orchestration_batch::AutoDagScheduleDecision::Ready
+    };
+    crate::flow::orchestration_batch::log_auto_dag_schedule_event(
+        file,
+        schedule_decision,
+        schedule.nodes.len(),
+        schedule.batches.len(),
+    );
+    if let Some(blocker) = schedule_blocker {
+        anyhow::bail!(blocker);
+    }
+
+    let execution_tasks = execution_tasks_from_schedule(&schedule, prompt_preset_block)?;
+    if execution_tasks.is_empty() {
+        eprintln!("[orchestrate] auto-DAG schedule already complete");
+        return Ok(());
+    }
+    if config.plan || config.dry_run {
+        print_plan(&execution_tasks);
+        return Ok(());
+    }
+
+    run_scheduled_dag_tasks_internal(
+        file,
+        &schedule,
+        ScheduledDagRunOptions {
+            prompt_preset_block,
+            ordered: OrderedTaskRunOptions {
+                exchange_source: None,
+                agent_override: config.agent.as_deref(),
+                model_override: config.model.as_deref(),
+            },
+            graph_evidence: graph_evidence.as_ref(),
+        },
+        global_config,
+        lifecycle,
+        agent_runner,
+    )
+}
+
+fn execution_tasks_from_schedule(
+    schedule: &crate::auto_dag::AutoDagSchedule,
+    prompt_preset_block: Option<&str>,
+) -> Result<Vec<ExecutionTask>> {
+    let mut tasks = Vec::new();
+    for node in &schedule.nodes {
+        match node.state {
+            crate::auto_dag::AutoDagNodeState::Complete => continue,
+            crate::auto_dag::AutoDagNodeState::Blocked
+            | crate::auto_dag::AutoDagNodeState::Failed => {
+                anyhow::bail!(
+                    "auto-DAG schedule {} has gated/failed node {}; refusing to launch dependents",
+                    schedule.schedule_id,
+                    node.id
+                );
+            }
+            crate::auto_dag::AutoDagNodeState::Pending
+            | crate::auto_dag::AutoDagNodeState::Ready
+            | crate::auto_dag::AutoDagNodeState::Running => {
+                tasks.push(ExecutionTask {
+                    label: node.label.clone(),
+                    prompt: apply_prompt_preset_block(&node.prompt, prompt_preset_block),
+                });
+            }
+        }
+    }
+    Ok(tasks)
+}
+
+fn run_scheduled_dag_tasks_internal(
+    file: &Path,
+    schedule: &crate::auto_dag::AutoDagSchedule,
+    options: ScheduledDagRunOptions<'_>,
+    global_config: &Config,
+    lifecycle: &impl LifecycleOps,
+    agent_runner: &impl FreshAgentRunner,
+) -> Result<()> {
+    let mut effective_model: Option<String> = options.ordered.model_override.map(String::from);
+    let dispatch_ctx = build_dispatch_context(file);
+    crate::flow::orchestration_batch::log_queue_freeze_event(file, schedule.nodes.len(), true);
+
+    for batch in &schedule.batches {
+        eprintln!("[orchestrate] auto-DAG batch: {}", batch.join(", "));
+        for node_id in batch {
+            let Some(node) = schedule.nodes.iter().find(|node| &node.id == node_id) else {
+                anyhow::bail!("auto-DAG schedule references missing node `{node_id}`");
+            };
+            if node.state == crate::auto_dag::AutoDagNodeState::Complete {
+                continue;
+            }
+            if matches!(
+                node.state,
+                crate::auto_dag::AutoDagNodeState::Blocked
+                    | crate::auto_dag::AutoDagNodeState::Failed
+            ) {
+                anyhow::bail!(
+                    "auto-DAG node {} is {:?}; refusing to launch dependents",
+                    node.id,
+                    node.state
+                );
+            }
+
+            crate::auto_dag::update_node_state(
+                file,
+                &schedule.schedule_id,
+                &node.id,
+                crate::auto_dag::AutoDagNodeState::Running,
+            )?;
+            let prompt = apply_prompt_preset_block(&node.prompt, options.prompt_preset_block);
+            let item = queue_dispatch::classify(&node.label);
+            let graph_context = options
+                .graph_evidence
+                .and_then(|evidence| evidence.prompt_context_for_task(&node.label).transpose())
+                .transpose()?;
+            let step_result = match item.kind {
+                QueueItemKind::Command => {
+                    let result = queue_dispatch::dispatch_command(&item, &dispatch_ctx)?;
+                    if let queue_dispatch::DispatchResult::ModelOverride(tier) = result {
+                        eprintln!("[orchestrate] model override updated to: {}", tier);
+                        effective_model = Some(tier);
+                    }
+                    Ok(())
+                }
+                QueueItemKind::Prompt => run_ordered_task_step(
+                    file,
+                    &prompt,
+                    OrderedTaskStepOptions {
+                        agent_override: options.ordered.agent_override,
+                        model_override: effective_model.as_deref(),
+                        graph_context: graph_context.as_deref(),
+                        graph_evidence: options.graph_evidence,
+                        task_label: &node.label,
+                    },
+                    global_config,
+                    lifecycle,
+                    agent_runner,
+                ),
+            };
+
+            match step_result {
+                Ok(()) => {
+                    crate::auto_dag::update_node_state(
+                        file,
+                        &schedule.schedule_id,
+                        &node.id,
+                        crate::auto_dag::AutoDagNodeState::Complete,
+                    )?;
+                    let child = crate::flow::orchestration_batch::BatchChildResult {
+                        label: node.label.clone(),
+                        outcome: crate::flow::types::FlowOutcome::Completed,
+                        proof: Some(
+                            options
+                                .graph_evidence
+                                .and_then(|evidence| {
+                                    evidence.closeout_audit_proof_for_task(&node.label)
+                                })
+                                .unwrap_or_else(|| "finalize_session_check".to_string()),
+                        ),
+                    };
+                    crate::flow::orchestration_batch::log_child_closeout_event(file, &child);
+                }
+                Err(err) => {
+                    crate::auto_dag::update_node_state(
+                        file,
+                        &schedule.schedule_id,
+                        &node.id,
+                        crate::auto_dag::AutoDagNodeState::Failed,
+                    )?;
+                    let child = crate::flow::orchestration_batch::BatchChildResult {
+                        label: node.label.clone(),
+                        outcome: crate::flow::types::FlowOutcome::FailedClosed,
+                        proof: Some("auto_dag_child_step_error".to_string()),
+                    };
+                    crate::flow::orchestration_batch::log_child_closeout_event(file, &child);
+                    return Err(err);
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -1282,6 +1549,12 @@ fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<Resolve
         merge_task_batch(&mut batch, exchange_batch);
     }
 
+    if config.from_queue {
+        let doc = fs::read_to_string(file)
+            .with_context(|| format!("failed to read {}", file.display()))?;
+        merge_task_batch(&mut batch, queue_task_batch(&doc)?);
+    }
+
     canonicalize_prompt_preset_requests(file, &mut batch.requested_presets)?;
     if let Some(source) = &mut batch.exchange_source {
         canonicalize_prompt_preset_requests(file, &mut source.requested_presets)?;
@@ -1345,6 +1618,50 @@ fn exchange_text(doc: &str) -> Result<&str> {
         .find(|comp| comp.name == "exchange")
         .ok_or_else(|| anyhow::anyhow!("document has no `agent:exchange` component"))?;
     Ok(exchange.content(doc))
+}
+
+fn queue_task_batch(doc: &str) -> Result<ResolvedTaskBatch> {
+    let components = component::parse(doc).context("failed to parse document components")?;
+    let queue = components
+        .iter()
+        .find(|comp| comp.name == "queue")
+        .ok_or_else(|| anyhow::anyhow!("document has no `agent:queue` component"))?;
+    let body = queue.content(doc);
+    let entries = crate::queue::parse(body)?;
+    let (fm, _) = frontmatter::parse(doc)?;
+    let activation = crate::queue::resolve_activation(
+        &entries,
+        crate::queue::has_auto_attr(&queue.attrs),
+        false,
+        fm.queue_active.unwrap_or(false),
+    );
+    if !activation.active {
+        anyhow::bail!(
+            "agent:queue is not active; add `auto`, a start fence, or queue_active=true before --from-queue dispatch"
+        );
+    }
+    let mut batch = ResolvedTaskBatch::default();
+    for entry in activation.entries_after {
+        match entry {
+            crate::queue::QueueEntry::Prompt(prompt) => {
+                batch.tasks.push(normalize_task(&prompt.text));
+            }
+            crate::queue::QueueEntry::Preset(preset)
+            | crate::queue::QueueEntry::Dispatch(preset) => {
+                if !batch
+                    .requested_presets
+                    .iter()
+                    .any(|existing| existing == &preset)
+                {
+                    batch.requested_presets.push(preset);
+                }
+            }
+            crate::queue::QueueEntry::Completed(_)
+            | crate::queue::QueueEntry::StartFence(_)
+            | crate::queue::QueueEntry::StopFence => {}
+        }
+    }
+    Ok(batch)
 }
 
 fn exchange_task_source_changed(
@@ -2570,6 +2887,8 @@ mod tests {
                 tasks_explicit: Vec::new(),
                 from_file: None,
                 from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: true,
@@ -2605,6 +2924,8 @@ mod tests {
                 tasks_explicit: Vec::new(),
                 from_file: None,
                 from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: true,
@@ -2623,6 +2944,43 @@ mod tests {
                 .as_deref(),
             Some("(preset #spec-test)\nRun checks.\n")
         );
+    }
+
+    #[test]
+    fn resolve_task_batch_collects_active_queue_for_auto_dag() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(
+            &doc,
+            "---\nqueue_active: true\nprompt_presets:\n  \"#spec-test\": |\n    Run checks.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\npreset spec-test\n- do #prep\n- do #report after #prep\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+
+        let batch = resolve_task_batch(
+            &doc,
+            &OrchestrateConfig {
+                mode: OrchestrateMode::Dag,
+                tasks_explicit: Vec::new(),
+                from_file: None,
+                from_exchange: false,
+                from_queue: true,
+                resume_schedule: None,
+                agent: None,
+                model: None,
+                no_git: true,
+                no_worktree: true,
+                timeout_secs: 30,
+                dry_run: true,
+                plan: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            batch.tasks,
+            vec!["do #prep".to_string(), "do #report after #prep".to_string()]
+        );
+        assert_eq!(batch.requested_presets, vec!["#spec-test".to_string()]);
     }
 
     #[test]
@@ -3005,6 +3363,8 @@ mod tests {
                 tasks_explicit: Vec::new(),
                 from_file: None,
                 from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: Some("gpt-5".to_string()),
                 no_git: false,
@@ -3373,6 +3733,8 @@ mod tests {
                 tasks_explicit: vec!["  ❯ do #9pw9  ".to_string()],
                 from_file: None,
                 from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: Some("gpt-5".to_string()),
                 no_git: true,
@@ -3461,6 +3823,8 @@ exit 2
                 tasks_explicit: vec!["do #gkke".to_string()],
                 from_file: None,
                 from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: true,
@@ -3517,6 +3881,8 @@ exit 2
                 tasks_explicit: Vec::new(),
                 from_file: None,
                 from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: true,
@@ -3570,6 +3936,8 @@ exit 2
                 tasks_explicit: Vec::new(),
                 from_file: None,
                 from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: false,
@@ -3619,6 +3987,8 @@ exit 2
                 tasks_explicit: vec!["do #prep".to_string(), "do #report".to_string()],
                 from_file: None,
                 from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: false,
@@ -3668,6 +4038,8 @@ exit 2
                 tasks_explicit: vec!["do #prep".to_string()],
                 from_file: None,
                 from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: false,
@@ -3717,6 +4089,8 @@ exit 2
                 tasks_explicit: vec!["do #a".to_string(), "do #b".to_string()],
                 from_file: None,
                 from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: false,
@@ -3872,6 +4246,8 @@ exit 2
                 tasks_explicit: vec!["do #net".to_string()],
                 from_file: None,
                 from_exchange: false,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: false,
@@ -3978,6 +4354,8 @@ exit 2
                 tasks_explicit: Vec::new(),
                 from_file: None,
                 from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: true,
@@ -4038,6 +4416,8 @@ exit 2
                 tasks_explicit: Vec::new(),
                 from_file: None,
                 from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: true,
@@ -4079,6 +4459,8 @@ exit 2
                 tasks_explicit: Vec::new(),
                 from_file: None,
                 from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: true,
@@ -4142,6 +4524,8 @@ exit 2
                 tasks_explicit: Vec::new(),
                 from_file: None,
                 from_exchange: true,
+                from_queue: false,
+                resume_schedule: None,
                 agent: None,
                 model: None,
                 no_git: true,

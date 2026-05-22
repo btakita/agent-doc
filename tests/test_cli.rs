@@ -198,6 +198,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
     match (source, token) {
         ("src/git.rs", "guard_") => 19,
         ("src/git.rs", "reason=") => 4,
+        ("src/orchestrate.rs", "guard_") => 2,
         ("src/preflight.rs", "reason=") => 2,
         ("src/repair.rs", "guard_") => 9,
         ("src/repair.rs", "reason=") => 5,

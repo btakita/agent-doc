@@ -27,6 +27,10 @@ const JOB_PACKET_CONTRACT_VERSION: &str = "agent-doc-job-packet-v1";
 const WORKER_RESULT_CONTRACT_VERSION: &str = "agent-doc-worker-result-v1";
 const JOB_INDEX_CONTRACT_VERSION: &str = "agent-doc-jobs-index-v1";
 
+fn skip_zero(value: &usize) -> bool {
+    *value == 0
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct CreateOptions {
     pub(crate) operation_doc: bool,
@@ -49,6 +53,8 @@ pub(crate) struct JobsIndex {
     pub(crate) warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) operation_doc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auto_dag_schedule_id: Option<String>,
     pub(crate) jobs: Vec<JobRecord>,
 }
 
@@ -65,6 +71,16 @@ pub(crate) struct JobRecord {
     pub(crate) result_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) context_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auto_dag_node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auto_dag_node_state: Option<String>,
+    #[serde(default, skip_serializing_if = "skip_zero")]
+    pub(crate) attempt_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) replay_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) repair_commands: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) write_scope: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -156,6 +172,110 @@ pub(crate) fn create(file: &Path, options: CreateOptions) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn create_for_schedule(
+    file: &Path,
+    schedule: &crate::auto_dag::AutoDagSchedule,
+    options: CreateOptions,
+) -> Result<JobsIndex> {
+    if !file.exists() {
+        bail!("file not found: {}", file.display());
+    }
+    let root = project_root(file)?;
+    let canonical = file.canonicalize()?;
+    let created_at = unix_now();
+    let jobs_dir = root.join(".agent-doc/jobs").join(&schedule.schedule_id);
+    std::fs::create_dir_all(&jobs_dir)
+        .with_context(|| format!("failed to create {}", jobs_dir.display()))?;
+    let source_snapshot = git_head(&root);
+    let operation_doc = if options.operation_doc {
+        Some(write_schedule_operation_doc(
+            &root,
+            file,
+            schedule,
+            created_at,
+            &source_snapshot,
+        )?)
+    } else {
+        None
+    };
+
+    let mut records = Vec::new();
+    for (idx, node) in schedule.nodes.iter().enumerate() {
+        let target = node
+            .target
+            .clone()
+            .unwrap_or_else(|| node.id.trim_start_matches('#').to_string());
+        let job_id = format!("job-{}-{:02}", target, idx + 1);
+        let job_path = jobs_dir.join(format!("{job_id}.md"));
+        let result_path = jobs_dir.join(format!("{job_id}.result.json"));
+        let write_scope = schedule_write_scope(node);
+        let required_proof = vec![
+            "changed_paths".to_string(),
+            "commands".to_string(),
+            "verification".to_string(),
+            "worker_result".to_string(),
+            "confidence".to_string(),
+        ];
+        let record = JobRecord {
+            job_id: job_id.clone(),
+            target: target.clone(),
+            title: format!("{} ({})", description_summary(&node.prompt), node.id),
+            task_class: "auto_dag".to_string(),
+            model_tier: "med".to_string(),
+            risk: "medium".to_string(),
+            context_budget_tokens: options.budget,
+            path: relative_to(&root, &job_path),
+            result_path: relative_to(&root, &result_path),
+            context_path: None,
+            auto_dag_node_id: Some(node.id.clone()),
+            auto_dag_node_state: Some(format!("{:?}", node.state).to_ascii_lowercase()),
+            attempt_count: node.attempt_count,
+            replay_commands: node.replay_commands.clone(),
+            repair_commands: node.repair_commands.clone(),
+            write_scope: write_scope.clone(),
+            required_proof: required_proof.clone(),
+            tsift_status: schedule.graph_status.clone(),
+        };
+        let packet = render_schedule_job_packet(ScheduleJobPacketRender {
+            file,
+            schedule,
+            node,
+            job_id: &job_id,
+            target: &target,
+            write_scope: &write_scope,
+            required_proof: &required_proof,
+            context_budget: options.budget,
+            source_snapshot: &source_snapshot,
+            result_path: &record.result_path,
+        });
+        std::fs::write(&job_path, packet)
+            .with_context(|| format!("failed to write {}", job_path.display()))?;
+        records.push(record);
+    }
+
+    let index = JobsIndex {
+        contract_version: JOB_INDEX_CONTRACT_VERSION.to_string(),
+        parent_doc: relative_to(&root, file),
+        parent_doc_canonical: canonical.display().to_string(),
+        cycle_id: schedule.schedule_id.clone(),
+        created_at_unix: created_at,
+        source_snapshot,
+        preserve_on_success: options.audit,
+        manual_packet_only: schedule.graph_status == "missing",
+        warnings: schedule.warnings.clone(),
+        operation_doc,
+        auto_dag_schedule_id: Some(schedule.schedule_id.clone()),
+        jobs: records,
+    };
+    let index_path = jobs_dir.join("index.json");
+    std::fs::write(
+        &index_path,
+        serde_json::to_string_pretty(&index).context("failed to serialize job index")?,
+    )
+    .with_context(|| format!("failed to write {}", index_path.display()))?;
+    Ok(index)
+}
+
 fn create_index(file: &Path, options: CreateOptions) -> Result<JobsIndex> {
     if !file.exists() {
         bail!("file not found: {}", file.display());
@@ -237,6 +357,11 @@ fn create_index(file: &Path, options: CreateOptions) -> Result<JobsIndex> {
             path: relative_to(&root, &job_path),
             result_path: relative_to(&root, &result_path),
             context_path: tsift_context.context_path.clone(),
+            auto_dag_node_id: None,
+            auto_dag_node_state: None,
+            attempt_count: 0,
+            replay_commands: Vec::new(),
+            repair_commands: Vec::new(),
             write_scope: write_scope.clone(),
             required_proof: dispatch_plan.required_proof.clone(),
             tsift_status: tsift_context.status.clone(),
@@ -275,6 +400,7 @@ fn create_index(file: &Path, options: CreateOptions) -> Result<JobsIndex> {
         manual_packet_only: dispatch_plan.manual_packet_only,
         warnings: dispatch_plan.warnings.clone(),
         operation_doc,
+        auto_dag_schedule_id: None,
         jobs: records,
     };
     let index_path = jobs_dir.join("index.json");
@@ -863,6 +989,160 @@ Save a JSON object to `{result_path}` or paste it under `## Worker Result`:
     )
 }
 
+struct ScheduleJobPacketRender<'a> {
+    file: &'a Path,
+    schedule: &'a crate::auto_dag::AutoDagSchedule,
+    node: &'a crate::auto_dag::AutoDagNode,
+    job_id: &'a str,
+    target: &'a str,
+    write_scope: &'a [String],
+    required_proof: &'a [String],
+    context_budget: usize,
+    source_snapshot: &'a str,
+    result_path: &'a str,
+}
+
+fn render_schedule_job_packet(input: ScheduleJobPacketRender<'_>) -> String {
+    let write_scope = yaml_list(input.write_scope);
+    let required_proof = yaml_list(input.required_proof);
+    let deps = yaml_list(&input.node.deps);
+    let replay_commands = yaml_list(&input.node.replay_commands);
+    let repair_commands = yaml_list(&input.node.repair_commands);
+    format!(
+        r#"---
+contract_version: {job_contract}
+parent_doc: {parent_doc}
+cycle_id: {schedule_id}
+job_id: {job_id}
+prompt_target: {target}
+task_class: auto_dag
+model_tier: med
+risk: medium
+write_scope:
+{write_scope}
+context_budget_tokens: {context_budget}
+source_snapshot: {source_snapshot}
+tsift_index: {graph_status}
+manual_packet_only: {manual_packet_only}
+auto_dag_schedule_id: {schedule_id}
+auto_dag_node_id: {node_id}
+auto_dag_node_state: {node_state}
+attempt_count: {attempt_count}
+result_path: {result_path}
+---
+
+# Job Packet: auto-DAG {node_id}
+
+## Goal
+
+Complete `{node_id}` only: {prompt}
+
+## DAG Schedule
+
+- Schedule id: `{schedule_id}`
+- Source: `{source_kind}`
+- Batch deps:
+{deps}
+- Current state: `{node_state}`
+- Attempt count: {attempt_count}
+
+## Allowed Commands
+
+- Read files inside the declared write scope and read-only context.
+- Run focused tests or build commands needed to prove this node.
+- Do not edit outside `write_scope`; write a blocked worker result instead.
+
+## Required Context
+
+- Parent document: `{parent_doc}`
+- Source snapshot: `{source_snapshot}`
+- Required proof:
+{required_proof}
+
+## Replay And Repair
+
+Replay commands:
+{replay_commands}
+
+Repair commands:
+{repair_commands}
+
+## Acceptance Criteria
+
+- The DAG node is complete or explicitly blocked.
+- Changed paths stay inside `write_scope`.
+- Verification commands and outcomes are listed.
+- Worker result fields are present even when arrays are empty.
+- Downstream nodes must not be launched by a worker.
+
+## Output Schema
+
+Save a JSON object to `{result_path}` or paste it under `## Worker Result`:
+
+```json
+{{
+  "contract_version": "{worker_contract}",
+  "status": "complete|blocked|escalate",
+  "changed_paths": [],
+  "commands_run": [],
+  "touched_files": [],
+  "expected_tests": [],
+  "follow_up_ids": [],
+  "findings": [],
+  "proof": [],
+  "confidence": "low|medium|high",
+  "needs_parent_attention": []
+}}
+```
+
+## Escalation Conditions
+
+- Required graph/context evidence is stale, missing, contradictory, or outside this packet.
+- The task needs files outside `write_scope`.
+- Verification fails outside this node's scope.
+- The implementation affects concurrency, routing, security, git closeout, or session document invariants beyond this packet.
+
+## Worker Result
+
+```json
+```
+"#,
+        job_contract = JOB_PACKET_CONTRACT_VERSION,
+        parent_doc = input.file.display(),
+        schedule_id = input.schedule.schedule_id,
+        job_id = input.job_id,
+        target = input.target,
+        write_scope = write_scope,
+        context_budget = input.context_budget,
+        source_snapshot = input.source_snapshot,
+        graph_status = input.schedule.graph_status,
+        manual_packet_only = input.schedule.graph_status == "missing",
+        node_id = input.node.id,
+        node_state = format!("{:?}", input.node.state).to_ascii_lowercase(),
+        attempt_count = input.node.attempt_count,
+        result_path = input.result_path,
+        prompt = input.node.prompt,
+        source_kind = input.schedule.source_kind,
+        deps = deps,
+        required_proof = required_proof,
+        replay_commands = replay_commands,
+        repair_commands = repair_commands,
+        worker_contract = WORKER_RESULT_CONTRACT_VERSION,
+    )
+}
+
+fn schedule_write_scope(node: &crate::auto_dag::AutoDagNode) -> Vec<String> {
+    let labeled = extract_labeled_path_refs(&node.prompt);
+    if !labeled.is_empty() {
+        return labeled;
+    }
+    let paths = extract_path_refs(&node.prompt);
+    if !paths.is_empty() {
+        return paths;
+    }
+    vec!["undetermined".to_string()]
+}
+
 fn render_manual_packet_warning(dispatch_plan: &plan::DispatchPlan) -> String {
     if !dispatch_plan.manual_packet_only {
         return String::new();
@@ -1074,6 +1354,85 @@ Parent review must run required verification before `agent-doc finalize`.
         context_budget = dispatch_plan.context_budget_tokens,
         manual_packet_only = dispatch_plan.manual_packet_only,
         warnings = warnings,
+    );
+    std::fs::write(&path, content)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(relative_to(root, &path))
+}
+
+fn write_schedule_operation_doc(
+    root: &Path,
+    file: &Path,
+    schedule: &crate::auto_dag::AutoDagSchedule,
+    created_at: u64,
+    source_snapshot: &str,
+) -> Result<String> {
+    let dir = if root.join("tasks/agent-doc").is_dir() {
+        root.join("tasks/agent-doc/operations")
+    } else {
+        root.join(".agent-doc/operations")
+    };
+    std::fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
+    let path = dir.join(format!("{}.md", schedule.schedule_id));
+    let nodes = schedule
+        .nodes
+        .iter()
+        .map(|node| {
+            format!(
+                "- {} state={:?} attempts={} deps=[{}]",
+                node.id,
+                node.state,
+                node.attempt_count,
+                node.deps.join(",")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let batches = schedule
+        .batches
+        .iter()
+        .enumerate()
+        .map(|(idx, batch)| format!("- batch {}: {}", idx + 1, batch.join(", ")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let guard = serde_json::to_string_pretty(&schedule.guard)
+        .unwrap_or_else(|_| "{\"action\":\"unknown\"}".to_string());
+    let content = format!(
+        r#"# Auto-DAG Operation: {schedule_id}
+
+parent_doc: {parent_doc}
+created_at_unix: {created_at}
+source_snapshot: {source_snapshot}
+source_kind: {source_kind}
+graph_status: {graph_status}
+
+## Guard
+
+```json
+{guard}
+```
+
+## Batches
+
+{batches}
+
+## Nodes
+
+{nodes}
+
+## Replay
+
+Run `agent-doc orchestrate {parent_doc} --mode dag --resume-schedule {schedule_id}` to resume this schedule.
+"#,
+        schedule_id = schedule.schedule_id,
+        parent_doc = file.display(),
+        created_at = created_at,
+        source_snapshot = source_snapshot,
+        source_kind = schedule.source_kind,
+        graph_status = schedule.graph_status,
+        guard = guard,
+        batches = batches,
+        nodes = nodes,
     );
     std::fs::write(&path, content)
         .with_context(|| format!("failed to write {}", path.display()))?;
@@ -1440,5 +1799,53 @@ agent_doc_dispatch: auto
         let sidecar = std::fs::read_to_string(dir.path().join(context)).unwrap();
         assert!(sidecar.contains("agent-doc-tsift-context-sidecar-v1"));
         assert_eq!(index.jobs[0].tsift_status, "fresh");
+    }
+
+    #[test]
+    fn create_for_schedule_writes_dag_packet_metadata() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "---\n---\n").unwrap();
+        let schedule = crate::auto_dag::build_schedule(
+            &doc,
+            &["do #prep".to_string(), "do #report after #prep".to_string()],
+            None,
+            crate::auto_dag::classify_session_review_log(""),
+            "queue",
+        )
+        .unwrap();
+
+        let index = create_for_schedule(
+            &doc,
+            &schedule,
+            CreateOptions {
+                operation_doc: true,
+                audit: true,
+                budget: 512,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            index.auto_dag_schedule_id,
+            Some(schedule.schedule_id.clone())
+        );
+        assert_eq!(index.jobs.len(), 2);
+        assert_eq!(index.jobs[0].auto_dag_node_id.as_deref(), Some("#prep"));
+        assert!(
+            index.jobs[0]
+                .replay_commands
+                .iter()
+                .any(|command| command.contains("--resume-schedule"))
+        );
+        let packet = std::fs::read_to_string(dir.path().join(&index.jobs[0].path)).unwrap();
+        assert!(packet.contains("auto_dag_schedule_id"));
+        assert!(packet.contains("## DAG Schedule"));
+        assert!(packet.contains("agent-doc-worker-result-v1"));
+        let operation_doc = index.operation_doc.as_ref().unwrap();
+        let operation = std::fs::read_to_string(dir.path().join(operation_doc)).unwrap();
+        assert!(operation.contains("# Auto-DAG Operation"));
+        assert!(operation.contains("batch 1: #prep"));
     }
 }

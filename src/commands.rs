@@ -240,6 +240,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Generate lower-agent job packets from the current planning record",
     ));
     cmds.push(cmd(
+        "/agent-doc orchestrate --mode dag --from-queue",
+        "<FILE> [--resume-schedule ID]",
+        "Build or resume a persisted auto-DAG schedule from active queue prompts",
+    ));
+    cmds.push(cmd(
         "/agent-doc jobs list",
         "<FILE> [--json]",
         "List lower-agent job packets for a document",

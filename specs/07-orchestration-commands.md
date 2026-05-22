@@ -60,10 +60,11 @@ This file covers binary-owned planning/orchestration and the queue surface that 
 
 ## orchestrate
 
-`agent-doc orchestrate <FILE> --mode sequential|parallel|dag [--task TEXT ...] [--from-file TASKS.md] [--from-exchange] [--agent NAME] [--model MODEL] [--dry-run] [--plan]`
+`agent-doc orchestrate <FILE> --mode sequential|parallel|dag [--task TEXT ...] [--from-file TASKS.md] [--from-exchange] [--from-queue] [--resume-schedule ID] [--agent NAME] [--model MODEL] [--dry-run] [--plan]`
 
 - Natural-language orchestration requests are normalized by the skill/runbook layer into this command; the CLI itself expects explicit tasks and mode.
 - Task resolution combines repeated `--task` entries, optional task extraction from a file, and optional task extraction from the newest exchange tail.
+- `--from-queue` extracts all active `agent:queue` prompt entries and queue-level `preset` / `dispatch` directives, rather than only the single queue head used by normal `agent-doc run` resumability.
 - Batch-level `preset` / `presets` directives request frontmatter `prompt_presets` and are validated before execution. Exact preset keys win; a bare directive such as `preset review` also resolves to frontmatter key `#review` when only the hashtag form is defined.
 
 ### `--dry-run` and `--plan`
@@ -123,6 +124,18 @@ Additional rules:
 - Every ready node still runs through the normal single-document lifecycle: inject prompt -> `preflight` -> fresh agent request -> `finalize` -> `session-check`.
 - DAG mode is dependency-aware but not concurrent against one session document. Real concurrency belongs to `--mode parallel`.
 
+### Auto-DAG from queue
+
+`agent-doc orchestrate <FILE> --mode dag --from-queue`
+
+- Builds a binary-owned `agent-doc-auto-dag-schedule-v1` schedule from the active `agent:queue` body.
+- Expands compound `do [#a] [#b]` directives into one node per target and parses dependency text from `after=`, `deps=`, `after #id`, `depends on #id`, `blocked by #id`, and `requires #id`.
+- Computes deterministic source-order antichain batches, persists the schedule under `.agent-doc/schedules/<schedule-id>.json`, and writes schedule-backed job packets plus an operation note before launching work.
+- The persisted node record carries state, attempt count, replay commands, repair commands, dependency ids, graph status, and guard decision. `--resume-schedule <ID>` reloads that file, skips complete nodes, and refuses to launch dependents when any node is blocked or failed.
+- If tsift graph evidence is available, auto-DAG validates current/fresh graph status, one evidence handle per target, one worker ownership packet per target, and conflict-matrix approval before dispatching multi-node antichain batches. Stale graph evidence, ambiguous ownership, or unsafe parallel conflict evidence fails closed before dispatch.
+- Auto-DAG reads recent ops logs as scheduler input and classifies prompt-budget, cache-resend, restart-loop, and noop-closeout families. Prompt-budget/cache-resend gates the run into compact-first; restart-loop gates into restart/repair-first; repeated noop-closeout gates into fixture-fix-first. The schedule is written with the guard result so recovery has proof of why the run did not launch.
+- Auto-DAG still uses the shared single-document lifecycle for each launched node. A downstream batch is not considered ready until every node in the prior dependency set has completed through `finalize` and `session-check`; failed children update the schedule and stop the run deterministically.
+
 ## jobs
 
 `agent-doc jobs create <FILE> [--operation-doc] [--audit] [--budget N]`
@@ -134,6 +147,11 @@ Additional rules:
   targets instead of silently dropping the later ids.
 - Packets live under `.agent-doc/jobs/<cycle>/<job-id>.md` and are ignored by
   default. `--audit` records the preservation intent in the cycle index.
+- Auto-DAG schedules may also create schedule-backed packets under
+  `.agent-doc/jobs/<schedule-id>/`; these packets include
+  `auto_dag_schedule_id`, `auto_dag_node_id`, node state, attempt count,
+  replay commands, and repair commands in addition to the normal worker result
+  contract.
 - Each packet carries the `agent-doc-job-packet-v1` contract in frontmatter:
   parent document, cycle id, job id, prompt target, task class, model tier,
   risk, write scope, context budget, source snapshot, tsift status, and result

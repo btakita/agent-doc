@@ -440,6 +440,9 @@ pub fn reap(file: &Path) -> Result<()> {
             .context("failed to archive reaped item(s) to agent:done")?;
         new_doc = archived;
     }
+    if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&new_doc)? {
+        new_doc = reconciled;
+    }
     std::fs::write(file, &new_doc)?;
     if changed {
         eprintln!("[pending] backfilled missing hash ids / checkboxes before reap");

@@ -4341,6 +4341,53 @@ fn exchange_has_live_user_edit(baseline: Option<&str>, before: &str) -> bool {
     strip_boundary_for_dedup(base_exchange) != strip_boundary_for_dedup(before_exchange)
 }
 
+fn file_ipc_consumed_without_live_exchange_ack(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    baseline: Option<&str>,
+    before: Option<&str>,
+    after: &str,
+    ack_content_proven: bool,
+) -> bool {
+    if ack_content_proven {
+        return false;
+    }
+    let Some(before) = before else {
+        return false;
+    };
+    if !exchange_has_live_user_edit(baseline, before) {
+        return false;
+    }
+    let (Some(before_exchange), Some(after_exchange)) =
+        (exchange_content(before), exchange_content(after))
+    else {
+        return false;
+    };
+    if strip_boundary_for_dedup(before_exchange) != strip_boundary_for_dedup(after_exchange) {
+        return false;
+    }
+
+    let before_hash = crate::ops_log::content_hash(before);
+    let after_hash = crate::ops_log::content_hash(after);
+    eprintln!(
+        "[write] file IPC consumed for {} with live exchange edits but no ack-content proof and no exchange materialization — falling back before snapshot/commit",
+        file.display()
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "file_ipc_live_exchange_unacknowledged file={} source={} patch_id={} before_hash={} after_hash={}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            before_hash,
+            after_hash
+        ),
+    );
+    true
+}
+
 fn exchange_prompt_prefix_count(exchange: &str) -> usize {
     exchange
         .lines()
@@ -6050,6 +6097,18 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 consumed_without_materialization = true;
                 break;
             }
+            if file_ipc_consumed_without_live_exchange_ack(
+                file,
+                "explicit_file_ipc",
+                Some(&patch_id),
+                baseline,
+                Some(&content_at_start),
+                &content,
+                false,
+            ) {
+                consumed_without_materialization = true;
+                break;
+            }
             snapshot::save(file, &content)?;
             crate::ops_log::log_op(
                 file,
@@ -7612,6 +7671,7 @@ fn write_ipc_and_poll(
                 .get("patch_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
+            let mut ack_content_proven = false;
             let current_on_disk = if !patch_id.is_empty() {
                 match poll_ack_content_sidecar(
                     options.project_root,
@@ -7652,6 +7712,7 @@ fn write_ipc_and_poll(
                                     "[write] sidecar normalization diverged but no content_ours — using sidecar ({} bytes)",
                                     content.len()
                                 );
+                                ack_content_proven = true;
                                 content
                             }
                         } else {
@@ -7659,6 +7720,7 @@ fn write_ipc_and_poll(
                                 "[write] snapshot from ack-content sidecar ({} bytes)",
                                 content.len()
                             );
+                            ack_content_proven = true;
                             content
                         }
                     }
@@ -7742,6 +7804,20 @@ fn write_ipc_and_poll(
                 "file_ipc",
                 &expected_response,
                 &current_on_disk,
+            ) {
+                return Ok(false);
+            }
+            if file_ipc_consumed_without_live_exchange_ack(
+                doc_file,
+                "file_ipc",
+                Some(patch_id),
+                payload
+                    .get("baseline")
+                    .and_then(|value| value.as_str())
+                    .filter(|value| !value.is_empty()),
+                before_content.as_deref(),
+                &current_on_disk,
+                ack_content_proven,
             ) {
                 return Ok(false);
             }
@@ -9526,6 +9602,74 @@ scratch
         assert!(
             log.contains("ipc_materialization_missing_response") && log.contains("source=file_ipc"),
             "missing response materialization should be logged for operator repair:\n{log}"
+        );
+    }
+
+    #[test]
+    fn file_ipc_consumed_with_live_exchange_edit_requires_ack_content() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "live prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let result = try_ipc(
+            &doc,
+            &[],
+            "",
+            None,
+            Some(baseline),
+            None,
+            None,
+            Some("patch-live-edit"),
+        )
+        .unwrap();
+
+        assert!(
+            !result.success,
+            "file IPC consumption with live exchange edits and unchanged disk content must fall back"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "unacknowledged live-edit IPC must not become the saved snapshot"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("file_ipc_live_exchange_unacknowledged")
+                && log.contains("patch_id=patch-live-edit"),
+            "unacknowledged live-edit IPC should be logged:\n{log}"
         );
     }
 

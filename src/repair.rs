@@ -677,6 +677,9 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
     if let Some(archived) = crate::preflight::archive_pending_done(file, &repaired, &removed)? {
         repaired = archived;
     }
+    if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&repaired)? {
+        repaired = reconciled;
+    }
 
     write::atomic_write_pub(file, &repaired)?;
 
@@ -702,6 +705,11 @@ fn repair_completed_backlog_items(file: &Path) -> Result<RepairOutcome> {
             crate::preflight::archive_pending_done(file, &new_snapshot, &removed)?
         {
             new_snapshot = archived;
+        }
+        if let Some(reconciled) =
+            crate::status_cmd::reconcile_top_backlog_status_content(&new_snapshot)?
+        {
+            new_snapshot = reconciled;
         }
         snapshot::save(file, &new_snapshot)?;
         Some(new_snapshot)

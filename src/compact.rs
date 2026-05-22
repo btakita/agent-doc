@@ -180,7 +180,13 @@ pub fn run(
         let archive_path = save_archive(file, &archive_content)?;
 
         // Build compacted document
-        let compacted = build_compacted(&content, body, to_keep, &archive_path, to_archive.len());
+        let mut compacted =
+            build_compacted(&content, body, to_keep, &archive_path, to_archive.len());
+        if let Some(reconciled) =
+            crate::status_cmd::reconcile_top_backlog_status_content(&compacted)?
+        {
+            compacted = reconciled;
+        }
 
         apply_compacted_document(file, &compacted, &compacted, false)?;
 
@@ -307,8 +313,11 @@ fn run_component_compact(
     };
 
     let compacted = comp.replace_content(content, &summary);
-    let compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
+    let mut compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
         .unwrap_or(compacted);
+    if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&compacted)? {
+        compacted = reconciled;
+    }
     apply_compacted_document(file, &compacted, &compacted, is_crdt)?;
 
     let line_count = old_content.lines().count();
@@ -417,15 +426,23 @@ fn run_component_compact_partial(
     }
 
     let compacted = comp.replace_content(content, &new_content);
-    let compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
+    let mut compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
         .unwrap_or(compacted);
-    let snapshot_compacted = if trailing.trim().is_empty() {
+    if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&compacted)? {
+        compacted = reconciled;
+    }
+    let mut snapshot_compacted = if trailing.trim().is_empty() {
         compacted.clone()
     } else {
         let snapshot_content = comp.replace_content(content, &base_new_content);
         crate::template::repair_conversation_tail_outside_exchange(&snapshot_content)?
             .unwrap_or(snapshot_content)
     };
+    if let Some(reconciled) =
+        crate::status_cmd::reconcile_top_backlog_status_content(&snapshot_compacted)?
+    {
+        snapshot_compacted = reconciled;
+    }
     apply_compacted_document(file, &compacted, &snapshot_compacted, is_crdt)?;
 
     eprintln!(
@@ -1442,6 +1459,41 @@ mod tests {
         assert!(!exchange.contains("Queue:"));
         assert!(!exchange.contains("Icebox:"));
         assert!(!exchange.contains("### Re: topic one"));
+    }
+
+    #[test]
+    fn exchange_compact_reconciles_stale_top_backlog_status() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-summary\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Top backlog item: #done.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, doc).unwrap();
+
+        run_component_compact(&file, doc, "exchange", Some("Compacted."), false).unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        assert!(result.contains("No open backlog items."));
+        assert!(!result.contains("Top backlog item: #done."));
+        let snap = snapshot::load(&file).unwrap().unwrap();
+        assert!(snap.contains("No open backlog items."));
     }
 
     #[test]

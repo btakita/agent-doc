@@ -1881,6 +1881,20 @@ pub(crate) fn run_pending_maintenance(file: &Path) -> Result<PendingMaintenanceR
         }
     }
 
+    if let Some(reconciled) =
+        crate::status_cmd::reconcile_top_backlog_status_content(&current_content)?
+    {
+        eprintln!("[preflight] status: reconciled stale top-backlog marker");
+        current_content = reconciled;
+        mutated = true;
+    }
+    if let Some(ref mut snap_content) = snapshot_content
+        && let Some(reconciled) =
+            crate::status_cmd::reconcile_top_backlog_status_content(snap_content)?
+    {
+        *snap_content = reconciled;
+    }
+
     // 3. Persist any mutations to BOTH the working tree file and the snapshot.
     //    Writing to both (surgically, via component replace) keeps the two in
     //    sync so the upcoming step-2 `git::commit` stages the reaped+archived

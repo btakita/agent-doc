@@ -358,15 +358,15 @@ fn is_exchange_close_marker_line(content: &str) -> bool {
 
 fn line_looks_like_prompt_target(line: &str) -> bool {
     let trimmed = line.trim();
+    let normalized_imperative = normalize_imperative_candidate(trimmed)
+        .is_some_and(|normalized| looks_like_imperative_directive(&normalized));
     !trimmed.is_empty()
         && !trimmed.starts_with("<!--")
         && !trimmed.starts_with("```")
         && !trimmed.starts_with("~~~")
         && !trimmed.starts_with("### Re:")
         && !line_has_known_response_label_after_prompt(trimmed)
-        && (trimmed.starts_with('❯')
-            || trimmed.ends_with('?')
-            || looks_like_imperative_directive(trimmed))
+        && (trimmed.starts_with('❯') || trimmed.ends_with('?') || normalized_imperative)
 }
 
 pub(crate) fn text_line_looks_like_prompt_target(line: &str) -> bool {

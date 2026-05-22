@@ -2568,6 +2568,83 @@ impl PostCommitLocalDriftKind {
     }
 }
 
+fn prompt_classifier_post_commit_drift_kind(
+    head_doc: &str,
+    current_doc: &str,
+) -> Option<PostCommitLocalDriftKind> {
+    let prompt_bearing_body = |content: &str| {
+        crate::frontmatter::parse(content)
+            .map(|(_, body)| body.to_string())
+            .unwrap_or_else(|_| content.to_string())
+    };
+    let norm = |content: &str| {
+        crate::git::normalize_committed_exchange_artifacts(&prompt_bearing_body(content))
+    };
+    let diff_text = crate::diff::unified_diff_from_contents(&norm(head_doc), &norm(current_doc))?;
+    let changes = crate::diff::classify_prompt_bearing_changes(&diff_text);
+    if changes.is_empty() {
+        return None;
+    }
+    let has_explicit_prompt_target = changes
+        .iter()
+        .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+        .any(|change| {
+            change
+                .text
+                .lines()
+                .any(line_looks_like_explicit_post_commit_prompt_directive)
+        });
+    let has_content_edit = changes
+        .iter()
+        .any(|change| change.kind == crate::diff::PromptBearingChangeKind::ContentEdit);
+    let has_recovery_artifact = changes
+        .iter()
+        .any(|change| change.kind == crate::diff::PromptBearingChangeKind::RecoveryArtifact);
+    if has_explicit_prompt_target && !has_content_edit && !has_recovery_artifact {
+        Some(PostCommitLocalDriftKind::UserFollowUp)
+    } else {
+        Some(PostCommitLocalDriftKind::WorkingTreeEdits)
+    }
+}
+
+fn line_looks_like_explicit_post_commit_prompt_directive(line: &str) -> bool {
+    let mut trimmed = line.trim();
+    if let Some(rest) = trimmed.strip_prefix("- ") {
+        trimmed = rest.trim_start();
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("[ ]")
+        .or_else(|| trimmed.strip_prefix("[x]"))
+        .or_else(|| trimmed.strip_prefix("[X]"))
+        .or_else(|| trimmed.strip_prefix("[/]"))
+    {
+        trimmed = rest.trim_start();
+    }
+    if let Some(rest) = trimmed.strip_prefix("[#")
+        && let Some(close) = rest.find(']')
+    {
+        trimmed = rest[close + 1..].trim_start();
+    }
+
+    let lower = trimmed
+        .trim_start_matches('❯')
+        .trim_start()
+        .to_ascii_lowercase();
+    trimmed.starts_with('❯')
+        || trimmed.ends_with('?')
+        || lower.starts_with("do #")
+        || lower.starts_with("do [#")
+        || lower.starts_with("fix #")
+        || lower.starts_with("fix this")
+        || lower.starts_with("run tests")
+        || lower.starts_with("build + install")
+        || lower.starts_with("build and install")
+        || lower.starts_with("commit + push")
+        || lower.starts_with("commit and push")
+        || lower.contains(" spec-test")
+        || lower.contains(" spec test")
+}
+
 fn classify_post_commit_local_drift(
     head_doc: &str,
     current_doc: &str,
@@ -2593,6 +2670,9 @@ fn classify_post_commit_local_drift(
         && is_safe_user_only_follow_up_after_committed_head(&cleaned_head, current_doc)
     {
         return Some(PostCommitLocalDriftKind::UserFollowUp);
+    }
+    if let Some(kind) = prompt_classifier_post_commit_drift_kind(head_doc, current_doc) {
+        return Some(kind);
     }
     Some(PostCommitLocalDriftKind::WorkingTreeEdits)
 }
@@ -3543,6 +3623,63 @@ Implemented.
         assert!(is_safe_user_only_follow_up_after_committed_head(
             head, current
         ));
+    }
+
+    #[test]
+    fn post_commit_drift_uses_prompt_classifier_for_queue_directive() {
+        let head = "---\nagent_doc_session: test\n---\n\n\
+            ## Exchange\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: done\n\
+            Completed.\n\
+            <!-- /agent:exchange -->\n\n\
+            ## Queue\n\n\
+            <!-- agent:queue -->\n\
+            <!-- /agent:queue -->\n\n\
+            ## Backlog\n\n\
+            <!-- agent:backlog -->\n\
+            <!-- /agent:backlog -->\n";
+        let current = "---\nagent_doc_session: test\n---\n\n\
+            ## Exchange\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: done\n\
+            Completed.\n\
+            <!-- /agent:exchange -->\n\n\
+            ## Queue\n\n\
+            <!-- agent:queue auto -->\n\
+            preset #spec-test-build-install-commit-push\n\
+            - do [#nexttop]\n\
+            <!-- /agent:queue -->\n\n\
+            ## Backlog\n\n\
+            <!-- agent:backlog -->\n\
+            - [ ] [#nexttop] Fix stale status.\n\
+            <!-- /agent:backlog -->\n";
+
+        assert_eq!(
+            classify_post_commit_local_drift(head, current),
+            Some(PostCommitLocalDriftKind::UserFollowUp)
+        );
+    }
+
+    #[test]
+    fn post_commit_drift_keeps_inline_corrections_as_working_tree_edits() {
+        let head = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: report\n\
+            The service returned 401.\n\
+            More analysis.\n\
+            <!-- /agent:exchange -->\n";
+        let current = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: report\n\
+            The service returned 503.\n\
+            More analysis.\n\
+            <!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            classify_post_commit_local_drift(head, current),
+            Some(PostCommitLocalDriftKind::WorkingTreeEdits)
+        );
     }
 
     #[test]

@@ -30,54 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260522-014020.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260522-035739.md`*
 
 Compacted content:
-- Archived 1 response topic(s): SQLite graph DB optimization batch
+- Archived 3 response topic(s): SQLite graph performance next steps; SQLite graph performance batch; performance improvement
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are the #next-steps to improve sqlite graph performance?
-### Re: SQLite graph performance next steps — gpt-5
-
-Top backlog item: #gdbperfbase.
-
-I added the next performance work in this priority order:
-
-1. #gdbperfbase: refresh and migrate the real agent-loop `.tsift/graph.db`, then capture the baseline numbers before more tuning. This is first because current `graph-db status` still reports a stale schema-v1 graph missing the new `row_hash` and `source_watermark` columns, so performance data against that file is not clean.
-2. #gdbbenchhist: make graph performance measurement repeatable and bounded across the real projection plus synthetic high-degree/deep-chain graphs, with metric history suitable for regression review.
-3. #gdbpathbatch: batch evidence shortest-path and worker-context path expansion so evidence/conflict workflows do not regress into per-pair path queries.
-4. #gdbpropidx: only promote JSON-property filters into materialized indexed rows or columns after query-plan and benchmark evidence shows JSON extraction scans are the dominant cost.
-5. #gdbcompact: add a safe compaction policy for tombstone-heavy graph stores after Convex reconciliation, since current status reports 1,025,144 tombstones versus 929,474 live rows and a 605 MB graph DB.
-
-Evidence gathered this cycle: `tsift graph-db --path /home/brian/work/btakita/agent-loop --json status` completed and showed the stale schema/tombstone numbers above. I also tried `backend-eval --target #orchdog`; it produced no output after roughly 90 seconds, so I stopped it and treated bounded/progress-visible benchmarking as part of the follow-up work. No code changed, so I did not run the project test suite.
-### Re: SQLite graph performance batch — gpt-5
-
-Completed the full batch: `#gdbperfbase`, `#gdbbenchhist`, `#gdbpathbatch`, `#gdbpropidx`, and `#gdbcompact`.
-
-Shipped changes in `src/tsift`:
-- SQLite graph schema v3 now materializes `graph_node_properties` with `idx_graph_node_properties_key_value_node`, and property-filtered `kind`/`neighborhood` reads use that indexed table instead of JSON extraction scans.
-- Full projection refresh is now viable on the real root graph: it uses indexed graph-builder lookups, temp edge join indexes, indexed tombstone pruning, and keeps normal read queries read-only instead of implicitly refreshing.
-- Evidence collection now batches reachable node collection by target kind through one SQLite recursive CTE per family group.
-- `graph-db backend-eval` now reports real, synthetic high-degree, and synthetic deep-chain datasets, emits numeric metrics, and points at `fixtures/graph-db-performance-history.json` for `metric-digest` review.
-- `graph-db compact` adds dry-run/apply policy reporting, WAL checkpoint/VACUUM, and guarded tombstone pruning that requires `--confirmed-convex-reconciled`; status and doctor expose compaction proof without failing closed.
-
-Real agent-loop graph evidence after refresh/backend-eval: current schema/projection, 351,697 nodes, 586,301 edges, 151,622 retained tombstones, 1,136,963,584 byte `graph.db`, and 119,422,976 freelist bytes. The first successful migration refresh pruned 894,637 stale-live tombstones. `doctor` is ok; compaction remains recommended and tombstone pruning still requires Convex reconciliation. A live `kind backlog --property ref_id=gdbperfbase --limit 1` query now returns immediately and reports both `idx_graph_nodes_kind` and `idx_graph_node_properties_key_value_node` in the SQLite plan.
-
-Benchmark baseline from `backend-eval --target gdbperfbase`: real SQLite refresh 125,231,934 us, status 6,202,498 us, evidence 56,775 us, conflict-matrix 3,339,006 us, dispatch-trace 10,934,534 us, total 145,764,747 us. Synthetic high-degree SQLite total was 45,087 us; synthetic deep-chain total was 11,444 us. DuckDB/DuckPGQ and Ladybug remain on hold because real dispatch-trace parity differs from SQLite.
-
-Verification completed: `cargo test graph_db`, `make check`, `cargo install --path .`, `tsift --version`, `target/debug/tsift metric-digest --input fixtures/graph-db-performance-history.json --json`, real `graph-db refresh/status/doctor/evidence/compact/backend-eval`, `conflict-matrix`, and `dispatch-trace`. Latest GitHub Actions `CI` run inspected: `26263293674`, success. Pushed tsift commit `9da2685` and superproject submodule-pointer commit `8fb434e82`.
-❯ How much of a performance improvement did the last queue run result with?
-### Re: performance improvement — gpt-5
-
-The honest read is: the last queue run produced a solid post-change baseline, but not a clean apples-to-apples real-graph pre/post percentage.
-
-Before the batch, the only real-run timing we had was that the earlier backend-eval attempt produced no output after roughly 90 seconds and was stopped. After the batch, `backend-eval --target gdbperfbase` returned `145,764,747 us` total, with `125,231,934 us` of that spent in refresh. The post-refresh read/eval portion was about `20,532,813 us` total: status `6.20s`, evidence `0.057s`, conflict-matrix `3.34s`, and dispatch-trace `10.93s`.
-
-So for the real graph, I would describe the improvement as: unbounded/no-output after about 90s became bounded and reportable, with the read-side work now returning in about `20.5s`. That is at least a `4.4x` improvement versus the previous 90s abort threshold, or more than a `77%` wall-time reduction, but only if we compare against the non-refresh read/eval portion. If we include the full refresh, the run is `145.8s`, so I would not claim a total-run speedup from the recorded evidence.
-
-For the synthetic baselines that were added with the queue run, the numbers are clearer: high-degree SQLite total improved from `200,000 us` to `45,087 us`, about `4.4x` faster / `77.5%` lower; deep-chain SQLite total improved from `220,000 us` to `11,444 us`, about `19.2x` faster / `94.8%` lower.
-
-No repo files changed for this answer. Verification was document/context inspection only: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, targeted `rg`, fixture read, and `git show` on the shipped tsift commit.
-<!-- agent:boundary:22773020 -->
+<!-- agent:boundary:2b4f393d -->
 <!-- /agent:exchange -->
 ###
 <!--

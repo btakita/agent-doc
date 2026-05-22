@@ -31,26 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260522-221617.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260522-222729.md`*
 
 Compacted content:
+- Archived 1 response topic(s): graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ - Trailing prompt/context: What are #next-steps to improve graph performance?
-### Re: graph performance next steps — gpt-5
-
-Top backlog item: `#gdbpostbase`.
-
-I added the next graph-performance backlog in priority order and left the queued `do` items open for a later implementation cycle. The previous top five are already shipped, and the best current signal is that SQLite improved substantially but still spends most of the real run in refresh and shared preparation work. The next pass starts by replacing the stale baseline with fresh post-aaac32a measurements, then optimizes the remaining refresh construction path, then removes repeated conflict-matrix/dispatch-trace preparation work.
-
-Backend switching stays last. FalkorDB/DuckDB/Ladybug remain behind the promotion gate until SQLite's current baseline is clean and every candidate beats SQLite on parity, real operator reads, synthetic graphs, portability, and lock behavior.
-
-Changed paths: `tasks/software/tsift.md` only.
-
-Commands run: `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `git status --short`, `tsift status --json`, targeted reads/searches over `src/tsift/SPEC.md`, `tasks/software/tsift.done.md`, and the compacted exchange archive, plus repair closeout after an initial malformed patch block was rejected before the response was written.
-
-Verification: no code changed, so I did not run the tsift test/build suite. The tsift workspace index is stale, so I treated `tsift status` as diagnostic and relied on checked-in spec/archive content for the recommendation. No escalated commands were used.
-
-<!-- agent:boundary:d28c0403 -->
+<!-- agent:boundary:cb2331ed -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -29,12 +29,12 @@ Logged three fresh log-triage follow-ups. No open backlog items.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-230723.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-230839.md`*
 
 Compacted content:
-- Archived 1 response topic(s): full-content live-typing race
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:b4b42213 -->
+- Trailing prompt/context: The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should ...
+<!-- agent:boundary:cfd42a31 -->
 <!-- /agent:exchange -->
 ###
 <!--

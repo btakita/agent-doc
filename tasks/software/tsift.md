@@ -66,7 +66,12 @@ Verification:
 - Latest `btakita/tsift` GitHub `CI` before this new push was green (`26314205965`). Latest root `Agent Doc` run `26315225081` failed with empty `check` and `tmux-ci` job step lists and `gh run view --log-failed` returned `log not found`, so I classified it as the same external CI-start blocker rather than a code or tmux regression.
 
 Per agent-doc closeout ordering, the local commits are ready and the pushes follow after this document response is finalized.
-<!-- agent:boundary:907871ed -->
+### Re: gdbrowstream queue cleanup — gpt-5
+
+`#gdbrowstream` is already resolved by the prior closeout in `src/tsift` commit `c0ebfd5` and superproject commit `851d29aad`; no additional repo work was needed for this queue step. The active queue line was stale after the first auto-queue cycle consumed only `#gdbpostbase`.
+
+Verification and push status remain unchanged: final `make check` passed and `btakita/tsift` CI run `26315623600` passed. Root `Agent Doc` run `26315620142` still failed before job steps/logs were available, so it remains an external CI-start blocker.
+<!-- agent:boundary:e9611ee5 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -75,7 +80,7 @@ Per agent-doc closeout ordering, the local commits are ready and the pushes foll
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#gdbpostbase]~
-- do [#gdbrowstream]
+- ~do [#gdbrowstream]~
 - do [#gdbprepstage]
 - do [#gdbvacproof]
 - do [#gdbenginegate]

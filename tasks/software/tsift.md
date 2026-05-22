@@ -86,7 +86,15 @@ The unresolved blocker is external: live Convex reconciliation failed because `T
 `#gdbenginegate` was already completed in the prior implementation closeout: the backend-eval run kept DuckDB/DuckPGQ, FalkorDB, and Ladybug behind promotion gates because they still diverged from SQLite parity, and the result was committed in `src/tsift` commit `c0ebfd5` plus superproject commit `851d29aad`.
 
 No repository files changed for this queue cleanup. The final verification state remains: `make check` passed locally, `btakita/tsift` CI run `26315623600` passed, and root `Agent Doc` run `26315620142` remains an external CI-start blocker due empty jobs with no logs.
-<!-- agent:boundary:9a934d61 -->
+❯ Are the canditate DuckDB + FalkorDB now faster than SqliteDB?
+### Re: candidate backend speed — gpt-5
+
+Yes on raw elapsed time in the latest backend-eval, but no for promotion.
+
+The latest real run measured SQLite at `29.199s` total after the batching change. The candidate totals were faster: DuckDB/DuckPGQ at `6.529s` and FalkorDB at `6.170s`. So as benchmark candidates, both are currently faster than SQLite on that measured total.
+
+They still cannot replace SQLite because both failed the real parity gate: DuckDB/DuckPGQ differed from SQLite, and FalkorDB also differed from SQLite. Until the parity mismatches are fixed, the correct status is "faster candidate, not promotable backend." SQLite remains the authoritative backend.
+<!-- agent:boundary:976a71b5 -->
 <!-- /agent:exchange -->
 ###
 <!--

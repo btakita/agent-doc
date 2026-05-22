@@ -34,14 +34,38 @@ Logged three fresh log-triage follow-ups. No open backlog items.
 Compacted content:
 - Archived 1 response topic(s): compact prompt duplication
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:f3eef8f7 -->
+❯ The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. tsift.md had the duplicate prompt issue. The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?
+❯ #spec-test-build-install-commit-push
+### Re: mixed scratch comment deletion — gpt-5
+Yes, line-by-line was the right way to look at this one. This specific deletion was not just a generic race symptom: the duplicate-prompt cleanup was applying a fuzzy whole-comment match to a multiline ordinary HTML comment. When the comment contained one duplicate prompt line plus unrelated scratch/log-triage lines, the whole comment body could be emptied.
+
+I changed the cleanup to scrub multiline post-exchange comments line-by-line. A one-line duplicate comment can still be emptied, but unrelated lines mixed into the same multiline comment now remain user-owned and outside `agent:exchange`.
+
+Changed paths:
+- `src/agent-doc/src/template.rs`
+- `src/agent-doc/src/preflight.rs`
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc/specs/04-diff-computation.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification:
+- Reproduced the failing editor-visible mixed-comment case before the fix.
+- `cargo test normalize_editor_visible_template_structure_preserves_mixed_prompt_comment_scratch_lines`
+- `cargo test preflight_preserves_unrelated_lines_in_mixed_post_exchange_duplicate_prompt_comment`
+- `make check`
+- Latest GitHub CI run `26316547978` was green, including `Run make tmux-ci`.
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits so far:
+- `src/agent-doc`: `078c6981 fix: preserve mixed prompt scratch comments`
+- parent repo gitlink: `774467f59 chore: update agent-doc submodule`
+
+Push is intentionally after this `finalize` closeout so the session-document response commit is included in the same push boundary.
+<!-- agent:boundary:242725bc -->
 <!-- /agent:exchange -->
 ###
 <!--
-The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?
-#spec-test-build-install-commit-push
----
-Look through the Claude + Codex + agent-doc session logs for #next-steps to fix bugs.
 -->
 
 <!-- agent:queue -->

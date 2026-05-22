@@ -34,10 +34,42 @@ Logged three fresh log-triage follow-ups. No open backlog items.
 Compacted content:
 - Archived 1 response topic(s): #codexmanwarn
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:dad0a097 -->
+❯ The duplicate content corrupt document & duplicate prompt bugs surfaced as I was writing this prompt. Please fix in a mathematically provable way? Is this a race condition?
+❯ #spec-test-build-install-commit-push
+### Re: full-content live-typing race — gpt-5
+
+Fixed and pushed.
+
+This was a real race condition: a full-document replacement could be computed from source buffer `S`, then a later disk reread could see `S + new prompt` and stamp that late content as the source proof for editor IPC. That made the proof describe the wrong thing, so a Compact Exchange / full-content write could accept or persist content across a prompt typed after the replacement had already been derived.
+
+The fix makes the invariant explicit and testable: a target document `T` derived from source `S` can only be applied when the live editor/disk buffer still equals `S`. Editor IPC now carries the caller-supplied source hash and byte length; direct disk fallback uses the same visible-current compare-and-swap guard; socket full-content ACKs are rejected before snapshot save if the materialized document differs from `T`. Any interleaving prompt changes the live buffer away from `S`, so the write fails closed and the prompt remains for the next cycle.
+
+Changed paths:
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/src/compact.rs`
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc/tests/test_cli.rs`
+- parent repo gitlink `src/agent-doc`
+
+Verification:
+- `cargo test full_content`
+- `cargo test component_compact_direct_fallback_rejects_late_visible_edit`
+- `make check`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest GitHub Actions CI on `20260422/codex-agent-backend` was green, including `Run make tmux-ci` in run `26315620352`.
+
+Commits pushed:
+- `btakita/agent-doc` `20260422/codex-agent-backend`: `7a8210fd` `fix: bind full-content replacements to source buffer`
+- `btakita/agent-loop` `main`: `eacd9594f` `agent-doc: update full-content replacement guard`
+
+Confidence: high. The closeout path is now guarded by a source-buffer equality proof on every whole-document apply path involved in the bug, with regression tests covering late visible edits, stale operator IPC source proof, socket post-apply mismatch, and the Compact Exchange direct fallback.
+<!-- agent:boundary:3bdcb09e -->
 <!-- /agent:exchange -->
 ###
 <!--
+Look through the Claude + Codex session
 -->
 
 <!-- agent:queue -->

@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -81,19 +81,18 @@ The verification record remains the same: final `make check` passed, `btakita/ts
 `#gdbvacproof` remains review-gated rather than done. Local evidence exists for the parts that could run without live Convex credentials: Convex dry-run produced a reconciliation plan, `graph-db compact --apply` reduced the SQLite graph file from `1012051968` to `975118336` bytes with freelist `618496 -> 0`, and post-compact status showed freelist `0`.
 
 The unresolved blocker is external: live Convex reconciliation failed because `TSIFT_CONVEX_GRAPH_URL` / `--endpoint` was not configured. I left the review-gated item in place and did not change repo files for this queue cleanup.
-<!-- agent:boundary:6083b831 -->
+### Re: gdbenginegate queue cleanup — gpt-5
+
+`#gdbenginegate` was already completed in the prior implementation closeout: the backend-eval run kept DuckDB/DuckPGQ, FalkorDB, and Ladybug behind promotion gates because they still diverged from SQLite parity, and the result was committed in `src/tsift` commit `c0ebfd5` plus superproject commit `851d29aad`.
+
+No repository files changed for this queue cleanup. The final verification state remains: `make check` passed locally, `btakita/tsift` CI run `26315623600` passed, and root `Agent Doc` run `26315620142` remains an external CI-start blocker due empty jobs with no logs.
+<!-- agent:boundary:9a934d61 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#gdbpostbase]~
-- ~do [#gdbrowstream]~
-- ~do [#gdbprepstage]~
-- ~do [#gdbvacproof]~
-- do [#gdbenginegate]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

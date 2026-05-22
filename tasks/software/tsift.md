@@ -18,7 +18,7 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed: #impactdag and #dagfix shipped in tsift ed28437 and superproject 189dcac98; graph orchestration now exposes scheduler fields and regenerates dependency-DAG replay fixtures.
+Completed: #gdbret, #gdbbfs, #gdbpush, and #gdbdelta shipped in tsift bd402c5 and superproject ea61810cb; SQLite graph refreshes are delta-based, graph reads push batching/filtering into SQLite, tombstone retention diagnostics are surfaced, and both repos are pushed.
 <!-- /agent:status -->
 
 ## Spec
@@ -35,22 +35,43 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): sqlite graph optimization next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:23451336 -->
+### Re: SQLite graph DB optimization batch — gpt-5
+Implemented the four queued graph-db items and pushed them.
+
+- #gdbret: added row-hash/source-watermark tracking, stale-live tombstone pruning on refresh, file-size/freelist reporting, and non-fatal doctor/status tombstone-retention diagnostics.
+- #gdbbfs: moved SQLite neighborhood, shortest path, and evidence reachability traversal onto recursive CTE/batched query paths while preserving depth/max-hop limits.
+- #gdbpush: pushed SQLite kind/neighborhood cursor pagination and `--property KEY=VALUE` filters into SQL and surfaced query-plan diagnostics before adding JSON-property indexes/materialized rows.
+- #gdbdelta: replaced full delete/reinsert refresh with temp-table delta refreshes, anti-join deletes, unchanged-row skips, and refresh summaries for upsert/delete/unchanged/pruned counts.
+
+Verification:
+- `make check` passed.
+- `cargo test --test graph_db_conformance` passed: 29 passed, 1 ignored live Convex acceptance.
+- `cargo install --path . --force` completed; `tsift --version` reports `tsift 0.1.42`.
+- Installed-binary `tsift graph-db --path . --json refresh` proved the second refresh skipped all unchanged rows: 0 node/edge upserts, 3405 unchanged nodes, 19721 unchanged edges.
+- Latest GitHub Actions CI run `26262060470` for `btakita/tsift` was successful; workflow list has `CI` and `Release`, no tmux-test workflow for this repo.
+
+Commits/pushes:
+- tsift: `bd402c5` (`optimize sqlite graph store operations`) pushed to `btakita/tsift main`.
+- superproject: `ea61810cb` (`tsift: optimize sqlite graph operations`) pushed to `btakita/agent-loop main`.
+
+Planning note: `agent-doc plan` reported tsift graph evidence unavailable because `tsift conflict-matrix ... gdbret gdbbfs gdbpush gdbdelta` timed out after 30s, so I proceeded from source inspection and locked the behavior with tests.
+<!-- agent:boundary:7a04bb82 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- do [#gdbret]
+- do [#gdbbfs]
+- do [#gdbpush]
+- do [#gdbdelta]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbret] [recommended] Add SQLite graph tombstone retention, compaction, and doctor diagnostics: current graph.db status reports more tombstones than live rows, so define a safe prune or rebuild policy that preserves Convex tombstone semantics and tracks file-size/query impact.
-- [ ] [#gdbbfs] [recommended] Batch SQLite graph traversal reads for evidence, conflict-matrix, and dispatch-trace: replace per-node outgoing_edges/node lookup loops with frontier queries or recursive CTEs, preserve max-depth/max-hops semantics, and lock parity against the real #orchdog packet.
-- [ ] [#gdbpush] [recommended] Push graph-db kind/neighborhood cursor pagination and property filters into the SQLite GraphStore query layer instead of hydrating full node sets and filtering in memory; add query-plan assertions before adding JSON-property indexes or materialized property rows.
-- [ ] [#gdbdelta] [recommended] Replace full SQLite graph projection refresh with a measured delta refresh: persist per-row content hashes/source watermarks, skip unchanged node/edge writes, delete via temp anti-join tables, and prove backend-eval refresh timing improves on the current roughly 929k-row projection without breaking drift/doctor/Convex parity.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

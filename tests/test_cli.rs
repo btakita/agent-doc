@@ -459,6 +459,31 @@ fn test_manifest_uses_local_agent_kit_path_for_direct_install() {
 }
 
 #[test]
+fn test_codex_plugin_manifest_omits_invalid_claude_skill_path() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest_path = manifest_dir.join(".codex-plugin/plugin.json");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+
+    assert!(
+        parsed.get("skills").is_none(),
+        "Codex plugin manifests must not point skills at .claude/skills; use ./skills/ only when a Codex skills tree exists"
+    );
+
+    for field in ["composerIcon", "logo"] {
+        let path = parsed["interface"][field].as_str().unwrap();
+        assert!(
+            path.starts_with("./assets/") && !path.contains(".."),
+            "{field} must be a plugin-root-relative asset path, got {path}"
+        );
+        assert!(
+            manifest_dir.join(path.trim_start_matches("./")).exists(),
+            "{field} asset does not exist: {path}"
+        );
+    }
+}
+
+#[test]
 fn test_cli_run_requires_file() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("run");

@@ -122,6 +122,31 @@ fn resume_capability_drift_notice() -> &'static str {
      `codex exec` session"
 }
 
+fn is_codex_marketplace_manifest_noise(line: &str) -> bool {
+    let trimmed = line.trim();
+    let is_external_plugin_manifest = trimmed.contains("/.codex/.tmp/plugins/plugins/");
+    let is_prompt_warning = (trimmed.contains("codex_core_plugins::manifest:")
+        || trimmed.contains("codex_core::plugins::manifest:"))
+        && trimmed.contains("ignoring interface.defaultPrompt:");
+    let is_skill_icon_warning = trimmed.contains("codex_core_skills::loader:")
+        && (trimmed.contains("ignoring interface.icon_small: icon path must not contain '..'")
+            || trimmed.contains("ignoring interface.icon_large: icon path must not contain '..'"));
+
+    (is_external_plugin_manifest && is_prompt_warning) || is_skill_icon_warning
+}
+
+fn filter_codex_stderr_noise(stderr: &str) -> String {
+    let mut filtered = stderr
+        .lines()
+        .filter(|line| !is_codex_marketplace_manifest_noise(line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !filtered.is_empty() && stderr.ends_with('\n') {
+        filtered.push('\n');
+    }
+    filtered
+}
+
 fn lower_trimmed_lines(text: &str) -> impl Iterator<Item = &str> {
     text.lines().map(str::trim).filter(|line| !line.is_empty())
 }
@@ -1587,8 +1612,8 @@ impl Codex {
         let output = super::wait_with_output_timeout(child, super::run_agent_timeout())?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("codex command failed: {}", stderr);
+            let stderr = filter_codex_stderr_noise(&String::from_utf8_lossy(&output.stderr));
+            anyhow::bail!("codex command failed: {}", stderr.trim());
         }
 
         let raw = String::from_utf8_lossy(&output.stdout);
@@ -2068,7 +2093,7 @@ impl Iterator for CodexStreamIterator {
                     return Some(Err(e.into()));
                 }
                 None => {
-                    let stderr = self.collect_stderr();
+                    let stderr = filter_codex_stderr_noise(&self.collect_stderr());
                     let exit_status = self.child.wait().ok();
                     if let Some(status) = exit_status
                         && !status.success()
@@ -2268,6 +2293,29 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("sandbox violation"), "got: {msg}");
         assert!(msg.contains("codex subprocess exited with"), "got: {msg}");
+    }
+
+    #[test]
+    fn codex_stderr_filter_drops_marketplace_manifest_noise_only() {
+        let stderr = "\
+2026-05-04T02:58:49Z WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=/home/brian/.codex/.tmp/plugins/plugins/build-ios-apps/.codex-plugin/plugin.json
+2026-05-04T02:58:49Z WARN codex_core_skills::loader: ignoring interface.icon_small: icon path must not contain '..'
+2026-05-04T02:58:49Z WARN codex_core_skills::loader: ignoring interface.icon_large: icon path must not contain '..'
+real stderr
+";
+
+        let filtered = filter_codex_stderr_noise(stderr);
+
+        assert_eq!(filtered, "real stderr\n");
+    }
+
+    #[test]
+    fn codex_stderr_filter_keeps_local_plugin_manifest_warnings() {
+        let stderr = "WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=/home/brian/work/btakita/agent-loop/src/agent-doc/.codex-plugin/plugin.json\n";
+
+        let filtered = filter_codex_stderr_noise(stderr);
+
+        assert_eq!(filtered, stderr);
     }
 
     #[test]

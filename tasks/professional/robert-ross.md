@@ -4,7 +4,7 @@ agent_doc_format: template
 agent_doc_write: crdt
 agent_doc_model_tier: high
 claude_args: --dangerously-skip-permissions
-claude_model: claude-opus-4-6
+claude_model: opus
 links:
   - ../dreamable/build-party.md
   - ../dreamable/build-party-course-diagram.md
@@ -60,7 +60,40 @@ The plan covers:
 - Estimation notes reflecting Rob's feedback
 
 **Granola notes** at the linked URL returned 403 (authentication required). If Rob shares the Granola content or grants access, I can incorporate those notes into the plan.
-<!-- agent:boundary:bb14ed63 -->
+❯ Use corky to transcribe + diarize [phone_20260522-133854_4156839775.m4a](../../mail/contacts/robert-ross/recordings/phone_20260522-133854_4156839775.m4a)
+### Re: transcribe + diarize phone call — opus-4-7
+
+Transcribed and diarized the May 22 phone call (49:52, Brian + Rob). Saved to `mail/contacts/robert-ross/recordings/phone_20260522-133854_4156839775.md`. Chunked diarization across 5 × 600s windows landed 841 segments / 2 speakers; re-transcribed 1 low-confidence block (+0.43 avg confidence improvement).
+
+**Call summary — key topics:**
+
+1. **Real-time-ish content generation strategy** — Rob and Brian aligned on a layered render pipeline for Phil/Bill Party:
+   - Confidence-scored content; render immediately at low fidelity (bullet points, fixed components) when high-fidelity assets aren't ready
+   - Generate richer visuals in the background and swap in when confidence passes threshold
+   - B-roll library (panoramic Amazon footage, intro credits over music) used as engaging "tap-dance" filler buying generation time
+   - Cache generated assets (R2), but must be indexed/discoverable for reuse — Rob flagged that as a real concern
+   - Visual components treated as atoms/particles — granular composable library
+
+2. **Confidence scoring as Brian's lane** — Rob wants Brian focused on the confidence/scoring engine (carryover from Claude Score work + rubrics), not the LiveKit↔CopilotKit bridge that Tie-in shipped. Rob: "I need you for this other stuff."
+
+3. **Sentrux** — Rob saw a LinkedIn post about Sentrux (code rubric / scoring product) and sent it via Slack. Suggestion: evaluate whether it solves part of what Claude Score does for code-rubric scoring so the team doesn't have to build it. Action: review Sentrux's site/video and decide build-vs-buy.
+
+4. **Dog-fooding loop urgency** — Rob is already dog-fooding agent-doc; both want a unified Orbit + Bill Party loop ("one place, not different chats") to learn the surface and find bugs quickly. Jesse currently lacks the LiveKit MCP — getting that in is part of closing the loop.
+
+5. **Pitch-practice product idea** — Bill Party stage where founders pitch *somebody else's* product (generated live by the agent — "toothpicks in Alaska"), Toastmasters-style. Audience submits prompts directly to the generating agent. Rob: "endless amount of stuff we can do."
+
+6. **Yesterday's demo** — Rob proud of Tie-in for the LiveKit↔CopilotKit bridge demo and of Brian for ego-less framing. Rob explicitly wants Brian off bridge-class work going forward.
+
+7. **Database selection (Falcor / Neo4j / Stardog)** — Brian wants to schedule solutions-architect meetings Mon/Tue/Wed with Neo4j, Falcor, and (maybe) Stardog Union. Neo4j's automatic similarity consolidation (synonyms collapsed to one node) is the compelling feature for entity dedup. Stardog noted as not real-time-oriented.
+
+8. **Schema + entity deduplication anxiety** — Brian recounted Pedro's Claude-generated schema landing ~70% on dedup with no result-checking. Lesson: schemas + dedup need senior eyes + frequent checks, not "Claude probably got it right." Dog-fooding is the safety net.
+
+9. **Claude Cowork vs Claude Code (workflow gap)** — Rob's biggest pitch this call: he wants project-spanning conversations (Nate Jones videos, cross-cut ideas) that don't fit Brian's folder-anchored Claude Code workflow. Rob uses Claude Chat + Claude Cowork heavily; flagged the folder requirement as an autistic-shaped friction point for him. Brian acknowledged the gap and posited a graph DB could surface cross-project connections automatically.
+
+10. **Family / personal** — Brian's father (72, St. Augustine FL) just got a blood-cell mutation diagnosis, precursor to cancer, treatable. Rob expressed concern. Sophie ate last night. Brooke's sister visiting, family using the hotel pool/hot tubs.
+
+11. **Logistics** — Call wrapped to join Miguel on Zoom.
+<!-- agent:boundary:f4b39f27 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -70,5 +103,9 @@ The plan covers:
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#0pfn] Review Sentrux (LinkedIn/GitHub) for overlap with Claude Score scope — decide build-vs-buy before scoring engine work resumes
+- [ ] [#s1pj] Schedule Neo4j and Falcor solutions-architect calls next week (Mon/Tue/Wed) for database selection
+- [ ] [#xybn] Close unified dog-food loop — Orbit + Bill Party in one place; add LiveKit MCP to Jesse
+- [ ] [#8avm] [recommended] Design project-spanning Cowork-style conversation mode for agent-doc (Rob's cross-project workflow ask, 2026-05-22 call)
 - [ ] [#codex] [recommended] Codex CLI setup for Rob — plan at tasks/dreamable/robert-ross-claude-code-kit/codex-setup-plan.md
 <!-- /agent:backlog -->

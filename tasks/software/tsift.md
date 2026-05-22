@@ -30,27 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260522-035739.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260522-040703.md`*
 
 Compacted content:
-- Archived 3 response topic(s): SQLite graph performance next steps; SQLite graph performance batch; performance improvement
+- Archived 1 response topic(s): graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are the #next-steps to improve graph performance?
-### Re: graph performance next steps — gpt-5
-
-Top backlog item: #gdbrefreshhot.
-
-I added the next graph-performance backlog in this priority order:
-
-1. #gdbrefreshhot: profile the real refresh path by phase. This is first because the last real backend-eval spent `125.2s` of `145.8s` in refresh, so changing backends or raising traversal caps before isolating refresh cost would be weak evidence.
-2. #gdbmetricreal: put the real post-batch backend-eval metrics into the checked-in performance history and make regression review compare against them. The current fixture is still a placeholder baseline, not the actual 145.8s run.
-3. #gdbtracehot: profile the post-refresh operator read path, especially `dispatch-trace` and `conflict-matrix`. The previous read-side record was `dispatch-trace 10.9s`, `conflict-matrix 3.34s`, `evidence 0.057s`, and backend-eval `status 6.2s`; standalone status is now fast, so this should separate query cost from backend-eval preparation overhead.
-4. #gdbhopcaps: evaluate higher or adaptive max-hop caps with synthetic deep-chain and real session fixtures before raising defaults. The code already supports `--max-hops`, but the default/cap decision needs proof that recursive CTE bounds, truncation warnings, and deterministic ordering still hold.
-5. #gdbcompactrun: run the operational Convex reconciliation + refresh + compact path on the real graph and record the storage/timing delta. Current status is healthy but still compaction-recommended: `169,109` tombstones, `1.136 GB` graph DB, and `135.8 MB` freelist.
-6. #gdbfalkorgate: evaluate FalkorDB only behind the existing backend-eval promotion gate. It may help, but it should not bypass the SQLite parity, local install, and lock-behavior requirements that already hold DuckDB/DuckPGQ and Ladybug on prototype status.
-
-Evidence checked this cycle: the compacted performance batch, `src/tsift/SPEC.md`, graph-db conformance coverage around `--max-hops`, `tsift graph-db --path /home/brian/work/btakita/agent-loop --json status`, and `tsift metric-digest --input fixtures/graph-db-performance-history.json --json`. No code changed; verification was document/context inspection plus those read-only tsift commands, so I did not run the full project test suite.
-<!-- agent:boundary:451d20f5 -->
+<!-- agent:boundary:d4f563e3 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -21,7 +21,7 @@ queue_active: true
 
 <!-- agent:status patch=replace -->
 
-Logged three fresh log-triage follow-ups. Top backlog item: #startloop.
+Logged three fresh log-triage follow-ups. Top backlog item: #codexmanwarn.
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,7 +34,7 @@ Logged three fresh log-triage follow-ups. Top backlog item: #startloop.
 Compacted content:
 - Archived 1 response topic(s): #ipcackreg
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:87df7dd4 -->
+<!-- agent:boundary:cbd784b2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -43,14 +43,13 @@ Compacted content:
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#ipcackreg]~
-- do [#startloop]
+- ~do [#startloop]~
 - do [#codexmanwarn]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#startloop] Stop repeated starting-actor route timeout loops. Current tasks/agent-doc/agent-doc-bugs2.md generation 188 on pane %17 logs route_authoritative_actor_starting_not_ready followed by repeated route_starting_actor_timeout_coalesced after an 11.4s Codex capability proof; transition to stale-start recovery or one durable editor error instead of repeatedly binding dispatch to a non-ready actor.
 - [ ] [#codexmanwarn] [recommended] Clean Codex plugin/skill manifest warning noise surfaced during agent-doc sessions. Current Codex TUI repeatedly logs interface.icon_small/interface.icon_large path validation warnings, plus related plugin prompt/skills validation warnings; identify whether agent-doc skill/plugin install emits invalid metadata and either fix the manifests or filter unrelated marketplace-plugin noise from agent-doc log triage.
 <!-- /agent:backlog -->
 

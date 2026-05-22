@@ -55,7 +55,7 @@ Verification:
 - `cargo install --path .`
 - `agent-doc --version` -> `agent-doc 0.33.16`
 - CI tmux evidence: GitHub CI run `26262547417` succeeded, including `Run make tmux-ci`.
-<!-- agent:boundary:8b78c907 -->
+<!-- agent:boundary:55dd0cee -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +64,7 @@ Verification:
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#autodag]~
-- do [#dagdispatch]
+- ~do [#dagdispatch]~
 - do [#dagrecover]
 - do [#daglogs]
 <!-- /agent:queue -->

@@ -166,8 +166,32 @@ Commits:
 - Parent agent-loop repo: `3229d09e4 chore: update corky submodule`, committed locally; parent push follows this document closeout per the session closeout order.
 
 No escalation was needed. Confidence: high.
+❯ release + publish
+### Re: release + publish — gpt-5
 
-<!-- agent:boundary:dae01773 -->
+I could not release or publish Corky yet because the repo is still set to version `0.28.2`, and that version is already published everywhere checked:
+
+- Git tag: `v0.28.2` exists.
+- GitHub release: `corky v0.28.2` exists and is marked latest.
+- crates.io: `corky = "0.28.2"` is the published version.
+- PyPI: latest `corky` version is `0.28.2`.
+
+Corky `HEAD` is `v0.28.2-12-g162b58b`, so there is unreleased work on `main`, but `AGENTS.md` explicitly says not to bump versions automatically. I did not tag, publish to crates.io, run the PyPI workflow, create a GitHub release, or push anything for this prompt. To continue, specify the next release version or bump `Cargo.toml` and `pyproject.toml` yourself, then rerun `release + publish`.
+
+Commands run:
+- `agent-doc --version`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/software/corky.md`
+- `agent-doc read /home/brian/work/btakita/agent-loop/tasks/software/corky.md`
+- `agent-doc plan /home/brian/work/btakita/agent-loop/tasks/software/corky.md`
+- `git -C src/corky status --short --branch`
+- `git -C src/corky tag --list 'v*' --sort=-v:refname`
+- `git -C src/corky describe --tags --always --dirty`
+- `gh -R btakita/corky release list --limit 10`
+- `cargo search corky --limit 5`
+- `uvx --from packaging python -c "...pypi corky json..."`
+
+Changed paths: none. Verification/build/publish: not run because the release version is blocked before mutation. Escalation: none. Confidence: high.
+<!-- agent:boundary:465ed1b0 -->
 <!-- /agent:exchange -->
 ###
 <!--

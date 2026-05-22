@@ -3898,6 +3898,25 @@ fn dedupe_consecutive_response_blocks(content: &str, file: &Path) -> String {
     deduped
 }
 
+fn enforce_no_duplicate_prompt_residue(file: &Path, content: &str, context: &str) -> Result<()> {
+    match crate::template::guard_no_duplicate_prompt_residue_outside_exchange(content) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            log_template_structure_guard_event(
+                file,
+                TemplateStructureGuardReason::DuplicatePromptResidue,
+                FlowOutcome::FailedClosed,
+            );
+            Err(err).with_context(|| {
+                format!(
+                    "duplicate prompt residue check failed for {} ({context})",
+                    file.display()
+                )
+            })
+        }
+    }
+}
+
 pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -> Result<String> {
     let lifted = lift_pending_from_exchange_safe(content, file);
     // Defense-in-depth: merge any duplicate exchange openers that may have
@@ -3917,6 +3936,7 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
     let (normalized, _) =
         remove_post_exchange_duplicate_prompt_comments_with_log(&normalized, file, "structure");
     let (normalized, _) = dedupe_live_prompt_prefix_variants_in_tail(&normalized, file);
+    enforce_no_duplicate_prompt_residue(file, &normalized, "structure")?;
     match crate::template::guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
         Err(err)
@@ -3934,6 +3954,7 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
                     TemplateStructureGuardReason::DuplicateScaffoldDropped,
                     FlowOutcome::Completed,
                 );
+                enforce_no_duplicate_prompt_residue(file, &repaired, "duplicate-scaffold repair")?;
                 crate::template::guard_no_conversation_tail_outside_exchange(&repaired).context(
                     format!(
                         "template structure guard failed for {} after duplicate-scaffold repair",
@@ -3963,6 +3984,7 @@ pub(crate) fn normalize_template_structure_or_fail(content: &str, file: &Path) -
                     TemplateStructureGuardReason::DuplicateCloseTailMoved,
                     FlowOutcome::Completed,
                 );
+                enforce_no_duplicate_prompt_residue(file, &repaired, "duplicate-close repair")?;
                 crate::template::guard_no_conversation_tail_outside_exchange(&repaired).context(
                     format!(
                         "template structure guard failed for {} after duplicate-close repair",
@@ -6543,7 +6565,7 @@ pub(crate) fn dedupe_ipc_snapshot_content(
     before: Option<&str>,
     content: &str,
     source: &str,
-) -> (String, bool) {
+) -> Result<(String, bool)> {
     let mut deduped = dedupe_consecutive_response_blocks(content, file);
     let (comment_deduped, comment_changed) =
         remove_post_exchange_duplicate_prompt_comments_with_log(&deduped, file, source);
@@ -6562,6 +6584,7 @@ pub(crate) fn dedupe_ipc_snapshot_content(
     if prefix_changed {
         deduped = prefix_deduped;
     }
+    enforce_no_duplicate_prompt_residue(file, &deduped, "ipc snapshot")?;
     let changed = deduped != content;
     if changed {
         crate::ops_log::log_op(
@@ -6573,7 +6596,7 @@ pub(crate) fn dedupe_ipc_snapshot_content(
             ),
         );
     }
-    (deduped, changed)
+    Ok((deduped, changed))
 }
 
 /// Result of an IPC write attempt, including the patch_id used.
@@ -6818,7 +6841,7 @@ pub fn try_ipc(
                         ipc_before_content.as_deref(),
                         &effective_snap,
                         snap_source,
-                    );
+                    )?;
                     let repair_disk = repair_disk || dedupe_repair;
 
                     let expected_response = response_materialization_probe(patches, unmatched);
@@ -7588,7 +7611,7 @@ fn write_ipc_and_poll(
                 before_content.as_deref(),
                 &current_on_disk,
                 "ipc_file",
-            );
+            )?;
             if dedupe_repair {
                 repair_disk_from_ipc_dedupe(doc_file, &snap_content)?;
                 redeliver_ipc_dedupe_to_editor(doc_file, &snap_content);
@@ -10031,7 +10054,7 @@ scratch
         fs::write(&doc, before).unwrap();
 
         let (repaired, changed) =
-            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc");
+            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc").unwrap();
 
         assert!(changed);
         assert!(repaired.contains("❯ live prompt\n### Re: response"));
@@ -10073,7 +10096,7 @@ scratch
         fs::write(&doc, before).unwrap();
 
         let (repaired, changed) =
-            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc");
+            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc").unwrap();
 
         assert!(
             !changed,
@@ -10227,7 +10250,7 @@ scratch
         fs::write(&doc, before).unwrap();
 
         let (repaired, changed) =
-            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc");
+            dedupe_ipc_snapshot_content(&doc, Some(before), after, "test_ipc").unwrap();
 
         assert!(changed);
         assert_eq!(repaired.matches("sent + re \n").count(), 0);
@@ -10264,7 +10287,7 @@ scratch
         fs::write(&doc, before).unwrap();
 
         let (repaired, changed) =
-            dedupe_ipc_snapshot_content(&doc, Some(before), &after, "test_ipc");
+            dedupe_ipc_snapshot_content(&doc, Some(before), &after, "test_ipc").unwrap();
 
         assert!(changed);
         assert!(
@@ -10280,6 +10303,44 @@ scratch
         assert!(repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"));
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("post_exchange_duplicate_prompt_comment_removed"));
+    }
+
+    #[test]
+    fn ipc_snapshot_rejects_plain_markdown_duplicate_prompt_residue() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let prompt =
+            "Please keep this exact sentence around for duplicate residue coverage in markdown";
+        let before = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "<!-- /agent:exchange -->\n"
+            ),
+            prompt = prompt
+        );
+        let after = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "### Re: response — gpt-5\n\n",
+                "Done.\n",
+                "<!-- agent:boundary:new -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "# Notes\n\n",
+                "{prompt}\n"
+            ),
+            prompt = prompt
+        );
+        fs::write(&doc, &before).unwrap();
+
+        let err = dedupe_ipc_snapshot_content(&doc, Some(&before), &after, "test_ipc").unwrap_err();
+
+        assert!(
+            err.to_string().contains("duplicate prompt residue"),
+            "IPC snapshot dedupe must fail closed on duplicate prompt Markdown residue: {err}"
+        );
     }
 
     #[test]

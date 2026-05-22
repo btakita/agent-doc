@@ -751,7 +751,7 @@ impl SimWorld {
 
     fn repair_ipc_snapshot_duplicate_prompts(&mut self, before: &str, file: &Path) -> Result<()> {
         let (repaired, changed) =
-            crate::write::dedupe_ipc_snapshot_content(file, Some(before), &self.doc, "sim_ipc");
+            crate::write::dedupe_ipc_snapshot_content(file, Some(before), &self.doc, "sim_ipc")?;
         if changed {
             self.doc = repaired;
             self.coverage.prompt_duplicate_repairs += 1;

@@ -971,6 +971,8 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
     if let Some(cleaned) = remove_post_exchange_duplicate_prompt_comments(&normalized) {
         normalized = cleaned;
     }
+    guard_no_duplicate_prompt_residue_outside_exchange(&normalized)
+        .context("template duplicate prompt residue guard failed")?;
 
     match guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
@@ -982,6 +984,8 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
             }) =>
         {
             if let Some(repaired) = repair_duplicate_exchange_close_scaffold(&normalized)? {
+                guard_no_duplicate_prompt_residue_outside_exchange(&repaired)
+                    .context("template duplicate prompt residue guard failed after duplicate-scaffold repair")?;
                 guard_no_conversation_tail_outside_exchange(&repaired).with_context(
                     || "template structure guard failed after duplicate-scaffold repair",
                 )?;
@@ -993,6 +997,9 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
                 );
             }
             if let Some(repaired) = repair_duplicate_exchange_close_tail(&normalized)? {
+                guard_no_duplicate_prompt_residue_outside_exchange(&repaired).context(
+                    "template duplicate prompt residue guard failed after duplicate-close repair",
+                )?;
                 guard_no_conversation_tail_outside_exchange(&repaired).with_context(
                     || "template structure guard failed after duplicate-close repair",
                 )?;
@@ -1061,6 +1068,67 @@ pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<Strin
         cleaned.replace_range(start..end, &replacement);
     }
     Some(cleaned)
+}
+
+/// Fail closed when prompt text already recorded in `agent:exchange` still
+/// appears as freeform Markdown after the exchange close marker.
+///
+/// Ordinary post-exchange HTML comments are scrubbed by
+/// `remove_post_exchange_duplicate_prompt_comments`; tracked components such as
+/// backlog/queue have their own mutation rules. Anything else is ambiguous
+/// enough that closeout must not silently commit or dispatch it.
+pub fn guard_no_duplicate_prompt_residue_outside_exchange(doc: &str) -> Result<()> {
+    let components = match component::parse(doc) {
+        Ok(components) => components,
+        Err(err)
+            if err
+                .chain()
+                .any(|cause| cause.to_string().contains("without matching open")) =>
+        {
+            return Ok(());
+        }
+        Err(err) => return Err(err).context("failed to parse components"),
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(());
+    };
+    let prompts = exchange_prompt_comment_targets(exchange.content(doc));
+    if prompts.is_empty() {
+        return Ok(());
+    }
+
+    let protected_ranges = components
+        .iter()
+        .filter(|component| component.name != "exchange")
+        .map(|component| (component.open_start, component.close_end))
+        .collect::<Vec<_>>();
+    let in_protected_component = |pos: usize| {
+        protected_ranges
+            .iter()
+            .any(|(start, end)| pos >= *start && pos < *end)
+    };
+
+    let mut offset = 0usize;
+    for segment in doc.split_inclusive('\n') {
+        let line_start = offset;
+        offset += segment.len();
+        if line_start < exchange.close_end || in_protected_component(line_start) {
+            continue;
+        }
+        let trimmed = segment.trim();
+        if !is_duplicate_prompt_comment_text(trimmed, &prompts) {
+            continue;
+        }
+        anyhow::bail!(
+            "duplicate prompt residue outside `<!-- agent:exchange -->`; refusing to commit or dispatch ambiguous Markdown tail. First duplicate line: `{}`",
+            trimmed.chars().take(120).collect::<String>()
+        );
+    }
+
+    Ok(())
 }
 
 fn empty_html_comment_like(body: &str) -> String {
@@ -4786,6 +4854,83 @@ Existing answer.
             repaired.contains("Keep this unrelated scratch note hidden."),
             "unrelated scratch comments must stay outside exchange:\n{repaired}"
         );
+    }
+
+    #[test]
+    fn guard_no_duplicate_prompt_residue_outside_exchange_rejects_plain_markdown_duplicate() {
+        let prompt =
+            "Please keep this exact sentence around for duplicate residue coverage in markdown";
+        let doc = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "### Re: duplicate residue — gpt-5\n\n",
+                "Answered.\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "# Notes\n\n",
+                "{prompt}\n"
+            ),
+            prompt = prompt
+        );
+
+        let err = guard_no_duplicate_prompt_residue_outside_exchange(&doc).unwrap_err();
+
+        assert!(
+            err.to_string().contains("duplicate prompt residue outside"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn normalize_editor_visible_template_structure_rejects_plain_markdown_duplicate_residue() {
+        let prompt =
+            "Please keep this exact sentence around for duplicate residue coverage in markdown";
+        let doc = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "### Re: duplicate residue — gpt-5\n\n",
+                "Answered.\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "{prompt}\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+
+        let err = normalize_editor_visible_template_structure(&doc).unwrap_err();
+
+        assert!(
+            err.to_string().contains("duplicate prompt residue"),
+            "editor-visible normalization must fail closed on duplicate prompt Markdown residue: {err}"
+        );
+    }
+
+    #[test]
+    fn guard_no_duplicate_prompt_residue_outside_exchange_allows_tracked_components() {
+        let prompt =
+            "Please keep this exact sentence around for duplicate residue coverage in markdown";
+        let doc = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "### Re: duplicate residue — gpt-5\n\n",
+                "Answered.\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "{prompt}\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+
+        guard_no_duplicate_prompt_residue_outside_exchange(&doc).unwrap();
     }
 
     #[test]

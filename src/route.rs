@@ -1438,7 +1438,11 @@ fn scrub_duplicate_prompt_comments_for_route(content: &str) -> Result<Option<Str
     if !frontmatter.resolve_mode().is_template() {
         return Ok(None);
     }
-    Ok(crate::template::remove_post_exchange_duplicate_prompt_comments(content))
+    let cleaned = crate::template::remove_post_exchange_duplicate_prompt_comments(content);
+    let checked_content = cleaned.as_deref().unwrap_or(content);
+    crate::template::guard_no_duplicate_prompt_residue_outside_exchange(checked_content)
+        .context("route duplicate prompt residue guard failed")?;
+    Ok(cleaned)
 }
 
 fn cleanup_failed_route_panes(

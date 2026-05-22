@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Freeform duplicate prompt residue now fails closed.** After the safe
+  post-exchange HTML comment scrub runs, route, editor-visible normalization,
+  final template reconciliation, and IPC snapshot dedupe reject remaining
+  duplicate or near-duplicate prompt text in ordinary post-exchange Markdown
+  outside tracked components. This keeps arbitrary manual Markdown edits from
+  being silently committed or dispatched when there is no ownership proof for
+  deleting or relocating the duplicate text.
+
 - **Missed response materialization no longer closes as already committed.**
   IPC ACK/sidecar success now proves that the expected response body actually
   materialized before saving the snapshot, logging

@@ -196,6 +196,31 @@ fn route_scrubs_duplicate_prompt_comment_before_dispatch() {
     );
 }
 
+#[test]
+fn route_rejects_duplicate_prompt_markdown_residue_before_dispatch() {
+    let prompt =
+        "Please keep this exact sentence around for duplicate residue coverage in markdown";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ {prompt}\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "# Notes\n\n",
+            "{prompt}\n"
+        ),
+        prompt = prompt
+    );
+
+    let err = scrub_duplicate_prompt_comments_for_route(&content).unwrap_err();
+
+    assert!(
+        err.to_string().contains("duplicate prompt residue"),
+        "route must fail closed before dispatching against duplicate prompt Markdown residue: {err}"
+    );
+}
+
 fn test_registry_entry(pane: &str, file: &str, cwd: &std::path::Path) -> sessions::SessionEntry {
     sessions::SessionEntry {
         pane: pane.to_string(),

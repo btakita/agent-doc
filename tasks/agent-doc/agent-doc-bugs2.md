@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -34,15 +34,36 @@ Reviewed next steps; top backlog item: #autodag.
 Compacted content:
 - Archived 1 response topic(s): #next-steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:475632a9 -->
+### Re: auto-DAG queue work — gpt-5
+
+Implemented the auto-DAG queue scheduler work in `src/agent-doc` and committed it locally as `912dd0bb` (`feat: add auto-DAG queue scheduler`). Per the agent-doc closeout boundary, I will push the branch after this session document commit succeeds.
+
+What changed:
+- Added persisted `agent-doc-auto-dag-schedule-v1` schedules for active queue DAGs, including dependency parsing, cycle/missing-id validation, antichain batches, replay, repair, and node state.
+- Added `agent-doc orchestrate --mode dag --from-queue` and `--resume-schedule`, with schedule-backed job packets and failure gating for downstream nodes.
+- Added session-review scheduler guard input for prompt-budget, cache-resend, restart-loop, and noop-closeout log families.
+- Updated specs/docs and FlowCore coverage for the new schedule guard event.
+
+Verification:
+- `cargo check`
+- `cargo test auto_dag -- --test-threads=1`
+- `cargo test create_for_schedule_writes_dag_packet_metadata -- --test-threads=1`
+- `cargo test resolve_task_batch_collects_active_queue_for_auto_dag -- --test-threads=1`
+- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --test-threads=1`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- CI tmux evidence: GitHub CI run `26262547417` succeeded, including `Run make tmux-ci`.
+<!-- agent:boundary:8b78c907 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#autodag]
+- ~do [#autodag]~
 - do [#dagdispatch]
 - do [#dagrecover]
 - do [#daglogs]
@@ -51,10 +72,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#autodag] [recommended] Add an agent-doc auto-DAG planner for queued do/compound directives: parse explicit depends-on text, backlog ids, graph/conflict evidence, and job packets into a topological schedule; fail closed on cycles, missing ids, stale graph evidence, or ambiguous ownership before dispatch.
-- [ ] [#dagdispatch] [recommended] Execute auto-DAG batches through agent-doc orchestrate/jobs: run parallel-safe antichain batches, collect worker_result proof, unblock downstream nodes only after required proof/session-check passes, and stop deterministically on failed/gated nodes without launching dependents.
-- [ ] [#dagrecover] [recommended] Add auto-DAG persistence/recovery semantics: write operation docs/job packets with schedule id, node state, attempt count, replay commands, and repair commands so interrupted DAG runs can resume idempotently after compact/finalize/restart.
-- [ ] [#daglogs] [recommended] Use session-review guardrails as scheduler input: classify prompt-budget/cache-resend/restart-loop/noop-closeout log families before auto-DAG start and gate large or looping runs into compact/restart/fixture-fix steps.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

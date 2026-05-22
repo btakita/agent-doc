@@ -14,14 +14,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-Logged three fresh log-triage follow-ups. Top backlog item: #codexmanwarn.
+Logged three fresh log-triage follow-ups. No open backlog items.
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,23 +34,41 @@ Logged three fresh log-triage follow-ups. Top backlog item: #codexmanwarn.
 Compacted content:
 - Archived 1 response topic(s): #ipcackreg
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:cbd784b2 -->
+### Re: #codexmanwarn — gpt-5
+
+Completed `#codexmanwarn`.
+
+I found one real agent-doc-owned manifest issue and one external Codex noise source. The repo-local Codex plugin manifest had an invalid `skills` path pointing at `.claude/skills`, so I removed that field and updated the manifest version to `0.33.16`. The plugin-creator validator now accepts the manifest.
+
+I also added Codex stderr filtering for the known unrelated marketplace warnings that Codex emits from external cached plugins and skill icon metadata. The filter is intentionally narrow: it drops external `.codex/.tmp/plugins/plugins/` `interface.defaultPrompt` warnings and the loader's synthetic `interface.icon_small` / `interface.icon_large` `..` path warnings, while preserving local project plugin manifest warnings.
+
+Code and contract updates are committed locally:
+
+- `src/agent-doc` commit `ea246208` (`fix: clean codex plugin manifest warnings`)
+- root submodule-pointer commit `261b7346a` (`agent-doc: update codex manifest warning fix`)
+
+Verification passed:
+
+- plugin manifest validator
+- `cargo test codex_stderr_filter`
+- `cargo test test_codex_plugin_manifest_omits_invalid_claude_skill_path`
+- `cargo fmt`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- latest GitHub Actions run `26315224825` for `20260422/codex-agent-backend`, including `Run make tmux-ci`, completed successfully
+<!-- agent:boundary:39aac68b -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#ipcackreg]~
-- ~do [#startloop]~
-- do [#codexmanwarn]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#codexmanwarn] [recommended] Clean Codex plugin/skill manifest warning noise surfaced during agent-doc sessions. Current Codex TUI repeatedly logs interface.icon_small/interface.icon_large path validation warnings, plus related plugin prompt/skills validation warnings; identify whether agent-doc skill/plugin install emits invalid metadata and either fix the manifests or filter unrelated marketplace-plugin noise from agent-doc log triage.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

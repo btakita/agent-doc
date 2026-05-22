@@ -221,6 +221,39 @@ fn route_rejects_duplicate_prompt_markdown_residue_before_dispatch() {
     );
 }
 
+#[test]
+fn route_debounce_fails_closed_while_typing_indicator_is_active() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    std::fs::write(&doc, "prompt in progress\n").unwrap();
+
+    let doc_str = doc.to_string_lossy().to_string();
+    agent_doc::debounce::document_changed(&doc_str);
+
+    let err = await_idle_with_max_wait(&doc, Duration::from_millis(500), Duration::from_millis(25))
+        .expect_err("route must not proceed while the editor typing indicator is active");
+
+    assert!(
+        err.to_string().contains("typing_active=true"),
+        "route debounce error should prove the active typing reason: {err}"
+    );
+}
+
+#[test]
+fn route_debounce_allows_dispatch_after_typing_indicator_expires() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("session.md");
+    std::fs::write(&doc, "settled prompt\n").unwrap();
+
+    let doc_str = doc.to_string_lossy().to_string();
+    agent_doc::debounce::document_changed(&doc_str);
+
+    await_idle_with_max_wait(&doc, Duration::from_millis(10), Duration::from_millis(1000))
+        .expect("route should proceed after mtime and typing indicator are both idle");
+}
+
 fn test_registry_entry(pane: &str, file: &str, cwd: &std::path::Path) -> sessions::SessionEntry {
     sessions::SessionEntry {
         pane: pane.to_string(),

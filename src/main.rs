@@ -463,7 +463,7 @@ enum Commands {
         #[arg(long)]
         focus: Option<String>,
         /// Wait for typing to settle before routing (milliseconds, 0 = no debounce)
-        #[arg(long, default_value_t = 0)]
+        #[arg(long, default_value_t = 500)]
         debounce: u64,
     },
     /// Detect permission prompts from a Claude Code or OpenCode session

@@ -4,19 +4,41 @@
 
 The debounce subsystem manages multi-layer typing detection across editor plugins (JetBrains, VS Code, Neovim, Zed) and CLI invocations. While the architecture is sound, several known gaps exist that should inform operators and guide future improvements.
 
-## Mtime Granularity in Route Path
+## Route Quiescence
 
-**Gap:** The route path relies on filesystem mtime for debouncing rapid edits. Filesystem mtime resolution varies:
+**Status:** Fixed for editor-triggered route. The route path now treats filesystem
+mtime as only one side of the quiescence proof. When debounce is enabled, route
+waits until both of these are true for the debounce window before it inserts a
+session id, scrubs duplicate prompt residue, or submits a reopen:
+
+- the file mtime is idle
+- the cross-process typing indicator is idle
+
+If either signal remains active through the bounded wait, route fails closed and
+asks the caller to retry after typing stops. The CLI `route` default debounce is
+500ms, so JetBrains `Run Agent Doc` gets this binary-owned guard even though the
+plugin also waits in-process before saving.
+
+Filesystem mtime resolution still varies:
 - **Coarse-grained systems** (e.g., HFS+ on macOS): 1-second resolution
 - **Fine-grained systems** (Linux ext4): ~100ms resolution
 
-When multiple edits occur within the mtime granularity window, route may miss the intermediate change and only detect the final state.
+The typing indicator side of the proof is what closes the mtime granularity gap
+for live editor typing.
 
-**Impact:** Rare but real on macOS. User typing very fast may trigger a route call with an editor state that reflects only partial changes.
+**Impact:** Low. A missing or unavailable editor typing indicator can still only
+prove disk quiescence, but active editor integrations that call
+`document_changed()` now prevent route from mutating or dispatching against a
+live typing buffer.
 
-**Mitigation:** Route path uses a timeout cap (10x debounce duration) to prevent indefinite hangs. Cross-process typing indicator files provide additional fallback for preflight detection.
+**Mitigation:** Route uses a timeout cap (10x debounce duration) to prevent
+indefinite hangs and fails closed instead of proceeding when the combined proof
+does not settle.
 
-**Test coverage:** `test_mtime_granularity_100ms_rapid_edits`, `test_mtime_granularity_1s_coarse_system`. See `tests/debounce_gaps_test_plan.rs`.
+**Test coverage:** `route_debounce_fails_closed_while_typing_indicator_is_active`,
+`route_debounce_allows_dispatch_after_typing_indicator_expires`,
+`test_mtime_granularity_100ms_rapid_edits`, `test_mtime_granularity_1s_coarse_system`.
+See `src/route/tests.rs` and `tests/debounce_gaps_test_plan.rs`.
 
 ## Untracked File Edge Case
 
@@ -111,7 +133,7 @@ Files at **odd depths** from the project root (1, 3, 5 levels) failed to find `.
 
 3. **Make 30s status timeout configurable** — either via config.toml or frontmatter.
 
-4. **Mtime fallback in route path** — If mtime-detected change is stale (>1s), also check cross-process typing indicator as fallback.
+4. ~~**Mtime fallback in route path**~~ — **Fixed:** route now checks the cross-process typing indicator alongside mtime and fails closed when the combined proof does not settle.
 
 5. **CRDT merge monitoring** — Log merge conflicts and convergence issues to `.agent-doc/logs/merge.log` for operator visibility.
 

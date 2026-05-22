@@ -49,7 +49,7 @@ agent-doc route --dispatch-only --plain-trigger session.md
 agent-doc run session.md
 ```
 
-The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only --plain-trigger <file>` via a hotkey, and agent-doc dispatches the plain `agent-doc <file>` reopen into the right pane. That editor path always stays a bounded reopen send; it does not restart Codex just because the previous prompt was `/clear`.
+The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only --plain-trigger <file>` via a hotkey, and agent-doc dispatches the plain `agent-doc <file>` reopen into the right pane. Route waits for the file mtime and shared editor typing indicator to settle before it mutates the document or submits the reopen. That editor path always stays a bounded reopen send; it does not restart Codex just because the previous prompt was `/clear`.
 
 ## Feature Taxonomy
 

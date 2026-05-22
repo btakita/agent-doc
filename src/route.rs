@@ -11,7 +11,8 @@
 //!   `pane` override, a debounce delay in milliseconds, and column layout hints.
 //! - **`run_with_tmux(file, tmux, pane, debounce_ms, col_args, mode, plain_trigger)`**: Core routing logic.
 //!   1. Prunes stale session registry entries via `resync::prune`.
-//!   2. If `debounce_ms > 0`, waits for the file's mtime to settle (`await_idle`).
+//!   2. If `debounce_ms > 0`, waits for the file's mtime and shared editor typing
+//!      indicator to settle (`await_idle`).
 //!   3. Ensures a session UUID exists in the file's YAML frontmatter (generates one if missing).
 //!   4. Resolves the target tmux session: prefers project config (`config.toml`), falls
 //!      back to current tmux session, auto-updates config when the configured session is dead.
@@ -64,8 +65,9 @@
 //!   Hook-visible Codex dispatch-only reroutes still require routed submit proof after the
 //!   pane accepts the reopen; acceptance without hook-backed dispatch-start proof is terminal
 //!   for ready actors as well as startup-window reroutes.
-//! - **`await_idle(file, debounce)`**: Polls file mtime every 100ms until `debounce` has
-//!   elapsed since last modification, or until `10 × debounce` safety cap expires.
+//! - **`await_idle(file, debounce)`**: Polls file mtime and the shared editor typing
+//!   indicator every 100ms until both have been idle for `debounce`, or fails closed
+//!   after the `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every 500ms
 //!   looking for the agent's idle prompt (per `harness.prompt_patterns`). Returns true when
 //!   prompt found, false on timeout. Logs progress every 10 polls. Existing-pane reroutes only
@@ -1328,12 +1330,15 @@ pub fn run_with_tmux(
     tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
     let _ = resync::prune_with_tmux(tmux); // Clean stale entries before lookup
 
-    // Debounce: wait for file mtime to settle before proceeding
-    if debounce_ms > 0 {
-        await_idle(file, Duration::from_millis(debounce_ms))?;
-    }
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
+    }
+
+    // Debounce: wait for file mtime and editor typing indicator to settle before
+    // route performs visible mutations such as session UUID insertion or
+    // duplicate-prompt cleanup.
+    if debounce_ms > 0 {
+        await_idle(file, Duration::from_millis(debounce_ms))?;
     }
 
     // Ensure session UUID exists in frontmatter (generate if missing)
@@ -7072,35 +7077,46 @@ fn sync_after_claim(tmux: &Tmux, pane_id: &str, col_args: &[String]) {
     }
 }
 
-/// Wait for the file's mtime to settle (no modifications within the debounce window).
-/// Polls every 100ms, up to 10× the debounce duration as a safety cap.
+/// Wait for the file's mtime and editor typing indicator to settle.
+///
+/// Polls every 100ms, up to 10× the debounce duration as a safety cap. Route
+/// must fail closed instead of proceeding through a visible document mutation
+/// while the editor-side typing indicator is still active.
 fn await_idle(file: &Path, debounce: Duration) -> Result<()> {
+    await_idle_with_max_wait(file, debounce, debounce * 10)
+}
+
+fn await_idle_with_max_wait(file: &Path, debounce: Duration, max_wait: Duration) -> Result<()> {
     use std::time::Instant;
 
-    let max_wait = debounce * 10;
     let poll_interval = Duration::from_millis(100);
     let start = Instant::now();
+    let debounce_ms = debounce.as_millis().min(u64::MAX as u128) as u64;
+    let file_str = file.to_string_lossy();
 
     loop {
         let mtime = std::fs::metadata(file)
             .and_then(|m| m.modified())
             .with_context(|| format!("failed to stat {}", file.display()))?;
         let elapsed_since_edit = mtime.elapsed().unwrap_or(Duration::ZERO);
+        let typing_active = agent_doc::debounce::is_typing_via_file(&file_str, debounce_ms);
 
-        if elapsed_since_edit >= debounce {
+        if elapsed_since_edit >= debounce && !typing_active {
             eprintln!(
-                "[route] debounce OK — file idle for {:.1}s",
-                elapsed_since_edit.as_secs_f64()
+                "[route] debounce OK — file idle for {:.1}s and typing indicator idle",
+                elapsed_since_edit.as_secs_f64(),
             );
             return Ok(());
         }
 
         if start.elapsed() >= max_wait {
-            eprintln!(
-                "[route] debounce timeout after {:.1}s — proceeding anyway",
-                start.elapsed().as_secs_f64()
+            anyhow::bail!(
+                "route deferred for {}: document did not settle within {}ms (mtime_idle_ms={}, typing_active={}); retry after typing stops",
+                file.display(),
+                max_wait.as_millis(),
+                elapsed_since_edit.as_millis(),
+                typing_active
             );
-            return Ok(());
         }
 
         std::thread::sleep(poll_interval);

@@ -74,7 +74,37 @@ I used display name **Convex** (the official product name) rather than "ConvexDB
 
 - `resume` `main` 11471b5 — pushed (data.toml + rebuilt PDF).
 - `agent-loop` `main` (resume pointer bump) — local only per the runbook.
-<!-- agent:boundary:ad49558b -->
+❯ Add CopilotKit as a skill during my consulting.
+### Re: Add CopilotKit skill — opus-4-7
+
+Added CopilotKit to the freelance/consulting experience. Resume `main` ba71533 pushed; agent-loop pointer bumped locally.
+
+#### Changes (`resume/data.toml`)
+
+- New skill-taxonomy entry: **CopilotKit** (framework — AI/ML, React, agentic).
+- Added to the `Brian Takita` freelance entry's skill list — same "my consulting" mapping as the prior cycle.
+- Rebuilt `BrianTakita-acadian-asset-management.pdf`.
+
+#### Commits
+
+- `resume` `main` ba71533 — pushed (data.toml + rebuilt PDF).
+- `agent-loop` `main` (resume pointer bump) — local only per the runbook.
+Add CopilotKit and DeepEval as skills during my consulting.
+### Re: Add CopilotKit skill — opus-4-7
+
+Added CopilotKit to the freelance/consulting experience. Resume `main` ba71533 pushed; agent-loop pointer bumped locally.
+
+#### Changes (`resume/data.toml`)
+
+- New skill-taxonomy entry: **CopilotKit** (framework — AI/ML, React, agentic).
+- Added to the `Brian Takita` freelance entry's skill list — same "my consulting" mapping as the prior cycle.
+- Rebuilt `BrianTakita-acadian-asset-management.pdf`.
+
+#### Commits
+
+- `resume` `main` ba71533 — pushed (data.toml + rebuilt PDF).
+- `agent-loop` `main` (resume pointer bump) — local only per the runbook.
+<!-- agent:boundary:04f049e5 -->
 <!-- /agent:exchange -->
 
 ## Queue

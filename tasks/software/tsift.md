@@ -65,7 +65,19 @@ Real agent-loop graph evidence after refresh/backend-eval: current schema/projec
 Benchmark baseline from `backend-eval --target gdbperfbase`: real SQLite refresh 125,231,934 us, status 6,202,498 us, evidence 56,775 us, conflict-matrix 3,339,006 us, dispatch-trace 10,934,534 us, total 145,764,747 us. Synthetic high-degree SQLite total was 45,087 us; synthetic deep-chain total was 11,444 us. DuckDB/DuckPGQ and Ladybug remain on hold because real dispatch-trace parity differs from SQLite.
 
 Verification completed: `cargo test graph_db`, `make check`, `cargo install --path .`, `tsift --version`, `target/debug/tsift metric-digest --input fixtures/graph-db-performance-history.json --json`, real `graph-db refresh/status/doctor/evidence/compact/backend-eval`, `conflict-matrix`, and `dispatch-trace`. Latest GitHub Actions `CI` run inspected: `26263293674`, success. Pushed tsift commit `9da2685` and superproject submodule-pointer commit `8fb434e82`.
-<!-- agent:boundary:205fcd32 -->
+❯ How much of a performance improvement did the last queue run result with?
+### Re: performance improvement — gpt-5
+
+The honest read is: the last queue run produced a solid post-change baseline, but not a clean apples-to-apples real-graph pre/post percentage.
+
+Before the batch, the only real-run timing we had was that the earlier backend-eval attempt produced no output after roughly 90 seconds and was stopped. After the batch, `backend-eval --target gdbperfbase` returned `145,764,747 us` total, with `125,231,934 us` of that spent in refresh. The post-refresh read/eval portion was about `20,532,813 us` total: status `6.20s`, evidence `0.057s`, conflict-matrix `3.34s`, and dispatch-trace `10.93s`.
+
+So for the real graph, I would describe the improvement as: unbounded/no-output after about 90s became bounded and reportable, with the read-side work now returning in about `20.5s`. That is at least a `4.4x` improvement versus the previous 90s abort threshold, or more than a `77%` wall-time reduction, but only if we compare against the non-refresh read/eval portion. If we include the full refresh, the run is `145.8s`, so I would not claim a total-run speedup from the recorded evidence.
+
+For the synthetic baselines that were added with the queue run, the numbers are clearer: high-degree SQLite total improved from `200,000 us` to `45,087 us`, about `4.4x` faster / `77.5%` lower; deep-chain SQLite total improved from `220,000 us` to `11,444 us`, about `19.2x` faster / `94.8%` lower.
+
+No repo files changed for this answer. Verification was document/context inspection only: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, targeted `rg`, fixture read, and `git show` on the shipped tsift commit.
+<!-- agent:boundary:22773020 -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -103,7 +103,38 @@ tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/corky.m
 ```
 
 No code, spec, or test files were changed. I did not run build/install, commit, or push for Corky. The `#sheets-scope` backlog item remains open because implementation did not begin.
-<!-- agent:boundary:788fac70 -->
+Please add a feature to lookup a gmail url (https://mail.google.com/mail/u/0/#search/philip/FMfcgzQgLsCwhwtlQXPkzpdLhKhzPdNv) directly from a url and convert to markdown via the cli as a tool call.
+
+❯ #spec-test-build-install-commit-push
+### Re: Gmail URL refetch — gpt-5
+
+Implemented Corky support for `corky sync refetch TARGET`, where `TARGET` can now be a Gmail API thread ID, Gmail API message ID, or a Gmail web URL like `https://mail.google.com/mail/u/0/#search/query/FMfc...`. The command extracts selected-message tokens from Gmail fragments such as `#inbox/...` and `#search/query/...`, also accepts `th=` query URLs, tries the Gmail Threads API first, falls back through the Messages API to resolve the containing thread, and then reuses the existing refetch merge path to write the conversation markdown.
+
+Changed paths:
+- `src/corky/SPEC.md`
+- `src/corky/src/cli.rs`
+- `src/corky/src/main.rs`
+- `src/corky/src/sync/gmail_api_sync.rs`
+- `src/corky/src/sync/mod.rs`
+- `src/corky/tests/test_cli.rs`
+
+Verification completed:
+- `cargo test parse_refetch_target`
+- `cargo test test_cli_sync_refetch_help_mentions_gmail_url`
+- `make check`
+- `make build`
+- `make install` (installed with `transcribe-cuda` after GPU detection)
+- `corky --version`
+- `corky sync refetch --help`
+- `git diff --check`
+- GitHub CI inspection: latest Corky `CI` run `26209510559` on `main` completed successfully. Corky has no `tmux-ci`/`tmux-test` target or workflow to inspect.
+
+Commits:
+- Corky repo: `7549276 feat: support Gmail URL refetch`, pushed to `origin/main`.
+- Parent agent-loop repo: `fc190ee01 chore: update corky submodule`, committed locally; parent push follows this document closeout per the session closeout order.
+
+No escalation was needed. Confidence: high.
+<!-- agent:boundary:70555363 -->
 <!-- /agent:exchange -->
 ###
 <!--

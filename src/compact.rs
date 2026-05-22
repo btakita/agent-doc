@@ -11,6 +11,8 @@
 //! - **Template/stream mode (full compact):** when `keep` is `None`, archives the full content of
 //!   a named component (default `exchange`) and replaces it with a summary marker; optionally
 //!   accepts a custom `--message`.
+//!   - For `exchange`, unresolved text after the boundary marker is preserved as live drift in the
+//!     visible document and omitted from the archive, summary digest, saved snapshot, and commit.
 //! - **Template/stream mode (partial compact):** when `keep` is `Some(N)`, archives all but the
 //!   last N `### Re:` topic sections; rebuilds the component with an archive summary + kept topics.
 //!   - The preamble (content before the first `### Re:` heading) is always preserved; use
@@ -299,7 +301,12 @@ fn run_component_compact(
         .ok_or_else(|| anyhow::anyhow!("component '{}' not found in document", target))?;
 
     let old_content = comp.content(content);
-    let trimmed = old_content.trim();
+    let (archive_content, trailing) = if target == "exchange" {
+        split_component_content_at_boundary(old_content)
+    } else {
+        (old_content.to_string(), String::new())
+    };
+    let trimmed = archive_content.trim();
 
     if trimmed.is_empty() {
         eprintln!("[compact] Component '{}' is already empty", target);
@@ -309,28 +316,52 @@ fn run_component_compact(
     // Archive old content
     let archive_path = save_archive(
         file,
-        &build_component_archive(file, content, target, old_content),
+        &build_component_archive(file, content, target, &archive_content),
     )?;
 
     // Build summary marker
     let summary = match message {
         Some(msg) => format!("{}\n", msg),
-        None if target == "exchange" => build_exchange_compact_summary(content, &archive_path),
+        None if target == "exchange" => {
+            let summary_source = comp.replace_content(content, &archive_content);
+            build_exchange_compact_summary(&summary_source, &archive_path)
+        }
         None => format!(
             "*Compacted. Content archived to `{}`*\n",
             archive_path.display()
         ),
     };
 
-    let compacted = comp.replace_content(content, &summary);
+    let mut visible_content = summary.clone();
+    if !trailing.trim().is_empty() {
+        if !visible_content.ends_with('\n') {
+            visible_content.push('\n');
+        }
+        visible_content.push_str(trailing.trim_end());
+        visible_content.push('\n');
+    }
+
+    let compacted = comp.replace_content(content, &visible_content);
     let mut compacted = crate::template::repair_conversation_tail_outside_exchange(&compacted)?
         .unwrap_or(compacted);
     if let Some(reconciled) = crate::status_cmd::reconcile_top_backlog_status_content(&compacted)? {
         compacted = reconciled;
     }
-    apply_compacted_document(file, &compacted, &compacted, content, is_crdt)?;
+    let mut snapshot_compacted = if trailing.trim().is_empty() {
+        compacted.clone()
+    } else {
+        let snapshot_content = comp.replace_content(content, &summary);
+        crate::template::repair_conversation_tail_outside_exchange(&snapshot_content)?
+            .unwrap_or(snapshot_content)
+    };
+    if let Some(reconciled) =
+        crate::status_cmd::reconcile_top_backlog_status_content(&snapshot_compacted)?
+    {
+        snapshot_compacted = reconciled;
+    }
+    apply_compacted_document(file, &compacted, &snapshot_compacted, content, is_crdt)?;
 
-    let line_count = old_content.lines().count();
+    let line_count = archive_content.lines().count();
     eprintln!(
         "[compact] Archived {} lines from component '{}' to {}",
         line_count,
@@ -534,6 +565,28 @@ fn parse_topic_sections_with_tail(content: &str) -> TopicSections {
         sections,
         trailing,
     }
+}
+
+fn split_component_content_at_boundary(content: &str) -> (String, String) {
+    let mut before = String::new();
+    let mut after = String::new();
+    let mut after_boundary = false;
+
+    for line in content.lines() {
+        if line.starts_with("<!-- agent:boundary:") {
+            after_boundary = true;
+            continue;
+        }
+        if after_boundary {
+            after.push_str(line);
+            after.push('\n');
+        } else {
+            before.push_str(line);
+            before.push('\n');
+        }
+    }
+
+    (before, after)
 }
 
 /// Build archive content from a component.
@@ -1177,6 +1230,68 @@ mod tests {
         assert!(
             !snapshot_after.contains("do #autocmp. spec-test-build-install-commit-push"),
             "unresolved trailing prompt must remain live drift after compact, not committed snapshot state:\n{snapshot_after}"
+        );
+    }
+
+    #[test]
+    fn full_exchange_compact_preserves_trailing_prompt_after_boundary() {
+        let prompt = "do #fullcmp. spec-test-build-install-commit-push";
+        let doc = format!(
+            concat!(
+                "---\nagent_doc_session: test-full-tail\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\nExisting summary.\n\n",
+                "### Re: archived topic\n\nResponse body.\n",
+                "<!-- agent:boundary:abc123 -->\n",
+                "{prompt}\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+            prompt = prompt
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, &doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        snapshot::save(&file, &doc).unwrap();
+
+        run_component_compact(&file, &doc, "exchange", None, false).unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        let exchange = crate::component::parse(&result)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&result)
+            .to_string();
+
+        assert!(exchange.contains("*Compacted. Content archived to `"));
+        assert!(exchange.contains(prompt));
+        assert!(
+            !exchange.contains("Trailing prompt/context"),
+            "compact summary must not summarize unresolved live prompt text:\n{exchange}"
+        );
+
+        let snapshot_after = snapshot::load(&file).unwrap().unwrap();
+        assert!(
+            !snapshot_after.contains(prompt),
+            "unresolved trailing prompt must remain live drift after full compact, not committed snapshot state:\n{snapshot_after}"
+        );
+
+        let archive_dir = agent_doc_dir.join("archives");
+        let archive_path = std::fs::read_dir(&archive_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().is_some_and(|ext| ext == "md"))
+            .expect("compact should write an archive");
+        let archive = std::fs::read_to_string(archive_path).unwrap();
+        assert!(
+            !archive.contains(prompt),
+            "unresolved trailing prompt must not be archived:\n{archive}"
         );
     }
 

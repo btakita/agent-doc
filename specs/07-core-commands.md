@@ -17,6 +17,14 @@ This file covers the lower-churn command surface that is not primarily about tmu
 - If the diff contains a bare `compact exchange` request, `run` must fail closed and direct the caller to `agent-doc compact <FILE> --commit`.
 - Once a cycle records `committed`, later repair bookkeeping must not rewind the persisted cycle state to `response_captured` or `write_applied`.
 
+## compact
+
+`agent-doc compact <FILE> [--component NAME] [--keep N] [--message TEXT|-] [--tag NAME|skip] [--commit]`
+
+- Template-mode full exchange compaction must split the component at the live `agent:boundary` marker. Content before the boundary is archiveable and may be summarized; content after the boundary is unresolved live prompt drift and must remain visible in the working tree while staying out of the archive body, compact summary digest, saved snapshot, and closeout commit.
+- Template-mode partial exchange compaction follows the same unresolved-tail rule when keeping recent `### Re:` sections.
+- `--commit` closes compacted state through the normal binary-owned commit path. It commits only the compacted snapshot state; any unresolved post-boundary prompt left visible remains the next prompt-bearing diff for a later `agent-doc <FILE>` cycle.
+
 ## init
 
 Two modes:

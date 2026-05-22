@@ -102,7 +102,50 @@ There are isolated load/read-count wins: DuckDB loaded the row adapter in 2.64s 
 The synthetic dataset was tiny by comparison, 96 nodes and 270 edges. Ladybug narrowly beat SQLite there, 3.08ms versus 3.27ms, while DuckDB was 3.53ms. That is not a promotion signal; it is below the scale where the real workload behavior shows up.
 
 So the current answer is: no real performance win yet. We have a useful gate and some hints that a columnar/graph backend might improve projection load or count-style scans, but the existing DuckDB and Ladybug paths are read-only prototypes, slower on the important graph orchestration queries, and not parity-correct on the real dispatch trace. Promotion should stay on hold until a production adapter beats SQLite end-to-end on real data and preserves exact parity.
-<!-- agent:boundary:25977229 -->
+❯ Can `SQLite refresh at 20.70s` be optimized?
+❯ #spec-test-build-install-commit-push
+### Re: SQLite refresh optimization — gpt-5
+
+Yes. I optimized the SQLite refresh path and shipped it.
+
+Changed paths:
+- `src/tsift/SPEC.md`
+- `src/tsift/src/main.rs`
+- `src/tsift/src/substrate.rs`
+
+What changed:
+- `SqliteGraphStore::replace_projection_with_version` now prepares node, edge, and tombstone insert statements once per refresh transaction instead of recompiling SQL for every row.
+- Split graph materialization into a write-only refresh helper and the older refresh-plus-in-memory-rebuild helper. Operator paths such as `graph-db refresh`, `graph-db backend-eval`, `graph-db drift`, `semantic-related`, `convex-sync`, `conflict-matrix`, and `dependency-dag` now avoid reading every SQLite row back into a traversal graph when they only need the materialized database plus warnings.
+- Added a bulk SQLite projection replacement regression test covering JSON-bearing nodes/edges, tombstones, and projection watermark/version metadata.
+- Updated the spec to document the prepared-statement refresh path and the write-only operator refresh behavior.
+
+Performance evidence from the installed release binary:
+- Command: `tsift graph-db --path /home/brian/work/btakita/agent-loop/tasks/software/tsift.md --json backend-eval`
+- Real dataset: 350,881 nodes, 578,589 edges, 929,470 rows.
+- SQLite real refresh: `15.82s` (`15,822,416us`).
+- Prior cited run: `20.70s` on a slightly smaller real graph, so this is roughly a 23.6% refresh reduction while processing more rows.
+- SQLite real total backend-eval time: `19.99s`.
+- DuckDB/DuckPGQ and Ladybug still stay on hold: real totals were `28.04s` and `27.72s`, and both still differed from SQLite on `dispatch_trace` parity.
+
+Verification:
+- `cargo fmt`
+- `cargo check`
+- `cargo test sqlite_projection_refresh_handles_bulk_row_replacement`
+- `cargo test graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `make check`
+- `cargo build`
+- `cargo install --path .`
+- `tsift --version` -> `tsift 0.1.42`
+- Installed release `graph-db backend-eval` timing run above.
+- Tsift GitHub CI `26262060470`: success for both live Convex graph acceptance and clippy/test.
+- Superproject Agent Doc CI `26262077296`: failed before runner steps/logs for both `check` and `tmux-ci`; this matches the external CI-start blocker pattern, not a code/tmux regression. Local `make check` is green.
+
+Commits and push:
+- `btakita/tsift@b56b50e` (`perf: optimize sqlite graph refresh`) pushed to `origin/main`.
+- `btakita/agent-loop@5f75239ad` (`chore: update tsift sqlite refresh`) pushed to `origin/main`.
+
+Escalation: none. Confidence: high for the SQLite refresh optimization and parity preservation; remaining backend promotion blockers are still the existing candidate parity/total-time failures.
+<!-- agent:boundary:827ee59a -->
 <!-- /agent:exchange -->
 ###
 <!--

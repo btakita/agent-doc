@@ -30,32 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260522-010840.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260522-014020.md`*
 
 Compacted content:
-- Archived 1 response topic(s): sqlite graph optimization next steps
+- Archived 1 response topic(s): SQLite graph DB optimization batch
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-### Re: SQLite graph DB optimization batch — gpt-5
-Implemented the four queued graph-db items and pushed them.
-
-- #gdbret: added row-hash/source-watermark tracking, stale-live tombstone pruning on refresh, file-size/freelist reporting, and non-fatal doctor/status tombstone-retention diagnostics.
-- #gdbbfs: moved SQLite neighborhood, shortest path, and evidence reachability traversal onto recursive CTE/batched query paths while preserving depth/max-hop limits.
-- #gdbpush: pushed SQLite kind/neighborhood cursor pagination and `--property KEY=VALUE` filters into SQL and surfaced query-plan diagnostics before adding JSON-property indexes/materialized rows.
-- #gdbdelta: replaced full delete/reinsert refresh with temp-table delta refreshes, anti-join deletes, unchanged-row skips, and refresh summaries for upsert/delete/unchanged/pruned counts.
-
-Verification:
-- `make check` passed.
-- `cargo test --test graph_db_conformance` passed: 29 passed, 1 ignored live Convex acceptance.
-- `cargo install --path . --force` completed; `tsift --version` reports `tsift 0.1.42`.
-- Installed-binary `tsift graph-db --path . --json refresh` proved the second refresh skipped all unchanged rows: 0 node/edge upserts, 3405 unchanged nodes, 19721 unchanged edges.
-- Latest GitHub Actions CI run `26262060470` for `btakita/tsift` was successful; workflow list has `CI` and `Release`, no tmux-test workflow for this repo.
-
-Commits/pushes:
-- tsift: `bd402c5` (`optimize sqlite graph store operations`) pushed to `btakita/tsift main`.
-- superproject: `ea61810cb` (`tsift: optimize sqlite graph operations`) pushed to `btakita/agent-loop main`.
-
-Planning note: `agent-doc plan` reported tsift graph evidence unavailable because `tsift conflict-matrix ... gdbret gdbbfs gdbpush gdbdelta` timed out after 30s, so I proceeded from source inspection and locked the behavior with tests.
-<!-- agent:boundary:7a04bb82 -->
+<!-- agent:boundary:b4e91a3b -->
 <!-- /agent:exchange -->
 ###
 <!--

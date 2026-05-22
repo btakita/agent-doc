@@ -29,32 +29,12 @@ Logged three fresh log-triage follow-ups. Top backlog item: #startloop.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-220129.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-221356.md`*
 
 Compacted content:
-- Archived 1 response topic(s): log triage next steps
+- Archived 1 response topic(s): #ipcackreg
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: #ipcackreg — gpt-5
-
-Implemented the file-IPC guard so `write_ipc_and_poll` re-runs `file_ipc_consumed_without_live_exchange_ack` after IPC snapshot dedupe has selected the final snapshot. That closes the gap where a consumed file patch without ack-content could appear to change the exchange, get deduped back to the pre-write exchange, and still save `snapshot_saved_file_ipc`.
-
-Changed paths:
-- `src/agent-doc/src/write.rs`
-
-Verification:
-- `cargo test file_ipc_consumed_with_live_exchange_edit_requires_ack_content -- --test-threads=1`
-- `cargo test file_ipc_post_dedupe_unchanged_exchange_requires_ack_content -- --test-threads=1`
-- `make check`
-- `make install`
-- GitHub CI `CI` run `26268021723`: success, including `Run make tmux-ci`.
-
-Commits:
-- `src/agent-doc`: `a79f980` (`fix: guard file ipc after snapshot dedupe`)
-- superproject: `07ab6e298` (`agent-doc: update file IPC guard`)
-
-Escalation: none.
-Confidence: high. The new regression covers the post-dedupe unchanged-exchange/no-ack shape directly.
-<!-- agent:boundary:2ea14bfd -->
+<!-- agent:boundary:87df7dd4 -->
 <!-- /agent:exchange -->
 ###
 <!--

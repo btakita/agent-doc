@@ -29,38 +29,22 @@ Logged three fresh log-triage follow-ups. Top backlog item: #ipcackreg.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-214654.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-220129.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #nexttop, #followdrift, #liveipc
+- Archived 1 response topic(s): log triage next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Investigate Claude, Codex, agent-doc logs. What are #next-steps to fix bugs?
-### Re: log triage next steps — gpt-5
-
-I reviewed the current agent-doc ops/session logs, the active Codex TUI log, and the recent Claude session/project logs.
-
-Fresh issues worth tracking:
-
-1. `#ipcackreg` — highest priority. The `#liveipc` class is still visible after the claimed fix: `tasks/personal/michael-takita.md` cycle `1779486550534` logged file IPC with `live_exchange_edited=true`, unchanged before/after exchange hashes, then `ipc_write_consumed` and `commit_success` with no `file_ipc_live_exchange_unacknowledged` proof.
-2. `#startloop` — `tasks/agent-doc/agent-doc-bugs2.md` generation `188` on pane `%17` is repeatedly timing out in `starting` state. The log shows `route_authoritative_actor_starting_not_ready`, then repeated `route_starting_actor_timeout_coalesced` after an 11.4s Codex capability proof instead of a single durable recovery path.
-3. `#codexmanwarn` — lower priority, recommended cleanup. The active Codex log is flooded with plugin/skill manifest validation warnings like invalid `interface.icon_small` / `interface.icon_large` paths. I did not see this causing route failure, but it is making Codex log triage noisy.
-
-Claude logs did not show a fresh agent-doc route failure in the current tail; the recent Claude signal is mostly old session-stop history and stale tool-result noise.
-
-I captured those three items in the backlog in priority order. Top backlog item: `#ipcackreg`.
-
-Verification: log inspection only; no code changed, so I did not run the full test suite.
-<!-- agent:boundary:609cfeb8 -->
+<!-- agent:boundary:95366815 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#nexttop]
-- do [#followdrift]
-- do [#liveipc]
+- do [#ipcackreg]
+- do [#startloop]
+- do [#codexmanwarn]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

@@ -55,7 +55,26 @@ The Gmail web-UI ID (`FMfcgz…`) can't be decoded by `corky sync refetch`, so I
 #### Note
 
 The role wants Pandas **or Polars** and FastAPI — both already covered (Pandas added, FastAPI already in the db). No Polars experience was claimed, so it was not added. If you have Polars or MUI X experience, send it and I'll fold it in.
-<!-- agent:boundary:350737ab -->
+❯ Add ConvexDB, sqlite, and FalkorDB as skills during my consulting.
+### Re: Add Convex, SQLite, FalkorDB skills — opus-4-7
+
+Added all three to the freelance/consulting experience. Resume `main` 11471b5 pushed; agent-loop pointer bumped locally.
+
+#### Changes (`resume/data.toml`)
+
+- Three new skill-taxonomy entries: **Convex** (platform — database/backend/real-time), **SQLite** (database — SQL/relational/embedded), **FalkorDB** (database — graph/NoSQL).
+- All three added to the `Brian Takita` freelance entry's skill list — that is the only experience that maps to "my consulting" temporally (2019–2026; Convex and FalkorDB are both recent, post-2022 tech, so they could not belong to the older consulting-typed entries like Pivotal Labs or Neo Innovation).
+- Rebuilt `BrianTakita-acadian-asset-management.pdf`.
+
+#### Note
+
+I used display name **Convex** (the official product name) rather than "ConvexDB" — say the word if you want it shown literally as "ConvexDB". These three weren't added to the Acadian profile's bold list, but the role explicitly wants "relational and non-relational databases" — SQLite (relational) + Convex/FalkorDB (non-relational) directly answer that, so I can bold them in `acadian-asset-management.toml` if you want them emphasized.
+
+#### Commits
+
+- `resume` `main` 11471b5 — pushed (data.toml + rebuilt PDF).
+- `agent-loop` `main` (resume pointer bump) — local only per the runbook.
+<!-- agent:boundary:ad49558b -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -71,7 +71,12 @@ Per agent-doc closeout ordering, the local commits are ready and the pushes foll
 `#gdbrowstream` is already resolved by the prior closeout in `src/tsift` commit `c0ebfd5` and superproject commit `851d29aad`; no additional repo work was needed for this queue step. The active queue line was stale after the first auto-queue cycle consumed only `#gdbpostbase`.
 
 Verification and push status remain unchanged: final `make check` passed and `btakita/tsift` CI run `26315623600` passed. Root `Agent Doc` run `26315620142` still failed before job steps/logs were available, so it remains an external CI-start blocker.
-<!-- agent:boundary:e9611ee5 -->
+### Re: gdbprepstage queue cleanup — gpt-5
+
+`#gdbprepstage` is also already resolved by the prior closeout in `src/tsift` commit `c0ebfd5` and superproject commit `851d29aad`. The planner found this as queue-head drift with an existing completed worker result, so I did not redispatch or change repository files.
+
+The verification record remains the same: final `make check` passed, `btakita/tsift` CI run `26315623600` passed, and the root `Agent Doc` run `26315620142` remains classified as an external CI-start blocker because its jobs had no steps or logs.
+<!-- agent:boundary:996ffd64 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -81,7 +86,7 @@ Verification and push status remain unchanged: final `make check` passed and `bt
 preset #spec-test-build-install-commit-push
 - ~do [#gdbpostbase]~
 - ~do [#gdbrowstream]~
-- do [#gdbprepstage]
+- ~do [#gdbprepstage]~
 - do [#gdbvacproof]
 - do [#gdbenginegate]
 <!-- /agent:queue -->

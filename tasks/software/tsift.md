@@ -18,7 +18,8 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Completed: #gdbrefreshhot, #gdbmetricreal, #gdbtracehot, #gdbhopcaps, #gdbcompactrun, and #gdbfalkorgate shipped in tsift 638fe4c and superproject 9a5447b88; graph backend evaluation now records real metrics, phase timings, path cap probes, and gated FalkorDB evidence.
+
+Completed: #gdbrwbatch, #gdbprepfast, #gdbcandpush, #gdbpathbudget, and #gdbperfgate shipped in tsift aaac32a and superproject e25a1c50b; graph refresh now delta-upserts materialized property rows, conflict-matrix reuses a symbol-by-file graph index, experimental backend adapters use indexed outgoing/kind traversal, backend-eval reports adaptive path budgets plus performance gates, and promotion stays held until every measured operation beats SQLite with parity.
 <!-- /agent:status -->
 
 ## Spec
@@ -43,7 +44,33 @@ Top backlog item: `#gdbrwbatch`.
 I added the next graph-performance backlog in priority order. The order follows the current fixture: real SQLite is still the best production baseline at about 24.7s total; its refresh is the largest remaining cost at about 19.6s, with SQLite delta writes at about 12.9s and conflict-matrix preparation at about 5.2s. FalkorDB is not a promotion candidate yet: its refresh-equivalent load is faster, but real conflict-matrix is about 40.4s and total runtime is about 49.5s, roughly 2x SQLite.
 
 The next pass should attack write batching first, then repeated operator preparation, then candidate backend query pushdown. Hop-budget tuning and performance regression gates should follow once those hot paths stop dominating.
-<!-- agent:boundary:cb4ce11d -->
+### Re: graph performance queue — gpt-5
+
+Completed and pushed the five queued graph-performance items.
+
+Changed paths: `src/tsift/src/substrate.rs`, `src/tsift/src/main.rs`, `src/tsift/tests/graph_db_conformance.rs`, `src/tsift/SPEC.md`, `src/tsift/README.md`, plus the `src/tsift` submodule pointer in the superproject.
+
+What changed:
+- `#gdbrwbatch`: SQLite refresh no longer deletes and reinserts all `graph_node_properties`; it now delta-upserts/deletes materialized property rows and reports property upsert/unchanged/delete counts.
+- `#gdbprepfast`: conflict-matrix construction now builds a symbol-by-file graph index once per store instead of scanning all graph nodes per target.
+- `#gdbcandpush`: experimental backend-eval row adapters now keep node-kind and outgoing-edge indexes and batch reachable-kind traversal, removing the worst full-edge-scan behavior.
+- `#gdbpathbudget`: backend-eval now publishes explicit adaptive path probe config: 64-hop deep-chain coverage and 1-hop direct/high-degree probes.
+- `#gdbperfgate`: backend-eval now emits a `performance_gate` section with the baseline fixture, CI-safe synthetic profile, opt-in real profile, 10% allowed regression threshold, required metrics, and metric-digest command; promotion now requires parity plus lower time for every measured operation on every dataset.
+
+Verification:
+- Initial multi-filter `cargo test ...` command failed because Cargo accepts only one positional test filter; reran the focused filters separately and all passed.
+- `cargo test graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite` passed.
+- `cargo test sqlite_projection_refresh_tracks_versions_watermarks_and_tombstones` passed.
+- `cargo test sqlite_projection_refresh_handles_bulk_row_replacement` passed.
+- `make check` passed: clippy, 652 unit tests with 1 ignored, 108 exit-code tests, and 30 graph conformance tests with 1 ignored live Convex test.
+- `cargo build` passed.
+- `cargo install --path .` replaced the local `tsift`; `tsift --version` reports `0.1.42`.
+- Real backend-eval plus metric-digest ran against `tasks/software/tsift.md` and the checked-in history. Selected deltas: SQLite delta write improved from 12.94s to 7.91s, SQLite refresh improved from 19.60s to 14.61s, and SQLite total improved from 24.72s to 19.06s for the target run.
+
+CI/tmux evidence: GitHub `Agent Doc` run `26314220159` for the superproject push failed with empty step lists for both `check` and `tmux-ci` after about three seconds. I classified this as the existing external CI-start blocker, not a code or tmux regression; local verification above is clean.
+
+Commits pushed: tsift `aaac32a` (`perf: tighten graph backend evaluation`) and superproject `e25a1c50b` (`chore: update tsift graph performance`). No escalated commands were used.
+<!-- agent:boundary:c9e9ae87 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -51,22 +78,16 @@ The next pass should attack write batching first, then repeated operator prepara
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#gdbrefreshhot]
-- do [#gdbmetricreal]
-- do [#gdbtracehot]
-- do [#gdbhopcaps]
-- do [#gdbcompactrun]
-- do [#gdbfalkorgate]
+- do [#gdbrwbatch]
+- do [#gdbprepfast]
+- do [#gdbcandpush]
+- do [#gdbpathbudget]
+- do [#gdbperfgate]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbrwbatch] [recommended] Reduce SQLite graph refresh write cost on the real agent-loop projection: profile `real.refresh_phase.sqlite_delta_write.duration_micros` (currently 12,941,973 us of the 19,598,243 us SQLite refresh), batch node/edge/property upserts through temp-table merge or prepared-statement chunks, avoid unchanged property rewrites, and prove the improvement with `graph-db backend-eval` plus `metric-digest` against `fixtures/graph-db-performance-history.json`.
-- [ ] [#gdbprepfast] [recommended] Pull conflict-matrix preparation out of repeated graph performance hot paths: cache or reuse evidence target resolution, worker-result/source-handle expansions, and dispatch-trace inputs across backend-eval operations so `real.refresh_phase.conflict_matrix_preparation` (5,158,398 us) and post-refresh operator reads do not redo the same traversal work.
-- [ ] [#gdbcandpush] [recommended] Fix candidate backend query pushdown before considering FalkorDB, DuckDB/DuckPGQ, or Ladybug promotion: real candidate refresh-equivalent loads are fast at roughly 2.5s, but conflict-matrix is roughly 40s and total runtime is roughly 49s; implement candidate-side batch traversal/query plans and keep the promotion gate failing closed until every real and synthetic operation beats SQLite with parity.
-- [ ] [#gdbpathbudget] [recommended] Decide adaptive max-hop defaults from measured evidence instead of raising caps globally: use the current real `path_max_hops` timing, deep-chain and high-degree probes, truncation warnings, and query-plan assertions to define operation-specific hop budgets.
-- [ ] [#gdbperfgate] [recommended] Turn graph backend performance history into a bounded regression gate: keep a short CI-safe synthetic run plus an opt-in real projection benchmark, define allowed deltas for refresh, conflict-matrix, dispatch-trace, path_max_hops, graph.db size/freelist, and require `metric-digest` evidence in graph-performance PRs.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 ###

@@ -4537,6 +4537,88 @@ mod tests {
     }
 
     #[test]
+    fn preflight_preserves_unrelated_lines_in_mixed_post_exchange_duplicate_prompt_comment() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - gpt-5\n",
+            "Done.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n",
+            "<!--\n",
+            "-->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let exchange_prompt = "The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?";
+        let duplicate_prompt_line = "The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?";
+        let live = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior - gpt-5\n",
+                "Done.\n",
+                "<!-- agent:boundary:head -->\n",
+                "{exchange_prompt}\n",
+                "#spec-test-build-install-commit-push\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n",
+                "<!--\n",
+                "{duplicate_prompt_line}\n",
+                "#spec-test-build-install-commit-push\n",
+                "---\n",
+                "Look through the Claude + Codex + agent-doc session logs for #next-steps to fix bugs.\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            exchange_prompt = exchange_prompt,
+            duplicate_prompt_line = duplicate_prompt_line,
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !file_after.contains(&format!("<!--\n{duplicate_prompt_line}")),
+            "preflight should scrub only the duplicate prompt line from the mixed comment:\n{file_after}"
+        );
+        assert!(
+            file_after.contains("Look through the Claude + Codex + agent-doc session logs"),
+            "preflight must preserve unrelated scratch lines in the same ordinary comment:\n{file_after}"
+        );
+        assert!(
+            file_after.contains("<!--\n#spec-test-build-install-commit-push\n---\nLook through"),
+            "preflight must keep the mixed ordinary comment shell and nonduplicate lines:\n{file_after}"
+        );
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snapshot_after.contains(exchange_prompt),
+            "snapshot must not absorb the live prompt during preflight:\n{snapshot_after}"
+        );
+    }
+
+    #[test]
     fn preflight_waits_for_typing_before_duplicate_prompt_comment_cleanup() {
         let dir = setup_project();
         let root = dir.path();

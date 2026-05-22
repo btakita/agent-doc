@@ -1140,7 +1140,7 @@ fn empty_html_comment_like(body: &str) -> String {
 }
 
 fn strip_duplicate_prompt_comment_body(body: &str, prompts: &[String]) -> Option<String> {
-    if is_duplicate_prompt_comment_text(body, prompts) {
+    if !body.contains('\n') && is_duplicate_prompt_comment_text(body, prompts) {
         return None;
     }
 
@@ -4853,6 +4853,50 @@ Existing answer.
         assert!(
             repaired.contains("Keep this unrelated scratch note hidden."),
             "unrelated scratch comments must stay outside exchange:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_editor_visible_template_structure_preserves_mixed_prompt_comment_scratch_lines() {
+        let exchange_prompt = "The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?";
+        let duplicate_prompt_line = "The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?";
+        let doc = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior - gpt-5\n",
+                "Done.\n",
+                "<!-- agent:boundary:head -->\n",
+                "{exchange_prompt}\n",
+                "#spec-test-build-install-commit-push\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n",
+                "<!--\n",
+                "{duplicate_prompt_line}\n",
+                "#spec-test-build-install-commit-push\n",
+                "---\n",
+                "Look through the Claude + Codex + agent-doc session logs for #next-steps to fix bugs.\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            exchange_prompt = exchange_prompt,
+            duplicate_prompt_line = duplicate_prompt_line,
+        );
+
+        let repaired = normalize_editor_visible_template_structure(&doc)
+            .expect("editor-visible normalization should preserve mixed scratch comments");
+
+        assert!(
+            !repaired.contains(&format!("<!--\n{duplicate_prompt_line}")),
+            "duplicate prompt line should be scrubbed from the mixed comment:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("Look through the Claude + Codex + agent-doc session logs"),
+            "unrelated scratch lines in the same ordinary comment must survive:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("<!--\n#spec-test-build-install-commit-push\n---\nLook through"),
+            "the mixed comment shell and nonduplicate body lines should be preserved:\n{repaired}"
         );
     }
 

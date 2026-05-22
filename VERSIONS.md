@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Mixed scratch comments preserve unrelated lines during duplicate cleanup.**
+  Post-exchange HTML comment cleanup now removes duplicate prompt lines from
+  multiline comments without applying a fuzzy whole-comment match that can erase
+  unrelated scratch/log-triage text in the same comment. Added editor-visible and
+  preflight regressions for the live `agent-doc-bugs2.md` mixed-comment shape.
+
 - **Full-content replacements now bind to their computed source buffer.** Compact
   Exchange and other operator-owned whole-document replacements stamp editor IPC
   with the exact source buffer used to compute the replacement, not a late disk

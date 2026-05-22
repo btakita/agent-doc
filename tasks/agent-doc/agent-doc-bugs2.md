@@ -28,26 +28,12 @@ Logged three #next-steps bugs from session/log triage. Top backlog item: #nextto
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-030825.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-034920.md`*
 
 Compacted content:
-- Archived 1 response topic(s): JetBrains file-cache conflicts
+- Archived 1 response topic(s): #next-steps bug log triage
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ Analyze sessions and agent-doc logs for #next-steps to find bugs.
-### Re: #next-steps bug log triage — gpt-5
-
-I reviewed the active session document, completed archive, recent captures, `ops.log`, the active session log, `agent-doc ops summary`, and recent git history for `agent-doc-bugs2.md`.
-
-Findings added to backlog in priority order:
-
-1. `#nexttop` - stale top-backlog/status reporting. The document status says `#autodag` is the top backlog item, but the live backlog is empty and `#autodag` is in `tasks/agent-doc-bugs2.done.md`.
-2. `#followdrift` - prompt drift classification relapse. This preflight detected the new user prompt, but `ops.log` classified the same post-commit drift as `working_tree_edits`, making normal prompt input look anomalous again.
-3. `#liveipc` - file-IPC/live-edit proof gap. Recent logs show a file-IPC response write with `live_exchange_edited=true` and identical before/after exchange hashes, followed by `commit_success`; that path needs fail-closed coverage or stronger editor-ack proof.
-
-Top backlog item: `#nexttop`.
-
-Verification: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc ops summary`, targeted `rg`, `jq` over response captures, and `git show`/`git diff` on recent document commits. No Rust tests ran because this cycle only updates the session document/backlog.
-<!-- agent:boundary:5dc3edde -->
+<!-- agent:boundary:e7c68666 -->
 <!-- /agent:exchange -->
 ###
 <!--

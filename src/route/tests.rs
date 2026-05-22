@@ -5183,7 +5183,7 @@ fn resolve_or_create_pane_dispatch_only_prefers_authoritative_actor_dispatch_tar
 
 #[test]
 #[ignore = "live tmux integration test; run `make tmux-ci`"]
-fn resolve_or_create_pane_dispatch_only_refuses_registered_authoritative_actor_pane_when_supervisor_state_is_missing()
+fn resolve_or_create_pane_dispatch_only_reuses_registered_authoritative_actor_pane_when_supervisor_state_is_missing()
  {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -5223,7 +5223,7 @@ fn resolve_or_create_pane_dispatch_only_refuses_registered_authoritative_actor_p
     )
     .unwrap();
 
-    let err = resolve_or_create_pane_dispatch_only(
+    let dispatch_pane = resolve_or_create_pane_dispatch_only(
         &iso,
         &doc,
         None,
@@ -5234,28 +5234,30 @@ fn resolve_or_create_pane_dispatch_only_refuses_registered_authoritative_actor_p
         &HarnessConfig::claude(),
         &mut Vec::new(),
     )
-    .expect_err("dispatch-only reroute must fail closed when supervisor state is missing");
-    let message = err.to_string();
-    assert!(
-        message.contains("refused before input"),
-        "degraded authoritative refusal should fail before submit: {message}"
+    .expect(
+        "dispatch-only reroute should reuse the live authoritative pane after readiness checks",
+    );
+    assert_eq!(dispatch_pane, actor_pane);
+    let actor_after = wait_for_pane_contains(
+        &iso,
+        &actor_pane,
+        &HarnessConfig::claude().trigger_command(&file_path),
+        std::time::Duration::from_secs(3),
     );
     assert!(
-        !sessions::capture_pane(&iso, &actor_pane)
-            .unwrap_or_default()
-            .contains(&HarnessConfig::claude().trigger_command(&file_path)),
-        "degraded authoritative actor must not receive the reopen"
+        actor_after.contains(&HarnessConfig::claude().trigger_command(&file_path)),
+        "degraded authoritative actor should receive the direct-pane reopen: {actor_after}"
     );
 
     let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-        .expect("dispatch-only refusal should write an ops log entry");
+        .expect("dispatch-only degraded direct submit should write an ops log entry");
     assert!(
-        ops_log.contains("route_dispatch_only_authoritative_fallback_refused"),
-        "expected authoritative fallback logging, got: {ops_log}"
+        ops_log.contains("route_dispatch_only_authoritative_degraded_direct_pane"),
+        "expected authoritative degraded direct submit logging, got: {ops_log}"
     );
     assert!(
         ops_log.contains("supervisor_health=no_socket"),
-        "refusal logging should explain the degraded supervisor state: {ops_log}"
+        "direct-submit logging should explain the degraded supervisor state: {ops_log}"
     );
 }
 
@@ -9384,22 +9386,6 @@ fn dispatch_only_can_use_degraded_authoritative_actor_returns_false_when_none_pr
     assert!(!dispatch_only_can_use_degraded_authoritative_actor(
         &actor, None, None,
     ));
-}
-
-#[test]
-fn degraded_authoritative_actor_refusal_names_proof_recovery_before_input() {
-    let actor = test_degraded_actor("%42");
-    let message = degraded_authoritative_actor_refusal(
-        Path::new("/tmp/doc.md"),
-        &actor,
-        &HarnessConfig::codex(),
-        "supervisor health is no_socket",
-    );
-
-    assert!(message.contains("refused before input"));
-    assert!(message.contains("runtime_actor_state=missing"));
-    assert!(message.contains("agent-doc start /tmp/doc.md"));
-    assert!(message.contains("dispatch-start proof"));
 }
 
 #[test]

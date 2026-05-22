@@ -198,17 +198,21 @@ Later phases may refine caller values without changing the field names.
 - Dispatch-only degraded authoritative actor path: when the supervisor socket is
   unhealthy (Restartable, Halted, Unreachable, NoSocket) or actor_state is
   missing, and the authoritative actor pane still matches the registered
-  dispatch pane or live owner binding, `route --dispatch-only` must fail closed
-  before direct-pane submit. Route logs the refusal with
-  `route_dispatch_only_authoritative_fallback_refused`, including supervisor
-  health and runtime actor state, and tells the operator to restart or rebind the
-  owner with `agent-doc start <FILE>` before rerouting. The pure degraded
-  authority decision, runtime guard, refusal message, authoritative actor
-  ready-wait facts, delivery-action mode, retry budgets, direct-submit outcome,
-  proof policy, and dispatch-start proof classifiers live in
-  `flow::routed_reopen`; route-specific wrappers only map supervisor/controller
-  facts into those FlowCore types and perform the tmux/supervisor/controller
-  side effects. Pure unit tests must cover all supervisor health variants,
-  matching/non-matching pane bindings, authoritative actor actions, retry
-  budgets, and proof typing so degraded authority cannot become an
-  accepted-only dispatch path.
+  dispatch pane or live owner binding, `route --dispatch-only` must keep that
+  pane as the bounded recovery target instead of forcing the operator through a
+  manual `agent-doc start <FILE>` rebind. Route logs
+  `route_dispatch_only_authoritative_degraded_direct_pane`, including
+  supervisor health and runtime actor state, records the controller dispatch
+  attempt, and then uses the same direct-pane readiness, blocker, and proof
+  checks as other editor reroutes before submitting. If those checks do not
+  prove an idle prompt or dispatch-start proof where required, the route still
+  fails closed before or after submit at the typed guard that failed. The pure
+  degraded authority decision, runtime guard, degraded direct-submit log shape,
+  authoritative actor ready-wait facts, delivery-action mode, retry budgets,
+  direct-submit outcome, proof policy, and dispatch-start proof classifiers live
+  in `flow::routed_reopen`; route-specific wrappers only map
+  supervisor/controller facts into those FlowCore types and perform the
+  tmux/supervisor/controller side effects. Pure unit tests must cover all
+  supervisor health variants, matching/non-matching pane bindings,
+  authoritative actor actions, retry budgets, and proof typing so degraded
+  authority cannot bypass readiness or required dispatch-start proof.

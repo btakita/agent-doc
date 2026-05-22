@@ -151,11 +151,11 @@ use crate::flow::routed_reopen::{
     ActorDispatchState, ActorRuntimeHealth, AuthoritativeActorDispatchAction,
     AuthoritativeActorDispatchActionFacts, AuthoritativeActorReadyFacts,
     AuthoritativePromptReadyBarrierFacts, AuthoritativeRuntimeFacts, BusyPaneAutoFixFacts,
-    BusyPaneAutoFixOutcome, DegradedAuthoritativeActorFacts, DegradedAuthoritativeActorRefusal,
-    DirectPaneSubmitStatus as CommandDispatchStatus, DispatchOnlyProofOutcomeFacts,
-    DispatchOnlyProofPolicyFacts, DispatchOnlyReopenDelivery, DispatchStartProofDecision,
-    DispatchStartProofFacts, PromptReadyBarrierDecision, ReopenMode, RoutedDispatchStartProof,
-    RoutedReopenFacts, RoutedReopenGuardReason, StartingActorLogFacts,
+    BusyPaneAutoFixOutcome, DegradedAuthoritativeActorDirectSubmit,
+    DegradedAuthoritativeActorFacts, DirectPaneSubmitStatus as CommandDispatchStatus,
+    DispatchOnlyProofOutcomeFacts, DispatchOnlyProofPolicyFacts, DispatchOnlyReopenDelivery,
+    DispatchStartProofDecision, DispatchStartProofFacts, PromptReadyBarrierDecision, ReopenMode,
+    RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason, StartingActorLogFacts,
     accepted_only_dispatch_start_log_message, accepted_only_dispatch_start_refusal_message,
     actor_dispatch_blocker_reason, actor_recovery_hint,
     authoritative_actor_dispatch_guard_reason as flow_authoritative_actor_dispatch_guard_reason,
@@ -163,7 +163,7 @@ use crate::flow::routed_reopen::{
     busy_existing_pane_auto_fix_outcome as flow_busy_existing_pane_auto_fix_outcome,
     can_use_degraded_authoritative_actor, classify_authoritative_actor_dispatch_action,
     classify_authoritative_prompt_ready_barrier, classify_dispatch_start_proof,
-    decide_authoritative_reopen, degraded_authoritative_actor_refusal_message,
+    decide_authoritative_reopen, degraded_authoritative_actor_direct_submit_log_message,
     direct_pane_submit_outcome as flow_direct_pane_submit_outcome,
     dispatch_only_dispatch_start_proof_required as flow_dispatch_only_dispatch_start_proof_required,
     dispatch_only_sent_console_message, dispatch_only_sent_log_message,
@@ -2578,23 +2578,6 @@ fn dispatch_only_can_use_degraded_authoritative_actor(
     })
 }
 
-fn degraded_authoritative_actor_refusal(
-    file: &Path,
-    actor: &AuthoritativeActorDispatchTarget,
-    harness: &HarnessConfig,
-    reason: &str,
-) -> String {
-    let file_display = file.display().to_string();
-    degraded_authoritative_actor_refusal_message(DegradedAuthoritativeActorRefusal {
-        harness_binary: harness.binary.as_str(),
-        file_display: file_display.as_str(),
-        generation: actor.record.generation,
-        pane_id: actor.record.pane_id.as_str(),
-        reason,
-        runtime_actor_state: runtime_actor_state_label(&actor.runtime),
-    })
-}
-
 #[cfg(test)]
 fn authoritative_actor_start_wait_terminal_state(state: crate::session_actor::ActorState) -> bool {
     crate::flow::routed_reopen::actor_start_wait_terminal_state(actor_dispatch_state(state))
@@ -3268,23 +3251,57 @@ fn resolve_or_create_pane_dispatch_only(
             registered.as_deref(),
             live_owner.as_deref(),
         ) {
+            let dispatch_pane = actor.record.pane_id.clone();
+            let file_display = file.display().to_string();
+            let supervisor_health = supervisor_health_label(actor.runtime.health);
             crate::ops_log::log_op(
                 file,
-                &format!(
-                    "route_dispatch_only_authoritative_fallback_refused file={} pane={} harness={} generation={} record_state={} supervisor_health={} runtime_actor_state={} reason={}",
-                    file.display(),
-                    actor.record.pane_id,
-                    harness.binary,
-                    actor.record.generation,
-                    actor.record.state.as_str(),
-                    supervisor_health_label(actor.runtime.health),
-                    runtime_actor_state_label(&actor.runtime),
-                    reason
+                &degraded_authoritative_actor_direct_submit_log_message(
+                    DegradedAuthoritativeActorDirectSubmit {
+                        file_display: file_display.as_str(),
+                        pane_id: dispatch_pane.as_str(),
+                        harness_binary: harness.binary.as_str(),
+                        generation: actor.record.generation,
+                        record_state: actor.record.state.as_str(),
+                        supervisor_health: supervisor_health.as_str(),
+                        runtime_actor_state: runtime_actor_state_label(&actor.runtime),
+                        reason: reason.as_str(),
+                    },
                 ),
             );
-            anyhow::bail!(
-                "{}",
-                degraded_authoritative_actor_refusal(file, actor, harness, &reason)
+            let _authorization = authorize_controller_dispatch(
+                file,
+                session_id,
+                file_path,
+                actor,
+                "dispatch_only_reopen",
+                &format!(
+                    "submit=direct_pane actor_state={} harness={} degraded_supervisor={}",
+                    actor.actor_state().as_str(),
+                    harness.binary,
+                    reason.replace(' ', "_")
+                ),
+            )?;
+            rescue_target(dispatch_pane.as_str());
+            return dispatch_only_reopen_existing_pane(
+                tmux,
+                file,
+                pane,
+                col_args,
+                session_id,
+                file_path,
+                target_session,
+                harness,
+                created_panes,
+                pending_prompt_context
+                    .as_ref()
+                    .map(|context| context.marker.as_str()),
+                true,
+                true,
+                false,
+                dispatch_pane.as_str(),
+                DispatchOnlyReopenDelivery::DirectPaneSubmit,
+                true,
             );
         }
 

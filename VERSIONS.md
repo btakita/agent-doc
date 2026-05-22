@@ -6,6 +6,16 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Dispatch-only editor reroutes recover degraded authoritative panes.** When
+  JetBrains `Run Agent Doc` finds an authoritative actor pane whose supervisor
+  socket is missing or whose runtime actor state is absent, route now keeps that
+  pane as the recovery target if it is still the current registered/live owner.
+  The reroute records controller dispatch, logs
+  `route_dispatch_only_authoritative_degraded_direct_pane`, and then uses the
+  normal direct-pane readiness/blocker/proof gates before submitting, avoiding a
+  first-open manual `agent-doc start <FILE>` rebind when the live pane is already
+  dispatch-ready.
+
 - **Freeform duplicate prompt residue now fails closed.** After the safe
   post-exchange HTML comment scrub runs, route, editor-visible normalization,
   final template reconciliation, and IPC snapshot dedupe reject remaining

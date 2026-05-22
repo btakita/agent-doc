@@ -767,27 +767,30 @@ pub(crate) fn can_use_degraded_authoritative_actor(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct DegradedAuthoritativeActorRefusal<'a> {
-    pub(crate) harness_binary: &'a str,
+pub(crate) struct DegradedAuthoritativeActorDirectSubmit<'a> {
     pub(crate) file_display: &'a str,
-    pub(crate) generation: u64,
     pub(crate) pane_id: &'a str,
-    pub(crate) reason: &'a str,
+    pub(crate) harness_binary: &'a str,
+    pub(crate) generation: u64,
+    pub(crate) record_state: &'a str,
+    pub(crate) supervisor_health: &'a str,
     pub(crate) runtime_actor_state: &'a str,
+    pub(crate) reason: &'a str,
 }
 
-pub(crate) fn degraded_authoritative_actor_refusal_message(
-    facts: DegradedAuthoritativeActorRefusal<'_>,
+pub(crate) fn degraded_authoritative_actor_direct_submit_log_message(
+    facts: DegradedAuthoritativeActorDirectSubmit<'_>,
 ) -> String {
     format!(
-        "dispatch-only {} reroute for {} refused before input because authoritative actor generation {} on pane {} has degraded supervisor state ({}, runtime_actor_state={}). Restart or rebind the owner with `agent-doc start {}` and rerun the route after dispatch-start proof is available.",
-        facts.harness_binary,
+        "route_dispatch_only_authoritative_degraded_direct_pane file={} pane={} harness={} generation={} record_state={} supervisor_health={} runtime_actor_state={} reason={}",
         facts.file_display,
-        facts.generation,
         facts.pane_id,
-        facts.reason,
+        facts.harness_binary,
+        facts.generation,
+        facts.record_state,
+        facts.supervisor_health,
         facts.runtime_actor_state,
-        facts.file_display
+        facts.reason
     )
 }
 
@@ -1076,21 +1079,24 @@ mod tests {
     }
 
     #[test]
-    fn degraded_refusal_names_rebind_recovery_before_input() {
-        let message =
-            degraded_authoritative_actor_refusal_message(DegradedAuthoritativeActorRefusal {
-                harness_binary: "codex",
+    fn degraded_direct_submit_log_names_supervisor_reason() {
+        let message = degraded_authoritative_actor_direct_submit_log_message(
+            DegradedAuthoritativeActorDirectSubmit {
                 file_display: "/tmp/doc.md",
-                generation: 2,
                 pane_id: "%42",
-                reason: "supervisor health is no_socket",
+                harness_binary: "codex",
+                generation: 2,
+                record_state: "ready",
+                supervisor_health: "no_socket",
                 runtime_actor_state: "missing",
-            });
+                reason: "supervisor health is no_socket",
+            },
+        );
 
-        assert!(message.contains("refused before input"));
+        assert!(message.contains("route_dispatch_only_authoritative_degraded_direct_pane"));
+        assert!(message.contains("supervisor_health=no_socket"));
         assert!(message.contains("runtime_actor_state=missing"));
-        assert!(message.contains("agent-doc start /tmp/doc.md"));
-        assert!(message.contains("dispatch-start proof"));
+        assert!(message.contains("reason=supervisor health is no_socket"));
     }
 
     #[test]

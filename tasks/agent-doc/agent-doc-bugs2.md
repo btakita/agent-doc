@@ -34,7 +34,53 @@ Added auto-DAG next steps; top backlog item: #autodag.
 Compacted content:
 - Archived 1 response topic(s): duplicate prompt residue
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:85c32500 -->
+❯ When agent-doc first opens Claude Code or Codex, the first JB `Run Agent Doc` errors. After manually running agent-doc on the file, subsequent `Run Agent Doc` calls sometimes work. For /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-asset-management.md, `Run Agent Doc`. #spec-test-build-install-commit-push
+```
+resync: stash pane %18 is registered in its own project root — skipping kill
+resync: stash pane %36 is registered in its own project root — skipping kill
+resync: stash pane %27 is registered in its own project root — skipping kill
+resync: stash pane %17 is registered in its own project root — skipping kill
+resync: stash pane %8 is registered in its own project root — skipping kill
+resync: stash pane %38 is registered in its own project root — skipping kill
+[route] target tmux session: 0
+Error: dispatch-only claude reroute for tasks/recruit/acadian-asset-management.md refused before input because authoritative actor generation 1 on pane %2 has degraded supervisor state (supervisor health is no_socket, runtime_actor_state=missing). Restart or rebind the owner with `agent-doc start tasks/recruit/acadian-asset-management.md` and rerun the route after dispatch-start proof is available.
+```
+### Re: JetBrains degraded first-open reroute — gpt-5
+
+Fixed the JetBrains first-open failure for dispatch-only Claude/Codex routes when the authoritative actor reports `supervisor health is no_socket` or `runtime_actor_state=missing`.
+
+The route now keeps a degraded authoritative actor pane as the bounded recovery target when that pane is still the current registered/live owner. It records controller dispatch, logs `route_dispatch_only_authoritative_degraded_direct_pane`, and then uses the normal direct-pane readiness, blocker, and proof checks before submitting. Hook-backed Codex/OpenCode routes still fail closed if delivery remains accepted-only instead of producing dispatch-start proof, and busy or unready panes still stop at the existing typed guards.
+
+Changed paths:
+
+- `src/agent-doc/src/route.rs`
+- `src/agent-doc/src/flow/routed_reopen.rs`
+- `src/agent-doc/src/route/tests.rs`
+- `src/agent-doc/tests/test_cli.rs`
+- `src/agent-doc/specs/07-session-tmux-commands.md`
+- `src/agent-doc/specs/08a-session-actor-contract.md`
+- `src/agent-doc/README.md`
+- `src/agent-doc/VERSIONS.md`
+
+Verification completed:
+
+- `cargo test degraded_direct_submit_log_names_supervisor_reason`
+- `cargo test dispatch_only_can_use_degraded_authoritative_actor`
+- `cargo test authoritative_actor_dispatch_guard_reason`
+- `cargo test resolve_or_create_pane_dispatch_only_reuses_registered_authoritative_actor_pane_when_supervisor_state_is_missing -- --ignored`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- CI/tmux review: latest `CI` run `26261819347` succeeded; its `Run make tmux-ci` step succeeded.
+
+Commits made before this session-document closeout:
+
+- `src/agent-doc` commit `90542dbc` (`fix: recover degraded dispatch-only actor panes`)
+- parent commit `15841f690` (`agent-doc: recover degraded editor reroutes`)
+
+Push is intentionally after this binary-owned session-document commit and `session-check`, per the agent-doc closeout ordering.
+
+<!-- agent:boundary:bb5d9059 -->
 <!-- /agent:exchange -->
 ###
 <!--

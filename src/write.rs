@@ -7831,6 +7831,20 @@ fn write_ipc_and_poll(
                 &current_on_disk,
                 "ipc_file",
             )?;
+            if file_ipc_consumed_without_live_exchange_ack(
+                doc_file,
+                "file_ipc",
+                Some(patch_id),
+                payload
+                    .get("baseline")
+                    .and_then(|value| value.as_str())
+                    .filter(|value| !value.is_empty()),
+                before_content.as_deref(),
+                &snap_content,
+                ack_content_proven,
+            ) {
+                return Ok(false);
+            }
             if dedupe_repair {
                 repair_disk_from_ipc_dedupe(doc_file, &snap_content)?;
                 redeliver_ipc_dedupe_to_editor(doc_file, &snap_content);
@@ -9670,6 +9684,89 @@ scratch
             log.contains("file_ipc_live_exchange_unacknowledged")
                 && log.contains("patch_id=patch-live-edit"),
             "unacknowledged live-edit IPC should be logged:\n{log}"
+        );
+    }
+
+    #[test]
+    fn file_ipc_post_dedupe_unchanged_exchange_requires_ack_content() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "live prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let plugin_after = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "live prompt\n",
+            "live prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let doc_for_watcher = doc.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    let _ = fs::write(&doc_for_watcher, plugin_after);
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let patch = crate::template::PatchBlock::new("exchange", "live prompt\n");
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            None,
+            None,
+            Some("patch-post-dedupe"),
+        )
+        .unwrap();
+
+        assert!(
+            !result.success,
+            "file IPC must fall back when final deduped exchange is unchanged without ack-content proof"
+        );
+        assert!(
+            snapshot::load(&doc).unwrap().is_none(),
+            "unacknowledged post-dedupe no-op IPC must not become the saved snapshot"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("file_ipc_live_exchange_unacknowledged")
+                && log.contains("patch_id=patch-post-dedupe"),
+            "post-dedupe unacknowledged live-edit IPC should be logged:\n{log}"
+        );
+        assert!(
+            !log.contains("snapshot_saved_file_ipc"),
+            "post-dedupe unacknowledged live-edit IPC must not save a file-IPC snapshot:\n{log}"
         );
     }
 

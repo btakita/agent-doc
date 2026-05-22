@@ -29,39 +29,12 @@ Added auto-DAG next steps; top backlog item: #autodag.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-002414.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-005124.md`*
 
 Compacted content:
-- Archived 1 response topic(s): duplicate prompt corruption review
+- Archived 1 response topic(s): duplicate prompt residue
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ How can we "This does not mathematically eliminate duplicate prompt text from arbitrary manual Markdown editing"?
-❯ #spec-test-build-install-commit-push
-### Re: duplicate prompt residue — gpt-5
-
-The way to make this rigorous is to stop treating arbitrary Markdown duplicates as something the binary may guess-delete. Safe, known residue gets normalized; anything else becomes a fail-closed state before route or closeout can claim success.
-
-I implemented that boundary. Post-exchange HTML comment duplicates are still scrubbed while preserving the comment shell, but after that scrub the route path, editor-visible normalization, final template reconciliation, and IPC snapshot persistence now reject duplicate or near-duplicate prompt residue that remains in freeform post-exchange Markdown outside tracked components. The write path logs this through the typed document-mutation reason `duplicate_prompt_residue`, so it is audited by the FlowCore guard budget instead of being another untracked string check.
-
-Changed paths in `src/agent-doc`:
-- `SPEC.md`, `specs/07-closeout-commands.md`, `VERSIONS.md`
-- `src/template.rs`, `src/write.rs`, `src/route.rs`, `src/route/tests.rs`
-- `src/flow/document_mutation.rs`, `src/sim_world.rs`, `tests/test_cli.rs`
-
-Verification:
-- Focused regressions for template, route, and IPC duplicate Markdown residue passed.
-- `cargo test duplicate_prompt --manifest-path src/agent-doc/Cargo.toml` passed.
-- `cargo fmt --manifest-path src/agent-doc/Cargo.toml` and `git -C src/agent-doc diff --check` passed.
-- `make check` in `src/agent-doc` passed: clippy, 2245 default tests, integration tests, and deterministic closeout simulation.
-- `make install` passed; `agent-doc --version` reports `agent-doc 0.33.16`.
-- Latest upstream CI run `26257411546` was green, including `Run make tmux-ci`.
-- Local `make tmux-ci` passed: 228 live tmux tests.
-
-Commit / push:
-- `src/agent-doc`: `43cbb79c` (`fix: fail closed on duplicate prompt markdown residue`) pushed to `origin/20260422/codex-agent-backend`.
-- Root repo: `74a0f7c82` (`agent-doc: fail closed on duplicate prompt residue`) pushed to `origin/main`.
-
-I left unrelated dirty files in the root workspace untouched; only the `src/agent-doc` gitlink was committed in the root repo.
-<!-- agent:boundary:fb1929e4 -->
+<!-- agent:boundary:85c32500 -->
 <!-- /agent:exchange -->
 ###
 <!--

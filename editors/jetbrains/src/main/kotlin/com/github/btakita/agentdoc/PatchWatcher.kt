@@ -387,7 +387,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                         }
                     val result = if (preserveHead) {
                         NativePatching.repositionBoundaryToEndPreserveHead(sourceContent, boundaryId)
-                            ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId)
+                            ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId, preserveHead = true)
                     } else {
                         NativePatching.repositionBoundaryToEnd(sourceContent, boundaryId)
                             ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId)
@@ -662,9 +662,15 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         // Reposition boundary to end of exchange if requested
         if (patch.repositionBoundary) {
-            result = NativePatching.repositionBoundaryToEnd(result, patch.repositionBoundaryId)
-                ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId)
-                ?: result
+            result = if (patch.preserveHead) {
+                NativePatching.repositionBoundaryToEndPreserveHead(result, patch.repositionBoundaryId)
+                    ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId, preserveHead = true)
+                    ?: result
+            } else {
+                NativePatching.repositionBoundaryToEnd(result, patch.repositionBoundaryId)
+                    ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId)
+                    ?: result
+            }
         }
 
         // Normalize after patches and boundary reposition so prompts typed after
@@ -775,9 +781,15 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
 
             if (patch.repositionBoundary) {
-                result = NativePatching.repositionBoundaryToEnd(result, patch.repositionBoundaryId)
-                    ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId)
-                    ?: result
+                result = if (patch.preserveHead) {
+                    NativePatching.repositionBoundaryToEndPreserveHead(result, patch.repositionBoundaryId)
+                        ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId, preserveHead = true)
+                        ?: result
+                } else {
+                    NativePatching.repositionBoundaryToEnd(result, patch.repositionBoundaryId)
+                        ?: repositionBoundaryToEnd(result, "exchange", patch.repositionBoundaryId)
+                        ?: result
+                }
             }
 
             // Normalize after patches and boundary reposition so prompts typed
@@ -1130,8 +1142,12 @@ class PatchWatcher(private val project: Project) : Disposable {
         }, VCS_REFRESH_DEBOUNCE_MS)
     }
 
-    private fun repositionBoundaryToEnd(doc: String, component: String, boundaryId: String? = null) =
-        repositionBoundaryToEndUtil(doc, component, boundaryId)
+    private fun repositionBoundaryToEnd(
+        doc: String,
+        component: String,
+        boundaryId: String? = null,
+        preserveHead: Boolean = false,
+    ) = repositionBoundaryToEndUtil(doc, component, boundaryId, preserveHead)
 
     override fun dispose() {
         running = false
@@ -1207,6 +1223,8 @@ data class IpcPatch(
     val fullContent: String?,
     val repositionBoundary: Boolean = false,
     val repositionBoundaryId: String? = null,
+    /** Preserve transient `(HEAD)` response markers during post-commit editor cleanup. */
+    val preserveHead: Boolean = false,
     /** Lines whose plain text should be prefixed with `❯ ` in the exchange component. */
     val normalizePrefixLines: List<String> = emptyList(),
     /** UUID identifying this patch — used for ack-content sidecar and claimed-patches sentinel. */
@@ -1273,7 +1291,12 @@ internal fun findCodeBlockRangesUtil(doc: String): List<Pair<Int, Int>> {
     return ranges
 }
 
-internal fun repositionBoundaryToEndUtil(doc: String, component: String, boundaryId: String? = null): String? {
+internal fun repositionBoundaryToEndUtil(
+    doc: String,
+    component: String,
+    boundaryId: String? = null,
+    preserveHead: Boolean = false,
+): String? {
     val openPattern = Regex("""<!-- agent:${Regex.escape(component)}(\s[^>]*)? -->""")
     val closeTag = "<!-- /agent:$component -->"
     val boundaryPattern = Regex("""<!-- agent:boundary:([a-z0-9][a-z0-9:-]*) -->""")
@@ -1310,7 +1333,8 @@ internal fun repositionBoundaryToEndUtil(doc: String, component: String, boundar
         val trimmed = line.trim()
         !(trimmed.startsWith("<!-- agent:boundary:") && trimmed.endsWith(" -->"))
     }
-    val cleanContent = stripTransientHeadMarkers(filteredLines.joinToString("\n"))
+    val filteredContent = filteredLines.joinToString("\n")
+    val cleanContent = if (preserveHead) filteredContent else stripTransientHeadMarkers(filteredContent)
 
     val newBoundaryId = boundaryId ?: java.util.UUID.randomUUID().toString().substring(0, 8)
     val newBoundary = "<!-- agent:boundary:$newBoundaryId -->"
@@ -1595,6 +1619,7 @@ fun parsePatchJson(json: String): IpcPatch? {
 
         val repositionBoundary = root.get("reposition_boundary")?.asBoolean ?: false
         val repositionBoundaryId = root.get("reposition_boundary_id")?.asString
+        val preserveHead = root.get("preserve_head")?.asBoolean ?: false
         val normalizePrefixLines = root.getAsJsonArray("normalize_prefix_lines")
             ?.mapNotNull { it.asString } ?: emptyList()
         val patchId = root.get("patch_id")?.asString
@@ -1608,6 +1633,7 @@ fun parsePatchJson(json: String): IpcPatch? {
             fullContent,
             repositionBoundary,
             repositionBoundaryId,
+            preserveHead,
             normalizePrefixLines,
             patchId,
             expectedContentHash,

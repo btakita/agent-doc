@@ -243,6 +243,47 @@ User prompt.
     }
 
     @Test
+    fun `preserve-head reposition keeps HEAD markers for editor-visible cleanup`() {
+        val doc = """
+<!-- agent:exchange patch=append -->
+### Re: topic — opus-4-6 (HEAD)
+Response content.
+<!-- agent:boundary:aaa11111 -->
+User prompt.
+<!-- /agent:exchange -->
+""".trimStart()
+
+        val result = repositionBoundaryToEndUtil(doc, "exchange", "committed-id", preserveHead = true)
+
+        assertNotNull(result)
+        assertTrue(result!!.contains("### Re: topic — opus-4-6 (HEAD)\n"))
+        assertTrue(result.contains("User prompt.\n<!-- agent:boundary:committed-id -->"))
+        assertFalse(result.contains("aaa11111"))
+    }
+
+    @Test
+    fun `parsePatchJson accepts preserve-head file IPC reposition patches`() {
+        val json = """
+            {
+              "file": "/tmp/doc.md",
+              "patches": [],
+              "unmatched": "",
+              "patch_id": "patch-1",
+              "reposition_boundary": true,
+              "reposition_boundary_id": "committed-id",
+              "preserve_head": true
+            }
+        """.trimIndent()
+
+        val patch = requireNotNull(parsePatchJson(json))
+
+        assertTrue(patch.repositionBoundary)
+        assertTrue(patch.preserveHead)
+        assertEquals("committed-id", patch.repositionBoundaryId)
+        assertTrue(patch.patches.isEmpty())
+    }
+
+    @Test
     fun `annotates newly patched response headings against baseline`() {
         val baseline = """
 <!-- agent:exchange patch=append -->

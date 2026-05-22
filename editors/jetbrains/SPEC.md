@@ -66,6 +66,7 @@ Two strategies for detecting the file's position in the editor split:
 ### Patch Application Safety
 
 - JetBrains defers socket and file-watch patch application until the target markdown document has been idle long enough for the typing debounce. If the bounded wait times out, the plugin logs the timeout, does not mutate the document, and retries file-watch patches after another debounce window. Socket patches fail closed so the CLI can retry or fall back through the binary-owned closeout path.
+- JetBrains file-watch IPC must also accept reposition-only patches emitted by commit cleanup (`patches: []`, `reposition_boundary: true`, `preserve_head: true`). These patches are applied through `Document.setText` / VFS APIs, reuse the committed boundary id when provided, and preserve visible ` (HEAD)` response markers so closeout cleanup does not trigger IDE file-cache conflict dialogs.
 - `Run Agent Doc` waits for the active markdown document to settle before save/route. If the typing debounce times out, it logs the timeout and does not save or dispatch that click.
 
 ### Session Operator Actions

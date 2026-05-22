@@ -2723,7 +2723,7 @@ pub fn resolve_ipc_project_root_pub(canonical: &Path) -> std::path::PathBuf {
 ///
 /// Searches for `<!-- agent:boundary:UUID -->` inside the component's content,
 /// skipping matches inside fenced code blocks and inline code spans.
-fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
+pub(crate) fn find_boundary_id(doc: &str, component_name: &str) -> Option<String> {
     let components = component::parse(doc).ok()?;
     let comp = components.iter().find(|c| c.name == component_name)?;
     let content = &doc[comp.open_end..comp.close_start];
@@ -6615,6 +6615,13 @@ pub struct IpcResult {
     pub skipped_committed_cycle: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileIpcRepositionResult {
+    Queued,
+    DeferredExistingPatch,
+    Unavailable,
+}
+
 /// Remove leftover fallback patch files for a document after closeout commits.
 /// Prevents late file-watcher or plugin recovery from re-applying a stale patch
 /// to an already-committed document.
@@ -6630,6 +6637,106 @@ fn cycle_already_committed(file: &Path) -> Option<String> {
 
 fn write_claimed_patch_sentinel(project_root: &Path, patch_id: &str) {
     crate::flow::closeout::write_claimed_patch_sentinel(project_root, patch_id);
+}
+
+fn existing_patch_is_reposition_only(payload: &serde_json::Value) -> bool {
+    payload
+        .get("reposition_boundary")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+        && payload
+            .get("patches")
+            .and_then(|value| value.as_array())
+            .is_none_or(|patches| patches.is_empty())
+        && payload
+            .get("unmatched")
+            .and_then(|value| value.as_str())
+            .is_none_or(|unmatched| unmatched.trim().is_empty())
+        && payload
+            .get("fullContent")
+            .and_then(|value| value.as_str())
+            .is_none_or(|content| content.is_empty())
+}
+
+pub(crate) fn queue_file_ipc_reposition_boundary(
+    file: &Path,
+    boundary_id: Option<&str>,
+    normalize_prefix_lines: &[String],
+) -> Result<FileIpcRepositionResult> {
+    let canonical = file.canonicalize()?;
+    let project_root = resolve_ipc_project_root(&canonical);
+    let patches_dir = project_root.join(".agent-doc/patches");
+    if !patches_dir.exists() {
+        return Ok(FileIpcRepositionResult::Unavailable);
+    }
+
+    let hash = snapshot::doc_hash(file)?;
+    let patch_file = patches_dir.join(format!("{hash}.json"));
+    if patch_file.exists() {
+        let existing = std::fs::read_to_string(&patch_file).unwrap_or_default();
+        match serde_json::from_str::<serde_json::Value>(&existing) {
+            Ok(payload) if existing_patch_is_reposition_only(&payload) => {}
+            Ok(_) => {
+                crate::ops_log::log_op(
+                    file,
+                    &format!(
+                        "file_ipc_reposition_deferred_existing_patch file={} patch_file={}",
+                        file.display(),
+                        patch_file.display()
+                    ),
+                );
+                return Ok(FileIpcRepositionResult::DeferredExistingPatch);
+            }
+            Err(e) => {
+                eprintln!(
+                    "[commit] replacing unreadable file IPC reposition patch {}: {}",
+                    patch_file.display(),
+                    e
+                );
+            }
+        }
+    }
+
+    let patch_id = uuid::Uuid::new_v4().to_string();
+    let mut payload = serde_json::json!({
+        "file": canonical.to_string_lossy(),
+        "patches": [],
+        "unmatched": "",
+        "baseline": "",
+        "patch_id": patch_id,
+        "reposition_boundary": true,
+        "preserve_head": true,
+    });
+    if let Some(boundary_id) = boundary_id {
+        payload["reposition_boundary_id"] = serde_json::Value::String(boundary_id.to_string());
+    }
+    if !normalize_prefix_lines.is_empty() {
+        payload["normalize_prefix_lines"] = serde_json::Value::Array(
+            normalize_prefix_lines
+                .iter()
+                .map(|line| serde_json::Value::String(line.clone()))
+                .collect(),
+        );
+    }
+
+    atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "file_ipc_reposition_queued file={} patch_file={} patch_id={}",
+            file.display(),
+            patch_file.display(),
+            payload
+                .get("patch_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+        ),
+    );
+    eprintln!(
+        "[commit] file IPC reposition patch queued: {}",
+        patch_file.display()
+    );
+    Ok(FileIpcRepositionResult::Queued)
 }
 
 /// Attempt to write via IPC (socket-first, file-based fallback).
@@ -7362,7 +7469,19 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
     };
 
     if !crate::ipc_socket::is_listener_active(&project_root) {
-        return false;
+        return match queue_file_ipc_reposition_boundary(
+            file,
+            boundary_id.as_deref(),
+            &normalize_prefix_lines,
+        ) {
+            Ok(FileIpcRepositionResult::Queued) => true,
+            Ok(FileIpcRepositionResult::DeferredExistingPatch) => true,
+            Ok(FileIpcRepositionResult::Unavailable) => false,
+            Err(e) => {
+                eprintln!("[commit] file IPC reposition queue failed (non-fatal): {e}");
+                false
+            }
+        };
     }
 
     let result = if normalize_prefix_lines.is_empty() {
@@ -7402,11 +7521,35 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         }
         Ok(false) => {
             eprintln!("[commit] IPC reposition: no ack (non-fatal)");
-            false
+            match queue_file_ipc_reposition_boundary(
+                file,
+                boundary_id.as_deref(),
+                &normalize_prefix_lines,
+            ) {
+                Ok(FileIpcRepositionResult::Queued) => true,
+                Ok(FileIpcRepositionResult::DeferredExistingPatch) => true,
+                Ok(FileIpcRepositionResult::Unavailable) => false,
+                Err(e) => {
+                    eprintln!("[commit] file IPC reposition queue failed (non-fatal): {e}");
+                    false
+                }
+            }
         }
         Err(e) => {
             eprintln!("[commit] IPC reposition failed (non-fatal): {}", e);
-            false
+            match queue_file_ipc_reposition_boundary(
+                file,
+                boundary_id.as_deref(),
+                &normalize_prefix_lines,
+            ) {
+                Ok(FileIpcRepositionResult::Queued) => true,
+                Ok(FileIpcRepositionResult::DeferredExistingPatch) => true,
+                Ok(FileIpcRepositionResult::Unavailable) => false,
+                Err(e) => {
+                    eprintln!("[commit] file IPC reposition queue failed (non-fatal): {e}");
+                    false
+                }
+            }
         }
     }
 }

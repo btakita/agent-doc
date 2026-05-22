@@ -2154,12 +2154,12 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
         eprintln!("[commit] skipping working-tree boundary reposition — IPC listener active");
     } else if let Ok(working) = std::fs::read_to_string(file) {
         let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&working);
-        let normalize_prefix_lines = crate::snapshot::load(file)
-            .ok()
-            .flatten()
+        let snapshot_after_reposition = crate::snapshot::load(file).ok().flatten();
+        let normalize_prefix_lines = snapshot_after_reposition
+            .as_deref()
             .map(|snapshot| {
                 crate::write::extract_post_commit_normalization_targets(
-                    &snapshot,
+                    snapshot,
                     &prompt_canonicalized,
                 )
             })
@@ -2175,23 +2175,63 @@ fn reposition_boundary_in_snapshot(file: &Path) -> bool {
         let repositioned =
             crate::template::reposition_boundary_to_end_preserve_head(&prefix_repaired);
         if repositioned != working {
-            match crate::write::atomic_write_pub(file, &repositioned) {
-                Ok(()) => {
-                    if normalize_prefix_lines.is_empty() {
-                        eprintln!("[commit] repositioned boundary in working tree");
-                    } else {
-                        eprintln!(
-                            "[commit] repaired {} prefix lines and repositioned boundary in working tree",
-                            normalize_prefix_lines.len()
-                        );
-                    }
+            let committed_boundary_id = snapshot_after_reposition
+                .as_deref()
+                .and_then(|snapshot| crate::write::find_boundary_id(snapshot, "exchange"));
+            let file_ipc = crate::write::queue_file_ipc_reposition_boundary(
+                file,
+                committed_boundary_id.as_deref(),
+                &normalize_prefix_lines,
+            );
+            match file_ipc {
+                Ok(crate::write::FileIpcRepositionResult::Queued) => {
+                    eprintln!("[commit] queued working-tree boundary reposition through file IPC");
                     changed = true;
+                }
+                Ok(crate::write::FileIpcRepositionResult::DeferredExistingPatch) => {
+                    eprintln!(
+                        "[commit] deferred working-tree boundary reposition to existing file IPC patch"
+                    );
+                    changed = true;
+                }
+                Ok(crate::write::FileIpcRepositionResult::Unavailable) => {
+                    match crate::write::atomic_write_pub(file, &repositioned) {
+                        Ok(()) => {
+                            if normalize_prefix_lines.is_empty() {
+                                eprintln!("[commit] repositioned boundary in working tree");
+                            } else {
+                                eprintln!(
+                                    "[commit] repaired {} prefix lines and repositioned boundary in working tree",
+                                    normalize_prefix_lines.len()
+                                );
+                            }
+                            changed = true;
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[commit] failed to reposition boundary in working tree: {}",
+                                e
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!(
-                        "[commit] failed to reposition boundary in working tree: {}",
+                        "[commit] failed to queue file IPC boundary reposition: {}",
                         e
                     );
+                    match crate::write::atomic_write_pub(file, &repositioned) {
+                        Ok(()) => {
+                            eprintln!("[commit] repositioned boundary in working tree");
+                            changed = true;
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[commit] failed to reposition boundary in working tree: {}",
+                                e
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -7283,7 +7323,7 @@ Done.
     }
 
     #[test]
-    fn reposition_updates_working_tree_when_only_patches_dir_exists() {
+    fn reposition_queues_file_ipc_when_only_patches_dir_exists() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
@@ -7328,14 +7368,14 @@ Done.
             .output()
             .unwrap();
 
-        // Stale plugin install marker without a live listener should not block
-        // the clean disk rewrite that removes transient marker churn.
+        // File-watch IPC is editor-owned even without a live socket listener.
+        // Queue a patch instead of rewriting the open markdown file directly.
         fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
 
         // Run reposition
         reposition_boundary_in_snapshot(&doc);
 
-        // Both snapshot AND working tree should be repositioned
+        // Snapshot is repositioned for commit staging.
         let snap = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(
             !snap.contains("oldid456"),
@@ -7351,19 +7391,98 @@ Done.
             "snapshot should not retain transient head markers"
         );
 
+        // Working tree stays untouched; the queued file IPC patch lets the IDE
+        // apply the visible cleanup through its Document API.
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
-            !working.contains("oldid456"),
-            "working tree should be repositioned when only patches dir exists"
+            working.contains("oldid456"),
+            "working tree should not be rewritten while file IPC is available"
         );
         assert!(
-            working.contains("### Re: test — opus-4-6 (HEAD)"),
-            "working tree must preserve (HEAD) annotations; got:\n{working}"
+            working.contains("### Re: test — opus-4-6 (HEAD)\n"),
+            "working tree must preserve the active editor buffer; got:\n{working}"
         );
         assert_eq!(
             working.matches("(HEAD)").count(),
             1,
             "working tree should retain exactly one (HEAD) marker; got:\n{working}"
+        );
+
+        let patch_file = root
+            .join(".agent-doc/patches")
+            .join(format!("{}.json", crate::snapshot::doc_hash(&doc).unwrap()));
+        assert!(
+            patch_file.exists(),
+            "reposition should be queued for file IPC"
+        );
+        let payload: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&patch_file).unwrap()).unwrap();
+        assert_eq!(payload["reposition_boundary"], true);
+        assert_eq!(payload["preserve_head"], true);
+        let queued_boundary = payload["reposition_boundary_id"].as_str().unwrap();
+        assert_ne!(queued_boundary, "oldid456");
+        assert!(
+            snap.contains(&format!("<!-- agent:boundary:{queued_boundary} -->")),
+            "queued patch should reuse committed snapshot boundary id"
+        );
+        assert_eq!(payload["patches"].as_array().unwrap().len(), 0);
+        assert_eq!(payload["unmatched"], "");
+    }
+
+    #[test]
+    fn reposition_updates_working_tree_when_no_editor_ipc_available() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@test.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc_content = "---\nagent_doc_format: template\n---\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: test — opus-4-6 (HEAD)\nResponse.\n\
+            <!-- agent:boundary:oldid789 -->\n\
+            <!-- /agent:exchange -->\n";
+        let doc = root.join("plan.md");
+        fs::write(&doc, doc_content).unwrap();
+
+        let snap_dir = root.join(".agent-doc/snapshots");
+        fs::create_dir_all(&snap_dir).unwrap();
+        crate::snapshot::save(&doc, doc_content).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "initial", "--no-verify"])
+            .output()
+            .unwrap();
+
+        reposition_boundary_in_snapshot(&doc);
+
+        let working = fs::read_to_string(&doc).unwrap();
+        assert!(
+            !working.contains("oldid789"),
+            "working tree should be rewritten when no editor IPC is available"
+        );
+        assert!(
+            working.contains("### Re: test — opus-4-6 (HEAD)"),
+            "direct fallback must preserve (HEAD) annotations; got:\n{working}"
         );
     }
 

@@ -99,6 +99,7 @@ Boundary markers (`<!-- agent:boundary:{id} -->`) are transient UI elements that
 **When to reposition:**
 - After applying an IPC patch (when `reposition_boundary` flag is set)
 - After receiving a standalone reposition IPC signal (post-commit). Post-commit signals should carry the committed `boundary_id` so the editor normalizes back to `HEAD` instead of inventing a new local diff.
+- After commit cleanup when only file-watch IPC is available. The CLI must enqueue a reposition-only JSON patch in `.agent-doc/patches/<hash>.json` with `patches: []`, `reposition_boundary: true`, `preserve_head: true`, and the committed `reposition_boundary_id` instead of rewriting the markdown file on disk. Editors must apply that patch through the native document API and preserve ` (HEAD)` markers.
 
 **Response heading visibility:** During normal IPC patch application (before post-commit cleanup), plugins must preserve transient ` (HEAD)` markers on newly added `### Re:` headings in `agent:exchange`. That marker is part of the user-visible "fresh response is still uncommitted" state; only the explicit clean reposition/commit path is allowed to strip it.
 

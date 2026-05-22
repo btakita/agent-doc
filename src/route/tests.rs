@@ -9374,6 +9374,44 @@ fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTarget {
 }
 
 #[test]
+fn authoritative_actor_state_preserves_terminal_record_over_runtime_starting() {
+    let mut blocked_record = test_actor_record("%42");
+    blocked_record.state = crate::session_actor::ActorState::Blocked;
+    blocked_record.last_transition.reason = "starting_actor_timeout".to_string();
+    let blocked_actor = AuthoritativeActorDispatchTarget {
+        record: blocked_record,
+        runtime: SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(crate::session_actor::ActorState::Starting),
+        },
+    };
+    assert_eq!(
+        blocked_actor.actor_state(),
+        crate::session_actor::ActorState::Blocked,
+        "a route-owned blocked record should remain a durable terminal gate even if stale supervisor IPC still reports starting"
+    );
+    assert!(
+        actor_blocked_by_starting_timeout(&blocked_actor),
+        "a route-owned starting timeout should be identifiable before route re-registers the stale pane"
+    );
+
+    let mut starting_record = test_actor_record("%43");
+    starting_record.state = crate::session_actor::ActorState::Starting;
+    let ready_actor = AuthoritativeActorDispatchTarget {
+        record: starting_record,
+        runtime: SupervisorRuntime {
+            health: SupervisorHealth::Healthy,
+            actor_state: Some(crate::session_actor::ActorState::Ready),
+        },
+    };
+    assert_eq!(
+        ready_actor.actor_state(),
+        crate::session_actor::ActorState::Ready,
+        "non-terminal records should still accept fresher supervisor runtime state"
+    );
+}
+
+#[test]
 fn dispatch_only_can_use_degraded_authoritative_actor_returns_true_when_registered_matches() {
     let actor = test_degraded_actor("%42");
     assert!(dispatch_only_can_use_degraded_authoritative_actor(
@@ -9682,6 +9720,44 @@ fn starting_actor_timeout_record_coalesces_same_generation_and_pane() {
         record_starting_actor_timeout(&file_path, &next_generation, "next timeout").unwrap(),
         StartingActorTimeoutLogDecision::NewTimeout
     );
+}
+
+#[test]
+fn starting_actor_timeout_record_matches_same_generation_and_pane() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+    let doc = dir.path().join("tasks/agent-doc/timeout-match.md");
+    std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+    std::fs::write(&doc, "body").unwrap();
+    let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+    let facts = AuthoritativeActorReadyFacts {
+        pane_id: "%7".to_string(),
+        generation: 3,
+        actor_state: ActorDispatchState::Starting,
+        supervisor_health: "healthy".to_string(),
+        runtime_state: "starting".to_string(),
+        prompt_ready: false,
+        last_transition_reason: "session_start".to_string(),
+        last_transition_caller: "start".to_string(),
+    };
+
+    assert!(!starting_actor_timeout_record_matches(&file_path, &facts));
+    record_starting_actor_timeout(&file_path, &facts, "first timeout").unwrap();
+    assert!(starting_actor_timeout_record_matches(&file_path, &facts));
+
+    let mut different_generation = facts.clone();
+    different_generation.generation += 1;
+    assert!(!starting_actor_timeout_record_matches(
+        &file_path,
+        &different_generation
+    ));
+
+    let mut different_pane = facts;
+    different_pane.pane_id = "%8".to_string();
+    assert!(!starting_actor_timeout_record_matches(
+        &file_path,
+        &different_pane
+    ));
 }
 
 #[test]

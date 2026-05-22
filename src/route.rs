@@ -234,8 +234,19 @@ struct AuthoritativeActorDispatchTarget {
 
 impl AuthoritativeActorDispatchTarget {
     fn actor_state(&self) -> crate::session_actor::ActorState {
+        if matches!(
+            self.record.state,
+            crate::session_actor::ActorState::Blocked | crate::session_actor::ActorState::Closed
+        ) {
+            return self.record.state;
+        }
         self.runtime.actor_state.unwrap_or(self.record.state)
     }
+}
+
+fn actor_blocked_by_starting_timeout(actor: &AuthoritativeActorDispatchTarget) -> bool {
+    actor.record.state == crate::session_actor::ActorState::Blocked
+        && actor.record.last_transition.reason == "starting_actor_timeout"
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2673,11 +2684,70 @@ fn record_starting_actor_timeout(
     Ok(StartingActorTimeoutLogDecision::NewTimeout)
 }
 
+fn load_starting_actor_timeout_record(file_path: &str) -> Option<StartingActorTimeoutRecord> {
+    let (state_path, _) = starting_actor_timeout_paths(file_path)?;
+    std::fs::read_to_string(&state_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<StartingActorTimeoutRecord>(&content).ok())
+}
+
+fn starting_actor_timeout_record_matches(
+    file_path: &str,
+    facts: &AuthoritativeActorReadyFacts,
+) -> bool {
+    load_starting_actor_timeout_record(file_path).is_some_and(|record| {
+        record.pane_id == facts.pane_id && record.generation == facts.generation
+    })
+}
+
 fn clear_starting_actor_timeout_record(file_path: &str) {
     let Some((state_path, _)) = starting_actor_timeout_paths(file_path) else {
         return;
     };
     let _ = std::fs::remove_file(state_path);
+}
+
+fn mark_starting_actor_timeout_blocked(
+    file: &Path,
+    file_path: &str,
+    session_id: &str,
+    facts: &AuthoritativeActorReadyFacts,
+) {
+    let base_dir = registry_base_dir_for_dispatch(file_path);
+    match crate::project_controller::mark_lifecycle(
+        &base_dir,
+        crate::project_controller::LifecycleRequest {
+            file: file.to_path_buf(),
+            session_id: session_id.to_string(),
+            pane_id: facts.pane_id.clone(),
+            generation: facts.generation,
+            state: crate::session_actor::ActorState::Blocked,
+            caller: "route".to_string(),
+            reason: "starting_actor_timeout".to_string(),
+        },
+    ) {
+        Ok(updated) => {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "route_authoritative_actor_starting_marked_blocked file={} session={} pane={} generation={} blocker=starting_actor_timeout",
+                    file.display(),
+                    updated.session_id,
+                    updated.pane_id,
+                    updated.generation
+                ),
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "[route] warning: failed to mark timed-out starting actor {} generation {} for {} as blocked: {}",
+                facts.pane_id,
+                facts.generation,
+                file.display(),
+                err
+            );
+        }
+    }
 }
 
 fn wait_for_authoritative_actor_ready(
@@ -2695,6 +2765,20 @@ fn wait_for_authoritative_actor_ready(
         current_generation_ready_prompt_proven(tmux, initial, harness),
     );
     let start = Instant::now();
+    if starting_actor_timeout_record_matches(file_path, &last_facts) {
+        mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
+        let file_display = file.display().to_string();
+        crate::ops_log::log_op(
+            file,
+            &starting_actor_timeout_coalesced_log_line(
+                file_display.as_str(),
+                harness.binary.as_str(),
+                start.elapsed(),
+                &last_facts,
+            ),
+        );
+        return Ok(None);
+    }
 
     while Instant::now() < deadline {
         if let Some(refreshed) = load_authoritative_actor_binding(
@@ -2756,8 +2840,10 @@ fn wait_for_authoritative_actor_ready(
         Ok(StartingActorTimeoutLogDecision::NewTimeout) => {
             crate::ops_log::log_op(file, &log_line);
             log_prompt_ready_barrier_failed(file, RoutedReopenGuardReason::StartingActorNotReady);
+            mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
         }
         Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
+            mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
             let file_display = file.display().to_string();
             crate::ops_log::log_op(
                 file,
@@ -2849,6 +2935,32 @@ fn route_via_authoritative_actor(
         actor = refreshed;
         dispatch_pane = actor.record.pane_id.clone();
         actor_state = actor.actor_state();
+    }
+
+    if actor_blocked_by_starting_timeout(&actor) {
+        if let Err(e) = tmux.select_pane(&dispatch_pane) {
+            eprintln!(
+                "[route] warning: failed to focus pane {}: {}",
+                dispatch_pane, e
+            );
+        }
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "route_authoritative_actor_starting_timeout_durable_error file={} pane={} harness={} generation={}",
+                file.display(),
+                dispatch_pane,
+                harness.binary,
+                actor.record.generation
+            ),
+        );
+        anyhow::bail!(
+            "authoritative actor generation {} for {} owns pane {} but route will not bind a new dispatch target because this generation already timed out while starting. {}",
+            actor.record.generation,
+            file.display(),
+            dispatch_pane,
+            authoritative_actor_dispatch_recovery_hint(actor_state, file)
+        );
     }
 
     if lookup_dispatch_registration(file_path, session_id)?.as_deref()

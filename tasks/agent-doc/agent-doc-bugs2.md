@@ -29,33 +29,12 @@ Reviewed next steps; top backlog item: #autodag.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-012338.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260522-020859.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #next-steps
+- Archived 1 response topic(s): auto-DAG queue work
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: auto-DAG queue work — gpt-5
-
-Implemented the auto-DAG queue scheduler work in `src/agent-doc` and committed it locally as `912dd0bb` (`feat: add auto-DAG queue scheduler`). Per the agent-doc closeout boundary, I will push the branch after this session document commit succeeds.
-
-What changed:
-- Added persisted `agent-doc-auto-dag-schedule-v1` schedules for active queue DAGs, including dependency parsing, cycle/missing-id validation, antichain batches, replay, repair, and node state.
-- Added `agent-doc orchestrate --mode dag --from-queue` and `--resume-schedule`, with schedule-backed job packets and failure gating for downstream nodes.
-- Added session-review scheduler guard input for prompt-budget, cache-resend, restart-loop, and noop-closeout log families.
-- Updated specs/docs and FlowCore coverage for the new schedule guard event.
-
-Verification:
-- `cargo check`
-- `cargo test auto_dag -- --test-threads=1`
-- `cargo test create_for_schedule_writes_dag_packet_metadata -- --test-threads=1`
-- `cargo test resolve_task_batch_collects_active_queue_for_auto_dag -- --test-threads=1`
-- `cargo test flowcore_hot_path_guard_and_proof_tokens_are_budgeted -- --test-threads=1`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- CI tmux evidence: GitHub CI run `26262547417` succeeded, including `Run make tmux-ci`.
-<!-- agent:boundary:842e54b0 -->
+<!-- agent:boundary:b6eb35bf -->
 <!-- /agent:exchange -->
 ###
 <!--

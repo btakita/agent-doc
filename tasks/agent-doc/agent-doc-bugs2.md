@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Added auto-DAG next steps; top backlog item: #autodag.
+Reviewed next steps; top backlog item: #autodag.
 <!-- /agent:status -->
 
 ## Exchange
@@ -34,7 +34,22 @@ Added auto-DAG next steps; top backlog item: #autodag.
 Compacted content:
 - Archived 1 response topic(s): JetBrains degraded first-open reroute
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:87d20f42 -->
+❯ What are #next-steps to fix bugs?
+### Re: #next-steps — gpt-5
+
+Nothing to add to the backlog right now; the current backlog is already the priority order for the bug-fix path.
+
+Top backlog item: `#autodag`.
+
+Priority order:
+
+1. `#autodag` — define the auto-DAG planner contract and fail-closed graph/conflict checks first. Without this, the later queued work has no reliable scheduler boundary.
+2. `#dagdispatch` — execute safe antichain batches only after `#autodag` can produce a trustworthy schedule.
+3. `#dagrecover` — add resume/replay state once dispatch has real node-state transitions to persist.
+4. `#daglogs` — feed session-review guardrails into scheduling after the core planner, dispatch, and recovery contracts exist.
+
+The next executable step is `do [#autodag]` under the queued `#spec-test-build-install-commit-push` preset.
+<!-- agent:boundary:f47ed920 -->
 <!-- /agent:exchange -->
 ###
 <!--

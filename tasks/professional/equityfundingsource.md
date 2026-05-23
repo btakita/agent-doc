@@ -29,94 +29,12 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-042211.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-044614.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Hours to Invoice; Lucas Hours Change the Invoice Floor; Deployment URL and Lucas Cash Timing; 1 more
+- Archived 2 response topic(s): dev portal links; dev database
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ The following links are broken in dev:
-❯ - http://localhost:4200/portal-broker
-❯ - http://localhost:4200/portal-borrower
-❯ - http://localhost:4200/login?role=investor
-
-❯ https://equityfundingsource.brian-takita.workers.dev/portal-borrower is active.
-
-❯ #spec-test-commit-push
-### Re: dev portal links — gpt-5
-
-Fixed the dev-only routing gap for the three reported URLs:
-
-- `http://localhost:4200/login?role=investor` now renders the investor login page under `bun dev`.
-- `http://localhost:4200/portal-borrower` redirects to `/login?role=borrower` instead of 404ing.
-- `http://localhost:4200/portal-broker` redirects to `/login?role=broker` instead of 404ing.
-
-Changed paths:
-
-- `src/equityfundingsource-dev/app/equityfundingsource/app/index.server.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/dev-routes.test.ts`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/README.md`
-- `src/equityfundingsource-dev/docs/deploy.md`
-
-Implementation notes:
-
-- Mounted the existing auth and portal Hono route modules in the local port 4200 SSR dev app.
-- Made auth env probing tolerate a missing Hono `c.env` for lightweight local previews.
-- Let unauthenticated protected portal roots redirect before requiring D1/auth bindings.
-- Updated the PRD, README, and deploy notes to specify the new local-dev behavior while keeping full authenticated portal data on the Worker/D1 dev path.
-
-Verification:
-
-- `bun test app/equityfundingsource/dev-routes.test.ts` -> 3 pass.
-- `bun run check` -> 23 tests pass, browser build passes, Worker build passes.
-- Local `bun dev` is running on `http://localhost:4200`.
-- `curl -I http://localhost:4200/portal-broker` -> `303 Location: /login?role=broker`.
-- `curl -I http://localhost:4200/portal-borrower` -> `303 Location: /login?role=borrower`.
-- `curl --compressed -s 'http://localhost:4200/login?role=investor'` contains `Investor Login | Equity Funding Source`.
-- Tmux CI check: the EFS repo has no `.github` directory and `rg "tmux-ci|tmux-test|tmux"` found no tmux CI leg to inspect.
-
-Commit and push:
-
-- Committed in `src/equityfundingsource-dev`: `f8d1717 fix: expose portal entrypoints in dev`.
-- Pushed `main` to `origin`.
-- Left unrelated untracked `src/equityfundingsource-dev/tmp/` untouched.
-
-Confidence: high.
-Escalation: none.
-❯ Please configure the dev database.
-### Re: dev database — gpt-5
-
-Configured the local EFS dev database and fixed the local D1 command path.
-
-Changed paths:
-
-- `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-wrangler.ts` — allows `--local` Wrangler commands to run without Cloudflare credentials, while still requiring credentials for remote commands.
-- `src/equityfundingsource-dev/docs/deploy.md` — updated local/remote D1 examples to the current unified `users` table and current `/signup`, `/login`, `/portal-investor`, `/login/google`, and `/login/access-callback` routes.
-
-Local ignored configuration/state:
-
-- Created `src/equityfundingsource-dev/.dev.vars` with a generated local `AUTH_SECRET`; file mode is `600` and the file is gitignored.
-- Applied local D1 migrations to Wrangler's Miniflare state under `src/equityfundingsource-dev/.wrangler/state/v3/d1/`; this is also gitignored.
-
-Commands and verification:
-
-- `bunx wrangler d1 migrations apply equityfundingsource --local -c ../../wrangler.toml` applied local migrations `0002` through `0020`.
-- `bun run cf:d1:migrate:local` now succeeds and reports `No migrations to apply!` without requiring `CLOUDFLARE_API_TOKEN`.
-- Local D1 verification: `SELECT COUNT(*) AS applied FROM d1_migrations` returned `19`, and the expected `users`, `notifications`, `loans`, `platform_settings`, and `funded_deals` tables exist.
-- Live Worker smoke: `bun run dev:worker` started on `http://127.0.0.1:8787`; `GET /signup?role=investor` returned `200`; a temporary investor signup wrote to local D1 and redirected to `/portal-investor`; the temporary user and notification were removed afterward. I stopped the local Worker before closeout.
-- `bun run check` passed: 23 tests, browser build, and Worker build.
-- Tmux CI sweep: this EFS repo has no `.github` directory and no `tmux-ci`, `tmux-test`, or `tmux` references to inspect.
-
-Notes:
-
-- The first `bun run cf:d1:migrate:local` attempt failed because the wrapper incorrectly required remote Cloudflare credentials for local-only D1 commands; the wrapper fix addresses that.
-- I left the pre-existing untracked `src/equityfundingsource-dev/tmp/` directory untouched.
-- The nested EFS repo changes are not committed or pushed; this prompt did not request a repo commit/push.
-
-Confidence: high.
-Escalation: none.
-<!-- agent:boundary:29199f84 -->
+<!-- agent:boundary:f966e57a -->
 <!-- /agent:exchange -->
 ###
 

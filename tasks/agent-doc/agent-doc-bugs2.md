@@ -49,7 +49,7 @@ Verification:
 Commit / push:
 - Committed the non-session audit file as `e17074f71` (`agent-doc: audit duplicate prompt repairs`).
 - The session repair write is being committed through `agent-doc write --commit`; push comes after this repair commit passes session-check.
-<!-- agent:boundary:b525c6d7 -->
+<!-- agent:boundary:27f69d30 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -76,7 +76,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#cuni] [recommended] Consolidate duplicate-prompt cleanup into one canonical repair/invariant path instead of scattered cleanup helpers for post-exchange comments, prompt lines against before-content, prefix variants, and duplicate response blocks.
 - [ ] [#cspe] [recommended] Update src/agent-doc/editors/PLUGIN-SPEC.md and src/agent-doc/editors/SPEC.md to describe the new snapshot-only repair versus editor-redelivery contract, removing stale language that says every normalization fallback is sent back through fullContent.
 - [ ] [#ctes] [recommended] Rewrite tests that encode old over-eager fullContent redelivery behavior so they assert the new typed decisions, skip-redelivery branch, narrow-repair branch, and last-resort fullContent branch.
 - [ ] [#crem] [recommended] Remove redundant workaround branches and compatibility shims made unnecessary by the typed repair decision, keeping only guards that still protect committed snapshots, active typing, or externally visible editor state.

@@ -91,6 +91,26 @@ pub(crate) fn prompt_targets_reference_preset(
     effective_prompt_references_preset(prompt_targets, &[], prompt_presets, preset_name)
 }
 
+pub(crate) fn requested_prompt_presets(
+    prompt_targets: &[String],
+    added_diff_lines: &[String],
+    prompt_presets: &IndexMap<String, String>,
+) -> Vec<String> {
+    let mut requested = Vec::new();
+    for text in prompt_targets.iter().chain(added_diff_lines.iter()) {
+        let text = without_prompt_preset_definition_lines(text, prompt_presets);
+        if text.trim().is_empty() {
+            continue;
+        }
+        for preset in referenced_presets_in_text(&text, prompt_presets) {
+            if !requested.iter().any(|existing| existing == &preset) {
+                requested.push(preset);
+            }
+        }
+    }
+    requested
+}
+
 pub(crate) fn explicit_backlog_targets(
     current_file: &Path,
     prompt_targets: &[String],
@@ -737,6 +757,46 @@ mod tests {
             &presets,
             "#agent-doc-bug",
         ));
+    }
+
+    #[test]
+    fn requested_prompt_presets_detects_inline_hashtag_request() {
+        let presets = IndexMap::from([(
+            "#next-steps".to_string(),
+            "Any follow-up items to place in the backlog?".to_string(),
+        )]);
+
+        assert_eq!(
+            requested_prompt_presets(
+                &[
+                    "Please analyze failed orders and bot traffic on monsterrodholders.com. #next-steps"
+                        .to_string()
+                ],
+                &[],
+                &presets,
+            ),
+            vec!["#next-steps".to_string()]
+        );
+    }
+
+    #[test]
+    fn requested_prompt_presets_ignores_frontmatter_definition_lines() {
+        let presets = IndexMap::from([(
+            "#next-steps".to_string(),
+            "Any follow-up items to place in the backlog?".to_string(),
+        )]);
+
+        assert!(
+            requested_prompt_presets(
+                &[],
+                &[
+                    "prompt_presets:".to_string(),
+                    "  '#next-steps': Any follow-up items to place in the backlog?".to_string(),
+                ],
+                &presets,
+            )
+            .is_empty()
+        );
     }
 
     #[test]

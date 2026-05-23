@@ -970,6 +970,87 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_at_top() {
 }
 
 #[test]
+fn finalize_next_steps_pending_adds_keep_priority_order_and_status_top() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/state/cycles")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        concat!(
+            "---\n",
+            "agent_doc_session: test-session\n",
+            "agent_doc_format: template\n",
+            "agent: codex\n",
+            "model: gpt-5\n",
+            "prompt_presets:\n",
+            "  '#next-steps': Any follow-up items to place in the backlog?\n",
+            "---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Waiting.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ #next-steps\n",
+            "<!-- agent:boundary:1234abcd -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#old1] existing task\n",
+            "<!-- /agent:backlog -->\n"
+        ),
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--pending-add",
+            "id=first first prioritized next step",
+            "--pending-add",
+            "id=second second prioritized next step",
+            "--status",
+            "Added #next-steps follow-ups. Top backlog item: #first.",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #next-steps — gpt-5\n\nCaptured follow-ups in priority order.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let backlog = content
+        .split("<!-- agent:backlog -->\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n<!-- /agent:backlog -->").next())
+        .unwrap();
+    let first = backlog
+        .find("[#first] first prioritized next step")
+        .unwrap();
+    let second = backlog
+        .find("[#second] second prioritized next step")
+        .unwrap();
+    let existing = backlog.find("[#old1] existing task").unwrap();
+    assert!(
+        first < second && second < existing,
+        "expected #next-steps pending-adds to keep priority order above existing backlog, got:\n{}",
+        backlog
+    );
+    assert!(
+        content.contains("Added #next-steps follow-ups. Top backlog item: #first."),
+        "status should print the first inserted backlog id:\n{content}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(head.contains("[#first] first prioritized next step"));
+    assert!(head.contains("Top backlog item: #first."));
+}
+
+#[test]
 fn finalize_blocks_session_closeout_when_completed_pending_lacks_pending_done() {
     let (tmp, doc) = setup_session_template_doc();
     insert_pending_item(&doc, "- [ ] [#4qja] Stream orchestrate patchback\n");

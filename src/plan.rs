@@ -1719,6 +1719,62 @@ Done.
     }
 
     #[test]
+    fn plan_classifies_embedded_next_steps_domain_prompt_as_actionable_backlog_request() {
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+
+        let baseline = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+prompt_presets:
+  '#next-steps': Any follow-up items to place in the backlog?
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+"#;
+
+        let prompt =
+            "Please analyze failed orders and bot traffic on monsterrodholders.com. #next-steps";
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{prompt}\n<!-- /agent:exchange -->"),
+        );
+        std::fs::write(&doc, current).unwrap();
+        snapshot::save(&doc, baseline).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.task_class, "prompt_response");
+        assert_eq!(plan.execution_scope, ExecutionScope::Normal);
+        assert!(
+            plan.prompt_targets
+                .iter()
+                .any(|target| target.contains(prompt)),
+            "expected embedded #next-steps domain prompt target, got {:?}",
+            plan.prompt_targets
+        );
+        assert!(
+            plan.pending_mutations
+                .iter()
+                .any(|mutation| mutation.kind == PendingMutationKind::ExpectAdd),
+            "expected ExpectAdd from embedded #next-steps preset expansion, got {:?}",
+            plan.pending_mutations
+        );
+    }
+
+    #[test]
     fn test_plan_no_false_positive_on_questions() {
         let dir = setup_project();
         let doc = dir.path().join("plan.md");

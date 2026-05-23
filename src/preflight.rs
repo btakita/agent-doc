@@ -1651,6 +1651,14 @@ pub fn run(file: &Path) -> Result<()> {
             diff::detect_prompt_preset_requests(harness_only_diff),
         );
     }
+    push_unique_strings(
+        &mut prompt_presets_requested,
+        crate::prompt_contract::requested_prompt_presets(
+            &prompt_targets,
+            &added_diff_lines,
+            &frontmatter_prompt_presets,
+        ),
+    );
     prompt_presets_requested = prompt_presets_requested
         .into_iter()
         .map(|name| {
@@ -4164,6 +4172,161 @@ mod tests {
         assert!(
             log.contains("repair_preflight_stale_prompt_cycle_abandoned file="),
             "preflight should log the abandoned empty cycle:\n{log}"
+        );
+    }
+
+    #[test]
+    fn preflight_abandoned_stale_next_steps_prompt_stays_actionable() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "agent_doc_session: test\n",
+            "prompt_presets:\n",
+            "  '#next-steps': Any follow-up items to place in the backlog?\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n",
+            "Compacted.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+        let prior =
+            crate::cycle_state::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+
+        let prompt = "Left/Right buttons still do not work with agent-doc opencode. #next-steps";
+        let live = snapshot.replace(
+            "<!-- agent:boundary:abc123 -->\n",
+            &format!("{prompt}\n<!-- agent:boundary:abc123 -->\n"),
+        );
+        std::fs::write(&doc, &live).unwrap();
+        age_cycle_state(&doc, crate::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted
+        );
+        assert_ne!(
+            state.cycle_id, prior.cycle_id,
+            "preflight should abandon the stale empty cycle and open a fresh cycle for the prompt"
+        );
+        assert!(
+            state.requires_backlog_capture,
+            "the inline #next-steps prompt should still require backlog capture"
+        );
+        let diff = crate::diff::compute(&doc).unwrap().unwrap();
+        let prompt_targets = crate::diff::classify_prompt_bearing_changes(&diff)
+            .into_iter()
+            .filter(|change| change.kind == crate::diff::PromptBearingChangeKind::PromptTarget)
+            .map(|change| change.text)
+            .collect::<Vec<_>>();
+        assert!(
+            prompt_targets.iter().any(|target| target.contains(prompt)),
+            "fresh preflight should surface the abandoned #next-steps prompt as actionable, got {prompt_targets:?}"
+        );
+
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("repair_preflight_stale_prompt_cycle_abandoned file="),
+            "preflight should log the abandoned empty cycle:\n{log}"
+        );
+        assert!(
+            log.contains("post_commit_user_follow_up file="),
+            "step-2 commit should classify the prompt-bearing drift as a follow-up, not absorb it:\n{log}"
+        );
+    }
+
+    #[test]
+    fn preflight_compact_follow_up_next_steps_is_not_swallowed_by_commit_recovery() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "agent_doc_session: test\n",
+            "prompt_presets:\n",
+            "  '#next-steps': Any follow-up items to place in the backlog?\n",
+            "---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Compacted.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n",
+            "Compacted content archived.\n",
+            "<!-- agent:boundary:compact -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Pending\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, snapshot).unwrap();
+        crate::snapshot::save(&doc, snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "compact exchange", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = snapshot.replace(
+            "<!-- agent:boundary:compact -->\n",
+            "#next-steps\n<!-- agent:boundary:compact -->\n",
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run(&doc).unwrap();
+
+        let state = crate::cycle_state::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.phase,
+            crate::cycle_state::CyclePhase::PreflightStarted,
+            "compact follow-up should open a response cycle instead of becoming no_changes"
+        );
+        assert!(
+            state.requires_backlog_capture,
+            "compact follow-up #next-steps should carry the backlog-capture contract"
+        );
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snapshot_after, snapshot,
+            "preflight must not absorb the compact follow-up prompt into the snapshot"
+        );
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(head.status.success(), "git show HEAD:session.md failed");
+        assert_eq!(
+            String::from_utf8_lossy(&head.stdout).as_ref(),
+            snapshot,
+            "step-2 commit must not silently commit the compact follow-up prompt"
         );
     }
 

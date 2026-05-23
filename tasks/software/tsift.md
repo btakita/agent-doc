@@ -50,7 +50,10 @@ Verification and release path:
 - Local: `cargo check`, focused graph tests, full `make check`, and `cargo install --path .` passed; installed `tsift --version` is `tsift 0.1.42`.
 - CI: tsift run `26345952453` passed both `clippy + test` and live Convex acceptance. The superproject `Agent Doc` run `26345957563` failed before any job steps were allocated for both `check` and `tmux-ci`, so I classified that as an external CI-start blocker rather than a red tmux regression.
 - Commits pushed: `btakita/tsift@dd4a3fc` and superproject `btakita/agent-loop@4459e752a`.
-<!-- agent:boundary:7eed62f9 -->
+### Re: benchmark queue closeout — gpt-5
+
+Queue closeout repair: the benchmark requested by this queue item was run and recorded in the immediately preceding response. No additional code or benchmark commands were run in this repair closeout; this entry exists so the auto queue can consume the benchmark prompt cleanly after the earlier pending-add retry path.
+<!-- agent:boundary:d2e99dcc -->
 <!-- /agent:exchange -->
 ###
 <!--

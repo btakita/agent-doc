@@ -4,7 +4,7 @@ agent_doc_format: template
 agent_doc_write: crdt
 agent: codex
 codex_args: -s danger-full-access
-claude_model: claude-opus-4-6
+claude_model: opus
 links:
   - ./judith-krug.md
   - ./robert-waldman.md
@@ -23,115 +23,12 @@ links:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260505-185834.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-005917.md`*
 
-Active backlog:
-- [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
-- [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
-- [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)
-- 18 more active item(s)
-❯ Please read:
-❯ - /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource/2026-05-05-lucas.md
-❯ - /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource/2026-05-05-efs-confirm.md
-❯ - /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource/2026-05-05-project-plan.md
-
-❯ The demo is at https://equityfundingsource.brian-takita.workers.dev/
-
-❯ Draft an email for judith-krug and robert-waldman to explain current progress and what I need from them.
-### Re: email draft — gpt-5
-
-Subject: Equity Funding Source portal progress and feedback needed
-
-Hi Judith and Robert,
-
-I wanted to send a quick progress update on the Equity Funding Source portal and outline the feedback I need so I can keep the next phase moving.
-
-Current progress:
-- The current deployment includes 25 live pages plus the working form backend.
-- Core public pages are in place, including Home, About Us, and role-based login/signup.
-- Phase 1 is underway with the borrower portal pages for new loan applications, loan status tracking, settings, and notifications.
-- The admin portal now includes the loan application management page.
-- The live demo is here: https://equityfundingsource.brian-takita.workers.dev/
-
-What I need from you:
-- Please review the borrower onboarding flow at `/portal-borrower/new-application` and confirm that the fields and step-by-step flow are correct.
-- Please confirm how many documents a borrower is required to submit during onboarding.
-- Please confirm whether uploaded files should be stored in Dropbox using `/loan_applications/{loan_number}/{file_name}.{file_type}`.
-- Please confirm whether this logic is correct on the borrower status side: the six-step admin review process determines Progress, and once all six steps are approved the Loan Status changes to Open.
-- Please clarify what Open, Closed, and Unassigned mean in TMO so I can align the UI behavior with the source system.
-- Please review the admin loan table and let me know whether it should stay similar to the borrower status table or whether you want clearer differentiation.
-- Please confirm whether the loan progress modal feels right, including the ability for an admin to deny a step and provide a reason.
-
-Judith, I would especially value your feedback on the overall business flow, wording, and whether the borrower/admin experience matches how you want clients and staff to move through the process.
-
-Robert, I especially need your confirmation on the TMO status meanings, required document count, and Dropbox storage path so I can lock down the technical behavior correctly.
-
-Once I have that feedback, I can move into end-to-end testing for the borrower/admin workflow and then continue into the next portal phases.
-
-Thanks,
-Brian
-❯ Create a draft email using corky. Use numbered lists.
-### Re: corky draft email — gpt-5
-
-Created the Corky draft and used numbered lists as requested.
-
-Draft file:
-- `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`
-
-What I did:
-1. Created a real Corky draft addressed to Judith and CC'd Robert.
-2. Structured the email as numbered sections for progress, review items, specific asks, and next step.
-3. Validated the draft with `corky draft validate` and it passes.
-
-It is marked `status: review` and is ready for the next step when you want to push it with Corky.
-❯ In the draft, please use real urls that can be clicked. For the Dropbox question, please ask for access to I can inspect the directory conventions:
-❯ > 1. Please review `/portal-borrower/new-application` and confirm that the fields and step-by-step flow are correct.
-❯ > 2. Please confirm how many documents a borrower is required to submit during onboarding.
-❯ > 3. Please confirm whether uploaded files should be stored in Dropbox using `/loan_applications/{loan_number}/{file_name}.{file_type}`.
-### Re: corky draft revision — gpt-5
-
-Updated the existing Corky draft as requested.
-
-1. Replaced the inline route literal with the full clickable URL for the borrower onboarding flow:
-   https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application
-2. Replaced the Dropbox storage-path confirmation question with a request for Dropbox access so I can inspect the directory conventions directly.
-3. Updated Robert's specific ask to request Dropbox access instead of confirming a presumed path.
-4. Re-validated the draft with `corky draft validate` and it passes.
-
-Draft file remains:
-- `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`
-❯ Re: Dropbox folders, I don't need access if I can have a spec re: the folder + document name conventions, what to do if a document already exists, and each type of document with sensitive data fakes.
-
-❯ Update the draft.
-### Re: corky draft Dropbox spec revision — gpt-5
-
-Updated the existing Corky draft as requested.
-
-1. Replaced the Dropbox access request with a request for a written spec covering folder conventions, document naming conventions, and duplicate-file handling.
-2. Added a separate ask for one sanitized or fake example of each sensitive document type so the upload flow can be built against realistic inputs without needing real data.
-3. Updated Robert's specific ask to match the new spec-based request.
-4. Re-validated the draft with `corky draft validate` and it passes.
-
-Draft file remains:
-- `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`
-❯ Please use corky to send the email from brian.takita@gmail.com
-Corky reached the Gmail send step and is waiting for OAuth authorization for `brian.takita@gmail.com` at `http://127.0.0.1:8484/callback`.
-
-Use the browser window that Corky opened, or open the printed Google auth URL from the terminal output, then tell me once authorization is complete. After that I can finish the send and close the `agent-doc` cycle.
-❯ authorization is complete
-### Re: corky email send — gpt-5
-
-The email has been sent via Corky from `brian.takita@gmail.com`.
-
-1. Transport: Gmail API
-2. Recipient: `judithkrug@gmail.com`
-3. Subject: `Equity Funding Source portal progress and review items`
-4. Thread ID: `19dfa8523afb9b00`
-5. Message ID: `19dfa8523afb9b00`
-
-Draft source:
-- `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`
-<!-- agent:boundary:be1bc6fb -->
+Compacted content:
+- Archived 5 response topic(s): email draft; corky draft email; corky draft revision; 2 more
+- Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
+<!-- agent:boundary:90dbe19f -->
 <!-- /agent:exchange -->
 ###
 

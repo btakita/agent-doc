@@ -84,7 +84,39 @@ Commit and push:
 
 Confidence: high.
 Escalation: none.
-<!-- agent:boundary:1e9b4f25 -->
+❯ Please configure the dev database.
+### Re: dev database — gpt-5
+
+Configured the local EFS dev database and fixed the local D1 command path.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/app/equityfundingsource/bin/cf-wrangler.ts` — allows `--local` Wrangler commands to run without Cloudflare credentials, while still requiring credentials for remote commands.
+- `src/equityfundingsource-dev/docs/deploy.md` — updated local/remote D1 examples to the current unified `users` table and current `/signup`, `/login`, `/portal-investor`, `/login/google`, and `/login/access-callback` routes.
+
+Local ignored configuration/state:
+
+- Created `src/equityfundingsource-dev/.dev.vars` with a generated local `AUTH_SECRET`; file mode is `600` and the file is gitignored.
+- Applied local D1 migrations to Wrangler's Miniflare state under `src/equityfundingsource-dev/.wrangler/state/v3/d1/`; this is also gitignored.
+
+Commands and verification:
+
+- `bunx wrangler d1 migrations apply equityfundingsource --local -c ../../wrangler.toml` applied local migrations `0002` through `0020`.
+- `bun run cf:d1:migrate:local` now succeeds and reports `No migrations to apply!` without requiring `CLOUDFLARE_API_TOKEN`.
+- Local D1 verification: `SELECT COUNT(*) AS applied FROM d1_migrations` returned `19`, and the expected `users`, `notifications`, `loans`, `platform_settings`, and `funded_deals` tables exist.
+- Live Worker smoke: `bun run dev:worker` started on `http://127.0.0.1:8787`; `GET /signup?role=investor` returned `200`; a temporary investor signup wrote to local D1 and redirected to `/portal-investor`; the temporary user and notification were removed afterward. I stopped the local Worker before closeout.
+- `bun run check` passed: 23 tests, browser build, and Worker build.
+- Tmux CI sweep: this EFS repo has no `.github` directory and no `tmux-ci`, `tmux-test`, or `tmux` references to inspect.
+
+Notes:
+
+- The first `bun run cf:d1:migrate:local` attempt failed because the wrapper incorrectly required remote Cloudflare credentials for local-only D1 commands; the wrapper fix addresses that.
+- I left the pre-existing untracked `src/equityfundingsource-dev/tmp/` directory untouched.
+- The nested EFS repo changes are not committed or pushed; this prompt did not request a repo commit/push.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:29199f84 -->
 <!-- /agent:exchange -->
 ###
 

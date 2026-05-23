@@ -4037,6 +4037,139 @@ fn dedupe_consecutive_response_blocks(content: &str, file: &Path) -> String {
     deduped
 }
 
+#[derive(Clone, Copy, Debug)]
+struct DuplicatePromptRepairOptions<'a> {
+    source: &'a str,
+    before: Option<&'a str>,
+    preserve_doc: Option<&'a str>,
+    enforce_residue_guard: bool,
+}
+
+impl<'a> DuplicatePromptRepairOptions<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            before: None,
+            preserve_doc: None,
+            enforce_residue_guard: true,
+        }
+    }
+
+    fn with_before(mut self, before: Option<&'a str>) -> Self {
+        self.before = before;
+        self
+    }
+
+    fn preserving(mut self, preserve_doc: Option<&'a str>) -> Self {
+        self.preserve_doc = preserve_doc;
+        self
+    }
+
+    fn without_residue_guard(mut self) -> Self {
+        self.enforce_residue_guard = false;
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct DuplicatePromptRepairReport {
+    response_blocks: bool,
+    answered_tail: bool,
+    post_exchange_comments: bool,
+    prompt_lines_against_before: bool,
+    live_prefix_variants: bool,
+}
+
+impl DuplicatePromptRepairReport {
+    fn changed(self) -> bool {
+        self.response_blocks
+            || self.answered_tail
+            || self.post_exchange_comments
+            || self.prompt_lines_against_before
+            || self.live_prefix_variants
+    }
+}
+
+fn repair_duplicate_prompt_artifacts(
+    content: &str,
+    file: &Path,
+    options: DuplicatePromptRepairOptions<'_>,
+) -> Result<(String, DuplicatePromptRepairReport)> {
+    let mut repaired = content.to_string();
+    let mut report = DuplicatePromptRepairReport::default();
+
+    let response_deduped = dedupe_consecutive_response_blocks(&repaired, file);
+    if response_deduped != repaired {
+        repaired = response_deduped;
+        report.response_blocks = true;
+    }
+
+    if let Some(answered_tail_deduped) =
+        crate::template::remove_duplicate_answered_exchange_prompt_tail(&repaired)
+    {
+        repaired = answered_tail_deduped;
+        report.answered_tail = true;
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "duplicate_answered_exchange_prompt_tail_removed file={} source={} before_commit=true",
+                file.display(),
+                options.source
+            ),
+        );
+    }
+
+    let (comment_deduped, comment_changed) =
+        remove_post_exchange_duplicate_prompt_comments_with_log(
+            &repaired,
+            file,
+            options.source,
+            options.preserve_doc,
+        );
+    if comment_changed {
+        repaired = comment_deduped;
+        report.post_exchange_comments = true;
+    }
+
+    if let Some(before) = options.before {
+        let (prompt_deduped, prompt_changed) =
+            dedupe_prompt_lines_against_before(before, &repaired, file);
+        if prompt_changed {
+            repaired = prompt_deduped;
+            report.prompt_lines_against_before = true;
+        }
+    }
+
+    let (prefix_deduped, prefix_changed) =
+        dedupe_live_prompt_prefix_variants_in_tail(&repaired, file);
+    if prefix_changed {
+        repaired = prefix_deduped;
+        report.live_prefix_variants = true;
+    }
+
+    if options.enforce_residue_guard {
+        enforce_no_duplicate_prompt_residue(file, &repaired, options.source)?;
+    }
+
+    if report.changed() {
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "duplicate_prompt_artifact_repair file={} source={} response_blocks={} answered_tail={} post_exchange_comments={} prompt_lines_against_before={} live_prefix_variants={} before_commit=true",
+                file.display(),
+                options.source,
+                report.response_blocks,
+                report.answered_tail,
+                report.post_exchange_comments,
+                report.prompt_lines_against_before,
+                report.live_prefix_variants
+            ),
+        );
+    }
+
+    Ok((repaired, report))
+}
+
 fn enforce_no_duplicate_prompt_residue(file: &Path, content: &str, context: &str) -> Result<()> {
     match crate::template::guard_no_duplicate_prompt_residue_outside_exchange(content) {
         Ok(()) => Ok(()),
@@ -4076,18 +4209,11 @@ pub(crate) fn normalize_template_structure_or_fail_preserving(
         }
         result
     };
-    let normalized = dedupe_consecutive_response_blocks(
+    let (normalized, _) = repair_duplicate_prompt_artifacts(
         &crate::component::strip_backlog_patch_attr(&deduped_openers),
         file,
-    );
-    let (normalized, _) = remove_post_exchange_duplicate_prompt_comments_with_log(
-        &normalized,
-        file,
-        "structure",
-        preserve_doc,
-    );
-    let (normalized, _) = dedupe_live_prompt_prefix_variants_in_tail(&normalized, file);
-    enforce_no_duplicate_prompt_residue(file, &normalized, "structure")?;
+        DuplicatePromptRepairOptions::new("structure").preserving(preserve_doc),
+    )?;
     match crate::template::guard_no_conversation_tail_outside_exchange(&normalized) {
         Ok(()) => Ok(normalized),
         Err(err)
@@ -4105,14 +4231,19 @@ pub(crate) fn normalize_template_structure_or_fail_preserving(
                     TemplateStructureGuardReason::DuplicateScaffoldDropped,
                     FlowOutcome::Completed,
                 );
-                enforce_no_duplicate_prompt_residue(file, &repaired, "duplicate-scaffold repair")?;
+                let (repaired, _) = repair_duplicate_prompt_artifacts(
+                    &repaired,
+                    file,
+                    DuplicatePromptRepairOptions::new("duplicate-scaffold repair")
+                        .preserving(preserve_doc),
+                )?;
                 crate::template::guard_no_conversation_tail_outside_exchange(&repaired).context(
                     format!(
                         "template structure guard failed for {} after duplicate-scaffold repair",
                         file.display()
                     ),
                 )?;
-                return Ok(dedupe_consecutive_response_blocks(&repaired, file));
+                return Ok(repaired);
             }
             if crate::template::repair_duplicate_exchange_close_mixed_scaffold_tail(&normalized)?
                 .is_some()
@@ -4135,14 +4266,19 @@ pub(crate) fn normalize_template_structure_or_fail_preserving(
                     TemplateStructureGuardReason::DuplicateCloseTailMoved,
                     FlowOutcome::Completed,
                 );
-                enforce_no_duplicate_prompt_residue(file, &repaired, "duplicate-close repair")?;
+                let (repaired, _) = repair_duplicate_prompt_artifacts(
+                    &repaired,
+                    file,
+                    DuplicatePromptRepairOptions::new("duplicate-close repair")
+                        .preserving(preserve_doc),
+                )?;
                 crate::template::guard_no_conversation_tail_outside_exchange(&repaired).context(
                     format!(
                         "template structure guard failed for {} after duplicate-close repair",
                         file.display()
                     ),
                 )?;
-                return Ok(dedupe_consecutive_response_blocks(&repaired, file));
+                return Ok(repaired);
             }
             Err(err)
                 .with_context(|| format!("template structure guard failed for {}", file.display()))
@@ -6651,7 +6787,16 @@ fn normalized_content_ours_fallback(
 ) -> String {
     let fallback = content_ours_merged_with_disk_edits(file, baseline, content_ours);
     let normalized = normalize_exchange_prefixes_for_targets(&fallback, normalize_prefix_lines);
-    dedupe_consecutive_response_blocks(&normalized, file)
+    repair_duplicate_prompt_artifacts(
+        &normalized,
+        file,
+        DuplicatePromptRepairOptions::new("normalization_fallback")
+            .with_before(baseline)
+            .preserving(baseline)
+            .without_residue_guard(),
+    )
+    .map(|(repaired, _)| repaired)
+    .unwrap_or(normalized)
 }
 
 fn repair_disk_from_normalization_fallback(file: &Path, fallback: &str) -> Result<()> {
@@ -7518,27 +7663,15 @@ pub(crate) fn dedupe_ipc_snapshot_content(
     content: &str,
     source: &str,
 ) -> Result<(String, bool)> {
-    let mut deduped = dedupe_consecutive_response_blocks(content, file);
-    let (comment_deduped, comment_changed) =
-        remove_post_exchange_duplicate_prompt_comments_with_log(&deduped, file, source, before);
-    if comment_changed {
-        deduped = comment_deduped;
-    }
-    if let Some(before) = before {
-        let (prompt_deduped, prompt_changed) =
-            dedupe_prompt_lines_against_before(before, &deduped, file);
-        if prompt_changed {
-            deduped = prompt_deduped;
-        }
-    }
-    let (prefix_deduped, prefix_changed) =
-        dedupe_live_prompt_prefix_variants_in_tail(&deduped, file);
-    if prefix_changed {
-        deduped = prefix_deduped;
-    }
-    enforce_no_duplicate_prompt_residue(file, &deduped, "ipc snapshot")?;
+    let (deduped, report) = repair_duplicate_prompt_artifacts(
+        content,
+        file,
+        DuplicatePromptRepairOptions::new(source)
+            .with_before(before)
+            .preserving(before),
+    )?;
     let changed = deduped != content;
-    if changed {
+    if report.changed() {
         crate::ops_log::log_op(
             file,
             &format!(
@@ -9399,8 +9532,14 @@ fn normalize_final_template_content(
     }
     normalized = normalize_template_structure_or_fail_preserving(&normalized, file, Some(base))?;
     if let Some(before) = before_current {
-        let (deduped, changed) = dedupe_prompt_lines_against_before(before, &normalized, file);
-        if changed {
+        let (deduped, report) = repair_duplicate_prompt_artifacts(
+            &normalized,
+            file,
+            DuplicatePromptRepairOptions::new("final-template")
+                .with_before(Some(before))
+                .preserving(Some(base)),
+        )?;
+        if report.changed() {
             normalized =
                 normalize_template_structure_or_fail_preserving(&deduped, file, Some(base))?;
         }
@@ -11458,6 +11597,100 @@ scratch
             "assistant response quotes must not be treated as duplicate prompt text"
         );
         assert_eq!(repaired.matches("quote this exact line").count(), 2);
+    }
+
+    #[test]
+    fn duplicate_prompt_artifact_repair_runs_canonical_pipeline() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("diag.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let prompt = "Please keep this duplicate prompt around for canonical cleanup coverage #spec-test-build-install-commit-push";
+        let prefix_short = "agent-doc on corky running opencode, the arrow key functionality works at first but once a turn starts the key log shows re ";
+        let prefix_long = "agent-doc on corky running opencode, the arrow key functionality works at first but once a turn starts the key log shows received ";
+        let before = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "{prompt}\n",
+                "<!-- agent:boundary:old -->\n",
+                "<!-- /agent:exchange -->\n"
+            ),
+            prompt = prompt
+        );
+        let after = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "{prompt}\n",
+                "<!-- agent:boundary:new -->\n",
+                "{prefix_short}\n",
+                "{prefix_long}\n",
+                "### Re: duplicate prompt cleanup — gpt-5\n\n",
+                "Done.\n",
+                "### Re: duplicate prompt cleanup — gpt-5\n\n",
+                "Done.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "{prompt}\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt,
+            prefix_short = prefix_short,
+            prefix_long = prefix_long
+        );
+        fs::write(&doc, &before).unwrap();
+
+        let (repaired, report) = repair_duplicate_prompt_artifacts(
+            &after,
+            &doc,
+            DuplicatePromptRepairOptions::new("test-canonical")
+                .with_before(Some(&before))
+                .preserving(Some(&before)),
+        )
+        .unwrap();
+
+        assert_eq!(
+            report,
+            DuplicatePromptRepairReport {
+                response_blocks: true,
+                answered_tail: false,
+                post_exchange_comments: true,
+                prompt_lines_against_before: true,
+                live_prefix_variants: true,
+            }
+        );
+        assert_eq!(
+            repaired.matches("### Re: duplicate prompt cleanup").count(),
+            1,
+            "duplicate response block should be removed:\n{repaired}"
+        );
+        assert!(repaired.contains(&format!("❯ {prompt}\n<!-- agent:boundary:new -->")));
+        assert_eq!(
+            normalized_prompt_counts(exchange_content(&repaired).unwrap())
+                .get(prompt)
+                .copied(),
+            Some(1)
+        );
+        assert!(
+            !repaired.contains(&format!("❯ {prompt}\n{prompt}")),
+            "before-content prompt duplicate should be removed:\n{repaired}"
+        );
+        assert!(!repaired.contains(prefix_short));
+        assert!(repaired.contains(prefix_long));
+        assert!(
+            repaired.contains("\n<!--\n-->\n\n<!-- agent:backlog -->"),
+            "post-exchange duplicate prompt comment should keep the comment shell:\n{repaired}"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("duplicate_prompt_artifact_repair"));
+        assert!(log.contains("source=test-canonical"));
+        assert!(log.contains("response_blocks=true"));
+        assert!(log.contains("post_exchange_comments=true"));
+        assert!(log.contains("prompt_lines_against_before=true"));
+        assert!(log.contains("live_prefix_variants=true"));
     }
 
     #[test]

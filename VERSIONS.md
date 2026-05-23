@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Duplicate-prompt repair now has one write-path pipeline.** Closeout,
+  content-ours normalization fallback, and IPC snapshot repair now share a
+  canonical duplicate-prompt artifact repair that handles adjacent duplicate
+  response blocks, answered prompt tails, post-exchange duplicate prompt
+  comments, before-content prompt-line duplicates, and live prompt prefix
+  variants in one audited pass. The aggregate
+  `duplicate_prompt_artifact_repair` log records which artifact classes changed
+  while preserving the existing narrow diagnostic markers.
+
 - **IPC repair state is now a typed decision.** Sidecar-normalization fallback
   and duplicate-response IPC dedupe now resolve a single repair decision carrying
   the repaired snapshot content, snapshot source, disk-repair reason, bad editor

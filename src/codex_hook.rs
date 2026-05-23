@@ -345,6 +345,19 @@ fn attempt_stop_closeout(
 
     let queue_synthetic_cycle =
         active_auto_queue_prompt(file)?.is_some() && open_cycle_started_from_unchanged_file(file)?;
+    let captured_response_targets_queue_head = if queue_synthetic_cycle {
+        match &payload {
+            crate::replay_guard::ReplayPayloadClassification::Replayable(response) => {
+                crate::write::response_explicitly_targets_active_queue_head(
+                    file,
+                    response.as_ref(),
+                )?
+            }
+            _ => false,
+        }
+    } else {
+        false
+    };
 
     let mut note = String::new();
     match payload {
@@ -372,7 +385,10 @@ fn attempt_stop_closeout(
     } else if repair_outcome.repaired() {
         note.push_str(" The hook repaired the pending closeout state before auto-close.");
     }
-    if queue_synthetic_cycle && (repair_outcome.replayed_response() || repair_outcome.repaired()) {
+    let queue_repair_explicitly_closes_head = queue_synthetic_cycle
+        && repair_outcome.replayed_response()
+        && captured_response_targets_queue_head;
+    if queue_repair_explicitly_closes_head {
         match crate::write::consume_queue_prompt_with_outcome(file) {
             Ok(Some(outcome)) => {
                 note.push_str(&format!(
@@ -388,6 +404,8 @@ fn attempt_stop_closeout(
                 return Ok(StopCloseAttempt::StillOpen { note });
             }
         }
+    } else if queue_synthetic_cycle && repair_outcome.repaired() {
+        note.push_str(" The hook preserved the active queue head because the repair did not explicitly close it.");
     }
 
     if !crate::git::is_in_git_repo(file) {
@@ -2025,6 +2043,48 @@ agent-doc {}\n",
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix2"));
+    }
+
+    #[test]
+    fn stop_repair_preserves_auto_queue_when_response_targets_other_prompt() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["do #fix1", "do #fix2"]);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        crate::cycle_state::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: concat!(
+                "<!-- patch:exchange -->\n",
+                "### Re: #next-steps — gpt-5\n\n",
+                "Captured unrelated follow-up response.\n",
+                "<!-- /patch:exchange -->\n",
+            )
+            .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("do #fix1"), "{reason}");
+                assert!(!reason.contains("do #fix2"), "{reason}");
+            }
+            other => panic!("expected auto-queue continuation block, got {other:?}"),
+        }
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("### Re: #next-steps — gpt-5"));
+        assert!(content.contains("<!-- agent:queue auto -->"));
+        assert!(content.contains("queue_active: true"));
+        assert!(content.contains("- do #fix1"));
+        assert!(!content.contains("- ~do #fix1~"));
+        let root = project_root_for(dir.path()).unwrap();
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix1"));
     }
 
     #[test]

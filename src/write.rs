@@ -2220,6 +2220,51 @@ fn queue_prompt_text_matches(prompt_change: &str, queue_head: &str) -> bool {
     normalize_queue_prompt_text(prompt_change) == normalize_queue_prompt_text(queue_head)
 }
 
+pub(crate) fn response_explicitly_targets_active_queue_head(
+    file: &Path,
+    response: &str,
+) -> Result<bool> {
+    let content =
+        std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
+    let Some(queue_head) = active_queue_head_text(&content)? else {
+        return Ok(false);
+    };
+    Ok(response_explicitly_targets_queue_head(
+        response,
+        &queue_head,
+    ))
+}
+
+fn response_explicitly_targets_queue_head(response: &str, queue_head: &str) -> bool {
+    response
+        .lines()
+        .filter_map(response_heading_topic)
+        .any(|topic| response_topic_matches_queue_head(topic, queue_head))
+}
+
+fn response_heading_topic(line: &str) -> Option<&str> {
+    let trimmed = line.trim().trim_start_matches('❯').trim();
+    let topic = trimmed.strip_prefix("### Re:")?.trim();
+    Some(
+        topic
+            .split_once(" — ")
+            .map(|(topic, _)| topic)
+            .unwrap_or(topic)
+            .trim(),
+    )
+}
+
+fn response_topic_matches_queue_head(topic: &str, queue_head: &str) -> bool {
+    if queue_prompt_text_matches(topic, queue_head) {
+        return true;
+    }
+    let Some(head_id) = queue_prompt_done_id(queue_head) else {
+        return false;
+    };
+    queue_prompt_done_id(topic).is_some_and(|topic_id| topic_id == head_id)
+        || normalize_done_id(topic.trim().strip_prefix("do ").unwrap_or(topic).trim()) == head_id
+}
+
 fn queue_prompt_done_id(text: &str) -> Option<String> {
     let marker = text.find('#')?;
     let tail = &text[marker + 1..];

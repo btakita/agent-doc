@@ -13,6 +13,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   a matching `--done <id>`, so unrelated already-baselined prompts such as
   `#next-steps` cannot advance `agent:queue auto`.
 
+- **Repair closeouts preserve auto queues unless the response targets the
+  head.** Missing-response materialization through `write --commit` or the Codex
+  Stop hook now leaves the active queue head and `auto` attribute intact unless
+  the closeout carries explicit head proof, such as a matching `--done <id>` or
+  a `### Re:` topic for the current queue item.
+
 - **Codex child process launch retries transient executable-busy errors.**
   The Codex/OpenCode backend now retries child process spawn when Linux returns
   `ETXTBSY` for a just-written executable. This hardens the streaming resume

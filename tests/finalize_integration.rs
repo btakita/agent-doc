@@ -23,6 +23,10 @@ fn session_stream_doc_content() -> String {
     "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
 }
 
+fn session_stream_auto_queue_doc_content() -> String {
+    "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ #next-steps\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+}
+
 fn setup_template_doc() -> (TempDir, PathBuf) {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
@@ -527,6 +531,58 @@ fn write_commit_empty_stdin_adopts_visible_agent_owned_partial_patchback() {
         .args(["session-check", doc.to_str().unwrap()])
         .assert()
         .success();
+}
+
+#[test]
+fn write_commit_empty_stdin_repair_preserves_active_auto_queue_without_done() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let original = session_stream_auto_queue_doc_content();
+    fs::write(&doc, &original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", doc.to_str().unwrap(), "--stream"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #next-steps — gpt-5\nbody\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure();
+
+    let snapshot = only_snapshot_file(tmp.path());
+    fs::write(&snapshot, &original).unwrap();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin("")
+        .assert()
+        .success()
+        .stderr(predicates::str::contains(
+            "[queue] skipped consumption because the active prompt did not target the queue head",
+        ));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("### Re: #next-steps — gpt-5"),
+        "repair should materialize the visible response:\n{content}"
+    );
+    assert!(
+        content.contains("queue_active: true") && content.contains("<!-- agent:queue auto -->"),
+        "repair closeout must preserve active auto queue state:\n{content}"
+    );
+    assert!(
+        content.contains("- do #fix1") && !content.contains("- ~do #fix1~"),
+        "repair closeout must not consume the queue head without explicit done proof:\n{content}"
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("### Re: #next-steps — gpt-5") && head.contains("- do #fix1"),
+        "write --commit repair should commit response while leaving queue head open:\n{head}"
+    );
 }
 
 #[test]

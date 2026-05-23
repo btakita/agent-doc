@@ -146,3 +146,4 @@
 - 2026-05-23 [#qloop] [recommended] Wire Codex/direct agent-doc file invocations into the binary-owned auto-queue continuation loop, or explicitly re-dispatch the next queue head after finalize when queue_active and agent:queue auto remain true.
 - 2026-05-23 [#tsiftipc] [recommended] Capture the tsift.md duplicate-content corruption while typing as a named fixture and assert full-document IPC redelivery is skipped without fresh editor-buffer proof.
 - 2026-05-23 [#narrowpatch] [recommended] Replace eligible prefix-normalization fallback fullContent redeliveries with narrow normalization/reposition patches before using fullContent as a last resort.
+- 2026-05-23 [#repaircleanup] [recommended] Update editor specs/tests for snapshot-only repair versus editor-redelivery behavior and remove obsolete workaround branches after typed repair decisions land.

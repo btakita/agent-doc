@@ -28,7 +28,73 @@ links:
 Compacted content:
 - Archived 5 response topic(s): email draft; corky draft email; corky draft revision; 2 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:90dbe19f -->
+❯ Please evaluate /home/brian/work/btakita/agent-loop/src/equityfundingsource-dev/docs/current_progress.md
+
+❯ Please give me a clear progress report of what was done vs what needs to be done. What can be demoed?
+
+❯ Evaluate the hours vs the hours that I projected to judith-krug. lucas-huang is working at a $50/hr rate. I am charging judith-krug $100/hr. Should we reduce the hours. Note the added scope.
+### Re: EFS progress, demo, and hours — gpt-5
+
+I reviewed `src/equityfundingsource-dev/docs/current_progress.md`, the implementation surface, and the earlier Judith proposal notes.
+
+#### Executive read
+
+The work is no longer just a website migration. It is a first functional portal build: public home/about, auth for four roles, borrower application/document/profile flows, investor deal/funding flows, admin loan/deal/lender/user management, and TMO/Dropbox/D1 hooks. The 83 hours is within the original 63-90 hour estimate and very close to the fixed 80+ hour / $8k proposal, but the work mix shifted materially.
+
+#### Done
+
+- Public site: home/about plus brand/navigation shell.
+- Auth: signup/login for borrower, investor, broker, and admin; role routing; admin-specific auth; investor accreditation flag.
+- Borrower: dashboard, new loan application, documents, settings/profile, notifications, status pages, Dropbox-backed document handling.
+- Investor: available deals, deal detail, funding commitment, TMO `AddLoanFunding`, lender account request, My Positions.
+- Admin: loan management, status changes with TMO sync, publish/close deals, approve funding, lender request management, user management, settings/sync.
+- Local build evidence: `bun run build` and `bun run build:worker` both pass.
+
+#### Still not done / not safe to sell as complete
+
+- Broker portal is UI/demo data only. `current_progress.md` says this directly, and the implementation confirms broker data is static arrays.
+- OCR / document extraction into TMO fields is not done. The original scope still called for AI-powered OCR plus TMO field integration.
+- Google Calendar/G Suite notification integration is not done. There is app-level notification storage/API/toasts, but not the original calendar-based workflow.
+- The full Tier 0-3 document pipeline listed in this session status/pending (WAF -> Workers AI -> Claude -> Ragie) remains not built.
+- TMO integration exists in meaningful places, but demo it carefully because it depends on credentials, env, and real TMO behavior.
+- Automated test coverage is absent: `bun test` returns `No tests found`.
+
+#### What can be demoed now
+
+Demo this as a functional MVP/admin workflow, not as finished automation:
+
+1. Public home/about and role-specific login/signup.
+2. Borrower registration -> new loan application -> document upload -> borrower dashboard/status/documents/settings.
+3. Admin loan management -> status change -> publish eligible loan as deal.
+4. Investor registration -> available deals -> deal detail -> funding commitment -> pending state.
+5. Admin deal detail -> review/accept funding -> loan/deal status changes -> investor My Positions.
+6. Admin user management and lender request management.
+
+Avoid demoing broker backend, OCR extraction, G Suite/calendar notifications, Ragie/Claude document intelligence, and full production TMO reliability unless you frame them as next phase / integration in progress.
+
+#### Hours / billing
+
+Original proposal: `$8,000 flat for 80+ hours`, with `$100/hr for additional work`, and a 63-90 hour development estimate. Lucas logged 83h for 04/24-05/21.
+
+Math:
+
+- Lucas cost at `$50/hr`: `83 * 50 = $4,150`.
+- Client bill at `$100/hr`: `83 * 100 = $8,300`.
+- If capped at original flat `$8,000`: effective client rate is about `$96.39/hr`; margin over Lucas cost is `$3,850`.
+- The extra 3 hours above 80 is only `$300`.
+
+Recommendation: do not reduce the reported hours. 83h is credible because it is inside the original 63-90h estimate and the scope expanded into investor/admin deal workflows that were originally bonus scope. For client relationship reasons, I would probably invoice/cap this tranche at `$8,000` unless Judith explicitly approved hourly overage. The `$300` upside is not worth creating the impression that the estimate slipped, especially while OCR/calendar/Ragie pieces are still pending.
+
+Best framing to Judith:
+
+> Lucas logged 83 hours. That is within the original 80+ hour budget range, and we absorbed the small overage while adding the investor/admin deal-flow scope. The current demo covers the public site, borrower intake, investor deal review/funding, and admin management. OCR/document intelligence and calendar notifications remain the next phase.
+
+I added three concrete follow-ups to pending for broker backend integration, OCR/TMO field extraction, and Google Calendar/G Suite notification integration.
+
+#### Verification / proof
+
+Changed paths: no app code changes; session document only. Commands run: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, source inspection with `sed`/`rg`/`find`, `bun test`, `bun run build`, `bun run build:worker`, `git status --short`. Verification: build and worker bundle pass; `bun test` found no tests. Escalation: none. Confidence: medium-high; I did not run live Cloudflare/TMO/Dropbox end-to-end flows.
+<!-- agent:boundary:c78d7ac4 -->
 <!-- /agent:exchange -->
 ###
 
@@ -39,6 +105,9 @@ Please directly send the draft email using brian.takita@gmail.com
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
+- [ ] [#7a4d] [recommended] OCR/TMO field extraction: custom/fillable docs -> reviewed extracted fields -> TMO update/create flow
+- [ ] [#p40t] [recommended] Google Calendar/G Suite notification integration after Google admin credentials are available
 - [ ] [#dvmr] [recommended] Corky: add long mono-call mixed-speaker recovery (separate diarization confidence, tighter bad-span detection, forced re-diarize on flagged windows)
 - [ ] [#m6ch] Get Google Suite admin credentials from Robert (SMTP + Google Calendar integration)
 - [ ] [#x5rn] Convert EFS logo JPEG → transparent PNG/SVG (Robert sent JPEG)

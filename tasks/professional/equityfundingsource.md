@@ -385,7 +385,20 @@ gantt
 #### Proof
 
 Changed paths: session document only. Commands run: `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, targeted `rg`/`sed` source and document inspection, `git status --short`, and this `agent-doc finalize`. Verification: no code changes, so I did not run the app test suite this cycle; the PRD is grounded in the deployed/current-progress docs and prior session context. Escalation: none. Confidence: medium-high; live TMO, Dropbox, Google Workspace, and domain/legal states still require external confirmation.
-<!-- agent:boundary:7a35bc27 -->
+❯ Add a prds directory. Add prd into the prds directory.
+❯ #spec-test-commit-push
+### Re: EFS PRD directory — gpt-5
+
+Done. I added the EFS PRD under the new project-level `prds/` directory and added a focused Bun test so the PRD location, required sections, and Mermaid diagrams stay covered.
+
+Changed paths in `src/equityfundingsource-dev`: `README.md`, `prds/equity-funding-source-lending-portal-prd.md`, and `tests/prd.test.ts`. I also committed the parent repo gitlink update for `src/equityfundingsource-dev`.
+
+Verification: `bun run check` passed after the final edit: 16 tests, app build, and worker build. GitHub CI check: `gh workflow list --repo btakita/equityfundingsource-dev` and `gh run list --repo btakita/equityfundingsource-dev --limit 10` returned no configured workflows or runs, so there was no tmux CI leg to inspect.
+
+Commit/push: EFS repo commit `1114304` (`docs: add lending portal PRD`) was pushed to `btakita/equityfundingsource-dev` `origin/main`. Parent repo commit `d5e6a54bf` records the updated submodule pointer; per agent-doc closeout ordering, I am pushing the parent repo after this finalize completes.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:bd751a4f -->
 <!-- /agent:exchange -->
 ###
 

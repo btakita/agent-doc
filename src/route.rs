@@ -1361,20 +1361,35 @@ pub fn run_with_tmux(
             .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
-    if let Some(cleaned_content) = scrub_duplicate_prompt_comments_for_route(&updated_content)? {
-        crate::write::atomic_write_pub(file, &cleaned_content)?;
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "post_exchange_duplicate_prompt_comment_removed file={} source=route",
+    if let Some(cleanup) = scrub_duplicate_prompt_comments_for_route(&updated_content)? {
+        crate::write::atomic_write_pub(file, &cleanup.content)?;
+        if cleanup.removed_answered_tail {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "duplicate_answered_exchange_prompt_tail_removed file={} source=route",
+                    file.display()
+                ),
+            );
+            eprintln!(
+                "[route] removed duplicate answered prompt tail after exchange boundary in {}",
                 file.display()
-            ),
-        );
-        eprintln!(
-            "[route] scrubbed duplicate prompt text from comment after exchange in {}",
-            file.display()
-        );
-        updated_content = cleaned_content;
+            );
+        }
+        if cleanup.removed_comment {
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "post_exchange_duplicate_prompt_comment_removed file={} source=route",
+                    file.display()
+                ),
+            );
+            eprintln!(
+                "[route] scrubbed duplicate prompt text from comment after exchange in {}",
+                file.display()
+            );
+        }
+        updated_content = cleanup.content;
     }
 
     let fm = frontmatter::parse_for_file(&updated_content, file).map(|(f, _)| f)?;
@@ -1448,17 +1463,47 @@ pub fn run_with_tmux(
     }
 }
 
-fn scrub_duplicate_prompt_comments_for_route(content: &str) -> Result<Option<String>> {
+#[derive(Debug)]
+struct RouteDuplicatePromptCleanup {
+    content: String,
+    removed_answered_tail: bool,
+    removed_comment: bool,
+}
+
+fn scrub_duplicate_prompt_comments_for_route(
+    content: &str,
+) -> Result<Option<RouteDuplicatePromptCleanup>> {
     let (frontmatter, _) = frontmatter::parse(content)
         .context("failed to parse document frontmatter before route cleanup")?;
     if !frontmatter.resolve_mode().is_template() {
         return Ok(None);
     }
-    let cleaned = crate::template::remove_post_exchange_duplicate_prompt_comments(content);
-    let checked_content = cleaned.as_deref().unwrap_or(content);
-    crate::template::guard_no_duplicate_prompt_residue_outside_exchange(checked_content)
+    let mut cleaned_content = content.to_string();
+    let mut removed_answered_tail = false;
+    let mut removed_comment = false;
+    if let Some(tail_cleaned) =
+        crate::template::remove_duplicate_answered_exchange_prompt_tail(&cleaned_content)
+    {
+        cleaned_content = tail_cleaned;
+        removed_answered_tail = true;
+    }
+    if let Some(tail_cleaned) =
+        crate::template::remove_post_exchange_duplicate_prompt_comments(&cleaned_content)
+    {
+        cleaned_content = tail_cleaned;
+        removed_comment = true;
+    }
+    crate::template::guard_no_duplicate_prompt_residue_outside_exchange(&cleaned_content)
         .context("route duplicate prompt residue guard failed")?;
-    Ok(cleaned)
+    if removed_answered_tail || removed_comment {
+        Ok(Some(RouteDuplicatePromptCleanup {
+            content: cleaned_content,
+            removed_answered_tail,
+            removed_comment,
+        }))
+    } else {
+        Ok(None)
+    }
 }
 
 fn cleanup_failed_route_panes(

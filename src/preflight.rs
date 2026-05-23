@@ -347,6 +347,28 @@ fn relocate_out_of_exchange_prompt_before_diff(
     Ok((repaired != doc_content).then_some(repaired))
 }
 
+fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> Result<bool> {
+    let Some(cleaned_doc) = crate::template::remove_duplicate_answered_exchange_prompt_tail(
+        &std::fs::read_to_string(file)?,
+    ) else {
+        return Ok(false);
+    };
+
+    crate::write::atomic_write_pub(file, &cleaned_doc)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "duplicate_answered_exchange_prompt_tail_removed file={} source=preflight",
+            file.display()
+        ),
+    );
+    eprintln!(
+        "[preflight] removed duplicate answered prompt tail after exchange boundary in {}",
+        file.display()
+    );
+    Ok(true)
+}
+
 fn tracked_work_component_fingerprint(
     content: &str,
 ) -> Result<(Option<String>, Option<String>, Vec<String>)> {
@@ -1180,6 +1202,9 @@ pub fn run(file: &Path) -> Result<()> {
     }
     enforce_no_shadow_open_backlog(file)?;
     enforce_no_dropped_backlog(file)?;
+    if remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
+        recovered = true;
+    }
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
@@ -1207,6 +1232,9 @@ pub fn run(file: &Path) -> Result<()> {
             "[preflight] repaired prompt tail outside exchange in {}",
             file.display()
         );
+        recovered = true;
+    }
+    if remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
         recovered = true;
     }
     if let Some(cleaned_doc) = crate::template::remove_post_exchange_duplicate_prompt_comments(
@@ -4615,6 +4643,71 @@ mod tests {
         assert!(
             !snapshot_after.contains(exchange_prompt),
             "snapshot must not absorb the live prompt during preflight:\n{snapshot_after}"
+        );
+    }
+
+    #[test]
+    fn preflight_scrubs_duplicate_answered_prompt_tail_before_diff() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let prompt = "The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. Should we diff line by line?";
+        let snapshot = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "❯ #spec-test-build-install-commit-push\n",
+                "### Re: mixed scratch comment deletion - gpt-5\n\n",
+                "Answered already.\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n",
+                "<!--\n",
+                "Keep this scratch note.\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] keep me\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+        std::fs::write(&doc, &snapshot).unwrap();
+        snapshot::save(&doc, &snapshot).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let live = snapshot.replace(
+            "<!-- agent:boundary:head -->\n<!-- /agent:exchange -->",
+            &format!(
+                "<!-- agent:boundary:head -->\n{prompt}\n#spec-test-build-install-commit-push\n<!-- /agent:exchange -->"
+            ),
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run(&doc).unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !file_after.contains(&format!("\n{prompt}\n#spec-test-build-install-commit-push")),
+            "preflight should scrub duplicate answered prompt tails before diffing:\n{file_after}"
+        );
+        assert!(
+            file_after.contains("Keep this scratch note."),
+            "preflight cleanup must preserve unrelated scratch comments:\n{file_after}"
+        );
+        let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
+        assert!(
+            !snapshot_after.contains(&format!("\n{prompt}\n#spec-test-build-install-commit-push")),
+            "snapshot must not absorb the duplicate tail cleanup prompt"
         );
     }
 

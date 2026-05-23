@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Answered prompt tails after the exchange boundary are scrubbed before redispatch.**
+  Template normalization, preflight, and route cleanup now remove an exact raw
+  prompt tail after the latest `agent:boundary` when that prompt block already
+  has an assistant response earlier in `agent:exchange`. Preflight runs the
+  cleanup before the commit step can reposition the boundary, preventing the
+  already-answered prompt from reappearing as fresh prompt-bearing diff.
+
 - **Mixed scratch comments preserve unrelated lines during duplicate cleanup.**
   Post-exchange HTML comment cleanup now removes duplicate prompt lines from
   multiline comments without applying a fuzzy whole-comment match that can erase

@@ -968,6 +968,9 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
     while let Some(merged) = repair_duplicate_exchange_opener(&normalized)? {
         normalized = merged;
     }
+    if let Some(cleaned) = remove_duplicate_answered_exchange_prompt_tail(&normalized) {
+        normalized = cleaned;
+    }
     if let Some(cleaned) = remove_post_exchange_duplicate_prompt_comments(&normalized) {
         normalized = cleaned;
     }
@@ -1068,6 +1071,134 @@ pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<Strin
         cleaned.replace_range(start..end, &replacement);
     }
     Some(cleaned)
+}
+
+/// Remove a prompt tail after the latest exchange boundary when that tail is an
+/// exact duplicate of a prompt block already answered earlier in the exchange.
+///
+/// This covers delayed route/editor replay that re-adds the just-answered
+/// prompt after closeout. The cleanup is intentionally narrow: every
+/// non-comment tail line must match a contiguous prompt block immediately before
+/// an existing response heading.
+pub fn remove_duplicate_answered_exchange_prompt_tail(doc: &str) -> Option<String> {
+    let components = component::parse(doc).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let exchange_content = exchange.content(doc);
+    let duplicate_start = duplicate_answered_exchange_prompt_tail_start(exchange_content)?;
+
+    let mut cleaned_exchange = exchange_content[..duplicate_start].to_string();
+    if !cleaned_exchange.ends_with('\n') {
+        cleaned_exchange.push('\n');
+    }
+    Some(exchange.replace_content(doc, &cleaned_exchange))
+}
+
+fn duplicate_answered_exchange_prompt_tail_start(exchange: &str) -> Option<usize> {
+    let lines = exchange_line_spans(exchange);
+    let boundary_idx = lines
+        .iter()
+        .rposition(|(_, _, line)| line.trim().starts_with("<!-- agent:boundary:"))?;
+    let tail_start = lines
+        .get(boundary_idx)
+        .map(|(_, end, _)| *end)
+        .unwrap_or(exchange.len());
+    let tail = duplicate_exchange_tail_prompt_lines(&lines[boundary_idx + 1..])?;
+    if answered_exchange_prompt_blocks_before_boundary(&lines, boundary_idx)
+        .into_iter()
+        .any(|block| block == tail)
+    {
+        Some(tail_start)
+    } else {
+        None
+    }
+}
+
+fn exchange_line_spans(text: &str) -> Vec<(usize, usize, &str)> {
+    let mut spans = Vec::new();
+    let mut offset = 0usize;
+    for segment in text.split_inclusive('\n') {
+        let start = offset;
+        offset += segment.len();
+        spans.push((start, offset, segment));
+    }
+    if spans.is_empty() && !text.is_empty() {
+        spans.push((0, text.len(), text));
+    }
+    spans
+}
+
+fn duplicate_exchange_tail_prompt_lines(lines: &[(usize, usize, &str)]) -> Option<Vec<String>> {
+    let mut prompt_lines = Vec::new();
+    for (_, _, line) in lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("<!--") {
+            continue;
+        }
+        if is_exchange_turn_heading(trimmed) {
+            return None;
+        }
+        prompt_lines.push(normalize_duplicate_exchange_prompt_line(trimmed)?);
+    }
+    if prompt_lines.is_empty() {
+        None
+    } else {
+        Some(prompt_lines)
+    }
+}
+
+fn answered_exchange_prompt_blocks_before_boundary(
+    lines: &[(usize, usize, &str)],
+    boundary_idx: usize,
+) -> Vec<Vec<String>> {
+    let mut blocks = Vec::new();
+    for response_idx in 0..boundary_idx {
+        if !is_exchange_turn_heading(lines[response_idx].2.trim()) {
+            continue;
+        }
+        let mut block = Vec::new();
+        let mut cursor = response_idx;
+        while cursor > 0 {
+            cursor -= 1;
+            let trimmed = lines[cursor].2.trim();
+            if trimmed.is_empty() || trimmed.starts_with("<!--") {
+                if block.is_empty() {
+                    continue;
+                }
+                break;
+            }
+            if trimmed.starts_with('❯')
+                && let Some(normalized) = normalize_duplicate_exchange_prompt_line(trimmed)
+            {
+                block.push(normalized);
+                continue;
+            }
+            if block.is_empty()
+                && looks_like_prompt_comment_target(trimmed)
+                && let Some(normalized) = normalize_duplicate_exchange_prompt_line(trimmed)
+            {
+                block.push(normalized);
+                continue;
+            }
+            break;
+        }
+        if !block.is_empty() {
+            block.reverse();
+            blocks.push(block);
+        }
+    }
+    blocks
+}
+
+fn normalize_duplicate_exchange_prompt_line(line: &str) -> Option<String> {
+    let unprefixed = line.trim().strip_prefix('❯').unwrap_or(line.trim()).trim();
+    let normalized = unprefixed.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 /// Fail closed when prompt text already recorded in `agent:exchange` still
@@ -4897,6 +5028,43 @@ Existing answer.
         assert!(
             repaired.contains("<!--\n#spec-test-build-install-commit-push\n---\nLook through"),
             "the mixed comment shell and nonduplicate body lines should be preserved:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_removes_duplicate_answered_prompt_tail_after_boundary() {
+        let prompt = "The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. Should we diff line by line?";
+        let doc = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "❯ #spec-test-build-install-commit-push\n",
+                "### Re: mixed scratch comment deletion — gpt-5\n\n",
+                "Answered already.\n",
+                "<!-- agent:boundary:head -->\n",
+                "{prompt}\n",
+                "#spec-test-build-install-commit-push\n",
+                "<!-- /agent:exchange -->\n"
+            ),
+            prompt = prompt
+        );
+
+        let repaired = normalize_editor_visible_template_structure(&doc)
+            .expect("editor-visible normalization should remove duplicate answered prompt tail");
+
+        assert!(
+            repaired.contains(&format!(
+                "❯ {prompt}\n❯ #spec-test-build-install-commit-push\n### Re:"
+            )),
+            "answered prompt block must remain in exchange history:\n{repaired}"
+        );
+        assert!(
+            !repaired.contains(&format!("<!-- agent:boundary:head -->\n{prompt}")),
+            "duplicate raw prompt tail after the boundary should be removed:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("<!-- agent:boundary:head -->\n<!-- /agent:exchange -->"),
+            "boundary should stay at the exchange end after cleanup:\n{repaired}"
         );
     }
 

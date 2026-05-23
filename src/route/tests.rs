@@ -181,9 +181,10 @@ fn route_scrubs_duplicate_prompt_comment_before_dispatch() {
         prompt = prompt
     );
 
-    let cleaned = scrub_duplicate_prompt_comments_for_route(&content)
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content)
         .unwrap()
         .expect("route should canonicalize duplicate prompt scratch comments before dispatch");
+    let cleaned = cleanup.content;
 
     let duplicate_comment = format!("<!--\n{prompt}\n-->");
     assert!(
@@ -193,6 +194,43 @@ fn route_scrubs_duplicate_prompt_comment_before_dispatch() {
     assert!(
         cleaned.contains("\n<!--\n-->\n\n<!--\nKeep this unrelated scratch note hidden."),
         "route must preserve the ordinary comment shell and unrelated scratch comments:\n{cleaned}"
+    );
+}
+
+#[test]
+fn route_scrubs_duplicate_answered_prompt_tail_before_dispatch() {
+    let prompt = "The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. Should we diff line by line?";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ {prompt}\n",
+            "❯ #spec-test-build-install-commit-push\n",
+            "### Re: mixed scratch comment deletion — gpt-5\n\n",
+            "Answered already.\n",
+            "<!-- agent:boundary:head -->\n",
+            "{prompt}\n",
+            "#spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n"
+        ),
+        prompt = prompt
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content)
+        .unwrap()
+        .expect("route should canonicalize duplicate answered prompt tails before dispatch");
+    let cleaned = cleanup.content;
+
+    assert!(cleanup.removed_answered_tail);
+    assert!(
+        cleaned.contains(&format!(
+            "❯ {prompt}\n❯ #spec-test-build-install-commit-push\n### Re:"
+        )),
+        "answered prompt block must remain in exchange history:\n{cleaned}"
+    );
+    assert!(
+        !cleaned.contains(&format!("<!-- agent:boundary:head -->\n{prompt}")),
+        "route must not dispatch with duplicate raw prompt text after the boundary:\n{cleaned}"
     );
 }
 

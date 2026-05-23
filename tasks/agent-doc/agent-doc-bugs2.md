@@ -29,33 +29,12 @@ Completed #nextstale, #nextrunmiss, #nextswallow, and #nextorder2. No open backl
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-132638.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-135936.md`*
 
 Compacted content:
-- Archived 1 response topic(s): #next-steps log review
+- Archived 1 response topic(s): #next-steps prompt regressions
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: #next-steps prompt regressions — gpt-5
-
-Completed the four queued `#next-steps` regression items.
-
-Implementation:
-- `preflight.prompt_presets_requested` now uses the prompt-contract reference scan, so inline preset references like `Please analyze failed orders and bot traffic. #next-steps` are surfaced as requested presets while YAML `prompt_presets:` definition lines are ignored.
-- Added deterministic coverage for stale preflight-started `#next-steps` prompt drift, post-compact `#next-steps` follow-up prompts, embedded natural-language `#next-steps` plan classification/backlog capture, and ordered multi-item `#next-steps` backlog closeout/status behavior.
-- Updated `SPEC.md` with the inline preset request and ordered `#next-steps` backlog/status invariants.
-
-Verification:
-- `cargo test requested_prompt_presets -- --test-threads=2`
-- `cargo test next_steps -- --test-threads=2`
-- `make check`
-- `make build-release`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- Latest GitHub CI run `26324125156` on `20260422/codex-agent-backend` was successful, including `Run make tmux-ci`.
-
-Commits prepared before this document closeout:
-- `src/agent-doc`: `17f2ebd` `fix: keep inline next-steps prompts actionable`
-- parent gitlink: `6329e095d` `agent-doc: keep inline next-steps prompts actionable`
-<!-- agent:boundary:82ef6eea -->
+<!-- agent:boundary:af4bf95c -->
 <!-- /agent:exchange -->
 ###
 <!--

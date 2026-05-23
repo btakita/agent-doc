@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Prioritized next steps for separating repair and redelivery decisions. Top backlog item: #dvre.
+Added post-fix cleanup next steps after the decision-separation backlog. Top backlog item remains #dvre.
 <!-- /agent:status -->
 
 ## Exchange
@@ -158,11 +158,28 @@ Concrete next steps:
 I added those follow-up items to the backlog in priority order. No code changes were made in this cycle.
 
 Verification: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, and source inspection of the repair/redelivery call sites in `src/agent-doc/src/write.rs`.
-<!-- agent:boundary:06e1f68a -->
+❯ Are there #next-steps to clean up the many failed attempts to fix the duplicate corrupt document & the duplicate prompt issues after we "separate the decisions"? Please prioritize after the "separate the decisions" fixes.
+### Re: cleanup after repair decision split — gpt-5
+
+Yes. The top backlog item remains `#dvre`; the cleanup work should come after the decision-separation fixes because otherwise cleanup risks deleting the only evidence and guardrails around the bug.
+
+I would prioritize the cleanup sequence this way:
+
+1. First finish `#dvre`, `#rdec`, `#eprf`, `#rlog`, `#rtst`, and `#nfix` so the system has a clear repair/redelivery contract, proof, logs, and tests.
+2. Then audit the prior fixes and classify them as real invariants, fallbacks, logging, or obsolete workarounds.
+3. Consolidate the duplicate-prompt cleanup paths so there is one canonical place deciding what counts as duplicate prompt residue and what repair is legal.
+4. Update the editor specs to remove stale requirements that every normalization fallback must be pushed back via full-document `fullContent`.
+5. Rewrite tests that currently encode the old eager-redelivery behavior, keeping regression coverage but changing the expected behavior to typed decisions and proof-gated redelivery.
+6. Remove redundant workaround branches only after the new tests and logs prove the narrower behavior is stable.
+7. Finally, reduce temporary transition logging while keeping high-signal corruption diagnostics.
+
+I added those cleanup items after the existing “separate the decisions” backlog items, preserving priority order. No code changes were made in this cycle.
+
+Verification: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, and source/spec scan for the duplicate-prompt, normalization fallback, full-content, and reposition paths.
+<!-- agent:boundary:5aa8b980 -->
 <!-- /agent:exchange -->
 ###
 <!--
-Are there #next-steps to clean up the many failed attempts to fix the duplicate corrupt document & the duplicate prompt issues after we "separate the decisions"?
 ---
 html comment fix
 ---
@@ -185,6 +202,12 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 - [ ] [#rlog] [recommended] Add structured ops-log records for repair/redelivery decisions: patch_id, snap_source, repair_reason, before/current hashes, proof source, duplicate prompt count, required/observed prefix counts, and redeliver=true|false.
 - [ ] [#rtst] [recommended] Add deterministic unit and SimWorld coverage for ack-sidecar-only repair, real visible duplicate repair, sidecar normalization divergence, stale source-buffer skip, and post-commit user follow-up drift.
 - [ ] [#nfix] [recommended] Replace eligible prefix-normalization response fallback redeliveries with a narrow normalization/reposition patch before using fullContent as a last resort.
+- [ ] [#caud] [recommended] After the repair/redelivery split lands, audit the duplicate-prompt and prefix-normalization fixes added during the failed attempts and classify each as invariant, fallback, logging, or obsolete workaround.
+- [ ] [#cuni] [recommended] Consolidate duplicate-prompt cleanup into one canonical repair/invariant path instead of scattered cleanup helpers for post-exchange comments, prompt lines against before-content, prefix variants, and duplicate response blocks.
+- [ ] [#cspe] [recommended] Update src/agent-doc/editors/PLUGIN-SPEC.md and src/agent-doc/editors/SPEC.md to describe the new snapshot-only repair versus editor-redelivery contract, removing stale language that says every normalization fallback is sent back through fullContent.
+- [ ] [#ctes] [recommended] Rewrite tests that encode old over-eager fullContent redelivery behavior so they assert the new typed decisions, skip-redelivery branch, narrow-repair branch, and last-resort fullContent branch.
+- [ ] [#crem] [recommended] Remove redundant workaround branches and compatibility shims made unnecessary by the typed repair decision, keeping only guards that still protect committed snapshots, active typing, or externally visible editor state.
+- [ ] [#cobs] [recommended] Add temporary observability cleanup criteria: once the new repair/redelivery logs prove stable across local runs and tmux/CI, reduce noisy transition logs while preserving high-signal corruption diagnostics.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

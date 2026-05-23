@@ -369,6 +369,28 @@ fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> 
     Ok(true)
 }
 
+fn remove_post_exchange_duplicate_prompt_comments_for_preflight(file: &Path) -> Result<bool> {
+    let Some(cleaned_doc) = crate::template::remove_post_exchange_duplicate_prompt_comments(
+        &std::fs::read_to_string(file)?,
+    ) else {
+        return Ok(false);
+    };
+
+    crate::write::atomic_write_pub(file, &cleaned_doc)?;
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "post_exchange_duplicate_prompt_comment_removed file={} source=preflight",
+            file.display()
+        ),
+    );
+    eprintln!(
+        "[preflight] scrubbed duplicate prompt text from comment after exchange in {}",
+        file.display()
+    );
+    Ok(true)
+}
+
 fn tracked_work_component_fingerprint(
     content: &str,
 ) -> Result<(Option<String>, Option<String>, Vec<String>)> {
@@ -1205,6 +1227,9 @@ pub fn run(file: &Path) -> Result<()> {
     if remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
         recovered = true;
     }
+    if remove_post_exchange_duplicate_prompt_comments_for_preflight(file)? {
+        recovered = true;
+    }
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
@@ -1237,21 +1262,7 @@ pub fn run(file: &Path) -> Result<()> {
     if remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {
         recovered = true;
     }
-    if let Some(cleaned_doc) = crate::template::remove_post_exchange_duplicate_prompt_comments(
-        &std::fs::read_to_string(file)?,
-    ) {
-        crate::write::atomic_write_pub(file, &cleaned_doc)?;
-        crate::ops_log::log_op(
-            file,
-            &format!(
-                "post_exchange_duplicate_prompt_comment_removed file={} source=preflight",
-                file.display()
-            ),
-        );
-        eprintln!(
-            "[preflight] scrubbed duplicate prompt text from comment after exchange in {}",
-            file.display()
-        );
+    if remove_post_exchange_duplicate_prompt_comments_for_preflight(file)? {
         recovered = true;
     }
 

@@ -1319,15 +1319,12 @@ fn exchange_prompt_comment_targets(exchange: &str) -> Vec<String> {
             in_response_block = true;
             continue;
         }
+        if in_response_block {
+            continue;
+        }
         let Some(normalized) = normalize_prompt_comment_text(trimmed) else {
             continue;
         };
-        if in_response_block && !looks_like_prompt_comment_target(trimmed) {
-            continue;
-        }
-        if in_response_block {
-            in_response_block = false;
-        }
         if seen.insert(normalized.clone()) {
             targets.push(normalized);
         }
@@ -5028,6 +5025,76 @@ Existing answer.
         assert!(
             repaired.contains("<!--\n#spec-test-build-install-commit-push\n---\nLook through"),
             "the mixed comment shell and nonduplicate body lines should be preserved:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_editor_visible_template_structure_preserves_scratch_comment_after_compact_summary()
+    {
+        let prompt = "The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?";
+        let doc = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "Compacted content:\n",
+                "- Trailing prompt/context: {prompt}\n",
+                "❯ {prompt}\n",
+                "❯ #spec-test-build-install-commit-push\n",
+                "### Re: compact prompt duplication — gpt-5\n\n",
+                "Line-by-line diff was the right diagnostic.\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n",
+                "###\n",
+                "<!--\n",
+                "Look through the Claude + Codex + agent-doc session logs\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+
+        let repaired = normalize_editor_visible_template_structure(&doc)
+            .expect("editor-visible normalization should preserve unrelated scratch comments");
+
+        assert!(
+            repaired.contains("Look through the Claude + Codex + agent-doc session logs"),
+            "unrelated post-exchange scratch comment text must survive:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_editor_visible_template_structure_ignores_response_quoted_scratch_comment() {
+        let scratch =
+            "Look through the Claude + Codex + agent-doc session logs for #next-steps to fix bugs.";
+        let doc = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ Please inspect the latest route cleanup report. #spec-test-build-install-commit-push\n",
+                "### Re: route cleanup — gpt-5\n\n",
+                "{scratch}\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n",
+                "###\n",
+                "<!--\n",
+                "{scratch}\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            scratch = scratch
+        );
+
+        let repaired = normalize_editor_visible_template_structure(&doc)
+            .expect("response-quoted scratch comments should not be prompt residue");
+
+        assert!(
+            repaired.contains(scratch),
+            "response text must not authorize deleting matching user-owned scratch comments:\n{repaired}"
+        );
+        assert!(
+            repaired.contains(&format!("<!--\n{scratch}\n-->")),
+            "ordinary scratch comment body must stay intact:\n{repaired}"
         );
     }
 

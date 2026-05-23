@@ -198,6 +198,85 @@ fn route_scrubs_duplicate_prompt_comment_before_dispatch() {
 }
 
 #[test]
+fn route_preserves_scratch_comment_after_compact_summary_before_dispatch() {
+    let prompt = "The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted content:\n",
+            "- Trailing prompt/context: {prompt}\n",
+            "❯ {prompt}\n",
+            "❯ #spec-test-build-install-commit-push\n",
+            "### Re: compact prompt duplication — gpt-5\n\n",
+            "Line-by-line diff was the right diagnostic.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n",
+            "<!--\n",
+            "{prompt}\n",
+            "#spec-test-build-install-commit-push\n",
+            "---\n",
+            "Look through the Claude + Codex + agent-doc session logs\n",
+            "-->\n"
+        ),
+        prompt = prompt
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content)
+        .unwrap()
+        .expect("route cleanup should scrub duplicate compact prompt residue");
+    let cleaned = cleanup.content;
+
+    assert!(
+        !cleaned.contains(&format!("<!--\n{prompt}")),
+        "route cleanup should remove only the duplicate prompt line:\n{cleaned}"
+    );
+    assert!(
+        cleaned.contains("Look through the Claude + Codex + agent-doc session logs"),
+        "route cleanup must not erase unrelated post-exchange scratch comments:\n{cleaned}"
+    );
+    assert!(
+        cleaned.contains("<!--\n#spec-test-build-install-commit-push\n---\nLook through"),
+        "route cleanup must preserve command and separator scratch lines:\n{cleaned}"
+    );
+}
+
+#[test]
+fn route_preserves_scratch_comment_when_response_quotes_same_text() {
+    let scratch =
+        "Look through the Claude + Codex + agent-doc session logs for #next-steps to fix bugs.";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please inspect the latest route cleanup report. #spec-test-build-install-commit-push\n",
+            "### Re: route cleanup — gpt-5\n\n",
+            "{scratch}\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n",
+            "<!--\n",
+            "{scratch}\n",
+            "-->\n"
+        ),
+        scratch = scratch
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content).unwrap();
+    let cleaned = cleanup
+        .as_ref()
+        .map(|cleanup| cleanup.content.as_str())
+        .unwrap_or(content.as_str());
+
+    assert!(
+        cleaned.contains(&format!("<!--\n{scratch}\n-->")),
+        "route cleanup must not treat assistant response quotes as prompt residue:\n{cleaned}"
+    );
+}
+
+#[test]
 fn route_scrubs_duplicate_answered_prompt_tail_before_dispatch() {
     let prompt = "The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. Should we diff line by line?";
     let content = format!(

@@ -34,7 +34,24 @@ prompt_presets:
 Compacted content:
 - Archived 2 response topic(s): Updated EFS PRD; EFS PRD directory
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:77125c29 -->
+❯ I'm concerned that judith-krug will push back and be scared about the cost. I'm considering invoicing for less hours so lucas-huang (judith-krug and robert-waldman do not know about lucas-huang) can be paid.
+❯ What is your recommendation about the hours to invoice?
+### Re: Hours to Invoice — gpt-5
+
+I would not invoice fewer hours than were actually worked. If Judith pushes back, you want the invoice to be defensible: true hours/value, with any concession shown as a deliberate credit, not hidden undercounting.
+
+My recommendation: invoice a Phase 1 amount that is easy to say yes to, probably 20-25 hours at $100/hr ($2,000-$2,500) if that covers Lucas and preserves momentum. If the real work is materially more than that, show the full line and apply a courtesy credit:
+
+`Website recovery/build, form backend, deployment, project coordination: 32 hours @ $100 = $3,200`  
+`Launch courtesy credit: -$700`  
+`Amount due now: $2,500`
+
+That tells the truth, keeps Judith from seeing an $8K lump all at once, and avoids creating a fake record that the work took less time than it did.
+
+I would not mention Lucas. Treat him as your internal subcontractor/cost unless the client agreement specifically requires disclosure or he is client-facing. Judith and Robert do not need an explanation of your margin. They need a simple, confidence-building invoice tied to outcomes.
+
+If you think $2,500 will still trigger her, use 20 hours / $2,000 now and make the next step explicit: "This covers the first launch/recovery block. I will confirm before starting the next paid block." But I would avoid going below the amount needed to pay Lucas and keep your own cash position sane. Underbilling to manage her fear may buy one easier conversation and create a worse business pattern.
+<!-- agent:boundary:9fd3e921 -->
 <!-- /agent:exchange -->
 ###
 
@@ -45,6 +62,7 @@ Please directly send the draft email using brian.takita@gmail.com
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#s62t] [recommended] Prepare EFS Phase 1 invoice with truthful hours/value plus an explicit courtesy credit if needed; target 20-25 hours (,000-,500) only if it covers Lucas and preserves cash flow.
 - [ ] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
 - [ ] [#7a4d] [recommended] OCR/TMO field extraction: custom/fillable docs -> reviewed extracted fields -> TMO update/create flow
 - [ ] [#p40t] [recommended] Google Calendar/G Suite notification integration after Google admin credentials are available

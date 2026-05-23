@@ -21,7 +21,7 @@ queue_active: true
 
 <!-- agent:status patch=replace -->
 
-Resolved #qguard; current queued implementation work remains open.
+Resolved #qrepair; current queued implementation work remains open.
 <!-- /agent:status -->
 
 ## Exchange
@@ -68,7 +68,7 @@ Commit/push:
 - Pushed submodule commit `40aa1f50` to `origin/20260422/codex-agent-backend`.
 - Created local parent gitlink commit `f4db7e491`.
 - Did not push parent `main`; that branch already had existing unpushed commits, and the prior queue outcome said not to publish those implicitly.
-<!-- agent:boundary:f24df121 -->
+<!-- agent:boundary:f2540711 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -78,14 +78,13 @@ Commit/push:
 preset #spec-test-build-install-commit-push
 - ~do [#mxz5]~
 - ~do [#qguard]~
-- do [#qrepair]
+- ~do [#qrepair]~
 - do [#qfixture]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#qrepair] [recommended] Make response repair/write --commit queue-neutral: missing-response materialization repairs must preserve the current queue head and auto attribute unless the repair explicitly closes that queue item.
 - [ ] [#qfixture] [recommended] Add an end-to-end regression for agent:queue auto plus a non-queue #next-steps prompt and repair write, asserting the auto attribute is preserved and the next queue head is not consumed.
 <!-- /agent:backlog -->
 

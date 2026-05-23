@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 const DEFAULT_LIMIT: usize = 1000;
@@ -14,6 +14,7 @@ pub struct OpsSummaryReport {
     pub scanned_lines: usize,
     pub matched_events: usize,
     pub buckets: Vec<OpsSummaryBucket>,
+    pub bug_clusters: Vec<OpsBugCluster>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -26,6 +27,21 @@ pub struct OpsSummaryBucket {
     pub samples: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OpsBugCluster {
+    pub rank: usize,
+    pub family: String,
+    pub severity: String,
+    pub count: usize,
+    pub latest_timestamp: Option<u64>,
+    pub files: Vec<String>,
+    pub sessions: Vec<String>,
+    pub cycles: Vec<String>,
+    pub threads: Vec<String>,
+    pub examples: Vec<String>,
+    pub recommendation: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct BucketKey {
     category: String,
@@ -35,11 +51,22 @@ struct BucketKey {
 
 #[derive(Debug, Clone)]
 struct ClassifiedEvent {
+    event_name: String,
     timestamp: Option<u64>,
     category: String,
     file: Option<String>,
     session: Option<String>,
+    cycle: Option<String>,
+    thread: Option<String>,
     detail: String,
+    fields: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+struct ClusterSeed {
+    family: &'static str,
+    severity: &'static str,
+    recommendation: &'static str,
 }
 
 pub fn run_summary(project_root: Option<&Path>, limit: usize, json: bool) -> Result<()> {
@@ -76,6 +103,7 @@ pub fn summarize_ops_log(
     let lines = &all_lines[start..];
 
     let mut buckets: BTreeMap<BucketKey, OpsSummaryBucket> = BTreeMap::new();
+    let mut events = Vec::new();
     let mut matched_events = 0;
 
     for line in lines {
@@ -85,9 +113,9 @@ pub fn summarize_ops_log(
         matched_events += 1;
 
         let key = BucketKey {
-            category: event.category.to_string(),
-            file: event.file.unwrap_or_else(|| "<global>".to_string()),
-            session: event.session.unwrap_or_else(|| "-".to_string()),
+            category: event.category.clone(),
+            file: event.file.clone().unwrap_or_else(|| "<global>".to_string()),
+            session: event.session.clone().unwrap_or_else(|| "-".to_string()),
         };
         let bucket = buckets
             .entry(key.clone())
@@ -107,7 +135,8 @@ pub fn summarize_ops_log(
         if bucket.samples.len() == MAX_SAMPLES_PER_BUCKET {
             bucket.samples.remove(0);
         }
-        bucket.samples.push(event.detail);
+        bucket.samples.push(event.detail.clone());
+        events.push(event);
     }
 
     let mut buckets: Vec<OpsSummaryBucket> = buckets.into_values().collect();
@@ -124,6 +153,7 @@ pub fn summarize_ops_log(
         scanned_lines: lines.len(),
         matched_events,
         buckets,
+        bug_clusters: build_bug_clusters(&events),
     }
 }
 
@@ -157,6 +187,36 @@ fn print_human_summary(report: &OpsSummaryReport) {
             println!("    - {}", sample);
         }
     }
+
+    if !report.bug_clusters.is_empty() {
+        println!("\nbug clusters");
+        for cluster in &report.bug_clusters {
+            let latest = cluster
+                .latest_timestamp
+                .map(|ts| ts.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            println!(
+                "  #{} {} severity={} count={} latest={}",
+                cluster.rank, cluster.family, cluster.severity, cluster.count, latest
+            );
+            if !cluster.files.is_empty() {
+                println!("    files: {}", cluster.files.join(", "));
+            }
+            if !cluster.sessions.is_empty() {
+                println!("    sessions: {}", cluster.sessions.join(", "));
+            }
+            if !cluster.cycles.is_empty() {
+                println!("    cycles: {}", cluster.cycles.join(", "));
+            }
+            if !cluster.threads.is_empty() {
+                println!("    threads: {}", cluster.threads.join(", "));
+            }
+            println!("    next: {}", cluster.recommendation);
+            for sample in &cluster.examples {
+                println!("    - {}", sample);
+            }
+        }
+    }
 }
 
 fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
@@ -166,7 +226,17 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
 
     let category = match event_name {
         "flow_event" => classify_flow_event(&fields),
+        "interrupted_cycle_detected" => "closeout interrupted cycle".to_string(),
+        "late_fallback_patch_rejected" => "closeout late fallback rejected".to_string(),
+        "stale_snapshot_reset_drift_blocked" => "closeout stale snapshot reset blocked".to_string(),
+        "commit_blocked_missing_captured_response" => {
+            "closeout missing captured response".to_string()
+        }
+        "session_check_commit_boundary_recovered" => {
+            "closeout commit boundary recovered".to_string()
+        }
         "ipc_write_consumed" => "write ipc consumed".to_string(),
+        "ipc_socket_sidecar_timeout" => "write ipc socket sidecar timeout".to_string(),
         "commit_success" => "commit success".to_string(),
         "commit_noop" if field_eq(&fields, "drift_kind", "user_follow_up") => {
             "expected user follow-up noop".to_string()
@@ -192,25 +262,49 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
         "session_clear_live_busy_guard_refused" => "busy clear refused".to_string(),
         "session_clear_live_busy_guard_blocked" => "busy clear blocked".to_string(),
         "route_authoritative_actor_starting_not_ready" => "starting actor not ready".to_string(),
+        "route_starting_actor_timeout_coalesced" => "starting actor timeout coalesced".to_string(),
+        "route_cycle_start_missing"
+        | "route_cycle_start_missing_after_fresh_restart_optimistic"
+        | "route_cycle_start_missing_optimistic" => "route cycle start missing".to_string(),
         "route_dispatch_start_unproven_but_accepted" => "accepted-only route proof".to_string(),
         "route_dispatch_only_sent" if field_eq(&fields, "proof_scope", "accepted_only") => {
             "accepted-only route proof".to_string()
         }
         "route_dispatch_only_submit_unproven" => "dispatch-only not proven".to_string(),
+        "run_preflight_timeout" => "run preflight timeout".to_string(),
         "sync_latency" if field_eq(&fields, "status", "over_budget") => {
             "sync over budget".to_string()
+        }
+        "sqlite_log_counts" | "sqlite_log_count" => "sqlite log counts".to_string(),
+        "session_review_guard" => "session-review guardrail".to_string(),
+        "codex_thread_started" | "claude_jsonl_hook_marker" | "agent_doc_cycle_marker" => {
+            "cross-harness correlation marker".to_string()
+        }
+        _ if is_codex_manifest_warning(message) => "codex manifest warning storm".to_string(),
+        _ if session_review_family_for_message(message).is_some() => {
+            "session-review guardrail".to_string()
         }
         _ => return None,
     };
 
+    let detail = if category == "codex manifest warning storm" {
+        message.to_string()
+    } else {
+        render_detail(event_name, &fields)
+    };
+
     Some(ClassifiedEvent {
+        event_name: event_name.to_string(),
         timestamp,
         category,
         file: fields
             .get("file")
             .map(|file| normalize_file_for_report(file, project_root)),
-        session: fields.get("session").cloned(),
-        detail: render_detail(event_name, &fields),
+        session: extract_session(&fields),
+        cycle: extract_cycle(&fields),
+        thread: extract_thread(&fields),
+        detail,
+        fields,
     })
 }
 
@@ -294,6 +388,266 @@ fn classify_flow_event(fields: &BTreeMap<String, String>) -> String {
     }
 }
 
+fn build_bug_clusters(events: &[ClassifiedEvent]) -> Vec<OpsBugCluster> {
+    #[derive(Debug, Default)]
+    struct Accumulator {
+        count: usize,
+        latest_timestamp: Option<u64>,
+        files: BTreeSet<String>,
+        sessions: BTreeSet<String>,
+        cycles: BTreeSet<String>,
+        threads: BTreeSet<String>,
+        examples: Vec<String>,
+        severity: &'static str,
+        recommendation: &'static str,
+    }
+
+    let mut clusters: BTreeMap<&'static str, Accumulator> = BTreeMap::new();
+    for event in events {
+        let Some(seed) = cluster_seed(event) else {
+            continue;
+        };
+        let entry = clusters.entry(seed.family).or_insert_with(|| Accumulator {
+            severity: seed.severity,
+            recommendation: seed.recommendation,
+            ..Accumulator::default()
+        });
+        entry.count += 1;
+        if event.timestamp > entry.latest_timestamp {
+            entry.latest_timestamp = event.timestamp;
+        }
+        if let Some(file) = &event.file {
+            entry.files.insert(file.clone());
+        }
+        if let Some(session) = &event.session {
+            entry.sessions.insert(session.clone());
+        }
+        if let Some(cycle) = &event.cycle {
+            entry.cycles.insert(cycle.clone());
+        }
+        if let Some(thread) = &event.thread {
+            entry.threads.insert(thread.clone());
+        }
+        if entry.examples.len() == MAX_SAMPLES_PER_BUCKET {
+            entry.examples.remove(0);
+        }
+        entry.examples.push(event.detail.clone());
+    }
+
+    let mut ranked = clusters
+        .into_iter()
+        .map(|(family, cluster)| {
+            let severity_rank = severity_rank(cluster.severity);
+            (
+                severity_rank,
+                cluster.latest_timestamp,
+                OpsBugCluster {
+                    rank: 0,
+                    family: family.to_string(),
+                    severity: cluster.severity.to_string(),
+                    count: cluster.count,
+                    latest_timestamp: cluster.latest_timestamp,
+                    files: cluster.files.into_iter().collect(),
+                    sessions: cluster.sessions.into_iter().collect(),
+                    cycles: cluster.cycles.into_iter().collect(),
+                    threads: cluster.threads.into_iter().collect(),
+                    examples: cluster.examples,
+                    recommendation: cluster.recommendation.to_string(),
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.2.count.cmp(&a.2.count))
+            .then_with(|| b.1.cmp(&a.1))
+            .then_with(|| a.2.family.cmp(&b.2.family))
+    });
+    ranked
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (_, _, mut cluster))| {
+            cluster.rank = idx + 1;
+            cluster
+        })
+        .collect()
+}
+
+fn cluster_seed(event: &ClassifiedEvent) -> Option<ClusterSeed> {
+    let flow = event.fields.get("flow").map(String::as_str);
+    let reason = event.fields.get("reason").map(String::as_str);
+    let category = event.category.as_str();
+
+    if matches!(
+        event.event_name.as_str(),
+        "interrupted_cycle_detected"
+            | "late_fallback_patch_rejected"
+            | "stale_snapshot_reset_drift_blocked"
+            | "commit_blocked_missing_captured_response"
+            | "session_check_commit_boundary_recovered"
+    ) || (flow == Some("closeout")
+        && matches!(
+            reason,
+            Some(
+                "already_committed"
+                    | "session_check_interrupted"
+                    | "commit_boundary_recovered"
+                    | "snapshot_differs_from_head"
+            )
+        ))
+    {
+        return Some(ClusterSeed {
+            family: "closeout captured-response drift",
+            severity: "high",
+            recommendation: "replay through `agent-doc write --commit` or `finalize` and keep capture/snapshot/HEAD proof on the strict closeout path",
+        });
+    }
+
+    if matches!(
+        event.event_name.as_str(),
+        "route_starting_actor_timeout_coalesced"
+            | "route_cycle_start_missing"
+            | "route_cycle_start_missing_after_fresh_restart_optimistic"
+            | "route_cycle_start_missing_optimistic"
+            | "ipc_socket_sidecar_timeout"
+            | "run_preflight_timeout"
+            | "route_dispatch_only_submit_unproven"
+    ) || flow == Some("routed_reopen")
+        || category == "accepted-only route proof"
+        || category == "starting actor not ready"
+    {
+        return Some(ClusterSeed {
+            family: "route/start replay gap",
+            severity: "high",
+            recommendation: "replay the route with dispatch-start proof, starting-actor readiness evidence, and timeout diagnostics before accepting pane input as delivery",
+        });
+    }
+
+    if is_codex_manifest_warning(&event.detail) || category == "codex manifest warning storm" {
+        return Some(ClusterSeed {
+            family: "codex warning storm",
+            severity: "medium",
+            recommendation: "deduplicate external Codex plugin/skill-loader manifest noise and keep local manifest warnings visible",
+        });
+    }
+
+    if category == "sqlite log counts" {
+        return Some(ClusterSeed {
+            family: "sqlite correlation counts",
+            severity: "medium",
+            recommendation: "compare controller SQLite row counts with session-log and ops-log markers for missing projection or correlation drift",
+        });
+    }
+
+    if category == "cross-harness correlation marker" {
+        return Some(ClusterSeed {
+            family: "cross-harness correlation",
+            severity: "medium",
+            recommendation: "join Claude hook markers, Codex thread ids, agent-doc cycle ids, and ops timestamps before ranking bug clusters",
+        });
+    }
+
+    if category == "session-review guardrail"
+        || session_review_family_for_message(&event.detail).is_some()
+    {
+        return Some(ClusterSeed {
+            family: "session-review guardrail",
+            severity: "medium",
+            recommendation: "apply the guard action before scheduling: compact for budget/cache churn, restart or repair for loops, and fix fixtures for repeated noop closeouts",
+        });
+    }
+
+    if category == "anomalous drift noop" || category == "anomalous post-commit drift" {
+        return Some(ClusterSeed {
+            family: "working-tree drift after closeout",
+            severity: "medium",
+            recommendation: "separate benign user follow-up prompts from dirty working-tree drift before marking closeout complete",
+        });
+    }
+
+    None
+}
+
+fn severity_rank(severity: &str) -> usize {
+    match severity {
+        "high" => 3,
+        "medium" => 2,
+        "low" => 1,
+        _ => 0,
+    }
+}
+
+fn extract_session(fields: &BTreeMap<String, String>) -> Option<String> {
+    fields
+        .get("session")
+        .or_else(|| fields.get("session_id"))
+        .or_else(|| fields.get("agent_doc_session"))
+        .cloned()
+}
+
+fn extract_cycle(fields: &BTreeMap<String, String>) -> Option<String> {
+    fields
+        .get("cycle_id")
+        .or_else(|| fields.get("cycle"))
+        .or_else(|| fields.get("capture_id"))
+        .cloned()
+}
+
+fn extract_thread(fields: &BTreeMap<String, String>) -> Option<String> {
+    fields
+        .get("thread_id")
+        .or_else(|| fields.get("codex_thread_id"))
+        .or_else(|| fields.get("claude_session_id"))
+        .cloned()
+}
+
+fn is_codex_manifest_warning(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    (lower.contains("codex_core_plugins::manifest:")
+        || lower.contains("codex_core::plugins::manifest:")
+        || lower.contains("codex_core_skills::loader:"))
+        && (lower.contains("interface.defaultprompt")
+            || lower.contains("interface.icon_small")
+            || lower.contains("interface.icon_large")
+            || lower.contains("invalid icon")
+            || lower.contains("defaultprompt"))
+}
+
+fn session_review_family_for_message(message: &str) -> Option<&'static str> {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("prompt_budget")
+        || lower.contains("prompt budget")
+        || lower.contains("context budget")
+        || lower.contains("prompt too large")
+        || lower.contains("maximum context")
+        || lower.contains("token budget exceeded")
+    {
+        return Some("prompt_budget");
+    }
+    if lower.contains("cache_resend")
+        || lower.contains("cache resend")
+        || lower.contains("cache-resend")
+        || lower.contains("resend full context")
+    {
+        return Some("cache_resend");
+    }
+    if lower.contains("restart_loop")
+        || lower.contains("restart loop")
+        || lower.contains("startup_miss")
+        || lower.contains("fresh_restart_retry")
+    {
+        return Some("restart_loop");
+    }
+    if lower.contains("noop_closeout")
+        || lower.contains("noop closeout")
+        || lower.contains("commit_noop")
+        || lower.contains("already_current")
+    {
+        return Some("noop_closeout");
+    }
+    None
+}
+
 fn parse_log_line(line: &str) -> (Option<u64>, &str) {
     if let Some(rest) = line.strip_prefix('[')
         && let Some((ts, message)) = rest.split_once("] ")
@@ -352,6 +706,16 @@ fn render_detail(event_name: &str, fields: &BTreeMap<String, String>) -> String 
         "patches",
         "generation",
         "actor_state",
+        "cycle_id",
+        "cycle",
+        "capture_id",
+        "thread_id",
+        "session",
+        "session_id",
+        "sqlite_documents",
+        "sqlite_actor_transitions",
+        "sqlite_cycles",
+        "count",
         "flow",
         "stage",
         "outcome",
@@ -586,6 +950,90 @@ mod tests {
                         .any(|sample| sample.contains("reason=normal"))
             }),
             "{report:#?}"
+        );
+    }
+
+    #[test]
+    fn ops_summary_emits_ranked_bug_clusters_with_correlation_keys() {
+        let root = Path::new("/repo");
+        let log = "\
+[200] interrupted_cycle_detected file=/repo/tasks/a.md session=s1 cycle_id=cycle-a phase=response_captured
+[201] commit_blocked_missing_captured_response file=/repo/tasks/a.md session=s1 capture_id=cycle-a response_sha256=abc basis=head_current
+[202] stale_snapshot_reset_drift_blocked file=/repo/tasks/a.md session=s1 cycle_id=cycle-a phase=stream_write
+[203] route_starting_actor_timeout_coalesced file=/repo/tasks/b.md session=s2 pane=%2 generation=4 actor_state=starting
+[204] route_cycle_start_missing file=/repo/tasks/b.md session=s2 pane=%2 harness=codex marker=run timeout_secs=10
+[205] run_preflight_timeout file=/repo/tasks/b.md session=s2 event=direct_invocation_timeout diagnostic=preflight_started
+[206] ipc_socket_sidecar_timeout file=/repo/tasks/b.md session=s2 cycle_id=cycle-b
+[207] WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=/home/brian/.codex/.tmp/plugins/plugins/build-ios-apps/.codex-plugin/plugin.json
+[208] sqlite_log_counts file=/repo/tasks/a.md session=s1 cycle_id=cycle-a sqlite_documents=3 sqlite_actor_transitions=9 sqlite_cycles=2
+[209] session_review_guard file=/repo/tasks/c.md session=s3 family=prompt_budget count=2
+[210] codex_thread_started file=/repo/tasks/a.md session=s1 cycle_id=cycle-a thread_id=thread-7
+";
+
+        let report =
+            summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
+
+        assert_eq!(report.matched_events, 11);
+        let closeout = report
+            .bug_clusters
+            .iter()
+            .find(|cluster| cluster.family == "closeout captured-response drift")
+            .expect("closeout cluster");
+        assert_eq!(closeout.severity, "high");
+        assert_eq!(closeout.count, 3);
+        assert_eq!(closeout.files, vec!["tasks/a.md"]);
+        assert_eq!(closeout.sessions, vec!["s1"]);
+        assert!(closeout.cycles.contains(&"cycle-a".to_string()));
+
+        let route = report
+            .bug_clusters
+            .iter()
+            .find(|cluster| cluster.family == "route/start replay gap")
+            .expect("route cluster");
+        assert_eq!(route.count, 4);
+        assert_eq!(route.sessions, vec!["s2"]);
+
+        let codex = report
+            .bug_clusters
+            .iter()
+            .find(|cluster| cluster.family == "codex warning storm")
+            .expect("codex cluster");
+        assert_eq!(codex.count, 1);
+        assert!(
+            codex
+                .examples
+                .iter()
+                .any(|sample| sample.contains("codex_core_plugins::manifest"))
+        );
+
+        let sqlite = report
+            .bug_clusters
+            .iter()
+            .find(|cluster| cluster.family == "sqlite correlation counts")
+            .expect("sqlite cluster");
+        assert!(
+            sqlite
+                .examples
+                .iter()
+                .any(|sample| sample.contains("sqlite_actor_transitions=9"))
+        );
+
+        let guard = report
+            .bug_clusters
+            .iter()
+            .find(|cluster| cluster.family == "session-review guardrail")
+            .expect("session-review cluster");
+        assert_eq!(guard.files, vec!["tasks/c.md"]);
+
+        let thread_link = report
+            .bug_clusters
+            .iter()
+            .flat_map(|cluster| cluster.threads.iter())
+            .any(|thread| thread == "thread-7");
+        assert!(
+            thread_link,
+            "expected a bug cluster to retain Codex thread correlation keys: {:#?}",
+            report.bug_clusters
         );
     }
 

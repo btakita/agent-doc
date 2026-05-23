@@ -135,16 +135,34 @@ fn is_codex_marketplace_manifest_noise(line: &str) -> bool {
     (is_external_plugin_manifest && is_prompt_warning) || is_skill_icon_warning
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodexStderrNoiseReport {
+    filtered: String,
+    suppressed_marketplace_manifest_warnings: usize,
+}
+
 fn filter_codex_stderr_noise(stderr: &str) -> String {
-    let mut filtered = stderr
-        .lines()
-        .filter(|line| !is_codex_marketplace_manifest_noise(line))
-        .collect::<Vec<_>>()
-        .join("\n");
+    codex_stderr_noise_report(stderr).filtered
+}
+
+fn codex_stderr_noise_report(stderr: &str) -> CodexStderrNoiseReport {
+    let mut suppressed_marketplace_manifest_warnings = 0;
+    let mut kept = Vec::new();
+    for line in stderr.lines() {
+        if is_codex_marketplace_manifest_noise(line) {
+            suppressed_marketplace_manifest_warnings += 1;
+        } else {
+            kept.push(line);
+        }
+    }
+    let mut filtered = kept.join("\n");
     if !filtered.is_empty() && stderr.ends_with('\n') {
         filtered.push('\n');
     }
-    filtered
+    CodexStderrNoiseReport {
+        filtered,
+        suppressed_marketplace_manifest_warnings,
+    }
 }
 
 fn lower_trimmed_lines(text: &str) -> impl Iterator<Item = &str> {
@@ -2340,8 +2358,11 @@ real stderr
 ";
 
         let filtered = filter_codex_stderr_noise(stderr);
+        let report = codex_stderr_noise_report(stderr);
 
         assert_eq!(filtered, "real stderr\n");
+        assert_eq!(report.filtered, "real stderr\n");
+        assert_eq!(report.suppressed_marketplace_manifest_warnings, 3);
     }
 
     #[test]
@@ -2349,8 +2370,10 @@ real stderr
         let stderr = "WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=/home/brian/work/btakita/agent-loop/src/agent-doc/.codex-plugin/plugin.json\n";
 
         let filtered = filter_codex_stderr_noise(stderr);
+        let report = codex_stderr_noise_report(stderr);
 
         assert_eq!(filtered, stderr);
+        assert_eq!(report.suppressed_marketplace_manifest_warnings, 0);
     }
 
     #[test]

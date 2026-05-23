@@ -17314,6 +17314,86 @@ mod late_fallback_patch_guard_tests {
         doc
     }
 
+    struct TsiftDuplicateContentFixture {
+        bad_state_before_live_typing: &'static str,
+        repaired_snapshot: &'static str,
+        live_buffer_after_typing: &'static str,
+    }
+
+    fn tsift_md_duplicate_content_corruption_fixture() -> TsiftDuplicateContentFixture {
+        TsiftDuplicateContentFixture {
+            bad_state_before_live_typing: concat!(
+                "---\n",
+                "agent_doc_session: tsift-v0.1\n",
+                "agent: codex\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "*Compacted tsift context.*\n",
+                "❯ The duplicate content corrupt document bug occurred. Do we need more logic to prevent the full-document ipc?\n",
+                "❯ #spec-test-build-install-commit-push\n",
+                "### Re: benchmark and IPC payload guard — gpt-5\n\n",
+                "Ran the graph backend benchmark and added IPC payload guard coverage.\n",
+                "### Re: benchmark and IPC payload guard — gpt-5\n\n",
+                "Ran the graph backend benchmark and added IPC payload guard coverage.\n",
+                "<!-- agent:boundary:tsift-bad -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!-- agent:queue -->\n",
+                "<!-- /agent:queue -->\n"
+            ),
+            repaired_snapshot: concat!(
+                "---\n",
+                "agent_doc_session: tsift-v0.1\n",
+                "agent: codex\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "*Compacted tsift context.*\n",
+                "❯ The duplicate content corrupt document bug occurred. Do we need more logic to prevent the full-document ipc?\n",
+                "❯ #spec-test-build-install-commit-push\n",
+                "### Re: benchmark and IPC payload guard — gpt-5\n\n",
+                "Ran the graph backend benchmark and added IPC payload guard coverage.\n",
+                "<!-- agent:boundary:tsift-repaired -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!-- agent:queue -->\n",
+                "<!-- /agent:queue -->\n"
+            ),
+            live_buffer_after_typing: concat!(
+                "---\n",
+                "agent_doc_session: tsift-v0.1\n",
+                "agent: codex\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "*Compacted tsift context.*\n",
+                "❯ The duplicate content corrupt document bug occurred. Do we need more logic to prevent the full-document ipc?\n",
+                "❯ #spec-test-build-install-commit-push\n",
+                "### Re: benchmark and IPC payload guard — gpt-5\n\n",
+                "Ran the graph backend benchmark and added IPC payload guard coverage.\n",
+                "### Re: benchmark and IPC payload guard — gpt-5\n\n",
+                "Ran the graph backend benchmark and added IPC payload guard coverage.\n",
+                "The duplicate content corrupt document bug happened on tsift.md as I was tying in a prompt. ",
+                "What are #next-steps to ensure full-document IPC is not over-eager? #next-steps\n",
+                "<!-- agent:boundary:tsift-live -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!-- agent:queue -->\n",
+                "<!-- /agent:queue -->\n"
+            ),
+        }
+    }
+
     #[test]
     fn ipc_repair_decision_records_prefix_fallback_bad_state() {
         let decision = IpcRepairDecision::content_ours_prefix_fallback(
@@ -17844,6 +17924,85 @@ mod late_fallback_patch_guard_tests {
                 && ops_log.contains("skip=stale_bad_state"),
             "stale redelivery skip should be logged:\n{ops_log}"
         );
+    }
+
+    #[test]
+    fn tsift_md_duplicate_content_fixture_skips_stale_full_document_redelivery() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use std::time::Duration;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let fixture = tsift_md_duplicate_content_corruption_fixture();
+        let doc = tmp.path().join("tasks/software/tsift.md");
+        fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        fs::write(&doc, fixture.live_buffer_after_typing).unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener_calls = calls.clone();
+        let listener_doc = doc.clone();
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                listener_calls.fetch_add(1, Ordering::SeqCst);
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
+                    fs::write(&listener_doc, full_content).ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        let delivered = redeliver_ipc_dedupe_to_editor(
+            &doc,
+            fixture.repaired_snapshot,
+            fixture.bad_state_before_live_typing,
+        );
+
+        assert!(
+            !delivered,
+            "tsift.md fixture must skip full-document redelivery when the visible buffer changed after repair planning"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "stale tsift.md repair proof must be rejected before any socket fullContent payload"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            fixture.live_buffer_after_typing,
+            "live tsift.md prompt text typed after repair planning must remain untouched"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("ipc_dedupe_editor_redelivery_proof")
+                && ops_log.contains("redeliver=false")
+                && ops_log.contains("ipc_dedupe_editor_redelivery_skipped")
+                && ops_log.contains("skip=stale_bad_state"),
+            "stale tsift.md fixture should log proof and skip diagnostics:\n{ops_log}"
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
     }
 
     #[test]

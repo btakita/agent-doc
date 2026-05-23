@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **The tsift.md duplicate-content IPC incident is now a named regression.** A
+  focused fixture models stale duplicate-response repair planning while the
+  visible `tasks/software/tsift.md` buffer receives a new prompt. The regression
+  proves response-fallback full-document redelivery skips socket/file IPC without
+  fresh bad-state proof, leaves the live buffer untouched, and logs the stale
+  proof decision.
+
 - **Codex Stop hooks now keep harness-native auto queues moving.** After a
   clean `finalize` / `session-check`, `codex-stop` now detects an active
   `agent:queue auto` with a ready next head prompt, blocks final-answer

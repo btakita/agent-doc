@@ -51,7 +51,26 @@ That tells the truth, keeps Judith from seeing an $8K lump all at once, and avoi
 I would not mention Lucas. Treat him as your internal subcontractor/cost unless the client agreement specifically requires disclosure or he is client-facing. Judith and Robert do not need an explanation of your margin. They need a simple, confidence-building invoice tied to outcomes.
 
 If you think $2,500 will still trigger her, use 20 hours / $2,000 now and make the next step explicit: "This covers the first launch/recovery block. I will confirm before starting the next paid block." But I would avoid going below the amount needed to pay Lucas and keep your own cash position sane. Underbilling to manage her fear may buy one easier conversation and create a worse business pattern.
-<!-- agent:boundary:9fd3e921 -->
+❯ I need to pay lucas-huang for his hours, which are 83 at $50/hr.
+### Re: Lucas Hours Change the Invoice Floor — gpt-5
+
+That changes the recommendation. Lucas is owed `83 * $50 = $4,150`. So `20-25 hours / $2,000-$2,500` is not viable unless you are intentionally taking a loss.
+
+Your hard floor is **42 hours at $100/hr = $4,200**. That barely covers Lucas and gives you almost no room for taxes, payment delay, your own time, or risk. I would treat 42 hours as the emergency minimum, not the recommendation.
+
+My practical recommendation: invoice **50 hours = $5,000** as the relationship-preserving ask, or **60 hours = $6,000** if the delivered work and coordination justify it. If the true combined work is higher, show the real value and apply a courtesy credit instead of pretending the work took fewer hours.
+
+A clean invoice shape:
+
+`Website recovery/build, 25-page deployment, form backend, infrastructure setup, and launch coordination`  
+`60 hours @ $100/hr = $6,000`  
+`Launch courtesy credit = -$1,000`  
+`Amount due now = $5,000`
+
+If you think Judith will panic at `$5,000`, use `$4,500` as the lowest strategic ask, but I would not go below `$4,200`. Below that, Lucas gets paid only by you absorbing the loss, and that is the wrong precedent with a client who may already be cost-sensitive.
+
+I would still not mention Lucas. The client-facing story is outcomes and project value. Lucas is your internal cost structure.
+<!-- agent:boundary:41a53e88 -->
 <!-- /agent:exchange -->
 ###
 
@@ -62,7 +81,7 @@ Please directly send the draft email using brian.takita@gmail.com
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#s62t] [recommended] Prepare EFS Phase 1 invoice with truthful hours/value plus an explicit courtesy credit if needed; target 20-25 hours (,000-,500) only if it covers Lucas and preserves cash flow.
+- [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
 - [ ] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
 - [ ] [#7a4d] [recommended] OCR/TMO field extraction: custom/fillable docs -> reviewed extracted fields -> TMO update/create flow
 - [ ] [#p40t] [recommended] Google Calendar/G Suite notification integration after Google admin credentials are available

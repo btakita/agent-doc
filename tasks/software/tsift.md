@@ -47,7 +47,41 @@ The remaining SQLite work is the write/refresh and traversal hot path: the same 
 I would keep `#gdbvacproof` as review/storage proof rather than the top perf item. `graph-db status` reports the projection current with ~946k live rows, ~413k retained tombstone rows, a ~1.09 GB file, no freelist bytes, and compaction `not_needed`; useful evidence, but not the main latency lever today. Preflight also warned that `#orchdog` is still a legacy gated item in `agent:backlog`, so `agent-doc migrate /home/brian/work/btakita/agent-loop/tasks/software/tsift.md` remains housekeeping.
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `agent-doc orchestrate --from-exchange --plan`, `tsift status --json`, `tsift context-pack`, `tsift graph-db --json --path /home/brian/work/btakita/agent-loop status`, `tsift graph-db --json --path /home/brian/work/btakita/agent-loop evidence next-steps --depth 3 --limit 8`, and `tsift graph-db --json --path /home/brian/work/btakita/agent-loop backend-eval`. Changed paths: session document only. Verification: graph status/evidence/backend-eval all returned successfully; no full source test/build run because this cycle only updated the session response/backlog. Escalation: none.
-<!-- agent:boundary:d3121683 -->
+❯ do [#gdbsqlitehotpath]. #spec-test-build-install-commit-push
+### Re: SQLite graph hot path — gpt-5
+
+Completed `#gdbsqlitehotpath`.
+
+Implemented the SQLite graph hot-path pass in `src/tsift`:
+
+- Added `GraphStore::edges_between_nodes` with a batched SQLite implementation, then routed conflict-matrix scoped snapshots through it instead of issuing one outgoing-edge query per scoped node.
+- Prefiltered unchanged node, edge, and materialized-property rows before SQLite refresh `ON CONFLICT` work, while retaining the older full-write path when user triggers exist so rollback/failure-injection tests still exercise the fail-closed path.
+- Reused prepared statements for single-node SQLite bounded-path frontiers to remove repeated prepare overhead from deep-chain path probes.
+- Updated `SPEC.md` and added focused coverage for batched scoped edge collection.
+
+Changed paths: `src/tsift/SPEC.md`, `src/tsift/src/main.rs`, `src/tsift/src/substrate.rs`, and the superproject `src/tsift` submodule pointer.
+
+Metric proof, post-install forced-refresh digest against `fixtures/graph-db-performance-history.json`: `reg:0`, `imp:6`. Current focused values were `real.refresh_phase.sqlite_delta_write.duration_micros=3237200`, `real.refresh_phase.sqlite_property_row_staging.duration_micros=569706`, `real.sqlite.conflict_matrix.duration_micros=34979`, `real.sqlite.path_max_hops.duration_micros=11236`, `synthetic_deep_chain.sqlite.path_max_hops.duration_micros=120`, and `synthetic_deep_chain.sqlite.path_max_hops.duration_micros_per_1k_graph_rows=312.5`. The local pre-change sample was about `3856606`, `571184`, `37504`, `11915`, and `219` respectively, so the targeted local metrics improved or stayed flat within noise; the fixture comparison reported no focused regressions.
+
+Verification run:
+
+- `cargo fmt`
+- `cargo check`
+- `cargo test sqlite_store_batches_edges_between_node_sets`
+- `cargo test graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite`
+- `cargo test graph_db_cli_rolls_back_failed_sqlite_refresh --test graph_db_conformance`
+- `cargo test sqlite_shortest_path_uses_bounded_frontier`
+- `make check` passed: clippy plus `657` unit tests, `108` exit-code tests, and `31` graph-db conformance tests.
+- `cargo build`
+- `cargo install --path .`, replacing `/home/brian/.cargo/bin/tsift`
+- three forced-refresh `tsift graph-db --json --path /home/brian/work/btakita/agent-loop backend-eval --target gdbsqlitehotpath` samples piped through `tsift metric-digest`
+
+CI/tmux evidence: `btakita/tsift` CI run `26335419296` passed after push (`clippy + test` and `live Convex graph acceptance`). The superproject Agent Doc workflow run `26335423912` failed before runner steps/logs were created; both `check` and `tmux-ci` jobs had empty step lists, so I classified it as an external CI-start blocker rather than a code or tmux regression.
+
+Commit/push: `src/tsift` commit `1e53fb8` (`perf: optimize sqlite graph hot paths`) was pushed to `origin/main`; superproject commit `261e72084` (`tsift: optimize sqlite graph hot paths`) was pushed to `origin/main`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:5d395a3b -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -65,7 +99,6 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbsqlitehotpath] [recommended] Improve SQLite graph hot paths before trying another graph backend: take a three-sample backend-eval baseline, profile real refresh write phases plus synthetic path/conflict cases, then optimize SQLite refresh delta/staging and bounded traversal until metric-digest shows no >15% regression and at least one measured win over the current fixture.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

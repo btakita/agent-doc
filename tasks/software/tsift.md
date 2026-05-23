@@ -36,7 +36,7 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): SQLite graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:f9704db7 -->
+<!-- agent:boundary:8ee44b5d -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -44,7 +44,7 @@ Compacted content:
 
 <!-- agent:queue auto -->
 dispatch #spec-test-build-install-commit-push
-- do [#gdbsourcebuild]
+- ~do [#gdbsourcebuild]~
 - do [#gdbprepreuse]
 - do [#gdbbenchnorm]
 - do [#gdbevidlat]
@@ -53,7 +53,6 @@ dispatch #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#gdbsourcebuild] [recommended] Reduce source_graph_build as the next SQLite graph performance bottleneck: profile markdown/session scanning, source-handle construction, semantic summary reads, and projection row construction, then cache or incrementally rebuild unchanged portions before more backend replacement work.
 - [ ] [#gdbprepreuse] [recommended] Remove repeated graph orchestration preparation from backend-eval and operator read paths by persisting or reusing shared evidence, worker_result/source_handle expansion, semantic rows, and dispatch-trace inputs across conflict-matrix, dispatch-trace, and metric runs.
 - [ ] [#gdbbenchnorm] [recommended] Normalize graph performance history by graph row counts and run repeated backend-eval samples before judging small regressions, so source_graph_build growth, evidence latency noise, and candidate backend deltas are not mistaken for durable wins or losses from one real projection run.
 - [ ] [#gdbevidlat] [recommended] Re-measure the indexed graph-db evidence resolver with repeated real and synthetic runs, because the last benchmark showed evidence target resolution moving from about 24.9ms to 36.5ms; keep the indexed lookup path only if repeated metric-digest output proves it is neutral or faster under the current graph size.

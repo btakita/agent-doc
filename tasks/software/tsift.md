@@ -111,7 +111,14 @@ So the honest read is mixed but favorable to SQLite for the workload that curren
 SQLite is likely enough if tsift keeps the graph workload bounded, indexed, local, transactional, and projection-cache-friendly. Kuzu or DuckDB/DuckPGQ become more compelling if the product direction shifts toward large analytical graph scans, unbounded/variable-length path workloads, parallel OLAP-style joins, or native graph-query syntax as a user-facing feature. Until a production adapter proves parity, concurrency behavior, install portability, and wins across every backend-eval dataset, SQLite should remain the correctness and local-performance baseline.
 
 Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc plan`, `tsift status --json`, `tsift context-pack`, source/schema inspections with `rg`/`sed`, `tsift graph-db --json --path /home/brian/work/btakita/agent-loop status`, and `tsift graph-db --json --path /home/brian/work/btakita/agent-loop backend-eval --candidate duckdb-duckpgq --candidate kuzu` with focused `jq` extraction. Changed paths: session document/backlog only. Verification: all read/eval commands completed successfully; no source build/test run was needed because this cycle only answered the prompt and added backlog items. Escalation: none. Confidence: high.
-<!-- agent:boundary:70a6658f -->
+### Re: do #gdbrefreshcache — gpt-5
+
+`#gdbrefreshcache` is already complete and archived in `tasks/software/tsift.done.md`. The backing implementation is present in `src/tsift` commit `c1c7668` (`perf: cache scoped graph orchestration`) and superproject commit `f321eabef` (`tsift: cache scoped graph orchestration`).
+
+No source work was rerun for this queue head because the item has already shipped; this closeout is consuming the reactivated queue entry.
+
+Commands/proof: ran `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg` against the session and done archive, `git status --short`, `git log --oneline`, and `git show --stat c1c7668` in `src/tsift`. Changed paths: session document only. Verification: archived done entry and implementation commits confirmed; no source build/test run was needed for this idempotent queue-consumption cycle. Escalation: none. Confidence: high.
+<!-- agent:boundary:2e7dfb22 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -119,9 +126,9 @@ Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc orchestr
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#gdbrefreshcache]
+- ~do [#gdbrefreshcache]~
 - do [#gdbtargetsnap]
 - do [#gdbpathprobe]
 <!-- /agent:queue -->

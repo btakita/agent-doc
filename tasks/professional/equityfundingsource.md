@@ -29,43 +29,12 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-225030.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-225835.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Send inquiry email
+- Archived 2 response topic(s): Send inquiry email; Direct draft email send
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ Please load the assets.
-### Re: Send inquiry email — gpt-5
-
-Yes, the button is wired to a real server-side email path, but delivery depends on the production Worker having `RESEND_API_KEY` configured.
-
-What I verified:
-- The contact form posts to `POST /contact`.
-- The route validates name, email, and message before any delivery attempt.
-- Valid submissions call `contact_email_send_`, which posts to `https://api.resend.com/emails`.
-- The email is sent from `Equity Funding Source <info@equityfundingsource.com>`, addressed to `site.email` or `info@equityfundingsource.com`, with `reply_to` set to the visitor's email.
-- If `RESEND_API_KEY` is missing or Resend rejects the request, the form fails closed with a 503 message telling the visitor to email `info@equityfundingsource.com` or call `(323) 225-3800`.
-
-I could not confirm the remote Cloudflare secret from this shell because the EFS repo does not have `CLOUDFLARE_API_TOKEN` available. Local `.dev.vars` also does not include `RESEND_API_KEY`, so a local Worker submit would fail closed rather than send.
-
-I did not submit a real live inquiry, because that would send an actual email to EFS. To prove production delivery, run `bun run cf:secrets:list` with Cloudflare credentials and confirm `RESEND_API_KEY`, or submit a test inquiry and check the `info@equityfundingsource.com` inbox or Resend activity.
-
-Proof: changed paths: none outside this session document. Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg`, `sed`, `bun run cf:secrets:list`. Verification: source inspection and secret-list attempt; no code/tests changed. Confidence: the email code path is real; deployed delivery remains unconfirmed until the Cloudflare secret or inbox is checked. Escalation: none.
-❯ Please directly send the draft email using brian.takita@gmail.com
-### Re: Direct draft email send — gpt-5
-
-I did not send a new email from `brian.takita@gmail.com` because the document does not contain an unsent draft body, and the only matching EFS Corky draft I found is already recorded as sent in the archived session history.
-
-What I found:
-- The prompt asks to send "the draft email" from `brian.takita@gmail.com`, but no current draft body, recipient, or subject is present in the active exchange.
-- The only matching local draft is `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`.
-- The archived EFS session records that this draft was already sent via Corky from `brian.takita@gmail.com` to `judithkrug@gmail.com`, subject `Equity Funding Source portal progress and review items`, with thread/message id `19dfa8523afb9b00`.
-- `corky draft validate mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md` still passes.
-
-I intentionally did not duplicate-send that already-sent draft or create a new inquiry email body without the exact text. To send a new message, I need the draft body and intended recipient/subject, or explicit confirmation that you want the May 5 EFS progress email sent again.
-
-Proof: changed paths: `tasks/professional/equityfundingsource.md` only. Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg`, `sed`, `corky draft validate`, `agent-doc write --commit`, `agent-doc session-check`, `agent-doc finalize`. Verification: validated the matching Corky draft and confirmed prior-send evidence in the archived session. Confidence: high that no distinct unsent draft is present in this session; high that resend would risk duplicating the May 5 EFS progress email. Escalation: none.
-<!-- agent:boundary:e4e3a2e0 -->
+<!-- agent:boundary:77a1da41 -->
 <!-- /agent:exchange -->
 ###
 

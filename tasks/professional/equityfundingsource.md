@@ -10,6 +10,12 @@ links:
   - ./robert-waldman.md
   - ../personal/robert-ward.md
   - ./bob-remeika.md
+prompt_presets:
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
+  '#commit-push': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share
+  '#commit-push-deploy': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share. deploy
+  '#spec-test-commit-push': update spec + tests. commit + push
+  '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
 ---
 
 ## Status
@@ -94,7 +100,56 @@ I added three concrete follow-ups to pending for broker backend integration, OCR
 #### Verification / proof
 
 Changed paths: no app code changes; session document only. Commands run: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, source inspection with `sed`/`rg`/`find`, `bun test`, `bun run build`, `bun run build:worker`, `git status --short`. Verification: build and worker bundle pass; `bun test` found no tests. Escalation: none. Confidence: medium-high; I did not run live Cloudflare/TMO/Dropbox end-to-end flows.
-<!-- agent:boundary:c78d7ac4 -->
+❯ Add full bun test coverage. Update the harness files to ensure tests are updated for any features or bug fixes. The test suite must pass before the turn ends.
+
+❯ #spec-test-commit-push
+### Re: Bun test coverage — gpt-5
+
+Added Bun coverage for the EFS app and wired it into the project harness.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/package.json`
+- `src/equityfundingsource-dev/app/equityfundingsource/package.json`
+- `src/equityfundingsource-dev/Makefile`
+- `src/equityfundingsource-dev/tests/auth.test.ts`
+- `src/equityfundingsource-dev/tests/fixtures.test.ts`
+- `src/equityfundingsource-dev/tests/gformula.test.ts`
+- `src/equityfundingsource-dev/tests/tmo-api.test.ts`
+- `src/equityfundingsource-dev/tests/tmo-sync.test.ts`
+
+What changed:
+
+- Added root `test` and `check` scripts so `bun run check` runs `bun test`, the app build, and the worker bundle build.
+- Added app-level `test` and `check` delegation back to the repo root so running the harness from `app/equityfundingsource` still exercises the full suite.
+- Added `make test` and `make check` targets.
+- Added 15 Bun tests covering password hashing, session signing/tamper rejection, Cloudflare Access token reading and RS256 JWKS verification, borrower/admin fixtures, loan/investor calculations, investor distributions, TMO XML schedule parsing, TMO AddLoanFunding request shaping, missing TMO credential failure, and recurring payment schedule expansion.
+
+Commands run:
+
+- `bun test`
+- `bun run check`
+- `git -C src/equityfundingsource-dev commit -m "test: add EFS bun coverage"`
+- `git -C src/equityfundingsource-dev push origin main`
+- `gh run list --repo btakita/equityfundingsource-dev --limit 10`
+- `gh workflow list --repo btakita/equityfundingsource-dev`
+- `gh run list --limit 10`
+- `gh run view 26319861420`
+
+Verification:
+
+- `bun test`: 15 pass, 0 fail, 71 assertions.
+- `bun run check`: passed; reran the 15-test suite, `bun run build`, and `bun run build:worker`.
+- EFS GitHub Actions: no workflows/runs listed for `btakita/equityfundingsource-dev`.
+- Parent repo latest `Agent Doc` CI run `26319861420`: `check` and `tmux-ci` jobs were not started because GitHub reported the account billing/spending-limit annotation. I classified that as an external CI-start blocker, not a code or tmux regression.
+
+Commit and push:
+
+- EFS commit: `22c3140 test: add EFS bun coverage`
+- Pushed: `origin/main` from `2b8a124` to `22c3140`
+
+Escalation: none. Confidence: high for local test/build coverage; live TMO/Dropbox/Cloudflare integrations remain mocked or build-verified rather than exercised against production services.
+<!-- agent:boundary:84f52223 -->
 <!-- /agent:exchange -->
 ###
 

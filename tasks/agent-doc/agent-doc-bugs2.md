@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -34,7 +34,7 @@ Top backlog item: #edproof. Added #tsiftipc as the concrete tsift.md reproductio
 Compacted content:
 - Archived 2 response topic(s): #next-steps to fix agent-doc bugs; full-document IPC next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:68e0d637 -->
+<!-- agent:boundary:f816f493 -->
 <!-- /agent:exchange -->
 ###
 <!--

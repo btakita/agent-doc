@@ -79,16 +79,16 @@ Commands:
 - `sed -n '247,252p' src/agent-doc/specs/07-orchestration-commands.md`
 
 Verification: inspected the implementation and spec paths; no code was changed, so I did not run the test suite.
-<!-- agent:boundary:d2e2f6cf -->
+<!-- agent:boundary:6bf87516 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#edproof]~
-- ~do [#typedrepair]~
+- do [#typedrepair]
 - do [#repairtests]
 - do [#tsiftipc]
 - do [#narrowpatch]

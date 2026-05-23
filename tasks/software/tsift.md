@@ -30,38 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-220957.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-222948.md`*
 
 Compacted content:
-- Archived 1 response topic(s): graph backend eval queue
+- Archived 2 response topic(s): sqlite graph performance next steps; gdbfalkorreal location
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are #next-steps in improving the sqlite graph performance?
-### Re: sqlite graph performance next steps — gpt-5
-
-Next priority is to get a fresh, repeated baseline before tuning again. The checked-in history still tells the story: the full real projection was about 931k graph rows with SQLite refresh in the 20-24s range, while the newest bounded edge/entity samples are only 57 nodes / 156 edges and still show `conflict_matrix_preparation` around 12s even when the SQLite graph reads themselves are tiny. That points at measurement hygiene and preparation reuse before another backend switch discussion.
-
-Top backlog id: `#gdbcurbase`.
-
-I added the backlog in priority order:
-
-1. `#gdbcurbase` — refresh the workspace/index, take three current backend-eval samples, include both the bounded session target and opt-in full projection, run metric-digest, and update the performance history before optimizing again.
-2. `#gdbprepcache` — make conflict-matrix preparation reuse durable across CLI invocations so context/evidence/staged-diff/impact setup does not dominate graph reads.
-3. `#gdbfullreg` — promote full-projection performance evidence into the regression gate so small session-hinted runs cannot hide million-row regressions.
-
-After those, keep `#gdbvacproof` in review as the operational compaction proof. `#gdbfalkorreal` should remain a hold/gate: FalkorDB may be worth measuring, but it should not be promoted until a real adapter beats SQLite on full-projection conflict-matrix, evidence, dispatch-trace, path tiers, install portability, and lock behavior.
-
-Context note: `tsift status --json` currently reports the workspace index stale with 1011 stale files and one missing scope, so the first benchmark item should refresh the workspace index before using graph/search evidence as a performance source of truth.
-
-Commands run: `agent-doc preflight`, `agent-doc orchestrate --from-exchange --plan`, `agent-doc plan`, `agent-doc read`, targeted `rg`/`sed`/`jq`, and `tsift status --json`. No code changed, so I did not run the build or test suite.
-❯ Where is [#gdbfalkorreal]? I don't see it in the backlog.
-### Re: gdbfalkorreal location — gpt-5
-
-You were right: `#gdbfalkorreal` was not in the active backlog. It was only present in the completed/reaped archive at `tasks/software/tsift.done.md` and still referenced by the inactive queue, so my previous response should not have described it as an active backlog item.
-
-I restored `#gdbfalkorreal` to the active backlog, after the three higher-priority SQLite measurement/prep items. Top backlog id remains `#gdbcurbase`.
-
-Commands run: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targeted `rg`. No code changed, so I did not run build/tests.
-<!-- agent:boundary:b2e772ae -->
+<!-- agent:boundary:5c741580 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -70,9 +44,9 @@ Commands run: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, targete
 
 <!-- agent:queue -->
 preset #spec-test-build-install-commit-push
-- do [#gdbprepprof]
-- do [#gdbprofilefull]
-- do [#gdbhoptiers]
+- do [#gdbcurbase]
+- do [#gdbprepcache]
+- do [#gdbfullreg]
 - do [#gdbfalkorreal]
 - Please run a benchmark on the performance improvements for this queue run
 <!-- /agent:queue -->

@@ -20,7 +20,8 @@ queue_active: false
 ## Status
 
 <!-- agent:status patch=replace -->
-Added prioritized #next-steps follow-up items from Codex, Claude, and agent-doc logs. Top backlog item: #nextstale.
+
+Completed #nextstale, #nextrunmiss, #nextswallow, and #nextorder2. No open backlog items.
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,22 +34,44 @@ Added prioritized #next-steps follow-up items from Codex, Claude, and agent-doc 
 Compacted content:
 - Archived 1 response topic(s): #next-steps log review
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:2f1e8b2d -->
+### Re: #next-steps prompt regressions — gpt-5
+
+Completed the four queued `#next-steps` regression items.
+
+Implementation:
+- `preflight.prompt_presets_requested` now uses the prompt-contract reference scan, so inline preset references like `Please analyze failed orders and bot traffic. #next-steps` are surfaced as requested presets while YAML `prompt_presets:` definition lines are ignored.
+- Added deterministic coverage for stale preflight-started `#next-steps` prompt drift, post-compact `#next-steps` follow-up prompts, embedded natural-language `#next-steps` plan classification/backlog capture, and ordered multi-item `#next-steps` backlog closeout/status behavior.
+- Updated `SPEC.md` with the inline preset request and ordered `#next-steps` backlog/status invariants.
+
+Verification:
+- `cargo test requested_prompt_presets -- --test-threads=2`
+- `cargo test next_steps -- --test-threads=2`
+- `make check`
+- `make build-release`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest GitHub CI run `26324125156` on `20260422/codex-agent-backend` was successful, including `Run make tmux-ci`.
+
+Commits prepared before this document closeout:
+- `src/agent-doc`: `17f2ebd` `fix: keep inline next-steps prompts actionable`
+- parent gitlink: `6329e095d` `agent-doc: keep inline next-steps prompts actionable`
+<!-- agent:boundary:82ef6eea -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
 <!-- agent:queue -->
+preset #spec-test-build-install-commit-push
+- do `#nextstale`
+- do `#nextrunmiss`
+- do `#nextswallow`
+- do `#nextorder2`
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#nextstale] [recommended] Add deterministic coverage and recovery proof for stale preflight-started cycles whose abandoned prompt contains #next-steps; current ops.log shows repair_preflight_stale_prompt_cycle_abandoned for the prompt 'Left/Right buttons still do not work with agent-doc opencode. #next-steps', followed by post_commit_user_follow_up, so the next run must prove the prompt is still surfaced as an actionable prompt_target rather than silently absorbed.
-- [ ] [#nextrunmiss] [recommended] Reproduce and fix embedded natural-language #next-steps dispatch misses; Codex history reports 'Why did you not run "Please analyze failed orders and bot traffic on monsterrodholders.com. #next-steps"', so preset expansion and route/plan classification need coverage when #next-steps appears inside a domain request instead of as a standalone line.
-- [ ] [#nextswallow] [recommended] Add a compact-follow-up regression for Claude history where '#next-steps' after compact was committed and the next run said 'No changes detected ... Nothing to respond to'; verify preflight step-2 safe-status/OOB commit recovery cannot hide prompt-bearing compact follow-up text.
-- [ ] [#nextorder2] [recommended] Add an end-to-end #next-steps backlog-order fixture that expands prompt-presets into multiple pending additions and asserts the live backlog preserves priority/declaration order, with the printed top backlog id matching the first inserted item.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

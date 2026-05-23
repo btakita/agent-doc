@@ -28,35 +28,12 @@ Implemented #rdec and advanced the auto queue. Top backlog item after closeout s
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-030654.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-040655.md`*
 
 Compacted content:
-- Archived 1 response topic(s): auto queue continuation after finalize
+- Archived 1 response topic(s): auto queue continuation
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: auto queue continuation — gpt-5
-
-Implemented `#eprf`, `#rlog`, `#rtst`, and `#nfix`.
-
-What changed:
-- The IPC repair decision now carries prompt-prefix normalization targets and logs structured sidecar fallback records with patch id, bad/fallback hashes and lengths, prefix counts, and duplicate-prompt counts.
-- Prefix-only sidecar fallback now attempts a narrow normalize/reposition patch against the fresh rejected editor buffer first, with full-content redelivery kept as the stale-checked last resort.
-- Repair/redelivery skip and proof logs now preserve source patch ids and expected/current buffer hashes so stale editor buffers are not overwritten.
-- Added deterministic unit and SimWorld coverage for narrow normalization repair, stale bad-state skip, and ops-log evidence; updated the closeout/editor specs and version notes.
-
-Commits:
-- `src/agent-doc`: `12b1ac51 fix: narrow sidecar normalization redelivery`
-- parent gitlink: `e1d5d2b7c chore: advance agent-doc submodule`
-
-Verification:
-- `cargo test normalization_fallback_`
-- `cargo test normalization_repair_sim_uses_narrow_patch_for_prefix_only_divergence`
-- `cargo test ipc_repair_decision_`
-- `make check`
-- `make install`
-- Latest CI/tmux evidence: GitHub CI run `26321931940` completed successfully, including `make check` and `make tmux-ci`.
-
-Push will run after this session-document finalize, per the closeout rule that keeps the session document on the binary-owned commit path.
-<!-- agent:boundary:2218b3b2 -->
+<!-- agent:boundary:0529d9e4 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -73,12 +50,12 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- ~do [#dvre]~
-- ~do [#rdec]~
-- do [#eprf]
-- do [#rlog]
-- do [#rtst]
-- do [#nfix]
+- do [#caud]
+- do [#cuni]
+- do [#cspe]
+- do [#ctes]
+- do [#crem]
+- do [#cobs]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

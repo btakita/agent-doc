@@ -31,30 +31,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-044812.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-131258.md`*
 
 Compacted content:
-- Archived 4 response topic(s): graph performance benchmark normalization; queue closeout repair; evidence resolver latency; 1 more
+- Archived 1 response topic(s): SQLite graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are #next-steps to make sqlite graph faster?
-### Re: SQLite graph performance next steps — gpt-5
-
-I added three prioritized backlog items. The top backlog item is `#gdbrefreshcache`.
-
-The reason that is first: the current code already has the main SQLite query optimizations in place for property filters, bounded neighborhoods, evidence target resolution, and frontier path search. The remaining measured cost is mostly refresh and broad graph loading. The latest checked-in fixture shows real SQLite refresh around `24.4s`, with `source_graph_build` around `14.2s`, `sqlite_delta_write` around `8.0s`, and `sqlite_property_row_staging` around `2.1s`; evidence itself was around `25ms`, so chasing evidence first would not move the main wall-clock number.
-
-Priority order:
-
-1. `#gdbrefreshcache` — reuse the source-watermark cached projection path outside backend-eval so normal refresh/conflict-matrix can skip unchanged source graph and SQLite staging work.
-2. `#gdbtargetsnap` — stop conflict-matrix/dispatch-trace from loading the entire graph when a target-scoped evidence/ownership snapshot is enough.
-3. `#gdbpathprobe` — remove full-edge/full-row scans from backend-eval probe selection so status/path metrics measure the operation being tested, not setup scans.
-
-On max-hop caps: I would not raise them globally yet. Keep the cap conservative until `#gdbpathprobe` proves path measurement is clean and any higher cap is backed by synthetic deep-chain plus real repeated-sample metrics.
-
-On FalkorDB: it stays behind the backend promotion gate. It is worth evaluating, but not as the next lever, because current real costs are dominated by projection build/write and broad snapshot loading; a different graph backend only earns promotion if it preserves SQLite parity and beats SQLite across the measured operations without losing SQLite's bundled install and lock-behavior advantages.
-
-Changed paths: `tasks/software/tsift.md` only. Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `tsift status --json`, targeted `rg`/`sed` source inspection, `git status --short`, and this `agent-doc finalize` with backlog mutations. Verification: no code changed, so I did not run the Rust test suite. Escalation: none. Confidence: high for backlog ordering; medium-high for performance prioritization because it is based on existing fixture metrics and source inspection, not a fresh benchmark run.
-<!-- agent:boundary:a8249f1d -->
+<!-- agent:boundary:b12bc8dc -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -136,6 +136,13 @@ impl RunMode {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunCycleOutcome {
+    dispatched: bool,
+    queue_synthetic_diff: bool,
+    queue_consumption: Option<write::QueueConsumptionOutcome>,
+}
+
 pub fn run(
     file: &Path,
     branch: bool,
@@ -145,6 +152,42 @@ pub fn run(
     no_git: bool,
     config: &Config,
 ) -> Result<()> {
+    let mut create_branch = branch;
+    let mut completed_queue_items = 0usize;
+
+    loop {
+        let outcome = run_once(
+            file,
+            create_branch,
+            agent_name,
+            model,
+            dry_run,
+            no_git,
+            config,
+        )?;
+        create_branch = false;
+
+        if !outcome.dispatched {
+            return Ok(());
+        }
+        if outcome.queue_consumption.is_some() {
+            completed_queue_items += 1;
+        }
+        if !should_continue_auto_queue(file, &outcome, completed_queue_items, no_git)? {
+            return Ok(());
+        }
+    }
+}
+
+fn run_once(
+    file: &Path,
+    branch: bool,
+    agent_name: Option<&str>,
+    model: Option<&str>,
+    dry_run: bool,
+    no_git: bool,
+    config: &Config,
+) -> Result<RunCycleOutcome> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -157,7 +200,11 @@ pub fn run(
             "[run] Nothing changed since last run for {}",
             file.display()
         );
-        return Ok(());
+        return Ok(RunCycleOutcome {
+            dispatched: false,
+            queue_synthetic_diff: false,
+            queue_consumption: None,
+        });
     };
     write::guard_no_exchange_compaction_request_for_diff(file, &the_diff)?;
 
@@ -208,7 +255,11 @@ pub fn run(
         eprintln!("--- Diff ---");
         print!("{}", the_diff);
         eprintln!("--- Prompt would be {} bytes ---", prompt.len());
-        return Ok(());
+        return Ok(RunCycleOutcome {
+            dispatched: false,
+            queue_synthetic_diff,
+            queue_consumption: None,
+        });
     }
 
     // Create branch if requested
@@ -296,14 +347,19 @@ pub fn run(
     crate::repair::clear_pending(file)?;
     maybe_abort_after_write_applied_for_test()?;
 
+    let mut queue_consumption = None;
     if !no_git {
         let _heartbeat = RunHeartbeat::start(file, "commit_closeout", agent_name, None);
-        write::consume_queue_prompt(file)?;
+        queue_consumption = write::consume_queue_prompt_with_outcome(file)?;
         write::complete_required_closeout(file)?;
     }
 
     eprintln!("Response written to {}", file.display());
-    Ok(())
+    Ok(RunCycleOutcome {
+        dispatched: true,
+        queue_synthetic_diff,
+        queue_consumption,
+    })
 }
 
 fn compute_run_diff(file: &Path) -> Result<Option<(String, bool)>> {
@@ -321,11 +377,38 @@ fn compute_run_diff(file: &Path) -> Result<Option<(String, bool)>> {
 }
 
 fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
+    let ActiveQueuePromptState::Ready { prompt } = active_queue_prompt_state(file)? else {
+        return Ok(None);
+    };
+    Ok(Some(diff::synthetic_added_lines_diff(&prompt, "queue")))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ActiveQueuePromptState {
+    Ready {
+        prompt: String,
+    },
+    Inactive,
+    StopFence {
+        next_prompt: Option<String>,
+    },
+    TimeGate {
+        start_at: String,
+        next_prompt: Option<String>,
+    },
+    ItemModified {
+        snapshot_head: Option<String>,
+        document_head: Option<String>,
+    },
+    Empty,
+}
+
+fn active_queue_prompt_state(file: &Path) -> Result<ActiveQueuePromptState> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let (fm, _) = frontmatter::parse_for_file(&content, file)?;
     if fm.queue_active != Some(true) {
-        return Ok(None);
+        return Ok(ActiveQueuePromptState::Inactive);
     }
 
     let components = component::parse(&content)?;
@@ -333,7 +416,7 @@ fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
         .iter()
         .find(|component| component.name == "queue")
     else {
-        return Ok(None);
+        return Ok(ActiveQueuePromptState::Inactive);
     };
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries =
@@ -341,25 +424,129 @@ fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
     let has_auto = crate::queue::has_auto_attr(&queue_component.attrs);
     let activation = crate::queue::resolve_activation(&entries, has_auto, false, true);
     if !activation.active {
-        return Ok(None);
+        return Ok(ActiveQueuePromptState::Inactive);
     }
     if crate::queue::has_stop_fence_at_head(&activation.entries_after) {
         eprintln!("[run] active queue halted by stop fence at head");
-        return Ok(None);
+        return Ok(ActiveQueuePromptState::StopFence {
+            next_prompt: crate::queue::first_prompt(&activation.entries_after)
+                .map(|prompt| prompt.text.clone()),
+        });
     }
     if let Some(start_at) = crate::queue::time_gate_at_head(&activation.entries_after) {
         eprintln!("[run] active queue deferred by time gate at head: {start_at}");
-        return Ok(None);
+        return Ok(ActiveQueuePromptState::TimeGate {
+            start_at: start_at.to_string(),
+            next_prompt: crate::queue::first_prompt(&activation.entries_after)
+                .map(|prompt| prompt.text.clone()),
+        });
+    }
+
+    if let Some(snapshot_content) = snapshot::load(file)?
+        && let Ok(snapshot_components) = component::parse(&snapshot_content)
+        && let Some(snapshot_queue) = snapshot_components
+            .iter()
+            .find(|component| component.name == "queue")
+    {
+        let snapshot_body = &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
+        if let Ok(snapshot_entries) = crate::queue::parse(snapshot_body) {
+            let snapshot_has_auto = crate::queue::has_auto_attr(&snapshot_queue.attrs);
+            let snapshot_activation =
+                crate::queue::resolve_activation(&snapshot_entries, snapshot_has_auto, false, true);
+            if crate::queue::detect_head_prompt_modified(
+                &snapshot_activation.entries_after,
+                &activation.entries_after,
+            ) {
+                let snapshot_head = crate::queue::first_prompt(&snapshot_activation.entries_after)
+                    .map(|prompt| prompt.text.clone());
+                let document_head = crate::queue::first_prompt(&activation.entries_after)
+                    .map(|prompt| prompt.text.clone());
+                eprintln!(
+                    "[run] active queue halted because the head prompt changed since the snapshot"
+                );
+                return Ok(ActiveQueuePromptState::ItemModified {
+                    snapshot_head,
+                    document_head,
+                });
+            }
+        }
     }
 
     let prompts = crate::queue::prompts(&activation.entries_after);
     let Some(prompt) = prompts.first() else {
-        return Ok(None);
+        return Ok(ActiveQueuePromptState::Empty);
     };
-    Ok(Some(diff::synthetic_added_lines_diff(
-        &prompt.text,
-        "queue",
-    )))
+    Ok(ActiveQueuePromptState::Ready {
+        prompt: prompt.text.clone(),
+    })
+}
+
+fn should_continue_auto_queue(
+    file: &Path,
+    outcome: &RunCycleOutcome,
+    completed_queue_items: usize,
+    no_git: bool,
+) -> Result<bool> {
+    if no_git || !outcome.queue_synthetic_diff {
+        return Ok(false);
+    }
+    let Some(queue) = outcome.queue_consumption.as_ref() else {
+        return Ok(false);
+    };
+    if !queue.auto || queue.drained || queue.remaining == 0 {
+        return Ok(false);
+    }
+
+    match active_queue_prompt_state(file)? {
+        ActiveQueuePromptState::Ready { prompt } => {
+            eprintln!(
+                "[queue] auto queue continuation: completed {} item(s); launching next prompt: {:?}",
+                completed_queue_items, prompt
+            );
+            Ok(true)
+        }
+        ActiveQueuePromptState::StopFence { next_prompt } => {
+            eprintln!(
+                "[queue] auto queue continuation stopped after {} completed item(s): stop_fence before next prompt {:?}",
+                completed_queue_items, next_prompt
+            );
+            Ok(false)
+        }
+        ActiveQueuePromptState::TimeGate {
+            start_at,
+            next_prompt,
+        } => {
+            eprintln!(
+                "[queue] auto queue continuation stopped after {} completed item(s): time_gate {} before next prompt {:?}",
+                completed_queue_items, start_at, next_prompt
+            );
+            Ok(false)
+        }
+        ActiveQueuePromptState::ItemModified {
+            snapshot_head,
+            document_head,
+        } => {
+            eprintln!(
+                "[queue] auto queue continuation stopped after {} completed item(s): item_modified snapshot_head={:?} document_head={:?}",
+                completed_queue_items, snapshot_head, document_head
+            );
+            Ok(false)
+        }
+        ActiveQueuePromptState::Inactive => {
+            eprintln!(
+                "[queue] auto queue continuation stopped after {} completed item(s): queue_inactive",
+                completed_queue_items
+            );
+            Ok(false)
+        }
+        ActiveQueuePromptState::Empty => {
+            eprintln!(
+                "[queue] auto queue continuation stopped after {} completed item(s): no_remaining_prompt",
+                completed_queue_items
+            );
+            Ok(false)
+        }
+    }
 }
 
 struct RunHeartbeat {

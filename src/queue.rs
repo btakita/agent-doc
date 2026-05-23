@@ -445,16 +445,28 @@ pub fn detect_head_prompt_modified(
 
 /// Check if a stop fence is at the head of the entries (before any prompt).
 pub fn has_stop_fence_at_head(entries: &[QueueEntry]) -> bool {
-    matches!(entries.first(), Some(QueueEntry::StopFence))
+    matches!(
+        first_live_control_or_prompt(entries),
+        Some(QueueEntry::StopFence)
+    )
 }
 
 /// Check if a time-gated start fence is at the head of the entries.
 /// Returns `Some(datetime)` if a time gate is found.
 pub fn time_gate_at_head(entries: &[QueueEntry]) -> Option<&str> {
-    match entries.first() {
+    match first_live_control_or_prompt(entries) {
         Some(QueueEntry::StartFence(Some(dt))) => Some(dt.as_str()),
         _ => None,
     }
+}
+
+fn first_live_control_or_prompt(entries: &[QueueEntry]) -> Option<&QueueEntry> {
+    entries.iter().find(|entry| {
+        !matches!(
+            entry,
+            QueueEntry::Completed(_) | QueueEntry::Preset(_) | QueueEntry::Dispatch(_)
+        )
+    })
 }
 
 #[cfg(test)]
@@ -536,6 +548,22 @@ mod tests {
         assert!(matches!(&entries[1], QueueEntry::Prompt(p) if p.text == "do #fix2"));
         assert_eq!(prompts(&entries).len(), 1);
         assert_eq!(render(&entries), body);
+    }
+
+    #[test]
+    fn stop_fence_after_completed_residue_is_live_head() {
+        let body = "- ~do #fix1~\n--- stop\n- do #fix2\n";
+        let entries = parse(body).unwrap();
+
+        assert!(has_stop_fence_at_head(&entries));
+    }
+
+    #[test]
+    fn time_gate_after_completed_residue_is_live_head() {
+        let body = "- ~do #fix1~\n--- start at 17:00 ET\n- do #fix2\n";
+        let entries = parse(body).unwrap();
+
+        assert_eq!(time_gate_at_head(&entries), Some("17:00 ET"));
     }
 
     #[test]

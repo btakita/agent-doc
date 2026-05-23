@@ -2012,14 +2012,28 @@ struct QueueConsumptionPlan {
     save_snapshot: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct QueueConsumptionOutcome {
+    pub(crate) consumed_text: String,
+    pub(crate) remaining: usize,
+    pub(crate) drained: bool,
+    pub(crate) auto: bool,
+}
+
 pub(crate) fn consume_queue_prompt(file: &Path) -> Result<bool> {
+    Ok(consume_queue_prompt_with_outcome(file)?.is_some())
+}
+
+pub(crate) fn consume_queue_prompt_with_outcome(
+    file: &Path,
+) -> Result<Option<QueueConsumptionOutcome>> {
     // Hold the document lock for the entire read-parse-write cycle to prevent
     // concurrent edits from invalidating parsed offsets (TOCTOU fix).
     let _lock = acquire_doc_lock(file)?;
     let content =
         std::fs::read_to_string(file).context("queue consume: failed to read document")?;
     let Some(plan) = plan_queue_prompt_consumption(file, &content)? else {
-        return Ok(false);
+        return Ok(None);
     };
 
     guard_visible_write_idle(file, "queue_consume")?;
@@ -2028,6 +2042,12 @@ pub(crate) fn consume_queue_prompt(file: &Path) -> Result<bool> {
         snapshot::save(file, &plan.new_snapshot)?;
     }
 
+    let outcome = QueueConsumptionOutcome {
+        consumed_text: plan.consumed_text.clone(),
+        remaining: plan.remaining,
+        drained: plan.drained,
+        auto: plan.auto,
+    };
     eprintln!(
         "[queue] consumed: {:?} (remaining: {})",
         plan.consumed_text, plan.remaining
@@ -2036,13 +2056,12 @@ pub(crate) fn consume_queue_prompt(file: &Path) -> Result<bool> {
         eprintln!("[queue] drained — cleared queue_active");
     } else if plan.auto {
         eprintln!(
-            "[queue] auto queue is single-step resumable: {} prompt(s) remain; re-run `agent-doc {}` after this closeout to continue.",
-            plan.remaining,
-            file.display()
+            "[queue] auto queue has {} prompt(s) remaining after this closeout",
+            plan.remaining
         );
     }
 
-    Ok(true)
+    Ok(Some(outcome))
 }
 
 fn plan_queue_prompt_consumption(

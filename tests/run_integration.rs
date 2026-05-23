@@ -68,6 +68,37 @@ fn write_mock_agent(root: &Path, response: &str) -> PathBuf {
     script
 }
 
+fn write_counting_queue_agent(root: &Path) -> (PathBuf, PathBuf) {
+    let script = root.join("mock-counting-queue-agent.sh");
+    let counter = root.join("mock-counting-queue-agent.count");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+cat >/dev/null
+count_file='{counter}'
+n=0
+if [ -f "$count_file" ]; then
+  n="$(cat "$count_file")"
+fi
+n=$((n + 1))
+printf '%s' "$n" > "$count_file"
+printf '{{"result":"<!-- patch:exchange -->\\n### Re: queue item %s — gpt-5\\n\\nImplemented and verified.\\n\\nVerification:\\n- `cargo test`\\n<!-- /patch:exchange -->\\n","session_id":"sess-%s"}}\n' "$n" "$n"
+"#,
+            counter = counter.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).unwrap();
+    }
+    (script, counter)
+}
+
 fn write_mock_streaming_agent(root: &Path) -> PathBuf {
     let script = root.join("mock-streaming-agent.sh");
     fs::write(
@@ -219,7 +250,7 @@ fn template_doc_with_model() -> String {
 }
 
 fn active_auto_queue_doc() -> String {
-    "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
+    "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n- do #fix2\n- do #fix3\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n".to_string()
 }
 
 #[test]
@@ -296,17 +327,14 @@ fn bare_path_alias_uses_same_template_safe_path() {
 }
 
 #[test]
-fn run_resumes_active_queue_head_and_reports_single_step_auto_remaining() {
+fn run_auto_queue_continues_until_drained() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     fs::write(&doc, active_auto_queue_doc()).unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
 
-    let script = write_mock_agent(
-        tmp.path(),
-        "<!-- patch:exchange -->\n### Re: queue item — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n",
-    );
+    let (script, counter) = write_counting_queue_agent(tmp.path());
     let config_root = write_config(tmp.path(), &script);
 
     agent_doc()
@@ -319,40 +347,50 @@ fn run_resumes_active_queue_head_and_reports_single_step_auto_remaining() {
             "[run] active queue head synthesized as prompt diff",
         ))
         .stderr(predicate::str::contains(
-            "[queue] auto queue is single-step resumable: 1 prompt(s) remain",
-        ));
+            "[queue] auto queue continuation: completed 1 item(s); launching next prompt: \"do #fix2\"",
+        ))
+        .stderr(predicate::str::contains(
+            "[queue] auto queue continuation: completed 2 item(s); launching next prompt: \"do #fix3\"",
+        ))
+        .stderr(predicate::str::contains("[queue] drained"));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains("### Re: queue item — gpt-5"),
-        "queue response should be written"
+        content.contains("### Re: queue item 1 — gpt-5"),
+        "first queue response should be written"
     );
     assert!(
-        content.contains("- ~do #fix1~"),
-        "first active queue prompt should be marked complete"
+        content.contains("### Re: queue item 2 — gpt-5"),
+        "second queue response should be written"
     );
     assert!(
-        content.contains("- do #fix2"),
-        "later queue prompt should remain open for the next invocation"
+        content.contains("### Re: queue item 3 — gpt-5"),
+        "third queue response should be written"
     );
     assert!(
-        content.contains("queue_active: true"),
-        "queue should stay active while prompts remain"
+        content.contains("queue_active: false"),
+        "queue should clear active state after all prompts are consumed"
     );
+    assert!(!content.contains("agent:queue auto"));
+    assert!(!content.contains("do #fix1"));
+    assert!(!content.contains("do #fix2"));
+    assert!(!content.contains("do #fix3"));
+    assert_eq!(fs::read_to_string(counter).unwrap(), "3");
 }
 
 #[test]
-fn run_repeated_active_queue_invocation_drains_last_prompt() {
+fn run_auto_queue_stop_fence_halts_continuation_before_next_prompt() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
-    fs::write(&doc, active_auto_queue_doc()).unwrap();
+    fs::write(
+        &doc,
+        "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: mock\nmodel: gpt-5\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue auto -->\n- do #fix1\n--- stop\n- do #fix2\n<!-- /agent:queue -->\n\n## Pending\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n",
+    )
+    .unwrap();
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
 
-    let script = write_mock_agent(
-        tmp.path(),
-        "<!-- patch:exchange -->\n### Re: queue item — gpt-5\n\nImplemented and verified.\n\nVerification:\n- `cargo test`\n<!-- /patch:exchange -->\n",
-    );
+    let (script, counter) = write_counting_queue_agent(tmp.path());
     let config_root = write_config(tmp.path(), &script);
 
     agent_doc()
@@ -360,28 +398,28 @@ fn run_repeated_active_queue_invocation_drains_last_prompt() {
         .env("XDG_CONFIG_HOME", &config_root)
         .args(["run", doc.to_str().unwrap()])
         .assert()
-        .success();
-    agent_doc()
-        .current_dir(tmp.path())
-        .env("XDG_CONFIG_HOME", &config_root)
-        .args(["run", doc.to_str().unwrap()])
-        .assert()
         .success()
-        .stderr(predicate::str::contains("[queue] drained"));
+        .stderr(predicate::str::contains(
+            "[queue] auto queue continuation stopped after 1 completed item(s): stop_fence before next prompt Some(\"do #fix2\")",
+        ));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains("queue_active: false"),
-        "queue should clear active state after the last prompt"
+        content.contains("### Re: queue item 1 — gpt-5"),
+        "first queue response should be written"
     );
     assert!(
-        !content.contains("agent:queue auto"),
-        "drained queue should strip auto"
+        !content.contains("### Re: queue item 2 — gpt-5"),
+        "stop fence should prevent the second queue response"
     );
+    assert!(content.contains("- ~do #fix1~"));
+    assert!(content.contains("--- stop"));
+    assert!(content.contains("- do #fix2"));
     assert!(
-        !content.contains("do #fix1") && !content.contains("do #fix2"),
-        "drained queue should remove consumed prompt residue"
+        content.contains("queue_active: true"),
+        "queue remains active but halted by the stop fence"
     );
+    assert_eq!(fs::read_to_string(counter).unwrap(), "1");
 }
 
 #[test]

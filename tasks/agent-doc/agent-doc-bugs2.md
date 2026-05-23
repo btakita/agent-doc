@@ -28,96 +28,23 @@ Top backlog item: #mxz5. Captured auto-queue stall follow-ups; current queued im
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-145933.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-213223.md`*
 
 Compacted content:
-- Archived 3 response topic(s): #edproof; agent:queue auto stopping; #next-steps for agent:queue auto stall
+- Archived 3 response topic(s): agent:queue auto stall; #tsiftipc; #narrowpatch
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-❯ `agent:queue auto` stalled yet again. Do whatever it takes to make `agent:queue auto` not stall anymore.
-❯ #spec-test-build-install-commit-push
-### Re: agent:queue auto stall — gpt-5
-
-Root cause found and fixed. The direct `agent-doc run` auto-queue loop already had continuation behavior, but the Codex harness-native path could still stall because `codex-stop` treated a clean `finalize` / `session-check` as terminal even when `queue_active: true` and `agent:queue auto` still had a ready head prompt. There was a second stall path when `codex-stop` auto-repaired/finalized an open queue-synthetic cycle: the response could be committed, but the completed queue head was not consumed before the hook checked for the next item.
-
-Implemented in `src/agent-doc`:
-
-- `src/codex_hook.rs` now detects active `agent:queue auto` after clean Stop closeout, blocks final-answer delivery, persists the requested queue head, and tells Codex to invoke `agent-doc <FILE>` again in the same turn.
-- The Stop hook now fails closed if a hook-driven continuation returns to Stop with the same queue head, which prevents infinite continuation loops.
-- The Stop auto-close path now recognizes queue-synthetic cycles that started from an unchanged file and consumes the completed queue head before committing, so the next Stop check sees the next prompt.
-- Added regression coverage for clean-closeout continuation, hook auto-close plus queue-head consumption, repeated continuation after head advance, and no-progress fail-closed behavior.
-- Updated `specs/07-orchestration-commands.md`, `runbooks/harness-invocation.md`, and `VERSIONS.md` with the Codex Stop-hook auto-queue contract.
-
-I also marked `#qloop` done because this cycle implements that backlog item. I preserved the current document queue marker as edited: it is `&lt;!-- agent:queue --&gt;`, not `agent:queue auto`, so this closeout is not re-enabling auto mode for the document queue.
-
-Verification passed:
-
-- `cargo test auto_queue --all-targets -- --test-threads=2`
-- `cargo test codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit --test codex_hook_integration -- --test-threads=2`
-- `git diff --check`
-- `cargo fmt --check`
-- `make check`
-- `make install`
-- `agent-doc --version` → `agent-doc 0.33.16`
-- GitHub CI run `26340567472` is green, including successful `Run make check` and `Run make tmux-ci` steps.
-
-Commits:
-
-- Submodule `src/agent-doc`: `0530c3bb fix: keep codex auto queues moving`, pushed to `origin/20260422/codex-agent-backend`.
-- Parent repo gitlink: `6b78bdd60 agent-doc: update agent-doc submodule`, committed locally only.
-
-I did not push parent `main`: it was already ahead of `origin/main` by 9 commits before the gitlink commit and has many unrelated dirty files. Pushing it now would publish unrelated existing history; `#mxz5` already tracks confirming whether that parent push is intended.
-### Re: #tsiftipc — gpt-5
-
-Implemented `#tsiftipc`.
-
-Changed paths:
-- `src/agent-doc/src/write.rs`
-- `src/agent-doc/specs/07-closeout-commands.md`
-- `src/agent-doc/VERSIONS.md`
-- `src/agent-doc` gitlink in the parent repo
-
-What changed:
-- Added a named `tsift.md` duplicate-content fixture that models stale duplicate-response repair planning while the visible `tasks/software/tsift.md` buffer receives the later `#next-steps` prompt.
-- Added regression coverage proving response-fallback full-document redelivery skips before socket/file IPC when the current editor buffer no longer matches the captured bad state, leaves the live prompt untouched, and logs the stale bad-state proof.
-- Updated the closeout spec and changelog so this exact `tsift.md` incident remains the concrete fixture for response-fallback redelivery behavior.
-
-Verification passed:
-- `cargo test tsift_md_duplicate_content_fixture_skips_stale_full_document_redelivery --all-targets -- --test-threads=2`
-- `git diff --check`
-- `cargo fmt --check`
-- `make check`
-- `cargo build`
-- `make install`
-- `agent-doc --version` -> `agent-doc 0.33.16`
-- `make tmux-ci` -> 228 ignored/tmux tests passed locally, 0 failures
-
-CI / tmux evidence:
-- `btakita/agent-doc` CI run `26341830440` for commit `85a214a10b0b97f9c760cabfb7c612da1ac66dc6` passed, including `Run make check` and `Run make tmux-ci`.
-- Parent `btakita/agent-loop` push run `26341843025` for commit `766a398e21a9a1aa705e9a5720f5dbfd41b0729a` did not start jobs; GitHub annotated both `check` and `tmux-ci` with the billing/spending-limit message, so I classified that as an external CI-start blocker rather than a code or tmux regression.
-
-Commits pushed:
-- `src/agent-doc`: `85a214a` (`test: cover tsift IPC stale redelivery`) pushed to `origin/20260422/codex-agent-backend`.
-- Parent repo: `766a398e2` (`agent-doc: cover tsift IPC stale redelivery`) pushed to `origin/main`.
-
-I staged only the intended non-session path sets for those manual commits. The parent worktree still has unrelated pre-existing dirty files, and I left them untouched.
-### Re: #narrowpatch — gpt-5
-
-Covered.
-
-I added a file-IPC regression for the prefix-normalization fallback path in `src/agent-doc/src/write.rs`. It proves a rejected sidecar that differs only by prompt-prefix normalization queues a narrow file IPC payload with `patches: []`, `unmatched: ""`, `normalize_prefix_lines`, boundary repositioning, and bad-buffer proof, and that it does not fall back to `fullContent` when the narrow repair is consumed.
-
-I also updated `src/agent-doc/specs/07-closeout-commands.md` and `src/agent-doc/VERSIONS.md` so the narrow-first contract explicitly covers both socket and file IPC before full-content redelivery is allowed.
-
-Verification passed locally: focused regression, `git diff --check`, `cargo fmt --check`, `make check`, `cargo build`, `make install`, `agent-doc --version` (`0.33.16`), and `make tmux-ci` (`228 passed`). Remote `btakita/agent-doc` CI run `26342394380` passed `make check` and `make tmux-ci` for commit `5f58660f`. Parent `btakita/agent-loop` run `26342401265` did not start any job steps because GitHub reported the billing/spending-limit blocker, so I treated that as external CI-start failure after local verification.
-
-Pushed commits: `5f58660f test: cover file ipc narrow redelivery` on `btakita/agent-doc` and `c2ebf7730 agent-doc: cover file ipc narrow redelivery` on parent `main`. I left unrelated parent worktree changes untouched.
-<!-- agent:boundary:00fcf155 -->
+<!-- agent:boundary:398bf5d8 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
+preset #spec-test-build-install-commit-push
+- do [#mxz5]
+- do [#qguard]
+- do [#qrepair]
+- do [#qfixture]
 <!-- /agent:queue -->
 
 ## Pending / Not Built

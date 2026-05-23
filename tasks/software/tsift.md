@@ -30,29 +30,12 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-210323.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc65443c45f7b49f5e6ace54e3f6bafe4077ade57924422b5eb3baf4dbd23c-20260523-213135.md`*
 
 Compacted content:
-- Archived 1 response topic(s): SQLite graph edge entities and benchmark
+- Archived 1 response topic(s): graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-❯ What are #next-steps to improve graph performance?
-### Re: graph performance next steps — gpt-5
-
-The top next step is `#gdbprepprof`.
-
-The current bottleneck looks like shared preparation, not the graph read operations themselves. In the latest checked-in `edge-entity-bounded-2026-05-23-*` samples, the bounded graph operations are already in the micro/millisecond range (`real.sqlite.path_max_hops` around 88-93us, `real.sqlite.conflict_matrix` around 1.6-1.9ms, `real.sqlite.dispatch_trace` around 141us), while `real.refresh_phase.conflict_matrix_preparation` is still about 12s. So the priority is to split and cache `prepare_conflict_matrix_inputs` before spending more effort on engine replacement.
-
-I added these backlog items in priority order:
-
-1. `#gdbprepprof` — break down and cache conflict-matrix preparation inputs.
-2. `#gdbprofilefull` — keep a full-projection performance profile beside the session-hinted 213-row run.
-3. `#gdbhoptiers` — raise max-hop behavior through measured operation-specific tiers, not one global cap.
-4. `#gdbfalkorreal` — keep FalkorDB gated behind backend-eval until a production adapter beats SQLite on full real workloads and operational constraints.
-
-On the two direct questions: yes, max-hop caps can probably increase, but only with operation-specific defaults plus deep-chain/high-degree fixtures proving truncation and query-plan behavior. FalkorDB could help later, but I would not switch to it from the current evidence: the bounded run has FalkorDB faster on conflict-matrix, slower on `path_max_hops`, and the older full run had candidate backends far behind SQLite on real conflict-matrix cost.
-
-Commands used for evidence: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg`, `sed`, and `jq` against the tsift spec/source/history fixture. No code changed and no test suite was run for this prompt-response cycle.
-<!-- agent:boundary:48c7cb44 -->
+<!-- agent:boundary:cccaee21 -->
 <!-- /agent:exchange -->
 ###
 <!--

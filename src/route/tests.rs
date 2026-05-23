@@ -161,7 +161,7 @@ fn authoritative_actor_ready_poll_surfaces_terminal_states() {
 }
 
 #[test]
-fn route_scrubs_duplicate_prompt_comment_before_dispatch() {
+fn route_low_level_cleanup_scrubs_duplicate_prompt_comment_without_preserve_doc() {
     let prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Reproduce bugs with tests first and fix the implementation. #spec-test-build-install-commit-push";
     let content = format!(
         concat!(
@@ -181,7 +181,7 @@ fn route_scrubs_duplicate_prompt_comment_before_dispatch() {
         prompt = prompt
     );
 
-    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, None)
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[])
         .unwrap()
         .expect("route should canonicalize duplicate prompt scratch comments before dispatch");
     let cleaned = cleanup.content;
@@ -215,7 +215,7 @@ fn route_preserves_duplicate_prompt_comment_from_snapshot() {
         prompt = prompt
     );
 
-    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, Some(&content)).unwrap();
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[&content]).unwrap();
 
     assert!(
         cleanup.is_none(),
@@ -250,7 +250,42 @@ fn route_preserves_scratch_comment_after_compact_summary_before_dispatch() {
         prompt = prompt
     );
 
-    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, None)
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[&content]).unwrap();
+
+    assert!(
+        cleanup.is_none(),
+        "production route cleanup must preserve visible post-exchange scratch comments"
+    );
+}
+
+#[test]
+fn route_low_level_cleanup_scrubs_unowned_duplicate_prompt_comment() {
+    let prompt = "The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?";
+    let content = format!(
+        concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Compacted content:\n",
+            "- Trailing prompt/context: {prompt}\n",
+            "❯ {prompt}\n",
+            "❯ #spec-test-build-install-commit-push\n",
+            "### Re: compact prompt duplication — gpt-5\n\n",
+            "Line-by-line diff was the right diagnostic.\n",
+            "<!-- agent:boundary:head -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "###\n",
+            "<!--\n",
+            "{prompt}\n",
+            "#spec-test-build-install-commit-push\n",
+            "---\n",
+            "Look through the Claude + Codex + agent-doc session logs\n",
+            "-->\n"
+        ),
+        prompt = prompt
+    );
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[])
         .unwrap()
         .expect("route cleanup should scrub duplicate compact prompt residue");
     let cleaned = cleanup.content;
@@ -290,7 +325,7 @@ fn route_preserves_scratch_comment_when_response_quotes_same_text() {
         scratch = scratch
     );
 
-    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, None).unwrap();
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[]).unwrap();
     let cleaned = cleanup
         .as_ref()
         .map(|cleanup| cleanup.content.as_str())
@@ -321,7 +356,7 @@ fn route_scrubs_duplicate_answered_prompt_tail_before_dispatch() {
         prompt = prompt
     );
 
-    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, None)
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&content, &[])
         .unwrap()
         .expect("route should canonicalize duplicate answered prompt tails before dispatch");
     let cleaned = cleanup.content;
@@ -356,7 +391,7 @@ fn route_rejects_duplicate_prompt_markdown_residue_before_dispatch() {
         prompt = prompt
     );
 
-    let err = scrub_duplicate_prompt_comments_for_route(&content, None).unwrap_err();
+    let err = scrub_duplicate_prompt_comments_for_route(&content, &[]).unwrap_err();
 
     assert!(
         err.to_string().contains("duplicate prompt residue"),

@@ -373,11 +373,18 @@ fn remove_post_exchange_duplicate_prompt_comments_for_preflight(file: &Path) -> 
     let current = std::fs::read_to_string(file)?;
     let snapshot_doc = crate::snapshot::load(file).ok().flatten();
     let head_doc = crate::git::show_head(file).ok().flatten();
-    let preserve_doc = head_doc.as_deref().or(snapshot_doc.as_deref());
+    let mut preserve_docs = Vec::new();
+    preserve_docs.push(current.as_str());
+    if let Some(head_doc) = head_doc.as_deref() {
+        preserve_docs.push(head_doc);
+    }
+    if let Some(snapshot_doc) = snapshot_doc.as_deref() {
+        preserve_docs.push(snapshot_doc);
+    }
     let Some(cleaned_doc) =
-        crate::template::remove_post_exchange_duplicate_prompt_comments_preserving(
+        crate::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
             &current,
-            preserve_doc,
+            &preserve_docs,
         )
     else {
         return Ok(false);
@@ -4665,7 +4672,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_scrubs_post_exchange_duplicate_prompt_comment_before_diff() {
+    fn preflight_preserves_post_exchange_duplicate_prompt_comment_before_diff() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("session.md");
@@ -4727,12 +4734,8 @@ mod tests {
         let file_after = std::fs::read_to_string(&doc).unwrap();
         let duplicate_comment = format!("\n<!--\n{prompt}\n-->\n");
         assert!(
-            !file_after.contains(&duplicate_comment),
-            "preflight should scrub duplicate post-exchange prompt text before diffing:\n{file_after}"
-        );
-        assert!(
-            file_after.contains("\n<!--\n-->\n\n<!--\nKeep this unrelated scratch note hidden."),
-            "preflight should preserve the ordinary HTML comment shell after scrubbing duplicate prompt text:\n{file_after}"
+            file_after.contains(&duplicate_comment),
+            "preflight must preserve visible post-exchange scratch comments even when they duplicate prompt text:\n{file_after}"
         );
         assert!(
             file_after.contains("Keep this unrelated scratch note hidden."),
@@ -4858,16 +4861,18 @@ mod tests {
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            !file_after.contains(&format!("<!--\n{duplicate_prompt_line}")),
-            "preflight should scrub only the duplicate prompt line from the mixed comment:\n{file_after}"
+            file_after.contains(&format!("<!--\n{duplicate_prompt_line}")),
+            "preflight must preserve visible duplicate-looking lines in post-exchange scratch comments:\n{file_after}"
         );
         assert!(
             file_after.contains("Look through the Claude + Codex + agent-doc session logs"),
             "preflight must preserve unrelated scratch lines in the same ordinary comment:\n{file_after}"
         );
         assert!(
-            file_after.contains("<!--\n#spec-test-build-install-commit-push\n---\nLook through"),
-            "preflight must keep the mixed ordinary comment shell and nonduplicate lines:\n{file_after}"
+            file_after.contains(&format!(
+                "<!--\n{duplicate_prompt_line}\n#spec-test-build-install-commit-push\n---\nLook through"
+            )),
+            "preflight must keep the full mixed ordinary comment body:\n{file_after}"
         );
         let snapshot_after = crate::snapshot::load(&doc).unwrap().unwrap();
         assert!(
@@ -4942,7 +4947,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_waits_for_typing_before_duplicate_prompt_comment_cleanup() {
+    fn preflight_preserves_duplicate_prompt_comment_after_typing_settles() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("session.md");
@@ -5010,8 +5015,8 @@ mod tests {
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            !file_after.contains(&duplicate_comment),
-            "preflight should clean the duplicate only after typing settles:\n{file_after}"
+            file_after.contains(&duplicate_comment),
+            "preflight must preserve visible scratch comments after typing settles:\n{file_after}"
         );
     }
 

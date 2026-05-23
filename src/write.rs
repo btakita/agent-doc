@@ -4203,6 +4203,7 @@ struct DuplicatePromptRepairOptions<'a> {
     source: &'a str,
     before: Option<&'a str>,
     preserve_doc: Option<&'a str>,
+    preserve_current_doc: Option<&'a str>,
     enforce_residue_guard: bool,
 }
 
@@ -4212,6 +4213,7 @@ impl<'a> DuplicatePromptRepairOptions<'a> {
             source,
             before: None,
             preserve_doc: None,
+            preserve_current_doc: None,
             enforce_residue_guard: true,
         }
     }
@@ -4223,6 +4225,11 @@ impl<'a> DuplicatePromptRepairOptions<'a> {
 
     fn preserving(mut self, preserve_doc: Option<&'a str>) -> Self {
         self.preserve_doc = preserve_doc;
+        self
+    }
+
+    fn preserving_current(mut self, preserve_current_doc: Option<&'a str>) -> Self {
+        self.preserve_current_doc = preserve_current_doc;
         self
     }
 
@@ -4286,6 +4293,7 @@ fn repair_duplicate_prompt_artifacts(
             file,
             options.source,
             options.preserve_doc,
+            options.preserve_current_doc,
         );
     if comment_changed {
         repaired = comment_deduped;
@@ -5167,11 +5175,18 @@ fn remove_post_exchange_duplicate_prompt_comments_with_log(
     file: &Path,
     source: &str,
     preserve_doc: Option<&str>,
+    preserve_current_doc: Option<&str>,
 ) -> (String, bool) {
-    let Some(cleaned) = crate::template::remove_post_exchange_duplicate_prompt_comments_preserving(
-        content,
-        preserve_doc,
-    ) else {
+    let preserve_docs = [preserve_doc, preserve_current_doc]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let Some(cleaned) =
+        crate::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
+            content,
+            &preserve_docs,
+        )
+    else {
         return (content.to_string(), false);
     };
     crate::ops_log::log_op(
@@ -5594,8 +5609,11 @@ pub fn run_template(
     )?;
     let cleaned_resolved_backlog_prompts_applied = cleaned_resolved_backlog_prompts.is_some();
     if let Some(cleaned) = cleaned_resolved_backlog_prompts {
-        final_content =
-            normalize_template_structure_or_fail_preserving(&cleaned, file, Some(base))?;
+        final_content = normalize_template_structure_or_fail_preserving(
+            &cleaned,
+            file,
+            Some(&content_current),
+        )?;
     }
 
     // Dedup: skip write if merged content is identical to current file (strip boundary markers)
@@ -6297,8 +6315,11 @@ pub fn run_stream(
     )?;
     let cleaned_resolved_backlog_prompts_applied = cleaned_resolved_backlog_prompts.is_some();
     if let Some(cleaned) = cleaned_resolved_backlog_prompts {
-        final_content =
-            normalize_template_structure_or_fail_preserving(&cleaned, file, Some(base))?;
+        final_content = normalize_template_structure_or_fail_preserving(
+            &cleaned,
+            file,
+            Some(&content_current),
+        )?;
         crdt_state = crate::crdt::CrdtDoc::from_text(&final_content).encode_state();
     }
 
@@ -9677,7 +9698,8 @@ fn adopt_current_response_without_duplication(
     if let Some(snapshot_doc) = snapshot {
         repaired = normalize_user_prompts_in_exchange_safe(&repaired, base, snapshot_doc, file);
     }
-    repaired = normalize_template_structure_or_fail_preserving(&repaired, file, Some(base))?;
+    repaired =
+        normalize_template_structure_or_fail_preserving(&repaired, file, Some(content_current))?;
     Ok(Some(repaired))
 }
 
@@ -9693,26 +9715,38 @@ fn normalize_final_template_content(
     if let Some(snapshot_doc) = snapshot {
         normalized = normalize_user_prompts_in_exchange_safe(&normalized, base, snapshot_doc, file);
     }
-    normalized = normalize_template_structure_or_fail_preserving(&normalized, file, Some(base))?;
+    let preserve_current_or_base = before_current.or(Some(base));
+    normalized = normalize_template_structure_or_fail_preserving(
+        &normalized,
+        file,
+        preserve_current_or_base,
+    )?;
     if let Some(before) = before_current {
         let (deduped, report) = repair_duplicate_prompt_artifacts(
             &normalized,
             file,
             DuplicatePromptRepairOptions::new("final-template")
                 .with_before(Some(before))
-                .preserving(Some(base)),
+                .preserving(Some(base))
+                .preserving_current(Some(before)),
         )?;
         if report.changed() {
-            normalized =
-                normalize_template_structure_or_fail_preserving(&deduped, file, Some(base))?;
+            normalized = normalize_template_structure_or_fail_preserving(
+                &deduped,
+                file,
+                preserve_current_or_base,
+            )?;
         }
     }
     if let Some(repaired) =
         repair_response_precedes_prompt_in_exchange(&normalized, response, file, Some(base))?
     {
         normalized = repaired;
-        normalized =
-            normalize_template_structure_or_fail_preserving(&normalized, file, Some(base))?;
+        normalized = normalize_template_structure_or_fail_preserving(
+            &normalized,
+            file,
+            preserve_current_or_base,
+        )?;
     }
     if response_precedes_prompt_in_exchange(&normalized, response, Some(base)) {
         crate::ops_log::log_op(
@@ -15891,6 +15925,48 @@ Verification:
         assert!(
             repaired.contains(&format!("<!--\n{prompt}\n-->")),
             "baseline-owned post-exchange scratch text must not be scrubbed:\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn normalize_final_template_content_preserves_current_prompt_html_comment_body() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let prompt = "The html comment below this document's agent:exchange close tag had content that I put into it. This should not happen. #spec-test-build-install-commit-push";
+        let base = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ {prompt}\n",
+                "<!-- agent:boundary:head -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "###\n\n",
+                "<!--\n",
+                "-->\n\n",
+                "<!-- agent:backlog -->\n",
+                "<!-- /agent:backlog -->\n"
+            ),
+            prompt = prompt
+        );
+        let before_current = base.replace("<!--\n-->", &format!("<!--\n{prompt}\n-->"));
+        let merged = before_current.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: scratch comment preservation — gpt-5\n\nImplemented.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+        );
+
+        let repaired = normalize_final_template_content(
+            &doc,
+            &base,
+            Some(&base),
+            Some(&before_current),
+            &merged,
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            repaired.contains(&format!("<!--\n{prompt}\n-->")),
+            "current visible post-exchange scratch text must not be scrubbed:\n{repaired}"
         );
     }
 

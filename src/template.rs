@@ -1017,7 +1017,7 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
 /// This keeps unrelated scratch comments user-owned while cleaning stale editor
 /// residue such as a hidden previous copy of the current prompt.
 pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<String> {
-    remove_post_exchange_duplicate_prompt_comments_preserving(doc, None)
+    remove_post_exchange_duplicate_prompt_comments_preserving_docs(doc, &[])
 }
 
 /// Like `remove_post_exchange_duplicate_prompt_comments`, but keeps duplicate-
@@ -1029,6 +1029,21 @@ pub fn remove_post_exchange_duplicate_prompt_comments(doc: &str) -> Option<Strin
 pub fn remove_post_exchange_duplicate_prompt_comments_preserving(
     doc: &str,
     preserve_doc: Option<&str>,
+) -> Option<String> {
+    match preserve_doc {
+        Some(preserve_doc) => {
+            remove_post_exchange_duplicate_prompt_comments_preserving_docs(doc, &[preserve_doc])
+        }
+        None => remove_post_exchange_duplicate_prompt_comments_preserving_docs(doc, &[]),
+    }
+}
+
+/// Like `remove_post_exchange_duplicate_prompt_comments_preserving`, but accepts
+/// several ownership-proof documents and preserves the union of their ordinary
+/// post-exchange comment lines.
+pub fn remove_post_exchange_duplicate_prompt_comments_preserving_docs(
+    doc: &str,
+    preserve_docs: &[&str],
 ) -> Option<String> {
     let components = component::parse(doc).ok()?;
     let exchange = components
@@ -1044,9 +1059,10 @@ pub fn remove_post_exchange_duplicate_prompt_comments_preserving(
         .filter(|component| component.name != "exchange")
         .map(|component| (component.open_start, component.close_end))
         .collect::<Vec<_>>();
-    let preserved_comment_lines = preserve_doc
-        .map(post_exchange_comment_line_preserve_set)
-        .unwrap_or_default();
+    let mut preserved_comment_lines = HashSet::new();
+    for preserve_doc in preserve_docs {
+        preserved_comment_lines.extend(post_exchange_comment_line_preserve_set(preserve_doc));
+    }
 
     let mut replacements = Vec::<(usize, usize, String)>::new();
     for (start, end) in component::find_non_agent_html_comment_ranges(doc) {

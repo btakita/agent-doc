@@ -6,6 +6,15 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Route/preflight now preserve visible post-exchange scratch comments.**
+  Duplicate-prompt cleanup now treats the current visible document as ownership
+  proof for ordinary HTML comments below `agent:exchange`, so route, preflight,
+  and final closeout do not empty scratch comments the user typed before the
+  mutation. Generated duplicate comment residue can still be scrubbed when it is
+  absent from both the baseline/snapshot and the current file used for the
+  write, while exact duplicate answered prompt tails inside `agent:exchange`
+  remain auto-cleaned.
+
 - **Compact Exchange no longer emits full-document editor IPC.** Template
   exchange compaction now uses the visible idle + compare-and-swap direct-write
   guard even when an editor patch directory is present. This removes the
@@ -94,10 +103,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   This keeps stale-editor redelivery, disk repair, and snapshot save behavior on
   one auditable branch.
 
-- **Pre-existing scratch comments survive duplicate prompt cleanup.** Closeout,
+- **Owned scratch comments survive duplicate prompt cleanup.** Closeout,
   preflight, and route duplicate-prompt cleanup now preserve post-exchange HTML
-  comment lines that were already present in the pre-response baseline/snapshot.
-  The scrub still removes same-cycle duplicate prompt residue and preserves the
+  comment lines that were already present in the pre-response baseline/snapshot
+  or in the visible document used for the mutation. The scrub still removes
+  generated duplicate prompt residue with no ownership proof and preserves the
   comment shell, but it no longer empties a user's parked scratch prompt such as
   the `tsift.md` `#next-steps` comment after the prompt is answered.
 
@@ -109,9 +119,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   already-answered prompt from reappearing as fresh prompt-bearing diff.
 
 - **Mixed scratch comments preserve unrelated lines during duplicate cleanup.**
-  Post-exchange HTML comment cleanup now removes duplicate prompt lines from
-  multiline comments without applying a fuzzy whole-comment match that can erase
-  unrelated scratch/log-triage text in the same comment. Added editor-visible and
+  When generated post-exchange HTML comment residue lacks ownership proof,
+  cleanup removes only the duplicate prompt lines from multiline comments
+  without applying a fuzzy whole-comment match that can erase unrelated
+  scratch/log-triage text in the same comment. Added editor-visible and
   preflight regressions for the live `agent-doc-bugs2.md` mixed-comment shape.
 
 - **Full-content replacements now bind to their computed source buffer.** Compact
@@ -157,18 +168,17 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   diff computation, preventing cleaned baselines from diverging from editor
   replayed prompt/comment content.
 
-- **Post-exchange duplicate prompt comments are cleaned.** Preflight,
-  editor-visible normalization, IPC snapshot dedupe, and final template
-  reconciliation now remove ordinary HTML comment bodies after `agent:exchange`
-  when they duplicate or near-duplicate a prompt already present in the
-  exchange. Unrelated scratch comments stay user-owned and remain outside
-  `agent:exchange`.
+- **Generated post-exchange duplicate prompt comments are cleaned.** IPC
+  snapshot dedupe and final template reconciliation remove ordinary HTML
+  comment bodies after `agent:exchange` only when they duplicate or
+  near-duplicate a prompt already present in the exchange and lack
+  baseline/snapshot/current-visible ownership proof. Unrelated and visible
+  scratch comments stay user-owned and remain outside `agent:exchange`.
 
-- **Route pre-dispatch now shares duplicate prompt comment cleanup.** `agent-doc
-  route` runs the same post-exchange duplicate-prompt comment scrub before
-  sending a routed reopen, so editor Run actions do not dispatch against a
-  document that still contains a stale prompt copy in the scratch comment below
-  `agent:exchange`.
+- **Route pre-dispatch preserves visible scratch comments.** `agent-doc route`
+  still removes exact duplicate answered prompt tails before sending a routed
+  reopen, but ordinary post-exchange HTML comments already visible in the file
+  are ownership-protected instead of being emptied as duplicate prompt residue.
 
 - **Lower-agent job packet MVP.** `agent-doc plan` now emits deterministic
   lower-agent routing fields (`dispatch_candidate`, task class, risk,

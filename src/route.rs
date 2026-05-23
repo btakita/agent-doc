@@ -1363,9 +1363,16 @@ pub fn run_with_tmux(
     }
     let snapshot_doc = crate::snapshot::load(file).ok().flatten();
     let head_doc = crate::git::show_head(file).ok().flatten();
-    let preserve_doc = head_doc.as_deref().or(snapshot_doc.as_deref());
+    let mut preserve_docs = Vec::new();
+    preserve_docs.push(updated_content.as_str());
+    if let Some(head_doc) = head_doc.as_deref() {
+        preserve_docs.push(head_doc);
+    }
+    if let Some(snapshot_doc) = snapshot_doc.as_deref() {
+        preserve_docs.push(snapshot_doc);
+    }
     if let Some(cleanup) =
-        scrub_duplicate_prompt_comments_for_route(&updated_content, preserve_doc)?
+        scrub_duplicate_prompt_comments_for_route(&updated_content, &preserve_docs)?
     {
         crate::write::atomic_write_pub(file, &cleanup.content)?;
         if cleanup.removed_answered_tail {
@@ -1477,7 +1484,7 @@ struct RouteDuplicatePromptCleanup {
 
 fn scrub_duplicate_prompt_comments_for_route(
     content: &str,
-    preserve_doc: Option<&str>,
+    preserve_docs: &[&str],
 ) -> Result<Option<RouteDuplicatePromptCleanup>> {
     let (frontmatter, _) = frontmatter::parse(content)
         .context("failed to parse document frontmatter before route cleanup")?;
@@ -1494,9 +1501,9 @@ fn scrub_duplicate_prompt_comments_for_route(
         removed_answered_tail = true;
     }
     if let Some(tail_cleaned) =
-        crate::template::remove_post_exchange_duplicate_prompt_comments_preserving(
+        crate::template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(
             &cleaned_content,
-            preserve_doc,
+            preserve_docs,
         )
     {
         cleaned_content = tail_cleaned;

@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Logged three fresh log-triage follow-ups. No open backlog items.
+Prioritized next steps for separating repair and redelivery decisions. Top backlog item: #dvre.
 <!-- /agent:status -->
 
 ## Exchange
@@ -139,10 +139,31 @@ So the likely root cause is not that `redeliver_*` itself has complex logic; it 
 What should change: separate the decisions. Save a repaired snapshot when needed, but only full-content redeliver when a fresh editor-buffer proof shows the visible buffer still contains the exact bad state. Otherwise skip editor redelivery or send a narrow normalization/reposition patch.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, source inspection of `verify_sidecar_normalization`, `dedupe_ipc_snapshot_content`, and both redelivery call sites, plus ops-log inspection around the May 9 and May 15 repair sequences. No code changes were made.
-<!-- agent:boundary:faee10ea -->
+❯ What are the #next-steps to "separate the decisions"?
+### Re: next steps for separating repair decisions — gpt-5
+
+The top backlog item is `#dvre`.
+
+The practical split is: snapshot/disk repair can happen when `verify_sidecar_normalization(...)` or `dedupe_ipc_snapshot_content(...)` proves the ACK/snapshot needs cleanup, but editor redelivery should require a second, fresh proof that the visible editor buffer still contains the exact bad state.
+
+Concrete next steps:
+
+1. Keep `#dvre` first: gate `redeliver_ipc_dedupe_to_editor(...)` and `redeliver_normalization_fallback_to_editor(...)` so a repaired snapshot does not automatically become a full-document editor replacement.
+2. Replace the current boolean repair result with a typed repair decision carrying the repaired content, repair reason, bad-state fingerprint, and explicit `redeliver_editor` decision.
+3. Add fresh editor-buffer proof before full-content redelivery. The proof should match the exact duplicate prompt or missing-prefix state, not just an ACK sidecar delta.
+4. Add logging at the decision boundary: patch id, snapshot source, repair reason, before/current hashes, proof source, duplicate prompt count, required/observed prefix counts, and whether redelivery was skipped or sent.
+5. Add unit and SimWorld coverage for both branches: snapshot-only repair when the bad state is only in the sidecar/snapshot path, and full-content redelivery only when the visible editor still contains the bad state.
+6. After that, make narrow normalization/reposition patching the preferred prefix repair and keep full-content `ResponseFallback` as the last resort.
+
+I added those follow-up items to the backlog in priority order. No code changes were made in this cycle.
+
+Verification: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, and source inspection of the repair/redelivery call sites in `src/agent-doc/src/write.rs`.
+<!-- agent:boundary:06e1f68a -->
 <!-- /agent:exchange -->
 ###
 <!--
+Are there #next-steps to clean up the many failed attempts to fix the duplicate corrupt document & the duplicate prompt issues after we "separate the decisions"?
+---
 html comment fix
 ---
 Please fix. This has taken >50 turns and you still fail to fix this issue. FIX THE DANM ISSUE. Please add logging so you can detect when this issue occurs. I'm talking about the duplicate corrupt document & the duplicate prompt issue. It happened as I was typing this prompt. WTF are you doing? Not fixing the issue apparently. Just wasting tokens and time. #spec-test-build-install-commit-push
@@ -159,6 +180,11 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 
 <!-- agent:backlog -->
 - [ ] [#dvre] [recommended] Gate response-fallback full-document redelivery: after IPC dedupe or sidecar-normalization repair, require fresh editor-buffer proof that the visible buffer still contains the exact bad state before calling redeliver_ipc_dedupe_to_editor or redeliver_normalization_fallback_to_editor; otherwise save the repaired snapshot or send a narrow normalization/reposition patch.
+- [ ] [#rdec] [recommended] Split the IPC repair outcome in src/agent-doc/src/write.rs into typed decisions: repaired snapshot content, disk-repair reason, editor bad-state fingerprint, and explicit redeliver_editor=true|false.
+- [ ] [#eprf] [recommended] Add fresh editor-buffer proof before response-fallback full-document redelivery, so redeliver_ipc_dedupe_to_editor and redeliver_normalization_fallback_to_editor only run when the visible buffer still contains the exact duplicate/prefix-divergent state.
+- [ ] [#rlog] [recommended] Add structured ops-log records for repair/redelivery decisions: patch_id, snap_source, repair_reason, before/current hashes, proof source, duplicate prompt count, required/observed prefix counts, and redeliver=true|false.
+- [ ] [#rtst] [recommended] Add deterministic unit and SimWorld coverage for ack-sidecar-only repair, real visible duplicate repair, sidecar normalization divergence, stale source-buffer skip, and post-commit user follow-up drift.
+- [ ] [#nfix] [recommended] Replace eligible prefix-normalization response fallback redeliveries with a narrow normalization/reposition patch before using fullContent as a last resort.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

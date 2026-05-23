@@ -14,7 +14,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue_active: true
 ---
 
 ## Status
@@ -34,10 +34,27 @@ Added post-fix cleanup next steps after the decision-separation backlog. Top bac
 Compacted content:
 - Archived 7 response topic(s): document staleness and full-content IPC; Compact Exchange trigger; full-document IPC trigger; 4 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:c6f84486 -->
+### Re: #dvre — gpt-5
+
+Implemented #dvre in `src/agent-doc` and committed the non-session repo change as `241919e` (`fix: gate repair full-content redelivery`).
+
+The repair path now gates full-document editor redelivery on the exact bad buffer: IPC dedupe and sidecar-normalization fallback capture the rejected/bad content, only attempt `fullContent` repair when the current buffer still matches that bad state, and send `expected_content_hash` / `expected_content_len` for that bad source rather than for the repaired replacement. If the proof is stale or the editor repair is not consumed, the code falls back to the existing disk/snapshot repair path instead of forcing a stale full-document replacement.
+
+Specs were updated in `editors/SPEC.md` and `editors/PLUGIN-SPEC.md` to document that response-fallback redelivery uses proof for the bad buffer being replaced and skips full-content redelivery when that proof is stale.
+
+Verification:
+- `cargo test -p agent-doc late_fallback_patch_guard_tests -- --nocapture`
+- `make check`
+- Latest GitHub CI run `26319677438`: `Run make tmux-ci` succeeded
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Push will run after this finalize boundary succeeds, so the session document remains on the binary-owned closeout path.
+<!-- agent:boundary:70c16394 -->
 <!-- /agent:exchange -->
 ###
 <!--
+"separate the decisions"
 ---
 html comment fix
 ---
@@ -50,7 +67,7 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
-- do [#dvre]
+- ~do [#dvre]~
 - do [#rdec]
 - do [#eprf]
 - do [#rlog]
@@ -61,7 +78,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#dvre] [recommended] Gate response-fallback full-document redelivery: after IPC dedupe or sidecar-normalization repair, require fresh editor-buffer proof that the visible buffer still contains the exact bad state before calling redeliver_ipc_dedupe_to_editor or redeliver_normalization_fallback_to_editor; otherwise save the repaired snapshot or send a narrow normalization/reposition patch.
 - [ ] [#rdec] [recommended] Split the IPC repair outcome in src/agent-doc/src/write.rs into typed decisions: repaired snapshot content, disk-repair reason, editor bad-state fingerprint, and explicit redeliver_editor=true|false.
 - [ ] [#eprf] [recommended] Add fresh editor-buffer proof before response-fallback full-document redelivery, so redeliver_ipc_dedupe_to_editor and redeliver_normalization_fallback_to_editor only run when the visible buffer still contains the exact duplicate/prefix-divergent state.
 - [ ] [#rlog] [recommended] Add structured ops-log records for repair/redelivery decisions: patch_id, snap_source, repair_reason, before/current hashes, proof source, duplicate prompt count, required/observed prefix counts, and redeliver=true|false.

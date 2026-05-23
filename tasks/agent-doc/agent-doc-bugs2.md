@@ -57,7 +57,7 @@ Verification: passed. The focused Rust tests covered stale full-content source g
 CI/tmux evidence: latest GitHub CI run `26334620844` succeeded; its `Run make check` and `Run make tmux-ci` steps both passed.
 
 Push: no source changes were made, so there was nothing to commit or push for `src/agent-doc`.
-<!-- agent:boundary:bec517b3 -->
+<!-- agent:boundary:eeb23a47 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -66,7 +66,7 @@ Push: no source changes were made, so there was nothing to commit or push for `s
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#edproof]~
-- ~do [#typedrepair]~
+- do [#typedrepair]
 - do [#repairtests]
 - do [#tsiftipc]
 - do [#narrowpatch]

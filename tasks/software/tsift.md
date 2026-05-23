@@ -118,7 +118,14 @@ Commands/proof: ran `agent-doc preflight`, `agent-doc read`, `agent-doc orchestr
 No source work was rerun for this queue head because the item has already shipped; this closeout is consuming the reactivated queue entry.
 
 Commands/proof: ran `agent-doc --version`, `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg` against the session and done archive, `git status --short`, `git log --oneline`, and `git show --stat c1c7668` in `src/tsift`. Changed paths: session document only. Verification: archived done entry and implementation commits confirmed; no source build/test run was needed for this idempotent queue-consumption cycle. Escalation: none. Confidence: high.
-<!-- agent:boundary:2e7dfb22 -->
+### Re: do #gdbtargetsnap — gpt-5
+
+`#gdbtargetsnap` is already complete. The current session status records it as shipped with `#gdbrefreshcache` and `#gdbpathprobe`, and `tasks/software/tsift.done.md` has the archived done entry dated 2026-05-23.
+
+I did not redispatch or rerun the spec/test/build/install/push flow for this queue head. The planning evidence reported `previously_completed=true` for `#gdbtargetsnap`, so this closeout is consuming the reactivated queue entry only.
+
+Commands/proof: ran `agent-doc preflight` and `agent-doc plan`; plan attempted `tsift dispatch-trace` and timed out after 30s, but the partial evidence included `previously_completed=true` and a queue-head drift warning not to redispatch the completed item. Changed paths: session document only. Verification: session status, done archive, and plan evidence confirm this item is already closed; no source build/test run was needed for this idempotent queue-consumption cycle. Escalation: none. Confidence: high.
+<!-- agent:boundary:9c2adee6 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -129,7 +136,7 @@ Commands/proof: ran `agent-doc --version`, `agent-doc preflight`, `agent-doc rea
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#gdbrefreshcache]~
-- do [#gdbtargetsnap]
+- ~do [#gdbtargetsnap]~
 - do [#gdbpathprobe]
 <!-- /agent:queue -->
 

@@ -33,13 +33,46 @@ Top backlog item: #mxz5. Captured auto-queue stall follow-ups; current queued im
 Compacted content:
 - Archived 3 response topic(s): #edproof; agent:queue auto stopping; #next-steps for agent:queue auto stall
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:47f2f962 -->
+❯ `agent:queue auto` stalled yet again. Do whatever it takes to make `agent:queue auto` not stall anymore.
+❯ #spec-test-build-install-commit-push
+### Re: agent:queue auto stall — gpt-5
+
+Root cause found and fixed. The direct `agent-doc run` auto-queue loop already had continuation behavior, but the Codex harness-native path could still stall because `codex-stop` treated a clean `finalize` / `session-check` as terminal even when `queue_active: true` and `agent:queue auto` still had a ready head prompt. There was a second stall path when `codex-stop` auto-repaired/finalized an open queue-synthetic cycle: the response could be committed, but the completed queue head was not consumed before the hook checked for the next item.
+
+Implemented in `src/agent-doc`:
+
+- `src/codex_hook.rs` now detects active `agent:queue auto` after clean Stop closeout, blocks final-answer delivery, persists the requested queue head, and tells Codex to invoke `agent-doc <FILE>` again in the same turn.
+- The Stop hook now fails closed if a hook-driven continuation returns to Stop with the same queue head, which prevents infinite continuation loops.
+- The Stop auto-close path now recognizes queue-synthetic cycles that started from an unchanged file and consumes the completed queue head before committing, so the next Stop check sees the next prompt.
+- Added regression coverage for clean-closeout continuation, hook auto-close plus queue-head consumption, repeated continuation after head advance, and no-progress fail-closed behavior.
+- Updated `specs/07-orchestration-commands.md`, `runbooks/harness-invocation.md`, and `VERSIONS.md` with the Codex Stop-hook auto-queue contract.
+
+I also marked `#qloop` done because this cycle implements that backlog item. I preserved the current document queue marker as edited: it is `&lt;!-- agent:queue --&gt;`, not `agent:queue auto`, so this closeout is not re-enabling auto mode for the document queue.
+
+Verification passed:
+
+- `cargo test auto_queue --all-targets -- --test-threads=2`
+- `cargo test codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit --test codex_hook_integration -- --test-threads=2`
+- `git diff --check`
+- `cargo fmt --check`
+- `make check`
+- `make install`
+- `agent-doc --version` → `agent-doc 0.33.16`
+- GitHub CI run `26340567472` is green, including successful `Run make check` and `Run make tmux-ci` steps.
+
+Commits:
+
+- Submodule `src/agent-doc`: `0530c3bb fix: keep codex auto queues moving`, pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo gitlink: `6b78bdd60 agent-doc: update agent-doc submodule`, committed locally only.
+
+I did not push parent `main`: it was already ahead of `origin/main` by 9 commits before the gitlink commit and has many unrelated dirty files. Pushing it now would publish unrelated existing history; `#mxz5` already tracks confirming whether that parent push is intended.
+<!-- agent:boundary:d150f0ea -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - ~do [#edproof]~
 - ~do [#typedrepair]~
@@ -55,7 +88,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#mxz5] [recommended] Confirm whether parent main's existing unpushed commits should be pushed before publishing the superproject gitlink update.
 - [ ] [#qguard] [recommended] Fix queue consumption proof so prompt-only or next-steps closeouts cannot consume an active queue head when the preflight baseline already includes the unrelated prompt; require an exact queue-head prompt match, queue-synthetic diff proof, or explicit done id before consuming.
 - [ ] [#qrepair] [recommended] Make response repair/write --commit queue-neutral: missing-response materialization repairs must preserve the current queue head and auto attribute unless the repair explicitly closes that queue item.
-- [ ] [#qloop] [recommended] Wire Codex/direct agent-doc file invocations into the binary-owned auto-queue continuation loop, or explicitly re-dispatch the next queue head after finalize when queue_active and agent:queue auto remain true.
 - [ ] [#qfixture] [recommended] Add an end-to-end regression for agent:queue auto plus a non-queue #next-steps prompt and repair write, asserting the auto attribute is preserved and the next queue head is not consumed.
 - [ ] [#tsiftipc] [recommended] Capture the tsift.md duplicate-content corruption while typing as a named fixture and assert full-document IPC redelivery is skipped without fresh editor-buffer proof.
 - [ ] [#narrowpatch] [recommended] Replace eligible prefix-normalization fallback fullContent redeliveries with narrow normalization/reposition patches before using fullContent as a last resort.

@@ -6537,49 +6537,161 @@ fn repair_disk_from_normalization_fallback(file: &Path, fallback: &str) -> Resul
     Ok(())
 }
 
-fn redeliver_normalization_fallback_to_editor(file: &Path, fallback: &str) {
-    match try_ipc_full_content(file, fallback) {
-        Ok(true) => {
-            eprintln!(
+#[derive(Clone, Copy, Debug)]
+enum FullContentRepairRedelivery {
+    NormalizationFallback,
+    IpcDedupe,
+}
+
+impl FullContentRepairRedelivery {
+    fn label(self) -> &'static str {
+        match self {
+            Self::NormalizationFallback => "sidecar_normalization_fallback",
+            Self::IpcDedupe => "ipc_dedupe",
+        }
+    }
+
+    fn success_message(self) -> &'static str {
+        match self {
+            Self::NormalizationFallback => {
                 "[write] sidecar normalization fallback re-delivered to editor via full-content IPC"
-            );
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "sidecar_normalization_fallback_redelivered_editor file={} bytes={}",
-                    file.display(),
-                    fallback.len()
-                ),
-            );
+            }
+            Self::IpcDedupe => "[write] IPC duplicate-response repair re-delivered to editor",
         }
-        Ok(false) => {
-            eprintln!(
+    }
+
+    fn not_consumed_message(self) -> &'static str {
+        match self {
+            Self::NormalizationFallback => {
                 "[write] WARNING: sidecar normalization fallback repaired disk, but editor IPC repair was not consumed; reload the document if the editor view is stale"
-            );
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "sidecar_normalization_fallback_editor_repair_not_consumed file={} bytes={}",
-                    file.display(),
-                    fallback.len()
-                ),
-            );
+            }
+            Self::IpcDedupe => {
+                "[write] WARNING: IPC duplicate-response repair updated disk, but editor IPC repair was not consumed; reload the document if the editor view is stale"
+            }
         }
+    }
+
+    fn failed_message(self, error: &anyhow::Error) -> String {
+        match self {
+            Self::NormalizationFallback => format!(
+                "[write] WARNING: sidecar normalization fallback repaired disk, but editor IPC repair failed: {}; reload the document if the editor view is stale",
+                error
+            ),
+            Self::IpcDedupe => format!(
+                "[write] WARNING: IPC duplicate-response repair updated disk, but editor IPC repair failed: {}; reload the document if the editor view is stale",
+                error
+            ),
+        }
+    }
+}
+
+fn redeliver_full_content_repair_to_editor(
+    file: &Path,
+    repaired_content: &str,
+    expected_bad_state: &str,
+    kind: FullContentRepairRedelivery,
+) -> bool {
+    let current_content = match std::fs::read_to_string(file) {
+        Ok(content) => content,
         Err(e) => {
             eprintln!(
-                "[write] WARNING: sidecar normalization fallback repaired disk, but editor IPC repair failed: {}; reload the document if the editor view is stale",
+                "[write] WARNING: {} editor repair skipped because {} could not be read: {}",
+                kind.label(),
+                file.display(),
                 e
             );
             crate::ops_log::log_op(
                 file,
                 &format!(
-                    "sidecar_normalization_fallback_editor_repair_failed file={} error={}",
+                    "{}_editor_redelivery_skipped file={} skip=read_failed error={}",
+                    kind.label(),
                     file.display(),
                     e
                 ),
             );
+            return false;
+        }
+    };
+    if current_content != expected_bad_state {
+        eprintln!(
+            "[write] {} editor repair skipped: visible buffer no longer matches the bad state",
+            kind.label()
+        );
+        crate::ops_log::log_op(
+            file,
+            &format!(
+                "{}_editor_redelivery_skipped file={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={}",
+                kind.label(),
+                file.display(),
+                expected_bad_state.len(),
+                crate::ops_log::content_hash(expected_bad_state),
+                current_content.len(),
+                crate::ops_log::content_hash(&current_content)
+            ),
+        );
+        return false;
+    }
+
+    match try_ipc_full_content_response_fallback_from_source(
+        file,
+        repaired_content,
+        expected_bad_state,
+    ) {
+        Ok(true) => {
+            eprintln!("{}", kind.success_message());
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{}_redelivered_editor file={} bytes={} expected_bad_len={} expected_bad_hash={}",
+                    kind.label(),
+                    file.display(),
+                    repaired_content.len(),
+                    expected_bad_state.len(),
+                    crate::ops_log::content_hash(expected_bad_state)
+                ),
+            );
+            true
+        }
+        Ok(false) => {
+            eprintln!("{}", kind.not_consumed_message());
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{}_editor_repair_not_consumed file={} bytes={}",
+                    kind.label(),
+                    file.display(),
+                    repaired_content.len()
+                ),
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("{}", kind.failed_message(&e));
+            crate::ops_log::log_op(
+                file,
+                &format!(
+                    "{}_editor_repair_failed file={} error={}",
+                    kind.label(),
+                    file.display(),
+                    e
+                ),
+            );
+            false
         }
     }
+}
+
+fn redeliver_normalization_fallback_to_editor(
+    file: &Path,
+    fallback: &str,
+    expected_bad_state: &str,
+) -> bool {
+    redeliver_full_content_repair_to_editor(
+        file,
+        fallback,
+        expected_bad_state,
+        FullContentRepairRedelivery::NormalizationFallback,
+    )
 }
 
 fn repair_disk_from_ipc_dedupe(file: &Path, content: &str) -> Result<()> {
@@ -6601,47 +6713,13 @@ fn repair_disk_from_ipc_dedupe(file: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
-fn redeliver_ipc_dedupe_to_editor(file: &Path, content: &str) {
-    match try_ipc_full_content(file, content) {
-        Ok(true) => {
-            eprintln!("[write] IPC duplicate-response repair re-delivered to editor");
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "ipc_dedupe_redelivered_editor file={} bytes={}",
-                    file.display(),
-                    content.len()
-                ),
-            );
-        }
-        Ok(false) => {
-            eprintln!(
-                "[write] WARNING: IPC duplicate-response repair updated disk, but editor IPC repair was not consumed; reload the document if the editor view is stale"
-            );
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "ipc_dedupe_editor_repair_not_consumed file={} bytes={}",
-                    file.display(),
-                    content.len()
-                ),
-            );
-        }
-        Err(e) => {
-            eprintln!(
-                "[write] WARNING: IPC duplicate-response repair updated disk, but editor IPC repair failed: {}; reload the document if the editor view is stale",
-                e
-            );
-            crate::ops_log::log_op(
-                file,
-                &format!(
-                    "ipc_dedupe_editor_repair_failed file={} error={}",
-                    file.display(),
-                    e
-                ),
-            );
-        }
-    }
+fn redeliver_ipc_dedupe_to_editor(file: &Path, content: &str, expected_bad_state: &str) -> bool {
+    redeliver_full_content_repair_to_editor(
+        file,
+        content,
+        expected_bad_state,
+        FullContentRepairRedelivery::IpcDedupe,
+    )
 }
 
 pub(crate) fn dedupe_ipc_snapshot_content(
@@ -6997,42 +7075,47 @@ pub fn try_ipc(
                 if let Some(snap_content) = sidecar {
                     // Verify sidecar preserved normalize_prefix_lines targets.
                     // If the plugin's normalization diverged, prefer content_ours.
-                    let (effective_snap, snap_source, repair_disk) = if let Some(lines) =
-                        normalize_prefix_lines
-                        && !lines.is_empty()
-                        && !verify_sidecar_normalization(&snap_content, lines)
-                    {
-                        if let Some(ours) = content_ours {
-                            let fallback =
-                                normalized_content_ours_fallback(file, baseline, ours, lines);
-                            eprintln!(
-                                "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
-                                fallback.len()
-                            );
-                            crate::ops_log::log_op(
-                                file,
-                                &format!(
-                                    "sidecar_normalization_fallback file={} snap_source=content_ours reason=prefix_divergence",
-                                    file.display()
-                                ),
-                            );
-                            (fallback, "content_ours", true)
+                    let (effective_snap, snap_source, repair_disk, mut repair_bad_state) =
+                        if let Some(lines) = normalize_prefix_lines
+                            && !lines.is_empty()
+                            && !verify_sidecar_normalization(&snap_content, lines)
+                        {
+                            if let Some(ours) = content_ours {
+                                let bad_state = snap_content.clone();
+                                let fallback =
+                                    normalized_content_ours_fallback(file, baseline, ours, lines);
+                                eprintln!(
+                                    "[write] sidecar normalization diverged — falling back to content_ours ({} bytes)",
+                                    fallback.len()
+                                );
+                                crate::ops_log::log_op(
+                                    file,
+                                    &format!(
+                                        "sidecar_normalization_fallback file={} snap_source=content_ours reason=prefix_divergence",
+                                        file.display()
+                                    ),
+                                );
+                                (fallback, "content_ours", true, Some(bad_state))
+                            } else {
+                                eprintln!(
+                                    "[write] sidecar normalization diverged but no content_ours available — using sidecar"
+                                );
+                                (snap_content, "ack_content_sidecar", false, None)
+                            }
                         } else {
-                            eprintln!(
-                                "[write] sidecar normalization diverged but no content_ours available — using sidecar"
-                            );
-                            (snap_content, "ack_content_sidecar", false)
-                        }
-                    } else {
-                        (snap_content, "ack_content_sidecar", false)
-                    };
+                            (snap_content, "ack_content_sidecar", false, None)
+                        };
 
+                    let pre_dedupe_snap = effective_snap.clone();
                     let (effective_snap, dedupe_repair) = dedupe_ipc_snapshot_content(
                         file,
                         ipc_before_content.as_deref(),
                         &effective_snap,
                         snap_source,
                     )?;
+                    if dedupe_repair && repair_bad_state.is_none() {
+                        repair_bad_state = Some(pre_dedupe_snap);
+                    }
                     let repair_disk = repair_disk || dedupe_repair;
 
                     let expected_response = response_materialization_probe(patches, unmatched);
@@ -7074,12 +7157,23 @@ pub fn try_ipc(
                         let _ = std::fs::remove_file(path);
                     }
                     if repair_disk {
+                        let expected_bad_state = repair_bad_state.as_deref().unwrap_or("");
                         if dedupe_repair {
-                            repair_disk_from_ipc_dedupe(file, &effective_snap)?;
-                            redeliver_ipc_dedupe_to_editor(file, &effective_snap);
+                            if !redeliver_ipc_dedupe_to_editor(
+                                file,
+                                &effective_snap,
+                                expected_bad_state,
+                            ) {
+                                repair_disk_from_ipc_dedupe(file, &effective_snap)?;
+                            }
                         } else {
-                            repair_disk_from_normalization_fallback(file, &effective_snap)?;
-                            redeliver_normalization_fallback_to_editor(file, &effective_snap);
+                            if !redeliver_normalization_fallback_to_editor(
+                                file,
+                                &effective_snap,
+                                expected_bad_state,
+                            ) {
+                                repair_disk_from_normalization_fallback(file, &effective_snap)?;
+                            }
                         }
                     }
                     crate::ops_log::log_op(
@@ -7351,6 +7445,19 @@ pub fn try_ipc_full_content(file: &Path, content: &str) -> Result<bool> {
     try_ipc_full_content_with_mode(file, content, FullContentIpcMode::ResponseFallback, None)
 }
 
+fn try_ipc_full_content_response_fallback_from_source(
+    file: &Path,
+    content: &str,
+    source_content: &str,
+) -> Result<bool> {
+    try_ipc_full_content_with_mode(
+        file,
+        content,
+        FullContentIpcMode::ResponseFallback,
+        Some(source_content),
+    )
+}
+
 #[allow(dead_code)]
 pub fn try_ipc_full_content_operator_mutation(file: &Path, content: &str) -> Result<bool> {
     try_ipc_full_content_with_mode(file, content, FullContentIpcMode::OperatorMutation, None)
@@ -7469,7 +7576,11 @@ fn try_ipc_full_content_with_mode(
     let canonical = file.canonicalize()?;
     let project_root = resolve_ipc_project_root(&canonical);
     let before_content = std::fs::read_to_string(file).ok();
-    let proof_content = source_content.or(before_content.as_deref());
+    let effective_source_content = match (mode, source_content) {
+        (FullContentIpcMode::ResponseFallback, None) => Some(content),
+        _ => source_content,
+    };
+    let proof_content = effective_source_content.or(before_content.as_deref());
     let patch_id = uuid::Uuid::new_v4().to_string();
 
     if mode == FullContentIpcMode::ResponseFallback
@@ -7502,7 +7613,7 @@ fn try_ipc_full_content_with_mode(
         file,
         mode,
         &patch_id,
-        source_content,
+        effective_source_content,
         before_content.as_deref(),
     ) {
         return Ok(false);
@@ -7783,6 +7894,7 @@ fn write_ipc_and_poll(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let mut ack_content_proven = false;
+            let mut repair_bad_state: Option<String> = None;
             let current_on_disk = if !patch_id.is_empty() {
                 match poll_ack_content_sidecar(
                     options.project_root,
@@ -7797,6 +7909,7 @@ fn write_ipc_and_poll(
                             && !verify_sidecar_normalization(&content, lines)
                         {
                             if let Some(ours) = options.content_ours {
+                                repair_bad_state = Some(content.clone());
                                 let baseline = payload
                                     .get("baseline")
                                     .and_then(|value| value.as_str())
@@ -7815,8 +7928,6 @@ fn write_ipc_and_poll(
                                         doc_file.display()
                                     ),
                                 );
-                                repair_disk_from_normalization_fallback(doc_file, &fallback)?;
-                                redeliver_normalization_fallback_to_editor(doc_file, &fallback);
                                 fallback
                             } else {
                                 eprintln!(
@@ -7936,12 +8047,16 @@ fn write_ipc_and_poll(
             // Plugin applied the patch — update snapshot as actual post-write disk state.
             // `current_on_disk` is from ack-content sidecar when available, or 200ms file read.
             // Bug 2A fix: snapshot save failure after IPC success is non-fatal.
+            let pre_dedupe_content = current_on_disk.clone();
             let (snap_content, dedupe_repair) = dedupe_ipc_snapshot_content(
                 doc_file,
                 before_content.as_deref(),
                 &current_on_disk,
                 "ipc_file",
             )?;
+            if dedupe_repair && repair_bad_state.is_none() {
+                repair_bad_state = Some(pre_dedupe_content);
+            }
             if file_ipc_consumed_without_live_exchange_ack(
                 doc_file,
                 "file_ipc",
@@ -7957,8 +8072,18 @@ fn write_ipc_and_poll(
                 return Ok(false);
             }
             if dedupe_repair {
-                repair_disk_from_ipc_dedupe(doc_file, &snap_content)?;
-                redeliver_ipc_dedupe_to_editor(doc_file, &snap_content);
+                let expected_bad_state = repair_bad_state.as_deref().unwrap_or("");
+                if !redeliver_ipc_dedupe_to_editor(doc_file, &snap_content, expected_bad_state) {
+                    repair_disk_from_ipc_dedupe(doc_file, &snap_content)?;
+                }
+            } else if let Some(expected_bad_state) = repair_bad_state.as_deref()
+                && !redeliver_normalization_fallback_to_editor(
+                    doc_file,
+                    &snap_content,
+                    expected_bad_state,
+                )
+            {
+                repair_disk_from_normalization_fallback(doc_file, &snap_content)?;
             }
             crate::ops_log::log_op(
                 doc_file,
@@ -15804,7 +15929,8 @@ mod pending_patch_normalization_tests {
 mod late_fallback_patch_guard_tests {
     use super::{
         build_full_content_ipc_payload, cleanup_fallback_patch_files, cycle_already_committed,
-        try_ipc, try_ipc_full_content, try_ipc_full_content_operator_mutation_from_source,
+        redeliver_ipc_dedupe_to_editor, try_ipc, try_ipc_full_content,
+        try_ipc_full_content_operator_mutation_from_source,
     };
     use crate::snapshot;
     use std::fs;
@@ -16117,6 +16243,184 @@ mod late_fallback_patch_guard_tests {
                 "flow=document_mutation stage=pre_write_guard outcome=blocked reason=full_content_source_buffer_reject_stale_source_buffer:compact_exchange"
             ),
             "flow event should capture the full-content stale-source guard:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn response_fallback_full_content_rejects_live_drift_before_socket_delivery() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use std::time::Duration;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let fallback = "before\n";
+        let live = "before\nlive prompt typed after fallback was computed\n";
+        fs::write(&doc, live).unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener_calls = calls.clone();
+        let listener_doc = doc.clone();
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                listener_calls.fetch_add(1, Ordering::SeqCst);
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
+                    fs::write(&listener_doc, full_content).ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        let result = try_ipc_full_content(&doc, fallback).unwrap();
+
+        assert!(
+            !result,
+            "stale response fallback full-content IPC must be skipped before socket delivery"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "socket listener must not receive stale response fallback full-content payloads"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live,
+            "stale response fallback must not overwrite live prompt drift"
+        );
+        assert!(snapshot::load(&doc).unwrap().is_none());
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_source_buffer_rejected")
+                && ops_log.contains("source=response_fallback"),
+            "source-buffer rejection should be logged:\n{ops_log}"
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
+    }
+
+    #[test]
+    fn ipc_dedupe_redelivery_uses_bad_state_source_proof() {
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let bad_state = "before\n### Re: issue — gpt-5\nDone.\n### Re: issue — gpt-5\nDone.\n";
+        let repaired = "before\n### Re: issue — gpt-5\nDone.\n";
+        fs::write(&doc, bad_state).unwrap();
+
+        let seen_payload = Arc::new(Mutex::new(None::<serde_json::Value>));
+        let listener_seen = seen_payload.clone();
+        let listener_doc = doc.clone();
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                *listener_seen.lock().unwrap() = Some(payload.clone());
+                if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
+                    fs::write(&listener_doc, full_content).ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        let delivered = redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
+
+        assert!(delivered, "redelivery should be consumed by the listener");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), repaired);
+        let payload = seen_payload
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("listener should capture a payload");
+        assert_eq!(payload["fullContent"], repaired);
+        assert_eq!(
+            payload["expected_content_hash"].as_str(),
+            Some(crate::ops_log::content_hash(bad_state).as_str())
+        );
+        assert_eq!(
+            payload["expected_content_len"].as_u64(),
+            Some(bad_state.len() as u64)
+        );
+        assert_ne!(
+            payload["expected_content_hash"].as_str(),
+            Some(crate::ops_log::content_hash(repaired).as_str())
+        );
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
+    }
+
+    #[test]
+    fn ipc_dedupe_redelivery_skips_when_bad_state_is_stale() {
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let bad_state = "before\n### Re: issue — gpt-5\nDone.\n### Re: issue — gpt-5\nDone.\n";
+        let live_state = "before\nlive prompt typed after repair planning\n";
+        let repaired = "before\n### Re: issue — gpt-5\nDone.\n";
+        fs::write(&doc, live_state).unwrap();
+
+        let delivered = redeliver_ipc_dedupe_to_editor(&doc, repaired, bad_state);
+
+        assert!(
+            !delivered,
+            "redelivery must be skipped when the visible bad-state proof is stale"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live_state,
+            "stale redelivery must not overwrite live content"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("ipc_dedupe_editor_redelivery_skipped")
+                && ops_log.contains("skip=stale_bad_state"),
+            "stale redelivery skip should be logged:\n{ops_log}"
         );
     }
 

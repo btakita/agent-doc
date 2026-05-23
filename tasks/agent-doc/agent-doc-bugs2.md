@@ -34,41 +34,9 @@ Resolved #qfixture; auto queue drained.
 Compacted content:
 - Archived 3 response topic(s): agent:queue auto stall; #tsiftipc; #narrowpatch
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: #mxz5 — gpt-5
-
-Confirmed: do not push parent `main` as an implicit prerequisite for the superproject gitlink update unless the existing parent-only history is intentionally ready to publish too.
-
-Evidence from this cycle:
-- `git fetch origin` completed, and parent `main` is still `ahead 6` of `origin/main`.
-- The six unpushed parent commits are session/document commits: `dc3ab28c9`, `31e23eefb`, `ce8072deb`, `98269408f`, `39d1f5e3f`, and `6a7edfdac`.
-- The pending parent gitlink diffs for `src/equityfundingsource-dev` and `src/tmux-router` point at commits already present on their submodules' `origin/main`, so the submodule targets themselves are publishable.
-- A future parent gitlink commit made on this `main` branch would be pushed after those six existing commits, so it cannot be published independently from this branch without splitting or cherry-picking.
-
-Outcome: I left parent `main` unpushed and marked `#mxz5` done. The next queue item remains open.
-
-Verification run: `agent-doc preflight`, `agent-doc plan`, `git fetch origin`, `git status -sb`, `git log --oneline --decorate origin/main..HEAD`, `git diff --submodule=log -- src/equityfundingsource-dev src/tmux-router`, and submodule `status -sb` / `branch -vv` checks for both gitlink targets. No code changed, so no build or test suite was run.
-### Re: #qguard — gpt-5
-
-Implemented the queue-consumption guard for active `agent:queue auto` closeouts.
-
-Changed:
-- Active queues no longer advance when the baseline/current diff has no queue-head proof.
-- Closeout consumption now requires the exact queue-head prompt in the current diff, a queue-synthetic diff, or a matching `--done <id>` for the head item.
-- Missing active queue components now fail closed under the queue consume guard.
-- Added regression coverage for an unrelated already-baselined prompt that must not consume the active queue head.
-- Updated the document-format spec and `VERSIONS.md` with the stricter proof rule.
-
-Verification:
-- `cargo test -p agent-doc --test finalize_integration`
-- `make check`
-- `make install`
-- GitHub CI run `26343321839` was green, including its `make check` and `make tmux-ci` steps.
-
-Commit/push:
-- Pushed submodule commit `40aa1f50` to `origin/20260422/codex-agent-backend`.
-- Created local parent gitlink commit `f4db7e491`.
-- Did not push parent `main`; that branch already had existing unpushed commits, and the prior queue outcome said not to publish those implicitly.
-<!-- agent:boundary:6d6fdb5a -->
+equityfundingsource.md had the duplicate prompt corrupt document issue as I was typing in a prompt. Why was the full-document IPC incorrectly used? Can we mathematically eliminate this issue?
+#spec-test-build-install-commit-push
+<!-- agent:boundary:d3c6baeb -->
 <!-- /agent:exchange -->
 ###
 <!--

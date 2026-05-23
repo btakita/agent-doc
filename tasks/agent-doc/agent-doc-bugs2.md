@@ -33,7 +33,7 @@ Implemented #rdec and advanced the auto queue. Top backlog item after closeout s
 Compacted content:
 - Archived 1 response topic(s): auto queue continuation after finalize
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:1284cff0 -->
+<!-- agent:boundary:03b6b7ea -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -52,7 +52,7 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 preset #spec-test-build-install-commit-push
 - ~do [#dvre]~
 - ~do [#rdec]~
-- ~do [#eprf]~
+- do [#eprf]
 - do [#rlog]
 - do [#rtst]
 - do [#nfix]

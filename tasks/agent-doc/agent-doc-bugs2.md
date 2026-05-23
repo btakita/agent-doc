@@ -139,7 +139,7 @@ So the likely root cause is not that `redeliver_*` itself has complex logic; it 
 What should change: separate the decisions. Save a repaired snapshot when needed, but only full-content redeliver when a fresh editor-buffer proof shows the visible buffer still contains the exact bad state. Otherwise skip editor redelivery or send a narrow normalization/reposition patch.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, source inspection of `verify_sidecar_normalization`, `dedupe_ipc_snapshot_content`, and both redelivery call sites, plus ops-log inspection around the May 9 and May 15 repair sequences. No code changes were made.
-<!-- agent:boundary:3ac8384e -->
+<!-- agent:boundary:faee10ea -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -158,6 +158,7 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#dvre] [recommended] Gate response-fallback full-document redelivery: after IPC dedupe or sidecar-normalization repair, require fresh editor-buffer proof that the visible buffer still contains the exact bad state before calling redeliver_ipc_dedupe_to_editor or redeliver_normalization_fallback_to_editor; otherwise save the repaired snapshot or send a narrow normalization/reposition patch.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

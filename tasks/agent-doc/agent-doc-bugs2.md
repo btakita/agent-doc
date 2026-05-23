@@ -21,7 +21,7 @@ queue_active: false
 
 <!-- agent:status patch=replace -->
 
-Top backlog item: #edproof. Next queue: repair/redelivery fallback hardening.
+Top backlog item: #edproof. Added #tsiftipc as the concrete tsift.md reproduction fixture.
 <!-- /agent:status -->
 
 ## Exchange
@@ -48,12 +48,27 @@ I added the live backlog in this priority order:
 5. `#repaircleanup` — update specs/tests and remove obsolete workaround branches after typed repair decisions land.
 
 Top backlog item: `#edproof`.
-<!-- agent:boundary:cbfa2ade -->
+❯ The duplicate content corrupt document bug happened on tsift.md as I was tying in a prompt. What are #next-steps to ensure full-document IPC is not over-eager? #next-steps
+### Re: full-document IPC next steps — gpt-5
+
+Yes, the tsift.md duplicate-content corruption is the concrete repro to use for this bug family. The active backlog is already pointed at the right fix path: stop treating fallback repair as permission to push a whole document back into the editor unless the editor-visible buffer is proven to still contain the exact bad state.
+
+I added one missing follow-up item: `#tsiftipc`, placed after `#repairtests`, to capture that tsift.md corruption as a named fixture.
+
+Priority order is now:
+
+1. `#edproof` — require fresh editor-buffer proof before full-document fallback redelivery.
+2. `#typedrepair` — split repair outcomes into typed decisions and structured logs.
+3. `#repairtests` — cover the repair/redelivery decision matrix.
+4. `#tsiftipc` — preserve the tsift.md duplicate-content incident as the concrete reproduction fixture.
+5. `#narrowpatch` — prefer narrow normalization/reposition patches before `fullContent`.
+6. `#repaircleanup` — update specs/tests and remove obsolete workaround branches.
+
+Top backlog item: `#edproof`.
+<!-- agent:boundary:4ab43fe5 -->
 <!-- /agent:exchange -->
 ###
 <!--
-The duplicate content corrupt document bug happened on tsift.md as I was tying in a prompt. What are #next-steps to ensure full-document IPC is not over-eager?
-#spec-test-build-install-commit-push
 -->
 
 <!-- agent:queue -->
@@ -70,6 +85,7 @@ preset #spec-test-build-install-commit-push
 - [ ] [#edproof] [recommended] Require fresh editor-buffer proof before response-fallback full-document redelivery, so repaired snapshots are not pushed over unrelated live edits.
 - [ ] [#typedrepair] [recommended] Split write.rs IPC repair outcomes into typed decisions with repaired snapshot content, disk-repair reason, editor bad-state fingerprint, redeliver_editor, and structured ops-log records.
 - [ ] [#repairtests] [recommended] Add deterministic unit and SimWorld coverage for ack-sidecar-only repair, real visible duplicate repair, sidecar normalization divergence, stale source-buffer skips, and post-commit user-follow-up drift.
+- [ ] [#tsiftipc] [recommended] Capture the tsift.md duplicate-content corruption while typing as a named fixture and assert full-document IPC redelivery is skipped without fresh editor-buffer proof.
 - [ ] [#narrowpatch] [recommended] Replace eligible prefix-normalization fallback fullContent redeliveries with narrow normalization/reposition patches before using fullContent as a last resort.
 - [ ] [#repaircleanup] [recommended] Update editor specs/tests for snapshot-only repair versus editor-redelivery behavior and remove obsolete workaround branches after typed repair decisions land.
 <!-- /agent:backlog -->

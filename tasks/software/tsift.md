@@ -50,7 +50,7 @@ Verification and release path:
 - Local: `cargo check`, focused graph tests, full `make check`, and `cargo install --path .` passed; installed `tsift --version` is `tsift 0.1.42`.
 - CI: tsift run `26345952453` passed both `clippy + test` and live Convex acceptance. The superproject `Agent Doc` run `26345957563` failed before any job steps were allocated for both `check` and `tmux-ci`, so I classified that as an external CI-start blocker rather than a red tmux regression.
 - Commits pushed: `btakita/tsift@dd4a3fc` and superproject `btakita/agent-loop@4459e752a`.
-<!-- agent:boundary:27ba4f5c -->
+<!-- agent:boundary:7eed62f9 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -69,6 +69,7 @@ preset #spec-test-build-install-commit-push
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#gdbcachewm] [recommended] Fix conflict-matrix prep cache self-invalidation seen in the 2026-05-23 queue benchmark: exclude .tsift/conflict-matrix-cache artifacts from source watermarks/indexed graph inputs, then add a repeated backend-eval regression proving the second and third CLI runs hit disk cache for a live target.
 - [/] [#orchdog] [recommended] Dogfood the completed graph-backed agent orchestration stack on a real agent-doc queue run: run refresh -> evidence -> conflict-matrix -> dispatch-trace -> jobs create/collect, compare worker_prompt_packet and worker_result closure fields, and capture any tsift-side fixture gaps. **Dogfood performed 2026-05-21 on `session-share/tasks/root.md` items #x63e + #v4v0; findings recorded in #gdbevid, #cmgr, #gdbidx — see `session-share/tasks/root.md` exchange "graph-backed orchestration dogfood" entry for the full pipeline trace.** **Second dogfood 2026-05-21 against `tasks/software/tsift.md` (preset `#dogfood-tsift`) surfaced 2 new gaps: #cmgrwres and #gdblock.**
 <!-- /agent:backlog -->
 

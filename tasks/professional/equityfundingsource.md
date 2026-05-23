@@ -61,7 +61,21 @@ Commit/push:
 - Pushed `main` to `origin` (`f8d1717..fdd4b84`).
 
 Escalation: none. Confidence: high. The dev server is currently running at `http://localhost:4200`; use `http://127.0.0.1:8787` via `bun run dev:worker` for real broker sign-in with local D1.
-<!-- agent:boundary:53367799 -->
+❯ The end of the agent-doc turn should kill the dev server managed by the turn so I can run the dev server on my own and have visibility to the console logs.
+### Re: dev server ownership — gpt-5
+
+Stopped the dev server I had started for the prior turn. Going forward I will not leave an agent-managed EFS dev server running at the end of an `agent-doc` cycle unless you explicitly ask me to keep it alive.
+
+Changed paths: none.
+
+Commands / verification:
+
+- Sent SIGINT to the managed `bun run dev` session from the prior turn.
+- Verified `http://localhost:4200/login?role=broker` no longer accepts connections.
+- Verified no matching `bun dev` / EFS dev-server process is running with `pgrep -af 'bun.*dev|equityfundingsource.*dev|server started on port 4200'`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:569b895a -->
 <!-- /agent:exchange -->
 ###
 

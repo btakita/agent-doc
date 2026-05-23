@@ -29,40 +29,12 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-220043.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-220822.md`*
 
 Compacted content:
-- Archived 3 response topic(s): localhost broker login; dev server ownership; final EFS polish
+- Archived 1 response topic(s): local auth handoff
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ Getting an error logging in with `bun run dev:worker` running:
-```
-Something went wrong
-
-Authentication is not available on the lightweight local preview server. Run bun run dev:worker and use http://127.0.0.1:8787 for sign-in and portal data.
-```
-### Re: local auth handoff — gpt-5
-
-I reproduced the split: the real Worker path on `http://127.0.0.1:8787/login?role=broker` is fine, and a bad credential POST returns the normal `Email or password is incorrect.` response. The lightweight `:4200` path is the one that emits `Authentication is not available...`, because it has no D1/Worker bindings.
-
-I changed the local preview auth pages so `bun dev` can still render the login/signup pages, but their auth form submissions and related auth links hand off to the Worker origin when the dev context is configured. Practically: if you accidentally open the broker login on `:4200`, the form now posts to `http://127.0.0.1:8787/login?role=broker` instead of trapping you on the lightweight server.
-
-Changed paths:
-- `src/equityfundingsource-dev/app/equityfundingsource/app/index.server.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
-- `src/equityfundingsource-dev/lib/ui--server--efs/auth/login.ts`
-- `src/equityfundingsource-dev/lib/ui--server--efs/auth/signup.ts`
-- `src/equityfundingsource-dev/app/equityfundingsource/dev-routes.test.ts`
-
-Verification:
-- `bun run check` passed: 27 tests, app build, and Worker build.
-- `git diff --check` passed.
-- Live Worker smoke: POST to `http://127.0.0.1:8787/login?role=broker` reaches the real auth path and returns invalid credentials, not the lightweight-preview message.
-- Port `:4200` was not running by the final smoke check, so the 4200 handoff is covered by the new regression test. Restart `bun dev` if you use that preview server.
-- Latest GitHub `Agent Doc` run `26344685541` is red with empty job steps for both `check` and `tmux-ci`; I’m treating that as an external CI-start blocker, not a code/tmux regression.
-
-Escalation: none.
-Confidence: high.
-<!-- agent:boundary:195d57b3 -->
+<!-- agent:boundary:fd923b99 -->
 <!-- /agent:exchange -->
 ###
 

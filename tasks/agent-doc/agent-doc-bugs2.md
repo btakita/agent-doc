@@ -61,8 +61,39 @@ Commits so far:
 - `src/agent-doc`: `078c6981 fix: preserve mixed prompt scratch comments`
 - parent repo gitlink: `774467f59 chore: update agent-doc submodule`
 
-Push is intentionally after this `finalize` closeout so the session-document response commit is included in the same push boundary.
-<!-- agent:boundary:242725bc -->
+❯ Push is intentionally after this `finalize` closeout so the session-document response commit is included in the same push boundary.
+❯ The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. tsift.md had the duplicate prompt issue. The duplicate corrupt document bug & the duplicated prompt happened yet again as I was typing in this prompt. Should we diff line by line? Do we still have race conditions?
+❯ #spec-test-build-install-commit-push
+### Re: duplicate prompt tail race — gpt-5
+
+Yes. A line-by-line diff was the right way to isolate this, and there was still a race-shaped replay path.
+
+The prior mixed-comment fix handled duplicate prompt text inside the scratch HTML comment without deleting unrelated comment lines. The remaining bug was a separate shape: a raw copy of the already-answered prompt could reappear after the latest `agent:boundary` inside `agent:exchange`. Preflight's commit step could then reposition the boundary to the exchange end, making that stale prompt copy look like fresh prompt-bearing diff, and route could redispatch it.
+
+Fixed in `src/agent-doc`:
+
+- `src/template.rs`: added a normalized-exact cleanup for raw prompt tails after the latest `agent:boundary` only when they match a prompt block already followed by an assistant response.
+- `src/preflight.rs`: runs that cleanup before Step 2 commit can move the boundary, with a focused regression.
+- `src/route.rs` and `src/route/tests.rs`: route pre-dispatch shares the cleanup and logs `duplicate_answered_exchange_prompt_tail_removed` separately from post-exchange comment cleanup.
+- `specs/04-diff-computation.md`, `specs/07-closeout-commands.md`, and `VERSIONS.md`: documented the contract.
+
+Verification passed:
+
+- `cargo test normalize_removes_duplicate_answered_prompt_tail_after_boundary`
+- `cargo test preflight_scrubs_duplicate_answered_prompt_tail_before_diff`
+- `cargo test route_scrubs_duplicate_answered_prompt_tail_before_dispatch`
+- `make check`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- CI inspection: latest GitHub CI run `26317414149` succeeded, including `Run make tmux-ci`.
+
+Commits are local at this closeout point:
+
+- `src/agent-doc`: `53815f8 fix: scrub duplicate answered prompt tails`
+- parent repo: `8dbf00d19 agent-doc: scrub duplicate answered prompt tails`
+
+No escalation was needed. Confidence is high because the fix covers the exact replay shape from this document and the route/preflight variants are both under regression tests. Push will run after this mandatory document closeout so the session response commit is included in the parent history.
+<!-- agent:boundary:28c5e88d -->
 <!-- /agent:exchange -->
 ###
 <!--

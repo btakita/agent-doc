@@ -74,7 +74,10 @@
 //!   variant still skips already committed cycles, while
 //!   `try_ipc_full_content_operator_mutation` is available for fresh operator
 //!   mutations such as Compact Exchange that must reach the editor even after
-//!   the previous response cycle is committed.
+//!   the previous response cycle is committed. When the caller supplies the
+//!   source buffer used to compute the replacement, the binary verifies the
+//!   current disk buffer still matches that source before emitting IPC, so
+//!   stale full-document replacements cannot be handed to older editor bridges.
 //!
 //! - `try_ipc_reposition_boundary`: fire-and-forget IPC signal with the exact
 //!   committed exchange `boundary_id`. Normalizes the editor buffer back to the
@@ -7402,6 +7405,61 @@ fn attach_full_content_source_proof(payload: &mut serde_json::Value, before_cont
     }
 }
 
+fn full_content_source_label(mode: FullContentIpcMode) -> &'static str {
+    match mode {
+        FullContentIpcMode::ResponseFallback => "response_fallback",
+        FullContentIpcMode::OperatorMutation => "compact_exchange",
+    }
+}
+
+fn guard_full_content_source_buffer_current(
+    file: &Path,
+    mode: FullContentIpcMode,
+    patch_id: &str,
+    source_content: Option<&str>,
+    current_content: Option<&str>,
+) -> bool {
+    let Some(source_content) = source_content else {
+        return true;
+    };
+    let proof =
+        crate::flow::document_mutation::FullContentSourceProof::from_content(source_content);
+    let source = full_content_source_label(mode);
+    let current = current_content.unwrap_or("");
+    let decision = crate::flow::document_mutation::decide_full_content_visible_replacement(
+        current,
+        Some(&proof),
+    );
+    crate::flow::proof::log_flow_event(
+        file,
+        crate::flow::document_mutation::full_content_visible_replacement_event(decision, source),
+    );
+    if decision == crate::flow::document_mutation::FullContentVisibleReplacementDecision::Apply {
+        return true;
+    }
+
+    eprintln!(
+        "[write] full-content IPC skipped for {}: source buffer changed before delivery",
+        file.display()
+    );
+    crate::ops_log::log_op(
+        file,
+        &format!(
+            "full_content_source_buffer_rejected file={} source={} patch_id={} expected_len={} expected_hash={} current_len={} current_hash={} reason=stale_source_buffer",
+            file.display(),
+            source,
+            patch_id,
+            proof.expected_content_len,
+            proof.expected_content_hash,
+            current_content.map(str::len).unwrap_or(0),
+            current_content
+                .map(crate::ops_log::content_hash)
+                .unwrap_or_else(|| "-".to_string())
+        ),
+    );
+    false
+}
+
 fn try_ipc_full_content_with_mode(
     file: &Path,
     content: &str,
@@ -7437,6 +7495,16 @@ fn try_ipc_full_content_with_mode(
             ),
         );
         cleanup_fallback_patch_files(file);
+        return Ok(false);
+    }
+
+    if !guard_full_content_source_buffer_current(
+        file,
+        mode,
+        &patch_id,
+        source_content,
+        before_content.as_deref(),
+    ) {
         return Ok(false);
     }
 
@@ -16001,9 +16069,6 @@ mod late_fallback_patch_guard_tests {
 
     #[test]
     fn full_content_operator_ipc_uses_call_site_source_buffer_identity() {
-        use std::sync::mpsc;
-        use std::time::{Duration, Instant};
-
         let tmp = TempDir::new().unwrap();
         let agent_doc_dir = tmp.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -16017,47 +16082,12 @@ mod late_fallback_patch_guard_tests {
         let target = "after\n";
         fs::write(&doc, live).unwrap();
 
-        let (tx, rx) = mpsc::channel();
-        let watcher_dir = agent_doc_dir.join("patches");
-        let watcher = std::thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while Instant::now() < deadline {
-                let Ok(entries) = fs::read_dir(&watcher_dir) else {
-                    std::thread::sleep(Duration::from_millis(20));
-                    continue;
-                };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                        continue;
-                    }
-                    let raw = fs::read_to_string(&path).unwrap();
-                    let payload: serde_json::Value = serde_json::from_str(&raw).unwrap();
-                    fs::remove_file(&path).unwrap();
-                    tx.send(payload).unwrap();
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        });
-
         let result =
             try_ipc_full_content_operator_mutation_from_source(&doc, target, source).unwrap();
-        watcher.join().unwrap();
-        let payload = rx.recv_timeout(Duration::from_secs(1)).unwrap();
 
         assert!(
             !result,
-            "operator full-content IPC must not succeed when the editor/disk still contains live drift"
-        );
-        assert_eq!(payload["fullContent"], target);
-        assert_eq!(
-            payload["expected_content_hash"].as_str(),
-            Some(crate::ops_log::content_hash(source).as_str())
-        );
-        assert_eq!(
-            payload["expected_content_len"].as_u64(),
-            Some(source.len() as u64)
+            "operator full-content IPC must not be emitted when the disk buffer already contains live drift"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -16068,6 +16098,94 @@ mod late_fallback_patch_guard_tests {
             snapshot::load(&doc).unwrap().is_none(),
             "failed full-content IPC must not save a snapshot"
         );
+        let patch_count = fs::read_dir(agent_doc_dir.join("patches"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .count();
+        assert_eq!(
+            patch_count, 0,
+            "stale source guard must not hand a full-content patch to file IPC"
+        );
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("full_content_source_buffer_rejected")
+                && ops_log.contains("source=compact_exchange"),
+            "source-buffer rejection should be logged:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains(
+                "flow=document_mutation stage=pre_write_guard outcome=blocked reason=full_content_source_buffer_reject_stale_source_buffer:compact_exchange"
+            ),
+            "flow event should capture the full-content stale-source guard:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn socket_full_content_source_buffer_guard_blocks_noncompliant_listener() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use std::time::Duration;
+
+        let tmp = TempDir::new().unwrap();
+        let agent_doc_dir = tmp.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = tmp.path().join("test.md");
+        let source = "before\n";
+        let live = "before\nlive prompt typed during compact\n";
+        let target = "after\n";
+        fs::write(&doc, live).unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let listener_calls = calls.clone();
+        let listener_doc = doc.clone();
+        let listener_root = tmp.path().to_path_buf();
+        let server = std::thread::spawn(move || {
+            crate::ipc_socket::start_listener(&listener_root, move |msg| {
+                listener_calls.fetch_add(1, Ordering::SeqCst);
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
+                    fs::write(&listener_doc, full_content).ok()?;
+                }
+                Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
+            })
+            .ok();
+        });
+        for _ in 0..100 {
+            if crate::ipc_socket::is_listener_active(tmp.path()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            crate::ipc_socket::is_listener_active(tmp.path()),
+            "fake socket listener did not start"
+        );
+
+        let result =
+            try_ipc_full_content_operator_mutation_from_source(&doc, target, source).unwrap();
+
+        assert!(
+            !result,
+            "stale source guard should reject before socket delivery"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "socket listener must not receive stale full-content payloads"
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), live);
+        assert!(snapshot::load(&doc).unwrap().is_none());
+        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(ops_log.contains("full_content_source_buffer_rejected"));
+
+        let _ = fs::remove_file(crate::ipc_socket::socket_path(tmp.path()));
+        drop(server);
     }
 
     #[test]

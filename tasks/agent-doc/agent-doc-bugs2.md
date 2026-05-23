@@ -20,7 +20,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-Top backlog item: #qguard. Captured auto-queue stall follow-ups; current queued implementation work remains open.
+Top backlog item: #mxz5. Captured auto-queue stall follow-ups; current queued implementation work remains open.
 <!-- /agent:status -->
 
 ## Exchange
@@ -33,7 +33,7 @@ Top backlog item: #qguard. Captured auto-queue stall follow-ups; current queued 
 Compacted content:
 - Archived 3 response topic(s): #edproof; agent:queue auto stopping; #next-steps for agent:queue auto stall
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d2c32b48 -->
+<!-- agent:boundary:47f2f962 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -43,7 +43,7 @@ Compacted content:
 preset #spec-test-build-install-commit-push
 - ~do [#edproof]~
 - ~do [#typedrepair]~
-- do [#repairtests]
+- ~do [#repairtests]~
 - do [#tsiftipc]
 - do [#narrowpatch]
 - do [#repaircleanup]
@@ -52,11 +52,11 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] [#mxz5] [recommended] Confirm whether parent main's existing unpushed commits should be pushed before publishing the superproject gitlink update.
 - [ ] [#qguard] [recommended] Fix queue consumption proof so prompt-only or next-steps closeouts cannot consume an active queue head when the preflight baseline already includes the unrelated prompt; require an exact queue-head prompt match, queue-synthetic diff proof, or explicit done id before consuming.
 - [ ] [#qrepair] [recommended] Make response repair/write --commit queue-neutral: missing-response materialization repairs must preserve the current queue head and auto attribute unless the repair explicitly closes that queue item.
 - [ ] [#qloop] [recommended] Wire Codex/direct agent-doc file invocations into the binary-owned auto-queue continuation loop, or explicitly re-dispatch the next queue head after finalize when queue_active and agent:queue auto remain true.
 - [ ] [#qfixture] [recommended] Add an end-to-end regression for agent:queue auto plus a non-queue #next-steps prompt and repair write, asserting the auto attribute is preserved and the next queue head is not consumed.
-- [ ] [#repairtests] [recommended] Add deterministic unit and SimWorld coverage for ack-sidecar-only repair, real visible duplicate repair, sidecar normalization divergence, stale source-buffer skips, and post-commit user-follow-up drift.
 - [ ] [#tsiftipc] [recommended] Capture the tsift.md duplicate-content corruption while typing as a named fixture and assert full-document IPC redelivery is skipped without fresh editor-buffer proof.
 - [ ] [#narrowpatch] [recommended] Replace eligible prefix-normalization fallback fullContent redeliveries with narrow normalization/reposition patches before using fullContent as a last resort.
 - [ ] [#repaircleanup] [recommended] Update editor specs/tests for snapshot-only repair versus editor-redelivery behavior and remove obsolete workaround branches after typed repair decisions land.

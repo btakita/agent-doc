@@ -1,15 +1,15 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
+agent: codex
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
-agent: codex
 codex_args: -s danger-full-access
-claude_model: opus
 links:
-  - ./judith-krug.md
-  - ./robert-waldman.md
-  - ../personal/robert-ward.md
-  - ./bob-remeika.md
+- ./judith-krug.md
+- ./robert-waldman.md
+- ../personal/robert-ward.md
+- ./bob-remeika.md
 prompt_presets:
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
   '#commit-push': commit all uncommitted files + push in claudescore-plugin, claudescore.com, and session-share
@@ -34,28 +34,38 @@ prompt_presets:
 Compacted content:
 - Archived 2 response topic(s): Send inquiry email; Direct draft email send
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ The images on http://127.0.0.1:8787/about are broken. Please download asset files.
-### Re: About image assets — gpt-5
+❯ Please create the /blog page with a sample blog post. Please add the ability to create blog posts to the admin section...with the ability to upload content to R2.
+❯ #spec-test-commit-push-deploy
+### Re: Blog publishing — gpt-5
 
-Downloaded the four missing `/about` team image assets from the `equityfundingsource-assets` R2 bucket into the local gitignored asset cache:
+Implemented and deployed the EFS blog publishing work.
 
-- `public/assets/images/about/judith-krug-team.png`
-- `public/assets/images/about/diko-baghdasarian.png`
-- `public/assets/images/about/april-armas.png`
-- `public/assets/images/about/jessica-rian.png`
+What changed:
+- Added public `/blog` and `/blog/:slug` routes with a seeded sample post: `How Private Real Estate Lending Moves Quickly in California`.
+- Added D1 blog metadata via `0021_blog_posts.sql`; post bodies are stored in R2 under keys like `blog/california-private-lending-guide.html`.
+- Added admin blog management at `/portal-admin/blog-posts` and authenticated CRUD API routes under `/api/admin/blog-posts`; create/update writes the post HTML body to R2.
+- Added specs/docs/tests for the blog release path and a `bun run cf:r2:seed-blog` helper for the seeded R2 object.
 
-Then repacked the Worker static asset bundle so `http://127.0.0.1:8787` serves the new files from `app/equityfundingsource/dist/worker-assets`.
+Changed paths: `src/equityfundingsource-dev` blog/domain/server/browser/admin/API/migration/test/docs files, plus the parent `src/equityfundingsource-dev` gitlink. The pre-existing `src/equityfundingsource-dev/tmp/` directory remains untracked and untouched.
 
 Verification:
-
-- `curl -I http://127.0.0.1:8787/assets/images/about/{judith-krug-team,diko-baghdasarian,april-armas,jessica-rian}.png` returned `200 OK` with `Content-Type: image/png`.
-- `curl -I http://127.0.0.1:8787/about` returned `200 OK`.
-- `bun run check` in `src/equityfundingsource-dev` passed: 30 tests, app build, and worker build.
+- `bun test tests/blog.test.ts` passed.
+- `bun run check` in `src/equityfundingsource-dev` passed: 35 tests, app build, and Worker build.
 - `make check` at the repo root passed.
-- `gh run list --workflow CI --limit 1` found no workflow named `CI`. The available `Agent Doc` workflow’s latest run, `26345829441`, is red, but both `tmux-ci` and `check` jobs have empty step lists and `gh run view --job ... --log` returns `log not found`, so I’m classifying that as an external CI-start blocker rather than a code or tmux regression.
+- Latest GitHub `Agent Doc` run `26346430786` is red, but both `tmux-ci` and `check` jobs have empty step lists and `gh run view --job ... --log` returns `log not found`, so I’m classifying it as an external CI-start blocker rather than a code/tmux regression. There is still no workflow named `CI` in this repo.
 
-The repo download script (`bin/assets-download.sh`) still needs S3/Boto credentials that are not present in this checkout, so I used the active Wrangler auth path directly for the missing objects.
-<!-- agent:boundary:c0e9c584 -->
+Deploy proof:
+- Remote D1 migration initially returned Cloudflare timeout `7429`, but verification showed `blog_posts` exists, `d1_migrations` contains `0021_blog_posts.sql`, `SELECT COUNT(*) AS n FROM blog_posts WHERE status = 'published'` returns `1`, and `wrangler d1 migrations list` reports no pending migrations.
+- Remote R2 seed upload completed for `blog/california-private-lending-guide.html`.
+- Worker deployed to `https://equityfundingsource.brian-takita.workers.dev`, version `885b5cb2-65aa-46be-a091-708f1df1e341`.
+- Live smoke checks passed: `/blog` returned `200`, `/blog/california-private-lending-guide` returned `200` with expected article content, `/portal-admin/blog-posts` returned `303` to `/login?role=admin`, and remote R2 object download completed.
+
+Commits pushed:
+- EFS submodule: `35811c1` `feat: add blog publishing`; `0814676` `fix: seed blog content to remote R2`.
+- Parent repo: `ba43b90ab` `efs: add blog publishing`; `95c792a65` `efs: seed blog content to remote R2`.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:1ecdb273 -->
 <!-- /agent:exchange -->
 ###
 

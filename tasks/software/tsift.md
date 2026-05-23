@@ -58,7 +58,7 @@ Changed paths: none in `src/tsift`; session document only via queue-consumption 
 ### Re: queue closeout repair — gpt-5
 
 Repair-only closeout: the `#gdbbenchnorm` response above is the substantive result. This write syncs the already-consumed queue state while leaving the next queue item open.
-<!-- agent:boundary:acb2b566 -->
+<!-- agent:boundary:afaa6397 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +68,7 @@ Repair-only closeout: the `#gdbbenchnorm` response above is the substantive resu
 dispatch #spec-test-build-install-commit-push
 - ~do [#gdbsourcebuild]~
 - ~do [#gdbprepreuse]~
-- do [#gdbbenchnorm]
+- ~do [#gdbbenchnorm]~
 - do [#gdbevidlat]
 <!-- /agent:queue -->
 

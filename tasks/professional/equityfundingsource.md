@@ -29,100 +29,12 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-044614.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-220043.md`*
 
 Compacted content:
-- Archived 2 response topic(s): dev portal links; dev database
+- Archived 3 response topic(s): localhost broker login; dev server ownership; final EFS polish
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ http://localhost:4200/login?role=broker has an error...Database not configured
-❯ #spec-test-commit-push
-### Re: localhost broker login — gpt-5
-
-Fixed the `http://localhost:4200/login?role=broker` failure path. The lightweight `bun dev` server still cannot perform real auth because it has no D1/Worker bindings, but login/signup/Google callback submissions now render the role-specific auth page with a clear local-preview setup message instead of the raw `Database is not configured` 500 body.
-
-Changed paths in `src/equityfundingsource-dev`:
-
-- `app/equityfundingsource/lib/auth/routes.ts`
-- `app/equityfundingsource/dev-routes.test.ts`
-- `docs/deploy.md`
-- `app/equityfundingsource/bin/cf-wrangler.ts`
-
-Verification:
-
-- `bun test` passed: 24 tests, 0 failures.
-- `bun run check` passed: tests, site build, and worker build.
-- `git diff --check` passed.
-- Local smoke test with `bun run dev` on port 4200: `GET /login?role=broker` returns 200; `POST /login?role=broker` returns the Broker Login page with the setup message instead of the raw database error.
-- CI/tmux evidence: this repo has no GitHub Actions workflows or runs (`gh workflow list` and `gh run list` returned empty), so there was no remote CI leg to inspect.
-
-Commit/push:
-
-- Committed `fdd4b84 fix: handle local preview auth setup` in `src/equityfundingsource-dev`.
-- Pushed `main` to `origin` (`f8d1717..fdd4b84`).
-
-Escalation: none. Confidence: high. The dev server is currently running at `http://localhost:4200`; use `http://127.0.0.1:8787` via `bun run dev:worker` for real broker sign-in with local D1.
-❯ The end of the agent-doc turn should kill the dev server managed by the turn so I can run the dev server on my own and have visibility to the console logs.
-### Re: dev server ownership — gpt-5
-
-Stopped the dev server I had started for the prior turn. Going forward I will not leave an agent-managed EFS dev server running at the end of an `agent-doc` cycle unless you explicitly ask me to keep it alive.
-
-Changed paths: none.
-
-Commands / verification:
-
-- Sent SIGINT to the managed `bun run dev` session from the prior turn.
-- Verified `http://localhost:4200/login?role=broker` no longer accepts connections.
-- Verified no matching `bun dev` / EFS dev-server process is running with `pgrep -af 'bun.*dev|equityfundingsource.*dev|server started on port 4200'`.
-
-Escalation: none. Confidence: high.
-❯ do [#jnzs]. #spec-test-commit-push
-### Re: final EFS polish — gpt-5
-
-Completed the technical portion of `#jnzs` and left the item gated on the remaining external approval.
-
-Changed paths:
-
-- `src/equityfundingsource-dev/docs/deploy.md`
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
-- `src/equityfundingsource-dev/tests/funded-deals.test.ts`
-- `src/equityfundingsource-dev/tests/prd.test.ts`
-- Parent gitlink: `src/equityfundingsource-dev`
-
-Spec/test update:
-
-- Added funded-deals launch proof to the deploy guide and PRD: remote D1 migration state, live `/funded-deals` smoke test, live `/portal-admin/funded-deals` admin-route smoke test, and reviewer approval for images/copy/legal wording.
-- Added tests that lock the deploy-guide and PRD release-proof requirements.
-
-Remote D1 and deploy:
-
-- Applied remote D1 migration `0020_funded_deals.sql` to `equityfundingsource` (`280e1539-b940-4c59-8988-fbed63c12ac0`).
-- Confirmed remote migration list now reports no migrations to apply.
-- Confirmed remote visible funded-deal count: `18`.
-- Deployed Worker `equityfundingsource` version `f71454db-e595-489e-8f80-c8f933095226` at `https://equityfundingsource.brian-takita.workers.dev`.
-
-Live smoke:
-
-- `GET /funded-deals` on the live Worker returned `200` and included seeded records including `san-pedro-california-350000`.
-- Sample deal image `/assets/images/deals/san-pedro-350k.jpg` returned `200 image/jpeg` with a non-empty body.
-- `GET /portal-admin/funded-deals` returned `303` to `/login?role=admin`, which is the expected unauthenticated admin guard.
-
-Verification:
-
-- `bun run check` passed: 26 tests, 0 failures, plus site build and worker build.
-- `git diff --check` passed.
-- CI/tmux evidence: `gh workflow list` and `gh run list --limit 5` returned no workflows/runs for the EFS repo, so there was no remote CI leg to inspect.
-
-Commit/push:
-
-- EFS repo: `c4131cd test: document funded deals launch proof`, pushed to `origin/main`.
-- Parent repo gitlink: `bad725c8c chore: update efs funded deals proof`, pushed to `origin/main`.
-
-Operational note: the EFS `bun run cf:*` wrapper still fails because `.env` does not contain `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`. I used the active Wrangler OAuth login for `brian.takita@gmail.com`, pinned to account `1e7e194ff8da4ad9e40ce041aea84f76`, to complete the D1/deploy work without printing secrets.
-
-Pending outcome: `#jnzs` is gated, not done, because Judith or an EFS reviewer still needs to approve the funded-deal images, copy, lien-position wording, and legal/disclosure language before invoicing or final launch sign-off.
-
-Escalation: none. Confidence: high.
-<!-- agent:boundary:263c0edb -->
+<!-- agent:boundary:d8d94d73 -->
 <!-- /agent:exchange -->
 ###
 

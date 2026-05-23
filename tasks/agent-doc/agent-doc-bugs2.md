@@ -33,7 +33,30 @@ Implemented #rdec and advanced the auto queue. Top backlog item after closeout s
 Compacted content:
 - Archived 1 response topic(s): auto queue continuation after finalize
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:03b6b7ea -->
+### Re: auto queue continuation — gpt-5
+
+Implemented `#eprf`, `#rlog`, `#rtst`, and `#nfix`.
+
+What changed:
+- The IPC repair decision now carries prompt-prefix normalization targets and logs structured sidecar fallback records with patch id, bad/fallback hashes and lengths, prefix counts, and duplicate-prompt counts.
+- Prefix-only sidecar fallback now attempts a narrow normalize/reposition patch against the fresh rejected editor buffer first, with full-content redelivery kept as the stale-checked last resort.
+- Repair/redelivery skip and proof logs now preserve source patch ids and expected/current buffer hashes so stale editor buffers are not overwritten.
+- Added deterministic unit and SimWorld coverage for narrow normalization repair, stale bad-state skip, and ops-log evidence; updated the closeout/editor specs and version notes.
+
+Commits:
+- `src/agent-doc`: `12b1ac51 fix: narrow sidecar normalization redelivery`
+- parent gitlink: `e1d5d2b7c chore: advance agent-doc submodule`
+
+Verification:
+- `cargo test normalization_fallback_`
+- `cargo test normalization_repair_sim_uses_narrow_patch_for_prefix_only_divergence`
+- `cargo test ipc_repair_decision_`
+- `make check`
+- `make install`
+- Latest CI/tmux evidence: GitHub CI run `26321931940` completed successfully, including `make check` and `make tmux-ci`.
+
+Push will run after this session-document finalize, per the closeout rule that keeps the session document on the binary-owned commit path.
+<!-- agent:boundary:2218b3b2 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -48,7 +71,7 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#dvre]~
 - ~do [#rdec]~
@@ -61,10 +84,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#eprf] [recommended] Add fresh editor-buffer proof before response-fallback full-document redelivery, so redeliver_ipc_dedupe_to_editor and redeliver_normalization_fallback_to_editor only run when the visible buffer still contains the exact duplicate/prefix-divergent state.
-- [ ] [#rlog] [recommended] Add structured ops-log records for repair/redelivery decisions: patch_id, snap_source, repair_reason, before/current hashes, proof source, duplicate prompt count, required/observed prefix counts, and redeliver=true|false.
-- [ ] [#rtst] [recommended] Add deterministic unit and SimWorld coverage for ack-sidecar-only repair, real visible duplicate repair, sidecar normalization divergence, stale source-buffer skip, and post-commit user follow-up drift.
-- [ ] [#nfix] [recommended] Replace eligible prefix-normalization response fallback redeliveries with a narrow normalization/reposition patch before using fullContent as a last resort.
 - [ ] [#caud] [recommended] After the repair/redelivery split lands, audit the duplicate-prompt and prefix-normalization fixes added during the failed attempts and classify each as invariant, fallback, logging, or obsolete workaround.
 - [ ] [#cuni] [recommended] Consolidate duplicate-prompt cleanup into one canonical repair/invariant path instead of scattered cleanup helpers for post-exchange comments, prompt lines against before-content, prefix variants, and duplicate response blocks.
 - [ ] [#cspe] [recommended] Update src/agent-doc/editors/PLUGIN-SPEC.md and src/agent-doc/editors/SPEC.md to describe the new snapshot-only repair versus editor-redelivery contract, removing stale language that says every normalization fallback is sent back through fullContent.

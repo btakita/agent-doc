@@ -34,7 +34,35 @@ Logged three fresh log-triage follow-ups. No open backlog items.
 Compacted content:
 - Archived 2 response topic(s): mixed scratch comment deletion; duplicate prompt tail race
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:867dc7c5 -->
+❯ The html comment content below this agent:exchange element was deleted yet again by agent-doc. Why? Fix root cause. #spec-test-build-install-commit-push
+### Re: response-quoted scratch comment cleanup — gpt-5
+
+The deleted comment was caused by duplicate-prompt comment cleanup, not by the editor. The cleanup built its prompt ownership set from prompt-looking lines inside assistant response bodies, so a response that quoted or discussed the scratch comment text, including `#next-steps`, could make the ordinary HTML comment below the exchange look redundant and eligible for stripping. Preflight also had a timing problem where one cleanup pass ran after the git boundary moved, which made live prompt tail text harder to distinguish from response body text.
+
+I fixed the root cause in `src/agent-doc`: prompt target collection now ignores assistant response blocks, and preflight now removes true duplicate post-exchange prompt comments before the commit/boundary step while keeping the later pass as a backstop. I added regressions for both compact-summary mixed scratch comments and response-quoted scratch comments.
+
+Changed paths:
+- `src/agent-doc/src/template.rs`
+- `src/agent-doc/src/preflight.rs`
+- `src/agent-doc/src/route/tests.rs`
+- `src/agent-doc/specs/04-diff-computation.md`
+- `src/agent-doc/specs/07-closeout-commands.md`
+
+Verification:
+- `cargo test --manifest-path src/agent-doc/Cargo.toml`
+- `cargo build --manifest-path src/agent-doc/Cargo.toml`
+- `make check` in `src/agent-doc`
+- `cargo install --path src/agent-doc`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- Latest GitHub CI run `26318080173` was green, including `Run make check` and `Run make tmux-ci`.
+
+Commit and push evidence:
+- Submodule commit `07931fa8` (`fix: preserve response-quoted scratch comments`) pushed to `origin/20260422/codex-agent-backend`.
+- Parent pointer commit `9f36c6f52` (`agent-doc: preserve response-quoted scratch comments`) pushed to `origin/main`.
+- This finalize step is committing the session-document response; I will push that resulting parent commit immediately after finalize succeeds.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:b51c5bf5 -->
 <!-- /agent:exchange -->
 ###
 <!--

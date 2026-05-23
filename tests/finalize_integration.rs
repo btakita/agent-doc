@@ -1556,6 +1556,51 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
 }
 
 #[test]
+fn finalize_skips_queue_consumption_when_user_prompt_diff_targets_other_work() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let baseline_content = queue_doc_content();
+    fs::write(&doc, &baseline_content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let current = baseline_content.replace(
+        "<!-- agent:boundary:1234abcd -->",
+        "❯ Continue with plan-auto-queue-continuation-after-finalize.md\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, current).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: continuation — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains(
+            "[queue] skipped consumption because the active prompt did not target the queue head",
+        ));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("- do #fix1"),
+        "queue head should remain open when the active prompt targets other work"
+    );
+    assert!(
+        !content.contains("- ~do #fix1~"),
+        "queue head must not be marked complete"
+    );
+    assert!(content.contains("queue_active: true"));
+}
+
+#[test]
 fn finalize_consumes_queue_prompt_after_dispatch_directive() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();

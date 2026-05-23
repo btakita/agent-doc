@@ -350,7 +350,15 @@ fn run_once(
     let mut queue_consumption = None;
     if !no_git {
         let _heartbeat = RunHeartbeat::start(file, "commit_closeout", agent_name, None);
-        queue_consumption = write::consume_queue_prompt_with_outcome(file)?;
+        if queue_synthetic_diff
+            || write::should_consume_queue_prompt_for_diff(file, Some(&the_diff))?
+        {
+            queue_consumption = write::consume_queue_prompt_with_outcome(file)?;
+        } else {
+            eprintln!(
+                "[queue] skipped consumption because the active prompt did not target the queue head"
+            );
+        }
         write::complete_required_closeout(file)?;
     }
 

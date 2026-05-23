@@ -1080,6 +1080,8 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
     let current_content =
         std::fs::read_to_string(file).context("failed to read document for pre-write guards")?;
     guard_no_exchange_compaction_request_between(file, baseline.as_deref(), &current_content)?;
+    let queue_consumption_allowed =
+        should_consume_queue_prompt_for_write(file, baseline.as_deref(), &current_content)?;
 
     let write_result = if options.is_ipc {
         run_ipc(file, baseline.as_deref(), write_flags)
@@ -1131,12 +1133,24 @@ pub fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<(
         match commit_mode {
             CommitMode::None => {}
             CommitMode::BestEffort => {
-                if let Err(e) = consume_queue_prompt(file) {
-                    eprintln!("[queue] warning: consumption failed: {}", e);
+                if queue_consumption_allowed {
+                    if let Err(e) = consume_queue_prompt(file) {
+                        eprintln!("[queue] warning: consumption failed: {}", e);
+                    }
+                } else {
+                    eprintln!(
+                        "[queue] skipped consumption because the active prompt did not target the queue head"
+                    );
                 }
             }
             CommitMode::Required => {
-                consume_queue_prompt(file)?;
+                if queue_consumption_allowed {
+                    consume_queue_prompt(file)?;
+                } else {
+                    eprintln!(
+                        "[queue] skipped consumption because the active prompt did not target the queue head"
+                    );
+                }
             }
         }
     }
@@ -2062,6 +2076,109 @@ pub(crate) fn consume_queue_prompt_with_outcome(
     }
 
     Ok(Some(outcome))
+}
+
+pub(crate) fn should_consume_queue_prompt_for_diff(
+    file: &Path,
+    diff_text: Option<&str>,
+) -> Result<bool> {
+    let content =
+        std::fs::read_to_string(file).context("queue consume guard: failed to read document")?;
+    should_consume_queue_prompt_for_diff_content(file, &content, diff_text)
+}
+
+fn should_consume_queue_prompt_for_write(
+    file: &Path,
+    baseline: Option<&str>,
+    current_content: &str,
+) -> Result<bool> {
+    let Some(base) = baseline else {
+        return Ok(true);
+    };
+    let base_norm = crate::diff::strip_comments(&strip_boundary_for_dedup(base));
+    let current_norm = crate::diff::strip_comments(&strip_boundary_for_dedup(current_content));
+    let diff_text = crate::diff::unified_diff_from_contents(&base_norm, &current_norm);
+    should_consume_queue_prompt_for_diff_content(file, current_content, diff_text.as_deref())
+}
+
+fn should_consume_queue_prompt_for_diff_content(
+    file: &Path,
+    content: &str,
+    diff_text: Option<&str>,
+) -> Result<bool> {
+    let Some(diff_text) = diff_text else {
+        return Ok(true);
+    };
+    let Some(queue_head) = active_queue_head_text(content)? else {
+        return Ok(true);
+    };
+    let prompt_changes: Vec<_> = crate::diff::classify_prompt_bearing_changes(diff_text)
+        .into_iter()
+        .filter(|change| {
+            matches!(
+                change.kind,
+                crate::diff::PromptBearingChangeKind::PromptTarget
+                    | crate::diff::PromptBearingChangeKind::ContentEdit
+            )
+        })
+        .collect();
+    if prompt_changes.is_empty() || crate::diff::detect_queue_trigger(diff_text) {
+        return Ok(true);
+    }
+    if prompt_changes
+        .iter()
+        .any(|change| queue_prompt_text_matches(&change.text, &queue_head))
+    {
+        return Ok(true);
+    }
+
+    eprintln!(
+        "[queue] active prompt differs from queue head for {}; prompt_changes={:?} queue_head={:?}",
+        file.display(),
+        prompt_changes
+            .iter()
+            .map(|change| change.text.as_str())
+            .collect::<Vec<_>>(),
+        queue_head
+    );
+    Ok(false)
+}
+
+fn active_queue_head_text(content: &str) -> Result<Option<String>> {
+    let (fm, _) = frontmatter::parse(content)?;
+    if fm.queue_active != Some(true) {
+        return Ok(None);
+    }
+    let components = component::parse(content)?;
+    let Some(comp) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(None);
+    };
+    let body = &content[comp.open_end..comp.close_start];
+    let entries =
+        crate::queue::parse(body).context("queue consume guard: failed to parse document queue")?;
+    Ok(crate::queue::first_prompt(&entries).map(|prompt| prompt.text.clone()))
+}
+
+fn queue_prompt_text_matches(prompt_change: &str, queue_head: &str) -> bool {
+    normalize_queue_prompt_text(prompt_change) == normalize_queue_prompt_text(queue_head)
+}
+
+fn normalize_queue_prompt_text(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            line.trim()
+                .trim_start_matches('❯')
+                .trim()
+                .replace("[#", "#")
+                .replace(']', "")
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase()
 }
 
 fn plan_queue_prompt_consumption(

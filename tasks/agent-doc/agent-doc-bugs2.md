@@ -28,28 +28,12 @@ Completed #caud: duplicate-prompt and prompt-prefix normalization audit committe
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-040655.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-044407.md`*
 
 Compacted content:
-- Archived 1 response topic(s): auto queue continuation
+- Archived 1 response topic(s): #caud
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: #caud — gpt-5
-
-Completed the audit and classified the duplicate-prompt / prompt-prefix paths in `tasks/agent-doc/audit-duplicate-prompt-prefix-normalization.md`.
-
-What changed:
-- Added a classification table covering canonical prompt-prefix invariants, sidecar/IPC repair fallbacks, duplicate-prompt cleanup fallbacks, logging hooks, and the obsolete force-commit workaround candidate.
-- Repaired the auto queue so the completed audit prompt is no longer at the head.
-
-Verification:
-- `make -C src/agent-doc check` passed: clippy, default Rust tests, integration tests, and `closeout_sim_medium_seed_corpus_runs_wider_deterministic_budget`.
-- CI/tmux review: latest CI run `26322998714` is in progress with `Run make tmux-ci` running; previous completed CI run `26321931940` had `Run make tmux-ci` successful.
-- `make -C src/agent-doc install` completed and reinstalled `agent-doc 0.33.16` plus `libagent_doc-0.33.16.so`.
-
-Commit / push:
-- Committed the non-session audit file as `e17074f71` (`agent-doc: audit duplicate prompt repairs`).
-- The session repair write is being committed through `agent-doc write --commit`; push comes after this repair commit passes session-check.
-<!-- agent:boundary:c08720aa -->
+<!-- agent:boundary:f99a7e1e -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -64,7 +48,7 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 #spec-test-build-install-commit-push
 -->
 
-<!-- agent:queue auto -->
+<!-- agent:queue -->
 preset #spec-test-build-install-commit-push
 - do [#cspe]
 - do [#ctes]

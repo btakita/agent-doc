@@ -34,7 +34,57 @@ prompt_presets:
 Compacted content:
 - Archived 4 response topic(s): Hours to Invoice; Lucas Hours Change the Invoice Floor; Deployment URL and Lucas Cash Timing; 1 more
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-<!-- agent:boundary:5857babd -->
+❯ The following links are broken in dev:
+❯ - http://localhost:4200/portal-broker
+❯ - http://localhost:4200/portal-borrower
+❯ - http://localhost:4200/login?role=investor
+
+❯ https://equityfundingsource.brian-takita.workers.dev/portal-borrower is active.
+
+❯ #spec-test-commit-push
+### Re: dev portal links — gpt-5
+
+Fixed the dev-only routing gap for the three reported URLs:
+
+- `http://localhost:4200/login?role=investor` now renders the investor login page under `bun dev`.
+- `http://localhost:4200/portal-borrower` redirects to `/login?role=borrower` instead of 404ing.
+- `http://localhost:4200/portal-broker` redirects to `/login?role=broker` instead of 404ing.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/app/equityfundingsource/app/index.server.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/lib/auth/routes.ts`
+- `src/equityfundingsource-dev/app/equityfundingsource/dev-routes.test.ts`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/README.md`
+- `src/equityfundingsource-dev/docs/deploy.md`
+
+Implementation notes:
+
+- Mounted the existing auth and portal Hono route modules in the local port 4200 SSR dev app.
+- Made auth env probing tolerate a missing Hono `c.env` for lightweight local previews.
+- Let unauthenticated protected portal roots redirect before requiring D1/auth bindings.
+- Updated the PRD, README, and deploy notes to specify the new local-dev behavior while keeping full authenticated portal data on the Worker/D1 dev path.
+
+Verification:
+
+- `bun test app/equityfundingsource/dev-routes.test.ts` -> 3 pass.
+- `bun run check` -> 23 tests pass, browser build passes, Worker build passes.
+- Local `bun dev` is running on `http://localhost:4200`.
+- `curl -I http://localhost:4200/portal-broker` -> `303 Location: /login?role=broker`.
+- `curl -I http://localhost:4200/portal-borrower` -> `303 Location: /login?role=borrower`.
+- `curl --compressed -s 'http://localhost:4200/login?role=investor'` contains `Investor Login | Equity Funding Source`.
+- Tmux CI check: the EFS repo has no `.github` directory and `rg "tmux-ci|tmux-test|tmux"` found no tmux CI leg to inspect.
+
+Commit and push:
+
+- Committed in `src/equityfundingsource-dev`: `f8d1717 fix: expose portal entrypoints in dev`.
+- Pushed `main` to `origin`.
+- Left unrelated untracked `src/equityfundingsource-dev/tmp/` untouched.
+
+Confidence: high.
+Escalation: none.
+<!-- agent:boundary:1e9b4f25 -->
 <!-- /agent:exchange -->
 ###
 

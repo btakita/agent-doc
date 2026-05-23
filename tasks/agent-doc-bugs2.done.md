@@ -145,3 +145,4 @@
 - 2026-05-23 [#repairtests] [recommended] Add deterministic unit and SimWorld coverage for ack-sidecar-only repair, real visible duplicate repair, sidecar normalization divergence, stale source-buffer skips, and post-commit user-follow-up drift.
 - 2026-05-23 [#qloop] [recommended] Wire Codex/direct agent-doc file invocations into the binary-owned auto-queue continuation loop, or explicitly re-dispatch the next queue head after finalize when queue_active and agent:queue auto remain true.
 - 2026-05-23 [#tsiftipc] [recommended] Capture the tsift.md duplicate-content corruption while typing as a named fixture and assert full-document IPC redelivery is skipped without fresh editor-buffer proof.
+- 2026-05-23 [#narrowpatch] [recommended] Replace eligible prefix-normalization fallback fullContent redeliveries with narrow normalization/reposition patches before using fullContent as a last resort.

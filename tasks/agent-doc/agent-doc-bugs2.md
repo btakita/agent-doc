@@ -34,7 +34,30 @@ Top backlog item: #typedrepair. Added #tsiftipc as the concrete tsift.md reprodu
 Compacted content:
 - Archived 2 response topic(s): #next-steps to fix agent-doc bugs; full-document IPC next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:d95769b7 -->
+### Re: #edproof — gpt-5
+
+Closed #edproof. I did not need to change source: the fresh editor-buffer proof work is already present from the prior #dvre/#eprf implementation and covered in the current tree.
+
+Evidence:
+- Binary fullContent payloads carry `expected_content_hash` / `expected_content_len` from the exact source or bad buffer. Repair redelivery passes the bad state into `try_ipc_full_content_response_fallback_from_source`.
+- The JetBrains watcher rejects `fullContent` when the live editor or VFS buffer does not match that proof.
+- The specs already state that response-fallback repair/redelivery uses the exact bad buffer as the proof source and rejects stale disk or editor buffers.
+
+Changed paths: none.
+
+Commands:
+- `cargo test full_content --all-targets`
+- `cargo test redelivery --all-targets`
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test --tests com.github.btakita.agentdoc.NormalizeExchangePrefixesTest`
+- `gh run list --workflow CI --limit 1`
+- `gh run view 26334620844 --json jobs`
+
+Verification: passed. The focused Rust tests covered stale full-content source guards, response fallback drift rejection, SimWorld stale-buffer modeling, narrow-before-full normalization repair, and bad-state redelivery proof. The JetBrains watcher test suite passed, including the full-content source-buffer proof utility.
+
+CI/tmux evidence: latest GitHub CI run `26334620844` succeeded; its `Run make check` and `Run make tmux-ci` steps both passed.
+
+Push: no source changes were made, so there was nothing to commit or push for `src/agent-doc`.
+<!-- agent:boundary:bec517b3 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -43,7 +66,7 @@ Compacted content:
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#edproof]~
-- do [#typedrepair]
+- ~do [#typedrepair]~
 - do [#repairtests]
 - do [#tsiftipc]
 - do [#narrowpatch]

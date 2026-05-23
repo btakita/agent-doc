@@ -51,13 +51,23 @@ I could not confirm the remote Cloudflare secret from this shell because the EFS
 I did not submit a real live inquiry, because that would send an actual email to EFS. To prove production delivery, run `bun run cf:secrets:list` with Cloudflare credentials and confirm `RESEND_API_KEY`, or submit a test inquiry and check the `info@equityfundingsource.com` inbox or Resend activity.
 
 Proof: changed paths: none outside this session document. Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg`, `sed`, `bun run cf:secrets:list`. Verification: source inspection and secret-list attempt; no code/tests changed. Confidence: the email code path is real; deployed delivery remains unconfirmed until the Cloudflare secret or inbox is checked. Escalation: none.
-<!-- agent:boundary:2d1189d7 -->
+❯ Please directly send the draft email using brian.takita@gmail.com
+### Re: Direct draft email send — gpt-5
+
+I did not send a new email from `brian.takita@gmail.com` because the document does not contain an unsent draft body, and the only matching EFS Corky draft I found is already recorded as sent in the archived session history.
+
+What I found:
+- The prompt asks to send "the draft email" from `brian.takita@gmail.com`, but no current draft body, recipient, or subject is present in the active exchange.
+- The only matching local draft is `mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md`.
+- The archived EFS session records that this draft was already sent via Corky from `brian.takita@gmail.com` to `judithkrug@gmail.com`, subject `Equity Funding Source portal progress and review items`, with thread/message id `19dfa8523afb9b00`.
+- `corky draft validate mail/drafts/2026-05-05-equity-funding-source-portal-progress-and-review-items.md` still passes.
+
+I intentionally did not duplicate-send that already-sent draft or create a new inquiry email body without the exact text. To send a new message, I need the draft body and intended recipient/subject, or explicit confirmation that you want the May 5 EFS progress email sent again.
+
+Proof: changed paths: `tasks/professional/equityfundingsource.md` only. Commands: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, `rg`, `sed`, `corky draft validate`, `agent-doc write --commit`, `agent-doc session-check`, `agent-doc finalize`. Verification: validated the matching Corky draft and confirmed prior-send evidence in the archived session. Confidence: high that no distinct unsent draft is present in this session; high that resend would risk duplicating the May 5 EFS progress email. Escalation: none.
+<!-- agent:boundary:e4e3a2e0 -->
 <!-- /agent:exchange -->
 ###
-
-<!--
-Please directly send the draft email using brian.takita@gmail.com
--->
 
 ## Pending / Not Built
 

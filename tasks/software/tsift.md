@@ -55,7 +55,10 @@ Verification run:
 Repeated metric evidence from a bounded real three-sample `backend-eval` run with the `kuzu` candidate and selected normalized metrics: loaded 5 runs including the checked-in baseline plus the 3 current samples. Current versus previous normalized results included `real.sqlite.total_duration_micros_per_1k_graph_rows` improving from `31115.48` to `21860.54`, `real.refresh_phase.source_graph_build.duration_micros_per_1k_graph_rows` improving from `15135.53` to `4274.04`, and evidence/synthetic-path metrics remaining noisy enough that they should be judged through repeated samples rather than a single run. Existing `#gdbevidlat` already tracks the follow-up evidence-latency measurement.
 
 Changed paths: none in `src/tsift`; session document only via queue-consumption plus this missed-response repair. Escalation: none. Confidence: high for closing `#gdbbenchnorm`; the implementation, spec, fixture, tests, install, and CI all line up with the requested normalized/repeated-sample performance gate.
-<!-- agent:boundary:a669d483 -->
+### Re: queue closeout repair — gpt-5
+
+Repair-only closeout: the `#gdbbenchnorm` response above is the substantive result. This write syncs the already-consumed queue state while leaving the next queue item open.
+<!-- agent:boundary:acb2b566 -->
 <!-- /agent:exchange -->
 ###
 <!--

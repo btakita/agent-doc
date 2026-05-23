@@ -14,14 +14,14 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-Resolved #qrepair; current queued implementation work remains open.
+Resolved #qfixture; auto queue drained.
 <!-- /agent:status -->
 
 ## Exchange
@@ -68,24 +68,18 @@ Commit/push:
 - Pushed submodule commit `40aa1f50` to `origin/20260422/codex-agent-backend`.
 - Created local parent gitlink commit `f4db7e491`.
 - Did not push parent `main`; that branch already had existing unpushed commits, and the prior queue outcome said not to publish those implicitly.
-<!-- agent:boundary:f2540711 -->
+<!-- agent:boundary:6d6fdb5a -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-preset #spec-test-build-install-commit-push
-- ~do [#mxz5]~
-- ~do [#qguard]~
-- ~do [#qrepair]~
-- do [#qfixture]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#qfixture] [recommended] Add an end-to-end regression for agent:queue auto plus a non-queue #next-steps prompt and repair write, asserting the auto attribute is preserved and the next queue head is not consumed.
 <!-- /agent:backlog -->
 
 <!-- agent:icebox -->

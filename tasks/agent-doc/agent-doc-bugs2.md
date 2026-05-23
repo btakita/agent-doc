@@ -20,8 +20,7 @@ queue_active: true
 ## Status
 
 <!-- agent:status patch=replace -->
-
-Added post-fix cleanup next steps after the decision-separation backlog. Top backlog item remains #dvre.
+Implemented #rdec and advanced the auto queue. Top backlog item after closeout should be #eprf.
 <!-- /agent:status -->
 
 ## Exchange
@@ -49,8 +48,27 @@ Verification:
 - `make install`
 - `agent-doc --version` -> `agent-doc 0.33.16`
 
-Push will run after this finalize boundary succeeds, so the session document remains on the binary-owned closeout path.
-<!-- agent:boundary:70c16394 -->
+❯ Push will run after this finalize boundary succeeds, so the session document remains on the binary-owned closeout path.
+❯ Why is `agent:queue auto` stopping after the first task is complete?
+### Re: queue auto and #rdec — gpt-5
+
+`agent:queue auto` is stopping after one completed task because the current direct run/finalize path is explicitly single-step resumable. The binary consumes one queue prompt during strict closeout, commits that cycle, prints a continuation diagnostic when prompts remain, and exits. A later `agent-doc <FILE>` invocation synthesizes the next active queue head as the prompt. There is not yet a parent-owned continuation loop that re-enters preflight/finalize until the queue drains. That gap is already captured in `tasks/agent-doc/plan-auto-queue-continuation-after-finalize.md`.
+
+I also completed #rdec in `src/agent-doc`: IPC sidecar-normalization fallback and duplicate-response dedupe now resolve through a typed repair decision carrying repaired snapshot content, snapshot source, disk-repair reason, editor bad-state fingerprint, and explicit `redeliver_editor=true|false`. Both socket IPC and file IPC paths use that decision before editor redelivery or disk repair, and the decision logs `ipc_repair_decision` with the repair reason and bad-state hash/length.
+
+Updated specs document the typed decision contract in `editors/SPEC.md` and `editors/PLUGIN-SPEC.md`, and `VERSIONS.md` has the unreleased note.
+
+Verification:
+- `cargo test -p agent-doc late_fallback_patch_guard_tests -- --nocapture`
+- `make check`
+- Latest GitHub CI run `26321059508`: `Run make check` and `Run make tmux-ci` succeeded
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+
+Commits pushed:
+- `src/agent-doc`: `3f038a9e` (`fix: type ipc repair decisions`)
+- parent `agent-loop`: `282d212a3` (`agent-doc: type ipc repair decisions`)
+<!-- agent:boundary:b7aba7aa -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -68,7 +86,7 @@ Look through the Claude + Codex + agent-doc session logs for #next-steps to fix 
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#dvre]~
-- do [#rdec]
+- ~do [#rdec]~
 - do [#eprf]
 - do [#rlog]
 - do [#rtst]
@@ -78,7 +96,6 @@ preset #spec-test-build-install-commit-push
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] [#rdec] [recommended] Split the IPC repair outcome in src/agent-doc/src/write.rs into typed decisions: repaired snapshot content, disk-repair reason, editor bad-state fingerprint, and explicit redeliver_editor=true|false.
 - [ ] [#eprf] [recommended] Add fresh editor-buffer proof before response-fallback full-document redelivery, so redeliver_ipc_dedupe_to_editor and redeliver_normalization_fallback_to_editor only run when the visible buffer still contains the exact duplicate/prefix-divergent state.
 - [ ] [#rlog] [recommended] Add structured ops-log records for repair/redelivery decisions: patch_id, snap_source, repair_reason, before/current hashes, proof source, duplicate prompt count, required/observed prefix counts, and redeliver=true|false.
 - [ ] [#rtst] [recommended] Add deterministic unit and SimWorld coverage for ack-sidecar-only repair, real visible duplicate repair, sidecar normalization divergence, stale source-buffer skip, and post-commit user follow-up drift.

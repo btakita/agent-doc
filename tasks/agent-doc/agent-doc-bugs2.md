@@ -66,18 +66,52 @@ Commits:
 - Parent repo gitlink: `6b78bdd60 agent-doc: update agent-doc submodule`, committed locally only.
 
 I did not push parent `main`: it was already ahead of `origin/main` by 9 commits before the gitlink commit and has many unrelated dirty files. Pushing it now would publish unrelated existing history; `#mxz5` already tracks confirming whether that parent push is intended.
-<!-- agent:boundary:d150f0ea -->
+### Re: #tsiftipc — gpt-5
+
+Implemented `#tsiftipc`.
+
+Changed paths:
+- `src/agent-doc/src/write.rs`
+- `src/agent-doc/specs/07-closeout-commands.md`
+- `src/agent-doc/VERSIONS.md`
+- `src/agent-doc` gitlink in the parent repo
+
+What changed:
+- Added a named `tsift.md` duplicate-content fixture that models stale duplicate-response repair planning while the visible `tasks/software/tsift.md` buffer receives the later `#next-steps` prompt.
+- Added regression coverage proving response-fallback full-document redelivery skips before socket/file IPC when the current editor buffer no longer matches the captured bad state, leaves the live prompt untouched, and logs the stale bad-state proof.
+- Updated the closeout spec and changelog so this exact `tsift.md` incident remains the concrete fixture for response-fallback redelivery behavior.
+
+Verification passed:
+- `cargo test tsift_md_duplicate_content_fixture_skips_stale_full_document_redelivery --all-targets -- --test-threads=2`
+- `git diff --check`
+- `cargo fmt --check`
+- `make check`
+- `cargo build`
+- `make install`
+- `agent-doc --version` -> `agent-doc 0.33.16`
+- `make tmux-ci` -> 228 ignored/tmux tests passed locally, 0 failures
+
+CI / tmux evidence:
+- `btakita/agent-doc` CI run `26341830440` for commit `85a214a10b0b97f9c760cabfb7c612da1ac66dc6` passed, including `Run make check` and `Run make tmux-ci`.
+- Parent `btakita/agent-loop` push run `26341843025` for commit `766a398e21a9a1aa705e9a5720f5dbfd41b0729a` did not start jobs; GitHub annotated both `check` and `tmux-ci` with the billing/spending-limit message, so I classified that as an external CI-start blocker rather than a code or tmux regression.
+
+Commits pushed:
+- `src/agent-doc`: `85a214a` (`test: cover tsift IPC stale redelivery`) pushed to `origin/20260422/codex-agent-backend`.
+- Parent repo: `766a398e2` (`agent-doc: cover tsift IPC stale redelivery`) pushed to `origin/main`.
+
+I staged only the intended non-session path sets for those manual commits. The parent worktree still has unrelated pre-existing dirty files, and I left them untouched.
+<!-- agent:boundary:4c6889c1 -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue -->
+<!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#edproof]~
 - ~do [#typedrepair]~
 - ~do [#repairtests]~
-- do [#tsiftipc]
+- ~do [#tsiftipc]~
 - do [#narrowpatch]
 - do [#repaircleanup]
 <!-- /agent:queue -->
@@ -89,7 +123,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#qguard] [recommended] Fix queue consumption proof so prompt-only or next-steps closeouts cannot consume an active queue head when the preflight baseline already includes the unrelated prompt; require an exact queue-head prompt match, queue-synthetic diff proof, or explicit done id before consuming.
 - [ ] [#qrepair] [recommended] Make response repair/write --commit queue-neutral: missing-response materialization repairs must preserve the current queue head and auto attribute unless the repair explicitly closes that queue item.
 - [ ] [#qfixture] [recommended] Add an end-to-end regression for agent:queue auto plus a non-queue #next-steps prompt and repair write, asserting the auto attribute is preserved and the next queue head is not consumed.
-- [ ] [#tsiftipc] [recommended] Capture the tsift.md duplicate-content corruption while typing as a named fixture and assert full-document IPC redelivery is skipped without fresh editor-buffer proof.
 - [ ] [#narrowpatch] [recommended] Replace eligible prefix-normalization fallback fullContent redeliveries with narrow normalization/reposition patches before using fullContent as a last resort.
 - [ ] [#repaircleanup] [recommended] Update editor specs/tests for snapshot-only repair versus editor-redelivery behavior and remove obsolete workaround branches after typed repair decisions land.
 <!-- /agent:backlog -->

@@ -59,7 +59,25 @@ Code points I checked:
 - `src/agent-doc/editors/SPEC.md`: Compact Exchange is supposed to emit a `fullContent` IPC payload.
 
 Verification: `agent-doc preflight`, `agent-doc plan`, `agent-doc read`, ops-log inspection, and source inspection. No code changes were made.
-<!-- agent:boundary:3d6dac9d -->
+❯ So the issue is triggered by `Compact Exchange`?
+### Re: Compact Exchange trigger — gpt-5
+
+Yes, but with an important distinction.
+
+`Compact Exchange` triggered the full-document IPC path. That part is intentional: compacting the exchange rewrites the document around the archived summary, so the binary sends a `fullContent` payload to the editor instead of a component append patch.
+
+What I do not see in the logs is evidence that Compact Exchange triggered a stale replacement or the duplicate/corrupt prompt issue in that specific cycle. The compact full-content write logged `full_content_source_buffer_apply:compact_exchange`, `socket_full_content`, `live_exchange_edited=false`, and `prompt_text_duplicated=false`, followed by `commit_success`. If it had been stale, the expected log would be `full_content_source_buffer_reject_stale_source_buffer:compact_exchange` / `full_content_source_buffer_rejected`, and the IPC payload would have been skipped.
+
+So the accurate framing is:
+
+- Trigger for full-document IPC: yes, `Compact Exchange`.
+- Proven trigger for stale/corrupt duplicate content: not from the evidence I checked.
+- Risk surface worth testing: yes. Because compact uses whole-document replacement, any plugin-side proof/ack bug there has a larger blast radius than a normal exchange append.
+
+The follow-up prompt after compact was normal post-commit drift: the snapshot stayed at the compact commit, then your new question appeared in the working document and preflight picked it up as the next prompt.
+
+Verification: `agent-doc preflight` and `agent-doc plan`; reused the previous source/log inspection for the compact full-content path. No code changes were made.
+<!-- agent:boundary:e0744444 -->
 <!-- /agent:exchange -->
 ###
 <!--

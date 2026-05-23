@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **File IPC sidecar-normalization fallback now has narrow repair coverage.**
+  The file-IPC fallback path is covered by a regression proving prefix-only
+  sidecar divergence queues a `patches: []` repair with `normalize_prefix_lines`,
+  boundary repositioning, and stale-buffer proof before any `fullContent`
+  replacement is allowed. The closeout spec now calls out socket and file IPC
+  as the same narrow-first contract.
+
 - **The tsift.md duplicate-content IPC incident is now a named regression.** A
   focused fixture models stale duplicate-response repair planning while the
   visible `tasks/software/tsift.md` buffer receives a new prompt. The regression

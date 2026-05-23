@@ -14051,6 +14051,159 @@ agent response
     }
 
     #[test]
+    fn normalization_fallback_file_ipc_queues_narrow_patch_before_full_content() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let bad_state = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+do #sidecar-file. spec-test-build-install-commit-push
+### Re: #sidecar-file — gpt-5
+
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        let repaired = "\
+---
+session: test
+---
+
+<!-- agent:exchange patch=append -->
+❯ do #sidecar-file. spec-test-build-install-commit-push
+### Re: #sidecar-file — gpt-5
+
+agent response
+<!-- agent:boundary:test-bnd-002 -->
+<!-- /agent:exchange -->
+";
+        std::fs::write(&doc, bad_state).unwrap();
+        let normalize_prefix_lines =
+            vec!["do #sidecar-file. spec-test-build-install-commit-push".to_string()];
+        let patch_hash = snapshot::doc_hash(&doc).unwrap();
+        let patch_file = agent_doc_dir
+            .join("patches")
+            .join(format!("{patch_hash}.json"));
+
+        let seen_repair_payloads =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        let watcher_doc = doc.clone();
+        let watcher_patch_file = patch_file.clone();
+        let watcher_ack_dir = agent_doc_dir.join("ack-content");
+        let watcher_repair_payloads = seen_repair_payloads.clone();
+        let watcher = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            while start.elapsed() < std::time::Duration::from_secs(3) {
+                if !watcher_patch_file.exists() {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+                let payload_text = match std::fs::read_to_string(&watcher_patch_file) {
+                    Ok(text) => text,
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                };
+                let payload: serde_json::Value = match serde_json::from_str(&payload_text) {
+                    Ok(payload) => payload,
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                };
+                watcher_repair_payloads
+                    .lock()
+                    .unwrap()
+                    .push(payload.clone());
+                let patch_id = payload
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap()
+                    .to_string();
+                let lines = payload
+                    .get("normalize_prefix_lines")
+                    .and_then(|value| value.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(str::to_string))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let current = std::fs::read_to_string(&watcher_doc).unwrap();
+                let repaired = normalize_exchange_prefixes_for_targets(&current, &lines);
+                std::fs::write(&watcher_doc, &repaired).unwrap();
+                std::fs::write(watcher_ack_dir.join(format!("{patch_id}.md")), repaired).unwrap();
+                std::fs::remove_file(&watcher_patch_file).unwrap();
+                return true;
+            }
+            false
+        });
+
+        let result = redeliver_normalization_fallback_to_editor(
+            &doc,
+            repaired,
+            bad_state,
+            &normalize_prefix_lines,
+            Some("source-patch-file"),
+        );
+        assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
+        assert!(result, "file IPC narrow normalization repair should apply");
+
+        let repair_payloads = seen_repair_payloads.lock().unwrap();
+        assert_eq!(
+            repair_payloads.len(),
+            1,
+            "expected exactly one file IPC repair payload"
+        );
+        let payload = &repair_payloads[0];
+        assert!(
+            payload.get("fullContent").is_none(),
+            "eligible file IPC prefix repair should avoid fullContent payloads: {payload}"
+        );
+        assert_eq!(payload["patches"].as_array().unwrap().len(), 0);
+        assert_eq!(payload["unmatched"], "");
+        assert_eq!(payload["reposition_boundary"], true);
+        assert_eq!(payload["preserve_head"], true);
+        assert_eq!(
+            payload["normalize_prefix_lines"][0],
+            "do #sidecar-file. spec-test-build-install-commit-push"
+        );
+        assert_eq!(payload["expected_content_len"], bad_state.len());
+        assert_eq!(
+            payload["expected_content_hash"],
+            crate::ops_log::content_hash(bad_state)
+        );
+
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            disk.contains("❯ do #sidecar-file. spec-test-build-install-commit-push"),
+            "file IPC narrow repair should leave disk/editor content normalized: {disk}"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("sidecar_normalization_fallback_narrow_repaired_editor")
+                && ops_log.contains("transport=file"),
+            "ops log should record the file IPC narrow editor repair:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("sidecar_normalization_fallback_redelivered_editor"),
+            "file IPC normalization-only repair should not fall back to fullContent:\n{ops_log}"
+        );
+    }
+
+    #[test]
     fn normalization_fallback_redelivery_skips_when_bad_state_is_stale() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");

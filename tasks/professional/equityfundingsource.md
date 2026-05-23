@@ -29,37 +29,12 @@ prompt_presets:
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-220822.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260523-221900.md`*
 
 Compacted content:
-- Archived 1 response topic(s): local auth handoff
+- Archived 1 response topic(s): contact page
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f...
-❯ Please create http://127.0.0.1:8787/contact following the styleguide & quality of the website.
-❯ #spec-test-commit-push
-### Re: contact page — gpt-5
-
-Built and pushed `http://127.0.0.1:8787/contact` for the EFS Worker.
-
-Changed paths:
-- `src/equityfundingsource-dev/lib/ui--server--efs/contact/index.ts` adds the public Contact page in the existing EFS navy/gold site shell, with hero image, phone/email/fax/mail cards, role-specific next-step links, structured data, and the inquiry form.
-- `src/equityfundingsource-dev/app/equityfundingsource/lib/contact/routes.ts` mounts GET/POST `/contact`, validates form input before email delivery, uses the existing flash-cookie pattern, and fails closed with phone/email fallback when `RESEND_API_KEY` is not configured.
-- `src/equityfundingsource-dev/app/equityfundingsource/worker.ts` and `app/index.server.ts` wire the route for Worker and local preview.
-- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`, `tests/prd.test.ts`, and `app/equityfundingsource/dev-routes.test.ts` add the spec/test coverage.
-- The commit also carries the already-present local auth handoff fix so the lightweight 4200 preview posts auth forms to the Worker origin at `127.0.0.1:8787`; that path is covered in `dev-routes.test.ts`.
-
-Verification:
-- `bun test app/equityfundingsource/dev-routes.test.ts tests/prd.test.ts` passed.
-- `bun run check` passed: 30 tests, server build, Worker build.
-- Live smoke against the already-running Worker passed: `GET http://127.0.0.1:8787/contact` returned 200, and invalid `POST /contact` returned 400 with the expected validation message.
-- Starting a new Worker was not needed because 8787 was already occupied; the existing Worker served the freshly built route.
-- GitHub Actions root run `26344992234` failed before job startup for both `check` and `tmux-ci` with the billing/spending-limit annotation, so there were no logs to inspect and this is an external CI-start blocker, not a code/tmux regression.
-
-Commit and push:
-- EFS repo: `bb41d6b` (`feat: add EFS contact page`) pushed to `origin/main`.
-- Parent repo submodule pointer: `081d01d9c` (`chore: update EFS contact page pointer`) pushed to `origin/main`.
-
-Escalation: none. Untracked `src/equityfundingsource-dev/tmp/` was already present and left untouched.
-<!-- agent:boundary:f98b9c03 -->
+<!-- agent:boundary:2af86780 -->
 <!-- /agent:exchange -->
 ###
 

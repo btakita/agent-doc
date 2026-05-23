@@ -33,7 +33,7 @@ Top backlog item: #qguard. Captured auto-queue stall follow-ups; current queued 
 Compacted content:
 - Archived 3 response topic(s): #edproof; agent:queue auto stopping; #next-steps for agent:queue auto stall
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-<!-- agent:boundary:159aa894 -->
+<!-- agent:boundary:d2c32b48 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -42,7 +42,7 @@ Compacted content:
 <!-- agent:queue auto -->
 preset #spec-test-build-install-commit-push
 - ~do [#edproof]~
-- do [#typedrepair]
+- ~do [#typedrepair]~
 - do [#repairtests]
 - do [#tsiftipc]
 - do [#narrowpatch]
@@ -56,7 +56,6 @@ preset #spec-test-build-install-commit-push
 - [ ] [#qrepair] [recommended] Make response repair/write --commit queue-neutral: missing-response materialization repairs must preserve the current queue head and auto attribute unless the repair explicitly closes that queue item.
 - [ ] [#qloop] [recommended] Wire Codex/direct agent-doc file invocations into the binary-owned auto-queue continuation loop, or explicitly re-dispatch the next queue head after finalize when queue_active and agent:queue auto remain true.
 - [ ] [#qfixture] [recommended] Add an end-to-end regression for agent:queue auto plus a non-queue #next-steps prompt and repair write, asserting the auto attribute is preserved and the next queue head is not consumed.
-- [ ] [#typedrepair] [recommended] Split write.rs IPC repair outcomes into typed decisions with repaired snapshot content, disk-repair reason, editor bad-state fingerprint, redeliver_editor, and structured ops-log records.
 - [ ] [#repairtests] [recommended] Add deterministic unit and SimWorld coverage for ack-sidecar-only repair, real visible duplicate repair, sidecar normalization divergence, stale source-buffer skips, and post-commit user-follow-up drift.
 - [ ] [#tsiftipc] [recommended] Capture the tsift.md duplicate-content corruption while typing as a named fixture and assert full-document IPC redelivery is skipped without fresh editor-buffer proof.
 - [ ] [#narrowpatch] [recommended] Replace eligible prefix-normalization fallback fullContent redeliveries with narrow normalization/reposition patches before using fullContent as a last resort.

@@ -284,6 +284,37 @@ User prompt.
     }
 
     @Test
+    fun `parsePatchJson preserves narrow normalization repair payload fields`() {
+        val json = """
+            {
+              "file": "/tmp/doc.md",
+              "patches": [],
+              "unmatched": "",
+              "patch_id": "patch-1",
+              "reposition_boundary": true,
+              "reposition_boundary_id": "committed-id",
+              "preserve_head": true,
+              "normalize_prefix_lines": ["do #repaircleanup. spec-test-build-install-commit-push"],
+              "expected_content_hash": "abc123",
+              "expected_content_len": 42
+            }
+        """.trimIndent()
+
+        val patch = requireNotNull(parsePatchJson(json))
+
+        assertTrue(patch.repositionBoundary)
+        assertEquals("committed-id", patch.repositionBoundaryId)
+        assertTrue(patch.preserveHead)
+        assertEquals(listOf("do #repaircleanup. spec-test-build-install-commit-push"), patch.normalizePrefixLines)
+        assertEquals("patch-1", patch.patchId)
+        assertEquals("abc123", patch.expectedContentHash)
+        assertEquals(42, patch.expectedContentLen)
+        assertTrue(patch.patches.isEmpty())
+        assertEquals("", patch.unmatched)
+        assertNull(patch.fullContent)
+    }
+
+    @Test
     fun `annotates newly patched response headings against baseline`() {
         val baseline = """
 <!-- agent:exchange patch=append -->

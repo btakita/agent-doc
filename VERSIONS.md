@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Editor repair cleanup now distinguishes snapshot-only from redelivery.**
+  The editor specs now make typed IPC repair decisions explicit: snapshot-only
+  repair stays binary-owned, narrow `normalize_prefix_lines` + boundary
+  reposition payloads stay on the normal patch path, and full-content redelivery
+  still requires non-stale bad-state proof. VS Code and JetBrains tests now pin
+  the narrow repair shape so pure-reposition shortcuts cannot absorb it.
+
 - **File IPC sidecar-normalization fallback now has narrow repair coverage.**
   The file-IPC fallback path is covered by a regression proving prefix-only
   sidecar divergence queues a `patches: []` repair with `normalize_prefix_lines`,

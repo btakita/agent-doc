@@ -25,6 +25,18 @@ describe('isPureRepositionSignal', () => {
             false,
         );
     });
+
+    it('keeps full-content repair payloads off the pure reposition path', () => {
+        assert.strictEqual(
+            isPureRepositionSignal({
+                reposition_boundary: true,
+                patches: [],
+                unmatched: '',
+                fullContent: 'replacement',
+            }),
+            false,
+        );
+    });
 });
 
 describe('appendPatchAlreadyPresent', () => {

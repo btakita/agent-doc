@@ -8039,9 +8039,10 @@ pub fn try_ipc(
                     .collect(),
             );
             // Include full normalized content ONLY when there are no component patches.
-            // When patches are present, the plugin applies normalize_prefix_lines before
-            // component patches — fullContent would conflict by replacing the document
-            // before patches run, causing duplicates on the next cycle.
+            // When patches are present, the plugin applies component patches,
+            // boundary reposition, and normalize_prefix_lines on the patch path.
+            // fullContent would conflict by replacing the document before patches run,
+            // causing duplicates on the next cycle.
             // fullContent is only safe as a fallback for append-mode (no-component) docs.
             if ipc_patches_json.is_empty()
                 && let Some(ours) = content_ours

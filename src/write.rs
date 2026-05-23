@@ -11525,6 +11525,102 @@ scratch
     }
 
     #[test]
+    fn file_ipc_synthesized_exchange_patch_omits_full_content() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let prompt = "do #ipcfull. spec-test-build-install-commit-push";
+        let original = format!(
+            "---\nagent_doc_format: template\n---\n\n\
+<!-- agent:exchange patch=append -->\n{prompt}\n<!-- /agent:exchange -->\n"
+        );
+        let unmatched = "### Re: ipc full-content guard - gpt-5\n\nDone.";
+        let after_plugin_write = format!(
+            "---\nagent_doc_format: template\n---\n\n\
+<!-- agent:exchange patch=append -->\n❯ {prompt}\n{unmatched}\n<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, &original).unwrap();
+
+        let seen_payload = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let patches_dir = agent_doc_dir.join("patches");
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let doc_for_watcher = doc.clone();
+        let seen_for_watcher = seen_payload.clone();
+        let after_for_watcher = after_plugin_write.clone();
+        let _watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(entries) = fs::read_dir(&patches_dir) else {
+                    continue;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(text) = fs::read_to_string(&path)
+                            && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text)
+                        {
+                            if let Some(pid) = payload.get("patch_id").and_then(|v| v.as_str()) {
+                                let _ = fs::write(
+                                    ack_dir.join(format!("{pid}.md")),
+                                    &after_for_watcher,
+                                );
+                            }
+                            *seen_for_watcher.lock().unwrap() = Some(payload);
+                        }
+                        let _ = fs::write(&doc_for_watcher, &after_for_watcher);
+                        let _ = fs::remove_file(path);
+                        return;
+                    }
+                }
+            }
+        });
+
+        let prefix_lines = vec![prompt.to_string()];
+        let result = try_ipc(
+            &doc,
+            &[],
+            unmatched,
+            None,
+            Some(&original),
+            Some(&after_plugin_write),
+            Some(prefix_lines.as_slice()),
+            Some("patch-synth-no-full-content"),
+        )
+        .unwrap();
+
+        assert!(
+            result.success,
+            "file IPC should accept the synthesized exchange patch"
+        );
+        let payload = seen_payload
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("watcher should capture the IPC payload");
+        assert!(
+            payload.get("fullContent").is_none(),
+            "template response IPC with a synthesized component patch must not send fullContent: {payload}"
+        );
+        assert_eq!(
+            payload["unmatched"], "",
+            "synthesized exchange patch must consume unmatched text instead of sending it twice"
+        );
+        let patches = payload["patches"]
+            .as_array()
+            .expect("payload patches should be an array");
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0]["component"], "exchange");
+        assert_eq!(patches[0]["content"], unmatched);
+        assert_eq!(payload["normalize_prefix_lines"][0], prompt);
+    }
+
+    #[test]
     fn effective_unmatched_cleared_when_synthesis_consumes_content() {
         // When synthesis consumes the unmatched content (patches input was empty,
         // ipc_patches output is non-empty), effective_unmatched should be "".

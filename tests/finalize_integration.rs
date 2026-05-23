@@ -1597,10 +1597,16 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
-    fs::write(&doc, queue_doc_content()).unwrap();
+    let baseline_content = queue_doc_content();
+    fs::write(&doc, &baseline_content).unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    let baseline = write_baseline(tmp.path(), &queue_doc_content());
+    let current = baseline_content.replace(
+        "<!-- agent:boundary:1234abcd -->",
+        "❯ do #fix1\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, current).unwrap();
+    let baseline = write_baseline(tmp.path(), &baseline_content);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -1611,7 +1617,7 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
             baseline.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nThe project is a CLI tool for interactive document sessions.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do #fix1 — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
         )
         .assert()
         .success()
@@ -1634,6 +1640,49 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
         content.contains("queue_active: true"),
         "queue_active should stay true when prompts remain"
     );
+}
+
+#[test]
+fn finalize_skips_queue_consumption_when_unrelated_prompt_is_already_in_baseline() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let baseline_content = queue_doc_content().replace(
+        "❯ describe the project\n<!-- agent:boundary:1234abcd -->",
+        "❯ #next-steps\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, &baseline_content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let baseline = write_baseline(tmp.path(), &baseline_content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #next-steps — gpt-5\nTop backlog item remains unchanged.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success()
+        .stderr(predicates::str::contains(
+            "[queue] skipped consumption because the active prompt did not target the queue head",
+        ));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("- do #fix1"),
+        "queue head should remain open when the prompt was unrelated and already in the baseline"
+    );
+    assert!(
+        !content.contains("- ~do #fix1~"),
+        "queue head must not be marked complete without exact prompt or done proof"
+    );
+    assert!(content.contains("queue_active: true"));
 }
 
 #[test]
@@ -1690,6 +1739,11 @@ fn finalize_consumes_queue_prompt_after_dispatch_directive() {
     fs::write(&doc, &content).unwrap();
     init_git_repo(tmp.path(), &doc);
 
+    let current = content.replace(
+        "<!-- agent:boundary:1234abcd -->",
+        "❯ do [#has9]\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, current).unwrap();
     let baseline = write_baseline(tmp.path(), &content);
 
     agent_doc()
@@ -1701,7 +1755,7 @@ fn finalize_consumes_queue_prompt_after_dispatch_directive() {
             baseline.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nImplemented the fix.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n",
         )
         .assert()
         .success()
@@ -1731,10 +1785,15 @@ fn finalize_drains_queue_and_clears_active_on_last_prompt() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
-    let single_prompt = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ describe the project\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- describe the project\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
+    let single_prompt = "---\nagent_doc_format: template\nagent: codex\nmodel: gpt-5\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n❯ prior prompt\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto -->\n- describe the project\n<!-- /agent:queue -->\n\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
     fs::write(&doc, single_prompt).unwrap();
     init_git_repo(tmp.path(), &doc);
 
+    let current = single_prompt.replace(
+        "<!-- agent:boundary:1234abcd -->",
+        "❯ describe the project\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, current).unwrap();
     let baseline = write_baseline(tmp.path(), single_prompt);
 
     agent_doc()
@@ -1780,6 +1839,11 @@ fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
     fs::write(&doc, content).unwrap();
     init_git_repo(tmp.path(), &doc);
 
+    let current = content.replace(
+        "<!-- agent:boundary:1234abcd -->",
+        "❯ do [#has9]\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, current).unwrap();
     let baseline = write_baseline(tmp.path(), content);
 
     agent_doc()
@@ -1791,7 +1855,7 @@ fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
             baseline.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nImplemented the fix.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do #has9 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n",
         )
         .assert()
         .success()
@@ -1916,6 +1980,11 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
     let snap_dir = tmp.path().join(".agent-doc/snapshots");
     // Find snapshot path by running agent-doc to create it via the baseline
     let baseline = write_baseline(tmp.path(), &content);
+    let current = content.replace(
+        "<!-- agent:boundary:1234abcd -->",
+        "❯ do #fix1\n<!-- agent:boundary:1234abcd -->",
+    );
+    fs::write(&doc, current).unwrap();
     // Also write snapshot manually to match the document
     // Use agent-doc snapshot path convention — just write the snapshot content
     // The binary will create the correct snapshot via finalize
@@ -1928,7 +1997,7 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
             baseline.to_str().unwrap(),
         ])
         .write_stdin(
-            "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nResponse text.\n<!-- /patch:exchange -->\n",
+            "<!-- patch:exchange -->\n### Re: do #fix1 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n",
         )
         .assert()
         .success()
@@ -1984,7 +2053,7 @@ fn finalize_fails_closed_when_active_queue_component_is_missing() {
         .assert()
         .failure()
         .stderr(predicates::str::contains(
-            "queue consume: queue_active is true but document has no agent:queue component",
+            "queue consume guard: queue_active is true but document has no agent:queue component",
         ));
 
     let head_text = head_blob(tmp.path());
@@ -2019,7 +2088,7 @@ fn finalize_fails_closed_when_active_queue_is_malformed() {
         .assert()
         .failure()
         .stderr(predicates::str::contains(
-            "queue consume: failed to parse document queue",
+            "queue consume guard: failed to parse document queue",
         ));
 
     let head_text = head_blob(tmp.path());

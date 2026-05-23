@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Queue closeout consumption now requires active-head proof.** Strict
+  `finalize` / `write --commit` no longer consume an active queue head solely
+  because the pre-response baseline and live document have no prompt diff. The
+  closeout must see the exact queue-head prompt, a queue-synthetic run diff, or
+  a matching `--done <id>`, so unrelated already-baselined prompts such as
+  `#next-steps` cannot advance `agent:queue auto`.
+
 - **Codex child process launch retries transient executable-busy errors.**
   The Codex/OpenCode backend now retries child process spawn when Linux returns
   `ETXTBSY` for a just-written executable. This hardens the streaming resume

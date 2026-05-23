@@ -2127,7 +2127,7 @@ fn should_consume_queue_prompt_for_write(
     done_ids: &[String],
 ) -> Result<bool> {
     let Some(base) = baseline else {
-        return Ok(true);
+        return queue_head_matches_done_ids(current_content, done_ids);
     };
     let base_norm = crate::diff::strip_comments(&strip_boundary_for_dedup(base));
     let current_norm = crate::diff::strip_comments(&strip_boundary_for_dedup(current_content));
@@ -2145,11 +2145,11 @@ fn should_consume_queue_prompt_for_diff_content(
     content: &str,
     diff_text: Option<&str>,
 ) -> Result<bool> {
-    let Some(diff_text) = diff_text else {
-        return Ok(true);
-    };
     let Some(queue_head) = active_queue_head_text(content)? else {
         return Ok(true);
+    };
+    let Some(diff_text) = diff_text else {
+        return Ok(false);
     };
     let prompt_changes: Vec<_> = crate::diff::classify_prompt_bearing_changes(diff_text)
         .into_iter()
@@ -2161,7 +2161,7 @@ fn should_consume_queue_prompt_for_diff_content(
             )
         })
         .collect();
-    if prompt_changes.is_empty() || crate::diff::detect_queue_trigger(diff_text) {
+    if crate::diff::detect_queue_trigger(diff_text) {
         return Ok(true);
     }
     if prompt_changes
@@ -2189,12 +2189,14 @@ fn active_queue_head_text(content: &str) -> Result<Option<String>> {
         return Ok(None);
     }
     let components = component::parse(content)?;
-    let Some(comp) = components
+    let comp = components
         .iter()
         .find(|component| component.name == "queue")
-    else {
-        return Ok(None);
-    };
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "queue consume guard: queue_active is true but document has no agent:queue component"
+            )
+        })?;
     let body = &content[comp.open_end..comp.close_start];
     let entries =
         crate::queue::parse(body).context("queue consume guard: failed to parse document queue")?;

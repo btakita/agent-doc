@@ -10870,7 +10870,7 @@ scratch
 
         let patches_dir = agent_doc_dir.join("patches");
         let watcher_dir = patches_dir.clone();
-        let _watcher = std::thread::spawn(move || {
+        let watcher = std::thread::spawn(move || {
             for _ in 0..40 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
@@ -10894,6 +10894,7 @@ scratch
             Some("patch-live-edit"),
         )
         .unwrap();
+        watcher.join().unwrap();
 
         assert!(
             !result.success,
@@ -10908,6 +10909,100 @@ scratch
             log.contains("file_ipc_live_exchange_unacknowledged")
                 && log.contains("patch_id=patch-live-edit"),
             "unacknowledged live-edit IPC should be logged:\n{log}"
+        );
+    }
+
+    #[test]
+    fn file_ipc_accepts_ack_content_sidecar_when_disk_lags_live_exchange() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let before = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "live prompt\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let ack_content = concat!(
+            "---\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "content\n",
+            "live prompt\n",
+            "### Re: live prompt — gpt-5\n\n",
+            "Handled.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, before).unwrap();
+
+        let patches_dir = agent_doc_dir.join("patches");
+        let watcher_dir = patches_dir.clone();
+        let ack_dir = agent_doc_dir.join("ack-content");
+        let ack_for_watcher = ack_content.to_string();
+        let watcher = std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
+                    continue;
+                };
+                if let Some(Ok(entry)) = entries.next() {
+                    if let Ok(text) = fs::read_to_string(entry.path())
+                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
+                    {
+                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                    }
+                    let _ = fs::remove_file(entry.path());
+                    return;
+                }
+            }
+        });
+
+        let patch =
+            crate::template::PatchBlock::new("exchange", "### Re: live prompt — gpt-5\n\nHandled.");
+        let result = try_ipc(
+            &doc,
+            &[patch],
+            "",
+            None,
+            Some(baseline),
+            None,
+            None,
+            Some("patch-live-edit-ack"),
+        )
+        .unwrap();
+        watcher.join().unwrap();
+
+        assert!(
+            result.success,
+            "ack-content proof should let file IPC accept an applied response even when disk still shows the pre-ack live exchange edit"
+        );
+        assert_eq!(
+            snapshot::load(&doc).unwrap().as_deref(),
+            Some(ack_content),
+            "snapshot must use the authoritative ack-content sidecar"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            before,
+            "this regression models the sidecar-only path where the editor proved the apply before disk caught up"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("file_ipc_live_exchange_unacknowledged"),
+            "ack-content proof must bypass the unacknowledged live-edit fallback:\n{log}"
         );
     }
 

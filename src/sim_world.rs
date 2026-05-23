@@ -296,6 +296,11 @@ struct Coverage {
     starting_timeout_coalesces: usize,
     prompt_duplicate_repairs: usize,
     normalization_repair_patches: usize,
+    sidecar_normalization_divergences: usize,
+    stale_source_buffer_skips: usize,
+    ack_sidecar_only_repairs: usize,
+    visible_duplicate_repairs: usize,
+    post_commit_follow_up_handoffs: usize,
     starting_prompt_promotions: usize,
     busy_dispatch_blocks: usize,
     closed_dispatch_blocks: usize,
@@ -374,6 +379,11 @@ impl Coverage {
         self.starting_timeout_coalesces += other.starting_timeout_coalesces;
         self.prompt_duplicate_repairs += other.prompt_duplicate_repairs;
         self.normalization_repair_patches += other.normalization_repair_patches;
+        self.sidecar_normalization_divergences += other.sidecar_normalization_divergences;
+        self.stale_source_buffer_skips += other.stale_source_buffer_skips;
+        self.ack_sidecar_only_repairs += other.ack_sidecar_only_repairs;
+        self.visible_duplicate_repairs += other.visible_duplicate_repairs;
+        self.post_commit_follow_up_handoffs += other.post_commit_follow_up_handoffs;
         self.starting_prompt_promotions += other.starting_prompt_promotions;
         self.busy_dispatch_blocks += other.busy_dispatch_blocks;
         self.closed_dispatch_blocks += other.closed_dispatch_blocks;
@@ -790,8 +800,67 @@ impl SimWorld {
         if decision == crate::flow::document_mutation::FullContentVisibleReplacementDecision::Apply
         {
             self.doc = replacement;
+        } else if decision
+            == crate::flow::document_mutation::FullContentVisibleReplacementDecision::RejectStaleSourceBuffer
+        {
+            self.coverage.stale_source_buffer_skips += 1;
         }
         decision
+    }
+
+    fn apply_sidecar_normalization_fallback(
+        &mut self,
+        sidecar: &str,
+        content_ours: &str,
+        normalize_prefix_lines: &[String],
+    ) {
+        if !crate::write::verify_sidecar_normalization(sidecar, normalize_prefix_lines) {
+            let fallback = crate::write::normalize_exchange_prefixes_for_targets(
+                content_ours,
+                normalize_prefix_lines,
+            );
+            self.snapshot = fallback;
+            self.coverage.sidecar_normalization_divergences += 1;
+        }
+    }
+
+    fn apply_ack_sidecar_only_repair(&mut self, ack_content: &str) {
+        self.snapshot = ack_content.to_string();
+        self.coverage.ack_sidecar_only_repairs += 1;
+    }
+
+    fn repair_visible_duplicate_response(&mut self) {
+        let repaired = crate::dedupe::dedupe_responses(&self.doc);
+        if repaired != self.doc {
+            self.doc = repaired;
+            self.coverage.visible_duplicate_repairs += 1;
+        }
+    }
+
+    fn record_post_commit_follow_up_handoff(&mut self) -> Result<()> {
+        if self.phase != CyclePhase::Committed {
+            bail!(
+                "post-commit follow-up handoff requires committed phase; seed={} trace={:?}",
+                self.seed,
+                self.trace
+            );
+        }
+        let Some(diff_text) = crate::diff::unified_diff_from_contents(&self.snapshot, &self.doc)
+        else {
+            return Ok(());
+        };
+        let has_follow_up = crate::diff::classify_prompt_bearing_changes(&diff_text)
+            .into_iter()
+            .any(|change| {
+                matches!(
+                    change.kind,
+                    crate::diff::PromptBearingChangeKind::PromptTarget
+                )
+            });
+        if has_follow_up {
+            self.coverage.post_commit_follow_up_handoffs += 1;
+        }
+        Ok(())
     }
 
     fn transition_supervisor(
@@ -1723,6 +1792,10 @@ fn full_content_source_proof_sim_rejects_stale_editor_buffers() {
             world.doc, original,
             "{source:?} should model live prompt drift before the full-content apply attempt"
         );
+        assert_eq!(
+            world.coverage.stale_source_buffer_skips, 1,
+            "{source:?} should count the stale full-content replacement skip"
+        );
         assert!(
             !world
                 .doc
@@ -1730,6 +1803,77 @@ fn full_content_source_proof_sim_rejects_stale_editor_buffers() {
             "{source:?} must not apply stale compact/repair/timeout replacement content"
         );
     }
+}
+
+#[test]
+fn sidecar_normalization_divergence_sim_uses_normalized_content_ours() {
+    let mut world = SimWorld::new(2_015);
+    let sidecar = template_doc(
+        "do #sidecardiv. spec-test-build-install-commit-push\n### Re: #sidecardiv — gpt-5\n\nDone.\n",
+    );
+    let content_ours = sidecar.clone();
+    let normalize_prefix_lines =
+        vec!["do #sidecardiv. spec-test-build-install-commit-push".to_string()];
+
+    world.apply_sidecar_normalization_fallback(&sidecar, &content_ours, &normalize_prefix_lines);
+
+    assert_eq!(world.coverage.sidecar_normalization_divergences, 1);
+    assert!(
+        world
+            .snapshot
+            .contains("❯ do #sidecardiv. spec-test-build-install-commit-push"),
+        "rejected sidecar snapshot should fall back to normalized content_ours"
+    );
+    assert_eq!(
+        world
+            .snapshot
+            .matches("### Re: #sidecardiv — gpt-5")
+            .count(),
+        1,
+        "normalization fallback must not duplicate the assistant response"
+    );
+}
+
+#[test]
+fn ack_sidecar_only_repair_sim_uses_authoritative_sidecar_snapshot() {
+    let mut world = SimWorld::new(2_012);
+    world.doc = template_doc(
+        "❯ do #acksidecar. spec-test-build-install-commit-push\n<!-- agent:boundary:live -->\n",
+    );
+    world.snapshot = template_doc("<!-- agent:boundary:base -->\n");
+    let ack_content = template_doc(
+        "❯ do #acksidecar. spec-test-build-install-commit-push\n### Re: #acksidecar — gpt-5\n\nDone.\n<!-- agent:boundary:ack -->\n",
+    );
+
+    world.apply_ack_sidecar_only_repair(&ack_content);
+
+    assert_eq!(world.coverage.ack_sidecar_only_repairs, 1);
+    assert_eq!(
+        world.snapshot, ack_content,
+        "ack-content sidecar should be the committed snapshot proof even when the local visible file still lags"
+    );
+    assert!(
+        !world.doc.contains("### Re: #acksidecar — gpt-5"),
+        "the sim must keep the sidecar-only distinction from ordinary disk repair"
+    );
+}
+
+#[test]
+fn visible_duplicate_repair_sim_dedupes_real_response_block() {
+    let mut world = SimWorld::new(2_013);
+    world.doc = template_doc(
+        "❯ do #dupvis. spec-test-build-install-commit-push\n### Re: #dupvis — gpt-5\n\nDone.\n### Re: #dupvis — gpt-5\n\nDone.\n<!-- agent:boundary:dup -->\n",
+    );
+
+    world.repair_visible_duplicate_response();
+
+    assert_eq!(world.coverage.visible_duplicate_repairs, 1);
+    assert_eq!(
+        world.doc.matches("### Re: #dupvis — gpt-5").count(),
+        1,
+        "visible duplicate repair should remove the real repeated response block"
+    );
+    world.assert_structural_invariants().unwrap();
 }
 
 #[test]
@@ -1754,6 +1898,30 @@ fn normalization_repair_sim_uses_narrow_patch_for_prefix_only_divergence() {
         world.doc.matches("### Re: #simnorm — gpt-5").count(),
         1,
         "narrow repair must not duplicate the assistant response"
+    );
+}
+
+#[test]
+fn post_commit_follow_up_sim_keeps_prompt_out_of_snapshot() {
+    let mut world = SimWorld::new(2_014);
+    world.apply(SimCommand::EditPrompt).unwrap();
+    world.apply(SimCommand::CaptureResponse).unwrap();
+    world.apply(SimCommand::ApplyCapturedResponse).unwrap();
+    world.apply(SimCommand::Commit).unwrap();
+    let committed_snapshot = world.snapshot.clone();
+
+    world.apply(SimCommand::EditLaterPrompt).unwrap();
+    world.record_post_commit_follow_up_handoff().unwrap();
+
+    assert_eq!(world.phase, CyclePhase::Committed);
+    assert_eq!(world.coverage.post_commit_follow_up_handoffs, 1);
+    assert_eq!(
+        world.snapshot, committed_snapshot,
+        "terminal follow-up drift should not be absorbed into the committed snapshot"
+    );
+    assert!(
+        world.doc.contains("later follow-up"),
+        "the user follow-up stays visible for the next response cycle"
     );
 }
 

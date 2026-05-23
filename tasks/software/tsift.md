@@ -36,7 +36,26 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): SQLite graph performance next steps
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/53cc6544...
-<!-- agent:boundary:24837ecf -->
+### Re: graph performance benchmark normalization — gpt-5
+
+Closed `#gdbbenchnorm`. The current `src/tsift` submodule already contains the implementation in `d56f96f perf: normalize backend eval metrics`, and the superproject `HEAD` already pins `src/tsift` to that commit. I verified that this covers the requested normalization path: `backend-eval` emits raw graph row counts, per-1k-graph-row normalized duration metrics for backend operations and refresh phases, `performance_gate.minimum_sample_runs = 3`, and a repeated-sample command that streams repeated backend-eval JSON into `metric-digest`.
+
+I did not create a new code commit because `src/tsift` was clean and already even with `origin/main`; duplicating the landed change would only churn the same surfaces. The document closeout is the only mutation for this cycle, and the prior finalize consumed the active queue head for `#gdbbenchnorm`.
+
+Verification run:
+
+- `tsift status --fix` in `src/tsift`: refreshed stale local index; instructions current.
+- `cargo test graph_db_backend_eval_benchmarks_candidate_stores_against_sqlite --test graph_db_conformance`: passed.
+- `make check` in `src/tsift`: passed clippy, 656 unit tests, 108 exit-code tests, and 31 graph-db conformance tests.
+- `cargo install --path .`: installed `tsift 0.1.42` to `/home/brian/.cargo/bin/tsift`.
+- `tsift --version`: `tsift 0.1.42`.
+- `gh run list --workflow CI --limit 1` in `src/tsift`: latest CI succeeded for `perf: normalize backend eval metrics`, run `26321879660`.
+- Root `Agent Doc` workflow run `26322731151` showed `check` and `tmux-ci` were not started because of GitHub billing/spending-limit allocation failure, so I classified that as an external CI-start blocker rather than a tmux regression.
+
+Repeated metric evidence from a bounded real three-sample `backend-eval` run with the `kuzu` candidate and selected normalized metrics: loaded 5 runs including the checked-in baseline plus the 3 current samples. Current versus previous normalized results included `real.sqlite.total_duration_micros_per_1k_graph_rows` improving from `31115.48` to `21860.54`, `real.refresh_phase.source_graph_build.duration_micros_per_1k_graph_rows` improving from `15135.53` to `4274.04`, and evidence/synthetic-path metrics remaining noisy enough that they should be judged through repeated samples rather than a single run. Existing `#gdbevidlat` already tracks the follow-up evidence-latency measurement.
+
+Changed paths: none in `src/tsift`; session document only via queue-consumption plus this missed-response repair. Escalation: none. Confidence: high for closing `#gdbbenchnorm`; the implementation, spec, fixture, tests, install, and CI all line up with the requested normalized/repeated-sample performance gate.
+<!-- agent:boundary:a669d483 -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -46,7 +65,7 @@ Compacted content:
 dispatch #spec-test-build-install-commit-push
 - ~do [#gdbsourcebuild]~
 - ~do [#gdbprepreuse]~
-- ~do [#gdbbenchnorm]~
+- do [#gdbbenchnorm]
 - do [#gdbevidlat]
 <!-- /agent:queue -->
 

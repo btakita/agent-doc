@@ -8508,6 +8508,7 @@ pub fn try_ipc_full_content_operator_mutation(file: &Path, content: &str) -> Res
     try_ipc_full_content_with_mode(file, content, FullContentIpcMode::OperatorMutation, None)
 }
 
+#[allow(dead_code)]
 pub fn try_ipc_full_content_operator_mutation_from_source(
     file: &Path,
     content: &str,

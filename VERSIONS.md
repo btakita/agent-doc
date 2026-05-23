@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Compact Exchange no longer emits full-document editor IPC.** Template
+  exchange compaction now uses the visible idle + compare-and-swap direct-write
+  guard even when an editor patch directory is present. This removes the
+  `compact_exchange` fullContent path that could replace an active editor buffer
+  immediately before the operator drafted the next prompt.
+
 - **Queue closeout consumption now requires active-head proof.** Strict
   `finalize` / `write --commit` no longer consume an active queue head solely
   because the pre-response baseline and live document have no prompt diff. The

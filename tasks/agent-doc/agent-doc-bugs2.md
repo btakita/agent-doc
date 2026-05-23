@@ -29,33 +29,12 @@ Resolved #qfixture; auto queue drained.
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-224302.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260523-230644.md`*
 
 Compacted content:
-- Archived 1 response topic(s): log-driven next steps
+- Archived 1 response topic(s): ops bug cluster batch
 - Prior summary/context: ### Session Summary *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7...
-### Re: ops bug cluster batch — gpt-5
-
-Implemented the log-driven bug-finding batch for `#1mm8`, `#hg0n`, `#te1d`, `#pmz2`, and `#f4xr` in `src/agent-doc`.
-
-What changed:
-- `agent-doc ops summary` now recognizes the closeout/captured-response drift events, route/start replay events, Codex manifest warning storms, SQLite count markers, cross-harness correlation markers, and session-review guardrail families from ops logs.
-- The JSON and human summaries now include ranked `bug_clusters` with severity, counts, latest timestamps, examples, and file/session/cycle/thread correlation keys.
-- Codex stderr filtering now has deterministic suppression counts for external marketplace manifest noise while preserving local manifest warnings.
-- README, SPEC, and `specs/07-core-commands.md` document the new ops cluster contract.
-
-Verification:
-- `cargo test ops_summary`
-- `cargo test codex_stderr`
-- `make check`
-- `cargo build`
-- `cargo install --path .`
-- Latest GitHub Actions CI run `26345119136` was green, including the `Run make tmux-ci` step.
-
-Commit / push state:
-- `src/agent-doc`: committed `4f4e719 feat: rank ops bug clusters` and pushed to `origin/20260422/codex-agent-backend`.
-- Superproject: committed `b93d11b91 chore: update agent-doc bug clusters`; per the agent-doc closeout ordering rule, this will be pushed after this finalize commit lands so the session response commit is included.
-<!-- agent:boundary:e3b1321f -->
+<!-- agent:boundary:c0112be4 -->
 <!-- /agent:exchange -->
 ###
 <!--

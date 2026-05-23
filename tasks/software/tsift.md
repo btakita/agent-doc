@@ -12,7 +12,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: true
+queue_active: false
 ---
 
 ## Status
@@ -74,18 +74,23 @@ CI/tmux evidence: pushed `tsift` commit `27231cb` (`perf: isolate evidence targe
 Commit/push: `src/tsift` commit `27231cb` is pushed. Parent repo commit `03e9f860b` (`chore: update tsift evidence timing`) is committed locally and will be pushed after this binary-owned document closeout so the session document commit stays on the finalize path.
 
 Escalation: none. Confidence: high; the benchmark now isolates resolver timing, repeated evidence latency is better than the fixture baseline, the full local suite passed, and the pushed `tsift` CI is green.
-<!-- agent:boundary:49e54d76 -->
+❯ So kuzu is ~94% faster than sqlite?
+### Re: Kuzu versus SQLite speed — gpt-5
+
+No. The `94.89%` number was not Kuzu versus SQLite. It was the current SQLite `real.sqlite.evidence.duration_micros_per_1k_graph_rows` sample (`1.3564`) compared against the older SQLite fixture baseline (`26.5449`) after the benchmark was fixed to stop charging full conflict-matrix graph snapshot materialization to the evidence packet metric.
+
+In the three current samples, Kuzu did beat SQLite on the isolated evidence metrics, but that is a different comparison: average real evidence packet collection was SQLite `7.50us/1k graph rows` versus Kuzu `1.04us/1k`, while average target resolution was SQLite `10.15us/1k` versus Kuzu `0.094us/1k`. Those averages are skewed by one SQLite outlier (`20.07us/1k` evidence and `29.69us/1k` resolver); the non-outlier samples are much closer.
+
+So the careful reading is: SQLite evidence got about `94.89%` faster versus its old baseline, and the current Kuzu prototype is faster on these isolated evidence/resolver samples, but the `94.89%` claim is not a Kuzu-over-SQLite claim. Kuzu still remains a read-only prototype gate, not a replacement candidate, until a real engine adapter proves parity, install portability, and concurrent-writer behavior.
+
+Changed paths: none. Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, and `jq` over `/tmp/tsift-gdbevidlat.ndjson` to compare current SQLite/Kuzu samples. Verification: no code changed, so no test suite was run this cycle. Escalation: none. Confidence: high; the clarification comes directly from the saved three-sample backend-eval data and the prior metric-digest comparison.
+<!-- agent:boundary:4b63942b -->
 <!-- /agent:exchange -->
 ###
 <!--
 -->
 
-<!-- agent:queue auto -->
-dispatch #spec-test-build-install-commit-push
-- ~do [#gdbsourcebuild]~
-- ~do [#gdbprepreuse]~
-- ~do [#gdbbenchnorm]~
-- do [#gdbevidlat]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

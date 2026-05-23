@@ -66,7 +66,39 @@ Commands: `cargo fmt`; `cargo check`; focused `cargo test` filters for the new f
 Verification: `make check` passed locally, covering clippy with `-D warnings`, 655 main tests with 1 ignored, 108 exit-code tests, and 30 graph-db conformance tests with 1 ignored. `cargo build` passed, local install replaced `/home/brian/.cargo/bin/tsift`, and `tsift --version` reports `tsift 0.1.42`. GitHub Actions CI run `26319112087` passed both jobs: `clippy + test` and `live Convex graph acceptance`; this repo's CI workflow has no separate tmux-test job, so no local `make tmux-ci` was triggered.
 
 Commit: tsift `978d1a8` (`perf: optimize sqlite graph paths`) pushed to `btakita/tsift` `main`; superproject `5bdfadbb0` (`chore: update tsift graph perf`) pushed to `btakita/agent-loop` `main` with only the `src/tsift` submodule pointer staged. Escalation: none. Confidence: high; the touched behavior is covered by new unit/conformance assertions plus the full local and remote suites.
-<!-- agent:boundary:2c3d24fb -->
+❯ Why is 1 test ignored?
+❯ Please give me a report the performance improvents from the last queue run.
+### Re: ignored tests and performance report — gpt-5
+
+The `1 ignored` wording in the prior closeout was per Cargo test target, not one global ignored test across the entire repo. There are two intentional ignored tests visible in the full `make check` breakdown:
+
+- Main crate target: `sim_world_medium_seed_corpus_runs_wider_deterministic_budget` is ignored because it runs the wider deterministic SimWorld corpus. The source note says it belongs in `make ci-full`, not the default local `make check` path.
+- Graph conformance target: `live_convex_graph_backend_acceptance_applies_and_matches_graph_db_queries` is ignored because it requires a dedicated live Convex deployment plus `TSIFT_LIVE_CONVEX_ACCEPTANCE=1` and a graph endpoint. The prior GitHub live Convex graph acceptance job was run separately and passed.
+
+For the performance report, I ran a fresh real `backend-eval` with the installed `tsift 0.1.42` from the latest queue commit `978d1a8`, then compared it with `src/tsift/fixtures/graph-db-performance-history.json`. The comparison baseline was the previous checked-in real run `real-agent-loop-batched-projection-2026-05-22`.
+
+Net result: the last queue produced real subphase wins, but not a total-run win. Real SQLite total went `29.20s -> 30.04s`, a `2.9%` regression. Real SQLite refresh went `24.41s -> 25.45s`, a `4.3%` regression. The reason is that `source_graph_build` grew `14.20s -> 14.86s` and now dominates the run; the graph also grew since the baseline, with current status showing `943,182` live graph rows.
+
+The useful wins are concentrated where the queue actually worked:
+
+| metric | before | after | change |
+| --- | ---: | ---: | ---: |
+| SQLite delta write | `7.97s` | `4.07s` | `49.0%` faster |
+| SQLite property-row staging | `2.14s` | `0.57s` | `73.5%` faster |
+| Conflict matrix | `0.91s` | `0.83s` | `8.6%` faster |
+| Path max hops | `1.03s` | `0.96s` | `6.8%` faster |
+| Status | `1.33s` | `1.27s` | `4.5%` faster |
+| Conflict prep | `4.80s` | `4.74s` | `1.4%` faster |
+| Dispatch trace | `1.49s` | `1.48s` | `0.5%` faster |
+
+Evidence target resolution did not show a wall-clock win in this run: `24.9ms -> 36.5ms`, an `11.6ms` absolute regression. That is small enough to treat as noise until repeated, but I would not claim the indexed resolver improved the measured evidence command yet.
+
+Candidate totals also improved slightly against the same previous run: DuckDB/DuckPGQ `6.53s -> 6.30s`, FalkorDB `6.17s -> 6.09s`, and Ladybug `6.41s -> 6.07s`. Kuzu was requested in the digest but was not present in both compared runs, so there is no apples-to-apples Kuzu delta from this fixture.
+
+Bottom line: `#gdbrefreshperf` succeeded at cutting SQLite write/properties cost, `#gdbpathfrontier` produced a modest path query win, and `#gdbstatscache` likely accounts for the status improvement. But total runtime is still gated by source graph construction and shared preparation, so the next performance work should move above SQLite write tuning: reduce `source_graph_build` and repeated prep, then rerun the same digest.
+
+Changed paths: no source files changed for this answer; the benchmark refreshed `.tsift/graph.db`, and `src/tsift` remained clean. Commands: `agent-doc preflight`, `agent-doc read`, `agent-doc plan`, `rg`/`sed`/`git show` inspection, `tsift graph-db --path /home/brian/work/btakita/agent-loop --json backend-eval --target gdbrefreshperf | tsift metric-digest --baseline src/tsift/fixtures/graph-db-performance-history.json --json ...`, `git status --short`, and `tsift graph-db --path /home/brian/work/btakita/agent-loop --json status`. Verification: read-only code/test inspection plus the fresh real benchmark digest; no test suite was rerun because this cycle changed no code. Escalation: none. Confidence: medium-high; the benchmark is real, but it is one run against a slightly larger current graph, so small deltas should not be overinterpreted.
+<!-- agent:boundary:fd07b78a -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -75,7 +75,54 @@ Commands / verification:
 - Verified no matching `bun dev` / EFS dev-server process is running with `pgrep -af 'bun.*dev|equityfundingsource.*dev|server started on port 4200'`.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:569b895a -->
+❯ do [#jnzs]. #spec-test-commit-push
+### Re: final EFS polish — gpt-5
+
+Completed the technical portion of `#jnzs` and left the item gated on the remaining external approval.
+
+Changed paths:
+
+- `src/equityfundingsource-dev/docs/deploy.md`
+- `src/equityfundingsource-dev/prds/equity-funding-source-lending-portal-prd.md`
+- `src/equityfundingsource-dev/tests/funded-deals.test.ts`
+- `src/equityfundingsource-dev/tests/prd.test.ts`
+- Parent gitlink: `src/equityfundingsource-dev`
+
+Spec/test update:
+
+- Added funded-deals launch proof to the deploy guide and PRD: remote D1 migration state, live `/funded-deals` smoke test, live `/portal-admin/funded-deals` admin-route smoke test, and reviewer approval for images/copy/legal wording.
+- Added tests that lock the deploy-guide and PRD release-proof requirements.
+
+Remote D1 and deploy:
+
+- Applied remote D1 migration `0020_funded_deals.sql` to `equityfundingsource` (`280e1539-b940-4c59-8988-fbed63c12ac0`).
+- Confirmed remote migration list now reports no migrations to apply.
+- Confirmed remote visible funded-deal count: `18`.
+- Deployed Worker `equityfundingsource` version `f71454db-e595-489e-8f80-c8f933095226` at `https://equityfundingsource.brian-takita.workers.dev`.
+
+Live smoke:
+
+- `GET /funded-deals` on the live Worker returned `200` and included seeded records including `san-pedro-california-350000`.
+- Sample deal image `/assets/images/deals/san-pedro-350k.jpg` returned `200 image/jpeg` with a non-empty body.
+- `GET /portal-admin/funded-deals` returned `303` to `/login?role=admin`, which is the expected unauthenticated admin guard.
+
+Verification:
+
+- `bun run check` passed: 26 tests, 0 failures, plus site build and worker build.
+- `git diff --check` passed.
+- CI/tmux evidence: `gh workflow list` and `gh run list --limit 5` returned no workflows/runs for the EFS repo, so there was no remote CI leg to inspect.
+
+Commit/push:
+
+- EFS repo: `c4131cd test: document funded deals launch proof`, pushed to `origin/main`.
+- Parent repo gitlink: `bad725c8c chore: update efs funded deals proof`, pushed to `origin/main`.
+
+Operational note: the EFS `bun run cf:*` wrapper still fails because `.env` does not contain `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`. I used the active Wrangler OAuth login for `brian.takita@gmail.com`, pinned to account `1e7e194ff8da4ad9e40ce041aea84f76`, to complete the D1/deploy work without printing secrets.
+
+Pending outcome: `#jnzs` is gated, not done, because Judith or an EFS reviewer still needs to approve the funded-deal images, copy, lien-position wording, and legal/disclosure language before invoicing or final launch sign-off.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:263c0edb -->
 <!-- /agent:exchange -->
 ###
 
@@ -86,7 +133,6 @@ Please directly send the draft email using brian.takita@gmail.com
 ## Pending / Not Built
 
 <!-- agent:pending -->
-- [ ] [#jnzs] [recommended] Before invoicing Judith, run final EFS polish: apply the D1 migration/deploy, smoke-test /funded-deals and /portal-admin/funded-deals on the live Worker, and get Judith's approval on funded-deal images/copy/legal wording.
 - [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
 - [ ] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
@@ -114,3 +160,9 @@ Please directly send the draft email using brian.takita@gmail.com
 - [ ] [#ft47] Token-based document upload flow
 - [ ] [#4ktv] Discuss Ragie content validation with Bob Remeika (scheduled call)
 <!-- /agent:pending -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, lien-position wording, and legal/disclosure language before invoicing or launch sign-off. Technical D1 migration, Worker deploy, and live funded-deals/admin-route smoke tests completed 2026-05-23.
+<!-- /agent:review -->

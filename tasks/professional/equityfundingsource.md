@@ -70,7 +70,26 @@ A clean invoice shape:
 If you think Judith will panic at `$5,000`, use `$4,500` as the lowest strategic ask, but I would not go below `$4,200`. Below that, Lucas gets paid only by you absorbing the loss, and that is the wrong precedent with a client who may already be cost-sensitive.
 
 I would still not mention Lucas. The client-facing story is outcomes and project value. Lucas is your internal cost structure.
-<!-- agent:boundary:41a53e88 -->
+❯ What is the deployment url?
+❯ lucas-huang needs $1000 by 5/27. I doubt judith-krug will pay by then. I may be able to cover $500 from my personal account. Any recommendations?
+### Re: Deployment URL and Lucas Cash Timing — gpt-5
+
+Current live demo URL: `https://equityfundingsource.brian-takita.workers.dev/`
+
+Specific borrower review URL: `https://equityfundingsource.brian-takita.workers.dev/portal-borrower/new-application`
+
+I also verified that the older static site `https://equityfundingsource.pages.dev` still returns `200`, but the current worker/backend deployment is the `brian-takita.workers.dev` URL. `https://www.equityfundingsource.com/` is still serving the old WordPress/Apache site, so I would not treat the custom domain as cut over yet.
+
+For Lucas: Wednesday, May 27, 2026 is too close to rely on Judith paying in time. I would split this into two tracks.
+
+1. **Lucas-facing:** tell him plainly that you can pay `$500` by May 27 if needed, and ask whether the remaining `$500` can be paid after the EFS payment clears or on a concrete follow-up date. Put that in writing so expectations are explicit. Do not make him guess.
+
+2. **Judith-facing:** invoice EFS immediately for the real Phase 1 value. My recommendation is still `$5,000` due on receipt, with a fallback of accepting a smaller immediate continuation payment if she pushes back. For example: `$5,000 due now`, or `$2,500 now + $2,500 after review feedback / next milestone`. Do not mention Lucas; the reason is project momentum and delivered value.
+
+If you can cover `$500` personally without creating a more serious problem, I would do that as the bridge. I would not promise Lucas the full `$1,000` by May 27 unless the money is actually in hand. Better to be direct now than to overpromise and damage trust.
+
+Short version: send the invoice today, ask Judith for immediate payment, but operate as if it will not arrive before May 27. Pay Lucas `$500` if you can, negotiate the remaining `$500` with a specific date, and keep the client invoice at a level that actually covers the project economics.
+<!-- agent:boundary:7b63da4e -->
 <!-- /agent:exchange -->
 ###
 
@@ -81,6 +100,7 @@ Please directly send the draft email using brian.takita@gmail.com
 ## Pending / Not Built
 
 <!-- agent:pending -->
+- [ ] [#qr72] [recommended] By May 27, 2026, send Lucas a written bridge plan: $500 now from personal funds if available, ask for the remaining $500 to be paid after EFS payment clears or by an agreed near-term date, and invoice EFS immediately for $5,000 with a smaller immediate continuation retainer accepted if Judith pushes back.
 - [ ] [#s62t] [recommended] Prepare EFS invoice with truthful hours/value; Lucas cost is $4,150 (83h @ $50), so floor is 42h/$4,200 and recommended ask is 50-60h/$5,000-$6,000 with any concession as an explicit courtesy credit.
 - [ ] [#37ah] [recommended] Broker portal backend: replace static broker demo data with TMO-backed submit-deal, pipeline, commissions, documents, and notifications
 - [ ] [#7a4d] [recommended] OCR/TMO field extraction: custom/fillable docs -> reviewed extracted fields -> TMO update/create flow
